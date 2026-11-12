@@ -36,6 +36,7 @@ import { draftKey, useDraft } from "../restore/drafts";
 import { useStayPut } from "../restore/scroll";
 import { useReads } from "../unread/reads";
 import type { Agent, ChatMessage, HubAccount } from "../chat/types";
+import type { Step } from "../hub/types";
 import { GroupChip } from "../groups/GroupChip";
 import { agentItem } from "../groups/model";
 import type { OversightLevel } from "../hub/types";
@@ -157,6 +158,18 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // The newest message's time when you last were at the end: Jump to
   // latest counts what the agent said after it.
   const leftAt = useRef(0);
+  // What an edit set aside, hidden at once; your latest message being
+  // edited, and why it can't be when it can't.
+  const aside = useChat((s) => (activeAgent ? s.setAside[activeAgent] : undefined));
+  const queuedCount = useChat((s) => (activeAgent ? (s.queues[activeAgent]?.items.length ?? 0) : 0));
+  const editLast = useChat((s) => s.editLast);
+  const [editing, setEditing] = useState<Editing | null>(null);
+  const [editNote, setEditNote] = useState<string | null>(null);
+  useEffect(() => {
+    if (!editNote) return;
+    const t = setTimeout(() => setEditNote(null), NOTE_MS);
+    return () => clearTimeout(t);
+  }, [editNote]);
   const seenThen = useRef<Set<string>>(new Set());
   const scrollerRef = useCallback(
     (el: HTMLDivElement | null) => {
@@ -269,9 +282,36 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const liveShown = toShow(pending ? convo.messages.slice(0, -1) : convo.messages);
   // A hub with client ids says which kept row each live message became;
   // an older hub's are matched by words and times.
-  const shown = convo.features?.has(FEATURES.clientIds)
+  const all = convo.features?.has(FEATURES.clientIds)
     ? shownWith(history?.messages ?? [], liveShown)
     : onceEach(withHistory(history?.messages ?? [], liveShown, history?.loadedAt ?? null));
+  const asideSet = new Set(aside ?? []);
+  const shown = aside?.length ? all.filter((m) => !asideSet.has(m.id) && !(m.clientId && asideSet.has(m.clientId))) : all;
+  // Your latest message, what ↑ and Edit replace: one you typed, not one
+  // the overseer sent on, a command, or one that never got there.
+  const mineAt = shown.findLastIndex((m) => m.role === "user" && !m.undelivered && !m.command && !relayedOf(m, sentOn));
+  const mine = mineAt >= 0 ? shown[mineAt] : undefined;
+  const editable = !!convo.features?.has(FEATURES.edit);
+  const whyNot = !mine
+    ? null
+    : busy
+      ? `You can edit your last message once ${agent.name} has finished replying.`
+      : queuedCount > 0
+        ? "You can edit your last message once your queued messages have gone."
+        : !(history?.messages ?? []).some((k) => k.id === mine.id)
+          ? `You can edit your last message once ${agent.name}’s hub has saved it.`
+          : null;
+  const startEdit = () => {
+    if (!mine || !editable) return;
+    if (whyNot) return setEditNote(whyNot);
+    const after = shown.slice(mineAt);
+    setEditing({
+      id: mine.id,
+      text: mine.content,
+      aside: after.flatMap((m) => (m.clientId ? [m.id, m.clientId] : [m.id])),
+      did: after.slice(1).flatMap((m) => m.steps ?? []),
+    });
+  };
   if (newLine.current === undefined && read && readAtOpen.current !== undefined) {
     const r = readAtOpen.current;
     newLine.current = r ? (shown.find((m) => m.role === "assistant" && ms(m.at) > ms(r.at))?.id ?? null) : null;
@@ -409,18 +449,27 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                         <span>New</span>
                       </div>
                     )}
-                    <DmMessage
-                      message={m}
-                      author={agent.name}
-                      authorKey={agentKey(agent)}
-                      youOn={agent.hubId}
-                      home={hub?.label}
-                      sentOn={sentOn}
-                      origin={origin}
-                      onSubmitForm={submitForm}
-                      onRetry={retry}
-                      onRemove={discard}
-                    />
+                    <div className={`room-msg${editing && editing.id !== m.id && editing.aside.includes(m.id) ? " msg-dim" : ""}`}>
+                      <DmMessage
+                        message={m}
+                        author={agent.name}
+                        authorKey={agentKey(agent)}
+                        youOn={agent.hubId}
+                        home={hub?.label}
+                        sentOn={sentOn}
+                        origin={origin}
+                        onSubmitForm={submitForm}
+                        onRetry={retry}
+                        onRemove={discard}
+                      />
+                      {editable && m === mine && !editing && (
+                        <span className="msg-actions" role="toolbar" aria-label="Message actions">
+                          <button type="button" className="msg-action" title={whyNot ?? "Edit (↑)"} onClick={startEdit}>
+                            Edit
+                          </button>
+                        </span>
+                      )}
+                    </div>
                   </Fragment>
                 ))}
                 {/* Desk's own agent says the setup in its DM while it's open. */}
@@ -445,7 +494,25 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
               </button>
             )}
           </div>
+          {editNote && (
+            <p className="composer-note small" role="status">
+              {editNote}
+            </p>
+          )}
+          {editing ? (
+            <EditLast
+              name={agent.name}
+              editing={editing}
+              onCancel={() => setEditing(null)}
+              onSave={(text) => {
+                if (!editLast(activeAgent, editing.id, editing.aside, text)) return setEditNote(`Couldn’t reach ${agent.name}. Try again in a moment.`);
+                setEditing(null);
+                stay.toLatest();
+              }}
+            />
+          ) : (
           <DmComposer
+            onEditLast={startEdit}
             to={activeAgent}
             agent={agent}
             hub={hub}
@@ -458,6 +525,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
             onSent={stay.toLatest}
             away={stay.away}
           />
+          )}
           {drop.dragging && <DropOverlay to={agent.name} />}
         </>
       )}
@@ -496,6 +564,99 @@ const DmMessage = memo(function DmMessage({
   return <Message message={message} relayed={relayed} steps={message.steps} {...shown} />;
 });
 
+/** How long a note on why you can't edit stays. */
+const NOTE_MS = 6000;
+
+/** Your latest sent message, being edited: its kept id and text, what
+ *  saving sets aside (it and what followed, by id and client id), and what
+ *  the reply being set aside did. */
+interface Editing {
+  id: string;
+  text: string;
+  aside: string[];
+  did: Step[];
+}
+
+/** The composer while you edit your latest message: the new version, what
+ *  the reply to the old one already did, and Save and ask again. */
+function EditLast({ name, editing, onCancel, onSave }: { name: string; editing: Editing; onCancel: () => void; onSave: (text: string) => void }) {
+  const [text, setText] = useState(editing.text);
+  const box = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    el.focus();
+    el.setSelectionRange(el.value.length, el.value.length);
+  }, []);
+  const save = () => {
+    if (!text.trim()) return;
+    if (text.trim() === editing.text.trim()) return onCancel();
+    onSave(text);
+  };
+  const n = editing.did.length;
+  return (
+    <form
+      className="composer composer-edit"
+      data-composer=""
+      aria-label="Editing your last message"
+      onSubmit={(e) => {
+        e.preventDefault();
+        save();
+      }}
+    >
+      <span className="composer-edit-label">Editing your last message</span>
+      <textarea
+        ref={box}
+        rows={1}
+        value={text}
+        aria-label="Your last message"
+        onChange={(e) => setText(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+          if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            save();
+          } else if (e.key === "Escape") {
+            e.preventDefault();
+            e.stopPropagation();
+            onCancel();
+          }
+        }}
+      />
+      {n > 0 && (
+        <div className="composer-edit-did" role="note">
+          <b>
+            {name}’s reply to it already did {n === 1 ? "1 thing" : `${n} things`}:
+          </b>
+          <ul>
+            {editing.did.map((d, i) => (
+              <li key={i}>
+                <span className="mono">{d.tool}</span>
+                {d.ok ? "" : " (failed)"}
+              </li>
+            ))}
+          </ul>
+          <span>
+            Editing won’t undo {n === 1 ? "it" : "them"}. {name} answers the new version knowing {n === 1 ? "it" : "they"} happened, so it
+            can put {n === 1 ? "it" : "them"} right itself.
+          </span>
+        </div>
+      )}
+      <div className="composer-edit-row">
+        <span className="composer-hint">
+          <kbd>Esc</kbd> cancel
+        </span>
+        <button type="button" className="btn btn-ghost" onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="submit" className="btn btn-signal" disabled={!text.trim()}>
+          Save and ask again
+        </button>
+      </div>
+    </form>
+  );
+}
+
 /** Files dropped anywhere on the conversation go with its next message. */
 type Files = ReturnType<typeof usePendingFiles>;
 
@@ -513,6 +674,7 @@ function DmComposer({
   sending: [sending, setSending],
   onSent,
   away,
+  onEditLast,
 }: {
   /** The agent's key. */
   to: string;
@@ -529,6 +691,9 @@ function DmComposer({
   onSent: () => void;
   /** Scrolled up from the newest message: End takes you back. */
   away: boolean;
+  /** ↑ with nothing queued to edit: edits your latest sent message, or
+   *  says why it can't be. */
+  onEditLast: () => void;
 }) {
   const send = useChat((s) => s.send);
   const enqueue = useChat((s) => s.enqueue);
@@ -616,6 +781,15 @@ function DmComposer({
             if (commands.onKeyDown(e)) return;
             if (emoji.onKeyDown(e)) return;
             if (e.key === "Enter" && !e.shiftKey) submit(e);
+            // ↑ in an empty composer edits your last message: the last one
+            // still waiting in the queue (not yet sent, so nothing is asked
+            // again), else the last one sent.
+            else if (e.key === "ArrowUp" && !draft && !files.pending.length && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+              e.preventDefault();
+              const last = useChat.getState().queues[to]?.items.filter((i) => !i.sending).at(-1);
+              if (last) useChat.getState().editingQueued(to, last.id);
+              else onEditLast();
+            }
             // Esc stops the agent, as Stop does; with nothing running it's
             // left to close what it always closed.
             else if (e.key === "Escape" && holding && !e.shiftKey) {

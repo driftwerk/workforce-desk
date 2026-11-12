@@ -119,6 +119,13 @@ interface ChatStore {
   /** Marks the queued message being edited (null: none), so nothing goes
    *  until the edit is saved. */
   editingQueued: (key: string, id: string | null) => void;
+  /** In each DM, by agent key: the messages an edit set aside (by id or
+   *  client id), hidden at once, before the hub's next read leaves them out. */
+  setAside: Record<string, string[]>;
+  /** Replaces your latest sent message, kept as `replaces`, with `text`,
+   *  setting aside it and what followed (`aside`, ids or client ids), and
+   *  asks again; false if it couldn't be sent. */
+  editLast: (key: string, replaces: string, aside: string[], text: string) => boolean;
   /** Shows an agent under a new name at once (until the roster is read again). */
   rename: (key: string, name: string) => void;
   /** Closes a removed agent's conversation and leaves it. */
@@ -636,6 +643,14 @@ export const useChat = create<ChatStore>((set, get) => ({
     live.get(key)?.cancel();
   },
   queues: {},
+  setAside: {},
+  editLast: (key, replaces, aside, text) => {
+    if (!text.trim()) return false;
+    const sent = live.get(key)?.send(text, { turn: { ...dmTurn(), edit: { replaces } } });
+    if (!sent) return false;
+    set((s) => ({ setAside: { ...s.setAside, [key]: [...(s.setAside[key] ?? []), ...aside] } }));
+    return true;
+  },
   editingQueued: (key, id) => {
     putQueue(key, (q) => {
       if ((q.editing ?? null) === id) return q;
@@ -692,10 +707,12 @@ export const useChat = create<ChatStore>((set, get) => ({
       const { [key]: _gone, ...conversations } = s.conversations;
       const { [key]: _kept, ...histories } = s.histories;
       const { [key]: _queued, ...queues } = s.queues;
+      const { [key]: _aside, ...setAside } = s.setAside;
       return {
         conversations,
         histories,
         queues,
+        setAside,
         activeAgent: s.activeAgent === key ? null : s.activeAgent,
         panelAgent: s.panelAgent === key ? null : s.panelAgent,
       };
