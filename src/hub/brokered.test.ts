@@ -189,6 +189,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   memorySettings: (h) => h.memorySettings(),
   pauseMemory: (h) => h.pauseMemory(true),
   chooseMemory: (h) => h.chooseMemory({ retainDays: 30 }),
+  memoryRetainPreview: (h) => h.memoryRetainPreview(30),
   changeGroupMemory: (h) => h.changeGroupMemory("g", { derive: true }),
   layout: (h) => h.layout(),
   replaceLayout: (h) => h.replaceLayout({ groups: [], ungrouped: { collapsed: false, items: [] } }),

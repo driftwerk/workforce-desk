@@ -796,6 +796,11 @@
   },
   {
     "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/memory/retain-preview?days=30"
+  },
+  {
+    "kind": "http",
     "method": "PATCH",
     "path": "/api/desk/memory/groups/g"
   },

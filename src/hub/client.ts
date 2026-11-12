@@ -926,6 +926,9 @@ export class DeskHub {
    *  at all, noting decisions, how long conversations are kept and how much
    *  room Desk Memory may take. */
   chooseMemory = (change: MemoryChoice): Promise<MemorySettings> => this.call("PATCH", "/api/desk/memory/settings", change);
+  /** What keeping conversations `days` would remove at the next tidy-up. */
+  memoryRetainPreview = (days: number): Promise<{ days: number; exchanges: number; sessions: number }> =>
+    this.call("GET", `/api/desk/memory/retain-preview?days=${encodeURIComponent(String(days))}`);
   /** Changes a group's memory switches: what `change` names, the rest kept. */
   changeGroupMemory = (id: string, change: Partial<Omit<GroupMemory, "deriveDecided">>): Promise<GroupMemory & { notice?: string }> =>
     this.call("PATCH", `/api/desk/memory/groups/${encodeURIComponent(id)}`, change);

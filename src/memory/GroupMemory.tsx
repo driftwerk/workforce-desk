@@ -32,16 +32,23 @@ export function GroupMemoryDialog({ group, hub, onClose }: { group: { id: string
   // Turned on for the whole Desk here, then on for this group too.
   const turnNotingOn = async () => {
     if (!hub) return;
+    let now: MemorySettings;
     try {
-      const now = await hub.chooseMemory({ enabled: true, derive: true });
+      now = await hub.chooseMemory({ enabled: true, derive: true });
       setSettings(now);
       setProblem(null);
+    } catch (e) {
+      setProblem(plainError(e));
+      return;
+    }
+    try {
       const changed = await hub.changeGroupMemory(group.id, { derive: true });
       const { notice, ...on } = changed;
       setSettings({ ...now, groups: now.groups.map((g) => (g.id === group.id ? { ...g, ...on } : g)) });
       setProblem(notice ?? null);
     } catch (e) {
-      setProblem(plainError(e));
+      // The Desk's part stands: say the group's didn't.
+      setProblem(`Noting is on for the whole Desk now, but not for ${group.name} yet: ${plainError(e)} Turn it on with the switch above.`);
     }
   };
   const change = async (patch: Partial<Omit<Switches, "deriveDecided">>) => {
@@ -93,7 +100,7 @@ export function GroupMemoryDialog({ group, hub, onClose }: { group: { id: string
                 <span className="ability-sub memory-off">
                   Noting is turned off for this Desk.
                   <button type="button" className="btn btn-sm" onClick={() => void turnNotingOn()}>
-                    Turn it on
+                    Turn on noting for the whole Desk and this group
                   </button>
                 </span>
               )}

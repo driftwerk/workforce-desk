@@ -111,9 +111,49 @@ describe("Settings → Memory", () => {
     fireEvent.blur(days);
     expect(hub.chooseMemory).not.toHaveBeenCalled();
     expect(days.value).toBe("180");
+    // More: kept at once, and Enter then leaving the field asks once.
+    fireEvent.change(days, { target: { value: "365" } });
+    await act(async () => fireEvent.keyDown(days, { key: "Enter" }));
+    await act(async () => fireEvent.blur(days));
+    expect(hub.chooseMemory).toHaveBeenCalledTimes(1);
+    expect(hub.chooseMemory).toHaveBeenCalledWith({ retainDays: 365 });
+  });
+
+  it("asks before keeping conversations for less, saying how many go", async () => {
+    const hub = fakeHub(settingsOf());
+    hub.chooseMemory = vi.fn(async (c: object) => {
+      const s = settingsOf();
+      return { ...s, limits: { ...s.limits, ...c } };
+    });
+    hub.memoryRetainPreview = vi.fn(async (days: number) => ({ days, exchanges: 42, sessions: 3 }));
+    await show(hub);
+    const days = screen.getByLabelText(/Keep conversations for/) as HTMLInputElement;
     fireEvent.change(days, { target: { value: "30" } });
     await act(async () => fireEvent.keyDown(days, { key: "Enter" }));
-    expect(hub.chooseMemory).toHaveBeenCalledWith({ retainDays: 30 });
+    expect(hub.memoryRetainPreview).toHaveBeenCalledWith(30);
+    expect(hub.chooseMemory).not.toHaveBeenCalled();
+    const ask = screen.getByRole("alertdialog", { name: "Keep conversations for less" });
+    expect(ask.textContent).toContain("This deletes conversations older than 30 days (about 42 exchanges)");
+    fireEvent.click(screen.getByRole("button", { name: "Keep them" }));
+    expect(hub.chooseMemory).not.toHaveBeenCalled();
+    fireEvent.change(days, { target: { value: "31" } });
+    await act(async () => fireEvent.keyDown(days, { key: "Enter" }));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Delete them" })));
+    expect(hub.chooseMemory).toHaveBeenCalledWith({ retainDays: 31 });
+  });
+
+  it("holds a switch while its change is saved", async () => {
+    const hub = fakeHub(settingsOf());
+    let done: (s: unknown) => void = () => {};
+    hub.chooseMemory = vi.fn(() => new Promise((r) => (done = r)));
+    await show(hub);
+    const remember = screen.getByRole("switch", { name: "Remember conversations" }) as HTMLButtonElement;
+    await act(async () => fireEvent.click(remember));
+    expect(remember.disabled).toBe(true);
+    fireEvent.click(remember);
+    expect(hub.chooseMemory).toHaveBeenCalledTimes(1);
+    await act(async () => done(settingsOf()));
+    expect(remember.disabled).toBe(false);
   });
 
   it("shows what loaded when another part fails, and says why", async () => {
@@ -164,11 +204,21 @@ describe("a group's memory", () => {
     await waitFor(() => expect(screen.getAllByRole("switch")).toHaveLength(2));
     expect((screen.getByRole("switch", { name: "Let Desk's model note decisions" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText(/Noting is turned off for this Desk\./)).toBeTruthy();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Turn it on" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Turn on noting for the whole Desk and this group" })));
     expect(hub.chooseMemory).toHaveBeenCalledWith({ enabled: true, derive: true });
     expect(hub.changeGroupMemory).toHaveBeenCalledWith("g-acme", { derive: true });
     const derive = screen.getByRole("switch", { name: "Let Desk's model note decisions" }) as HTMLButtonElement;
     expect(derive.disabled).toBe(false);
     expect(derive.getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("says so when noting came on for the Desk but not the group", async () => {
+    const hub = fakeHub(settingsOf({ limits: { ...settingsOf().limits, derive: false } }));
+    hub.chooseMemory = vi.fn(async () => settingsOf());
+    hub.changeGroupMemory = vi.fn(async () => Promise.reject(new Error("Desk couldn't reach the group.")));
+    render(<GroupMemoryDialog group={{ id: "g-acme", name: "Acme" }} hub={hub as unknown as DeskHub} onClose={() => {}} />);
+    await waitFor(() => expect(screen.getAllByRole("switch")).toHaveLength(2));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Turn on noting for the whole Desk and this group" })));
+    expect(screen.getByRole("alert").textContent).toMatch(/^Noting is on for the whole Desk now, but not for Acme yet/);
   });
 });
