@@ -9,7 +9,7 @@ import { useDesk } from "../hub/store";
 import { Confirm } from "../ui/Confirm";
 import { useOpenTicket } from "./opener";
 import { useBoard } from "./store";
-import { NoAgent, ThisComputerSetup } from "./LinkBoard";
+import { NoAgent, ThisComputerSetup } from "./syncSetup";
 import { hubNameOf, localSync, syncChoices, useSyncHubs } from "./syncStore";
 
 /** "3 min ago", from the minute it's drawn in. */
