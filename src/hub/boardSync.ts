@@ -130,10 +130,11 @@ export const pausedWords = (p: SyncPaused, hub: string): string => {
 };
 
 /** The one button that mends a pause or problem: what it says and what it
- *  does (`token`: a new token for the hub; `connections`: Settings, where
- *  the service is connected; `unlink`: unlink, keeping the tickets; `retry`:
+ *  does (`token`: a new token for the hub; `connections`: Settings → Connections
+ *  (this computer's own keys); `ask`: an agent on the hub is asked to switch
+ *  the service on; `unlink`: unlink, keeping the tickets; `retry`:
  *  resume and sync again). A pause you chose has Resume already. */
-export type SyncFix = { kind: "token" | "connections" | "unlink" | "retry"; label: string };
+export type SyncFix = { kind: "token" | "connections" | "ask" | "unlink" | "retry"; label: string };
 
 export const fixOf = (s: BoardSync, hub: string): SyncFix | null => {
   const system = SYSTEM_TITLE[s.system];
@@ -146,9 +147,11 @@ export const fixOf = (s: BoardSync, hub: string): SyncFix | null => {
       case "hubUnpaired":
         return { kind: "unlink", label: "Keep the tickets, unlink" };
       case "noToken":
-        return s.via.kind === "hub" ? { kind: "token", label: "New token…" } : { kind: "connections", label: `Set up ${system}` };
+        return s.via.kind === "hub" ? { kind: "token", label: "New token…" } : { kind: "connections", label: "Open connections" };
       case "missing":
-        return { kind: "connections", label: `Turn on ${system} for ${hub}` };
+        // On a hub, someone there switches it on: an agent is asked to. On
+        // this computer, its own keys are in Connections.
+        return s.via.kind === "hub" ? { kind: "ask", label: `Ask an agent on ${hub} to switch ${system} on` } : { kind: "connections", label: "Open connections" };
       case "refused":
         return { kind: "retry", label: "Try again" };
       case "leftGroup":

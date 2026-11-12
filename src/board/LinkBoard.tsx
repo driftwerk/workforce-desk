@@ -598,7 +598,7 @@ export const switchOnText = (system: SyncSystem, hub: string): string =>
 /** No agent on a hub has the system switched on: said in the one shape
  *  errors take, with asking an agent there to switch it on (in a DM, as the
  *  person), or whom to ask when there's no agent there to ask. */
-function NoAgent({ choice, system, words }: { choice: SyncChoice; system: SyncSystem; words: string }) {
+export function NoAgent({ choice, system, words }: { choice: SyncChoice; system: SyncSystem; words: string }) {
   const title = SYSTEM_TITLE[system];
   const roster = useChat((s) => s.roster);
   const there = roster.filter((a) => a.hubId === choice.paired).sort((a, b) => Number(b.isDefault) - Number(a.isDefault));

@@ -357,7 +357,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
           New ticket
         </button>
       </header>
-      {board.sync && <SyncBar board={board} now={now} onToken={tokenFor && chrome ? () => setNewToken(true) : undefined} />}
+      {board.sync && <SyncBar key={board.id} board={board} now={now} onToken={tokenFor && chrome ? () => setNewToken(true) : undefined} />}
       <LeftFilterShelf board={board} tickets={left} />
       {columnsShown}
       {live}
@@ -542,7 +542,7 @@ function PaneSync({ board, now }: { board: BoardT; now: number }) {
   const kept = useSyncHubs((s) => s.hubs);
   const paired = useChat((s) => s.hubs);
   if (!board.sync || syncStatus(board, hubNameOf(board.sync.via, kept, paired))?.kind === "synced") return null;
-  return <SyncBar board={board} now={now} />;
+  return <SyncBar key={board.id} board={board} now={now} />;
 }
 
 /** In place of a pane's board that isn't there (yet, or any more). */

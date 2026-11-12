@@ -7,7 +7,8 @@ import type { Board, Ticket } from "../hub/types";
 import { useDesk } from "../hub/store";
 import { Confirm } from "../ui/Confirm";
 import { useBoard } from "./store";
-import { hubNameOf, localSync, useSyncHubs } from "./syncStore";
+import { NoAgent } from "./LinkBoard";
+import { hubNameOf, localSync, syncChoices, useSyncHubs } from "./syncStore";
 
 /** "3 min ago", from the minute it's drawn in. */
 const ago = (iso: string | null | undefined, now: number): string | null => {
@@ -27,11 +28,13 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
   const [said, setSaid] = useState<string | null>(null);
   // What went wrong with the last thing asked here, shown in this bar with
   // a way to ask again, not in the window's toast.
-  const [failed, setFailed] = useState<{ words: string; again: () => void } | null>(null);
+  const [failed, setFailed] = useState<{ words: string; op: "pause" | "sync" | "me" | "mend" } | null>(null);
+  const [asking, setAsking] = useState(false);
   const [unlinking, setUnlinking] = useState(false);
   const sync = board.sync;
   if (!sync) return null;
   const hub = hubNameOf(sync.via, kept, paired);
+  const choice = sync.via.kind === "hub" ? (syncChoices(paired, kept).find((c) => c.id === (sync.via as { hub: string }).hub) ?? null) : null;
   const status = syncStatus(board, hub)!;
   const paused = !!sync.paused;
   const kept_ = (b: Board) => useBoard.setState((s) => ({ boards: { ...s.boards, [b.id]: b } }));
@@ -43,7 +46,7 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
     try {
       kept_(await api.pause(board.id, !paused));
     } catch (e) {
-      setFailed({ words: plainError(e), again: () => void pause() });
+      setFailed({ words: plainError(e), op: "pause" });
     } finally {
       setBusy(null);
     }
@@ -58,7 +61,7 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
       await api.syncNow(board.id);
       setSaid("Syncing now");
     } catch (e) {
-      setFailed({ words: plainError(e), again: () => void syncNow() });
+      setFailed({ words: plainError(e), op: "sync" });
     } finally {
       setBusy(null);
     }
@@ -76,7 +79,7 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
       setFailed(null);
       setSaid(vouched(b.sync?.meSource) ? `${hub} knows you as ${b.sync?.meName ?? "you"}` : (b.sync?.meNote ?? `${hub} can't say who you are`));
     } catch (e) {
-      setFailed({ words: plainError(e), again: () => void recheck() });
+      setFailed({ words: plainError(e), op: "me" });
     } finally {
       setBusy(null);
     }
@@ -88,16 +91,24 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
     if (fix.kind === "token") return onToken?.();
     if (fix.kind === "connections") return openSettingsAt("connections");
     if (fix.kind === "unlink") return setUnlinking(true);
+    if (fix.kind === "ask") return setAsking(true);
     const api = localSync();
     if (!api) return;
     setBusy("sync");
     setFailed(null);
+    let resumed = false;
     try {
-      if (paused) kept_(await api.pause(board.id, false));
+      if (paused) {
+        kept_(await api.pause(board.id, false));
+        resumed = true;
+      }
       await api.syncNow(board.id);
       setSaid("Syncing now");
     } catch (e) {
-      setFailed({ words: plainError(e), again: () => void mend() });
+      // Resumed only to try: if the try failed it is paused again, not left
+      // running and failing.
+      if (resumed) void api.pause(board.id, true).then(kept_, () => {});
+      setFailed({ words: plainError(e), op: "mend" });
     } finally {
       setBusy(null);
     }
@@ -151,11 +162,12 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
       {failed && (
         <span className="board-sync-failed" role="alert">
           {failed.words}{" "}
-          <button type="button" className="link" onClick={failed.again}>
+          <button type="button" className="link" onClick={() => void { pause, sync: syncNow, me: recheck, mend }[failed.op]()}>
             Try again
           </button>
         </span>
       )}
+      {asking && choice && <NoAgent choice={choice} system={sync.system} words={status.kind === "synced" ? "" : status.words} />}
       {unlinking && <UnlinkBoard board={board} onClose={() => setUnlinking(false)} />}
     </div>
   );

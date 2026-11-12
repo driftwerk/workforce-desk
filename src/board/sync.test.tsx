@@ -60,7 +60,7 @@ vi.mock("@workforce/rich", () => ({
 }));
 
 import { useChat } from "../chat/store";
-import { boardSyncOf, issueUrl, linkedTo, looksLikeToken, pausedWords, syncHubId, syncStatus, targetOk } from "../hub/boardSync";
+import { boardSyncOf, fixOf, issueUrl, linkedTo, looksLikeToken, pausedWords, syncHubId, syncStatus, targetOk } from "../hub/boardSync";
 import { useDesk } from "../hub/store";
 import type { Board as BoardT, SyncHub, Ticket } from "../hub/types";
 import { Board } from "./BoardView";
@@ -605,7 +605,13 @@ describe("the board, synced", () => {
     await screen.findByText(/Its tickets stay here with their keys/);
     cleanup();
     u = show(synced({ paused: { kind: "missing", tools: ["jira.search"] } }), []);
-    fireEvent.click(screen.getByRole("button", { name: "Turn on Jira for Atlas" }));
+    useUi.getState().closeSettings();
+    fireEvent.click(screen.getByRole("button", { name: "Ask an agent on Atlas to switch Jira on" }));
+    expect(document.querySelector(".sync-no-agent, .move-callout")).toBeTruthy();
+    expect(useUi.getState().settings).not.toBe("connections");
+    u.unmount();
+    u = show({ ...synced({ paused: { kind: "missing", tools: ["jira.search"] } }), sync: { ...synced().sync!, via: { kind: "thisHub" }, paused: { kind: "missing", tools: ["jira.search"] } } } as BoardT, []);
+    fireEvent.click(screen.getByRole("button", { name: "Open connections" }));
     expect(useUi.getState().settings).toBe("connections");
     u.unmount();
     native.route = (_hub, method, path, body) =>
@@ -614,6 +620,23 @@ describe("the board, synced", () => {
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(native.asked.some((a) => a.path.endsWith("/pause") && a.body?.paused === false)).toBe(true));
     await waitFor(() => expect(native.asked.some((a) => a.path.endsWith("/sync"))).toBe(true));
+  });
+
+  it("names the one fix for each pause and problem", () => {
+    const base = synced().sync!;
+    const hubVia = { kind: "hub", hub: "atlas" } as const;
+    const fix = (over: object) => fixOf({ ...base, via: hubVia, paused: null, problem: null, ...over } as never, "Atlas");
+    expect(fix({ paused: { kind: "byYou" } })).toBeNull();
+    expect(fix({ paused: { kind: "hubOffline", since: "2026-11-10T10:00:00Z" } })).toEqual({ kind: "retry", label: "Try again" });
+    expect(fix({ paused: { kind: "hubUnpaired" } })?.kind).toBe("unlink");
+    expect(fix({ paused: { kind: "noToken" } })?.kind).toBe("token");
+    expect(fix({ paused: { kind: "noToken" }, via: { kind: "thisHub" } })).toEqual({ kind: "connections", label: "Open connections" });
+    expect(fix({ paused: { kind: "missing", tools: [] } })?.kind).toBe("ask");
+    expect(fix({ paused: { kind: "missing", tools: [] }, via: { kind: "thisHub" } })?.kind).toBe("connections");
+    expect(fix({ paused: { kind: "refused", reason: "x" } })?.kind).toBe("retry");
+    expect(fix({ paused: { kind: "leftGroup" } })?.kind).toBe("unlink");
+    expect(fix({ problem: "x" })?.kind).toBe("retry");
+    expect(fix({})).toBeNull();
   });
 
   it("shows a sync that failed in the bar, with Try again, and not in the window's toast", async () => {
@@ -625,6 +648,15 @@ describe("the board, synced", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("Try again");
     expect(fail).not.toHaveBeenCalled();
+  });
+
+  it("pauses it again when a try to resume it failed", async () => {
+    native.route = (_hub, method, path, body) =>
+      path.endsWith("/pause") ? { status: 200, body: synced({ paused: (body as { paused: boolean }).paused ? { kind: "byYou" } : null }) } : path.endsWith("/sync") ? { status: 409, body: { error: "Atlas is busy." } } : localRoutes(method, path, body);
+    show(synced({ paused: { kind: "refused", reason: "policy denied" } }), []);
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    await screen.findByRole("alert");
+    await waitFor(() => expect(native.asked.filter((a) => a.path.endsWith("/pause")).map((a) => a.body?.paused)).toEqual([false, true]));
   });
 
   it("puts issues that left the filter on their shelf, out of the columns, to keep or drop", async () => {
