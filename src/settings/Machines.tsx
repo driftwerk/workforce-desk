@@ -39,7 +39,7 @@ export const useNow = (ticking: boolean): number => {
   return now;
 };
 
-/** "Update Desk on this Mac": a machine on a newer Desk is driven again
+/** "Update Desk on {this computer}": a machine on a newer Desk is driven again
  *  once this computer's Desk runs that version too (the machine itself is
  *  as it should be). It downloads the update, says what the restart does to
  *  this computer's sessions, and on the person's yes restarts into it once
