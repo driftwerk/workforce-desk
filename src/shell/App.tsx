@@ -28,6 +28,7 @@ import { jumpers } from "../rooms/unread";
 import { placeKey } from "../rooms/window";
 import { NewCrew } from "../crew/NewCrew";
 import { adoptDeskWelcome } from "../crew/welcome";
+import { rememberFormerNames } from "../rooms/formerNames";
 import { resumePairing } from "../hubs/PairHub";
 import { NewRoom } from "../rooms/NewRoom";
 import { Rooms } from "../rooms/Rooms";
@@ -67,6 +68,9 @@ import { WindowsSetup } from "../setup/WindowsSetup";
 import { useHost } from "./host";
 import { resumeAfterUpdate } from "../updates/store";
 import { UpdateNotice, useRestartWhenIdle, useUpdateChecks } from "../updates/UpdateNotice";
+
+// An `@` by an agent's name before a rename still reaches them.
+rememberFormerNames();
 
 /** Stops the answer nearest: in the open room, the open thread's when focus
  *  is in it, else the room's newest live one; else the open DM's turn. */
