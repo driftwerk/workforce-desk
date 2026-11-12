@@ -5,7 +5,7 @@ import { VoiceDialog } from "../crew/VoiceDialog";
 import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
 import { invoke, loadSettings, saveSettings, type Settings } from "../platform";
-import { AddVoiceById, voiceIdFrom } from "./AddVoiceById";
+import { AddVoiceById, linkWithoutId, voiceIdFrom } from "./AddVoiceById";
 import { addCustomVoice, removeCustomVoice, repairVoice, useSettings } from "./store";
 import { providerById, withCustom, type VoiceLookup } from "./voiceCatalog";
 
@@ -196,6 +196,19 @@ describe("a voice's link or its ID", () => {
     expect(voiceIdFrom(`https://elevenlabs.io/app/voice-lab/share/abc/${CLONE}`, "elevenlabs")).toBe(CLONE);
     expect(voiceIdFrom("https://fish.audio/discovery", "fish_audio")).toBeNull();
     expect(voiceIdFrom("not a voice", "elevenlabs")).toBeNull();
+    // Without its https://, as copied from an address bar.
+    expect(voiceIdFrom("fish.audio/m/802e3bc2b27e49c2995d23ef70e6ac89", "fish_audio")).toBe("802e3bc2b27e49c2995d23ef70e6ac89");
+    expect(linkWithoutId("https://fish.audio/discovery", "fish_audio")).toBe(true);
+    expect(linkWithoutId("fish.audio/m/802e3bc2b27e49c2995d23ef70e6ac89", "fish_audio")).toBe(false);
+    expect(linkWithoutId("802e3bc2b27e49c2995d23ef70e6ac89", "fish_audio")).toBe(false);
+  });
+
+  it("says plainly when a pasted link has no voice ID in it, and looks nothing up", async () => {
+    render(<AddVoiceById provider={elevenlabs} model={undefined} onAdd={() => {}} onCancel={() => {}} />);
+    fireEvent.change(screen.getByLabelText("The voice’s link, or its ID"), { target: { value: "elevenlabs.io/app/voice-library" } });
+    expect(screen.getByRole("alert").textContent).toContain("That link has no ElevenLabs voice ID in it.");
+    expect((screen.getByRole("button", { name: "Look it up" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(invoke).not.toHaveBeenCalledWith("voice_lookup", expect.anything());
   });
 
   it("looks a pasted link up by the ID in it", async () => {

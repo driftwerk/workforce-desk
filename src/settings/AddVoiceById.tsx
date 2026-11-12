@@ -16,17 +16,29 @@ export const voiceIdFrom = (pasted: string, provider: string): string | null => 
   const shape = ID_SHAPE[provider];
   if (!t) return null;
   if (shape?.test(t)) return t;
-  let url: URL;
-  try {
-    url = new URL(t);
-  } catch {
-    return null;
-  }
+  const url = asLink(t);
+  if (!url) return null;
   const query = url.searchParams.get("voiceId") ?? url.searchParams.get("voice_id");
   if (query && (!shape || shape.test(query))) return query;
   const parts = url.pathname.split("/").filter(Boolean);
   return parts.reverse().find((p) => (shape ? shape.test(p) : false)) ?? null;
 };
+
+/** What was pasted as a link, with or without its `https://`; null when it
+ *  isn't one. */
+const asLink = (t: string): URL | null => {
+  if (/^https?:\/\//i.test(t) || /^[\w-]+(\.[\w-]+)+(\/|\?|$)/.test(t)) {
+    try {
+      return new URL(/^https?:\/\//i.test(t) ? t : `https://${t}`);
+    } catch {
+      return null;
+    }
+  }
+  return null;
+};
+
+/** A link pasted with no voice ID of `provider` in it. */
+export const linkWithoutId = (pasted: string, provider: string): boolean => !!asLink(pasted.trim()) && !voiceIdFrom(pasted, provider);
 
 /** "Use a voice ID": a voice from `provider` by its id (a cloned or
  *  community one), looked up with the provider so it's named as it is
@@ -52,7 +64,8 @@ export function AddVoiceById({
   const [playProblem, setPlayProblem] = useState<string | null>(null);
 
   // A link to the voice, or its ID, as pasted.
-  const trimmed = voiceIdFrom(id, provider.id) ?? id.trim();
+  const noId = linkWithoutId(id, provider.id);
+  const trimmed = voiceIdFrom(id, provider.id) ?? (noId ? "" : id.trim());
   const said = result && result.id === trimmed ? result.lookup : null;
   const found = said?.state === "found" ? said : null;
   const problem = said ? lookupProblem(said, provider) : null;
@@ -110,6 +123,11 @@ export function AddVoiceById({
             {playing ? "Playing…" : "Preview"}
           </button>
         </div>
+      )}
+      {noId && (
+        <p className="small state-blocked" role="alert">
+          That link has no {provider.name} voice ID in it. Open the voice itself on {provider.name} and copy its link, or paste its ID.
+        </p>
       )}
       {problem && (
         <p className="small state-blocked" role="alert">

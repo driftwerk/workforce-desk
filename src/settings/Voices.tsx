@@ -59,21 +59,10 @@ export function Voices() {
         </button>
         <span className="voices-nav-label faint small">How agents sound</span>
         {VOICE_PROVIDERS.map((p) => (
-          <button
-            key={p.id}
-            type="button"
-            className={`side-row ${p.id === selected ? "on" : ""}`}
-            onClick={() => setSelected(p.id)}
-          >
+          <button key={p.id} type="button" className={`side-row ${p.id === selected ? "on" : ""}`} onClick={() => setSelected(p.id)}>
             <span className="side-name">{p.name}</span>
             <span className="faint small">
-              {p.id === defaultVoice.provider
-                ? "default"
-                : !p.keyPath
-                  ? "this computer"
-                  : keyOf(p)
-                    ? "connected"
-                    : ""}
+              {p.id === defaultVoice.provider ? "default" : !p.keyPath ? "this computer" : keyOf(p) ? "connected" : ""}
             </span>
           </button>
         ))}
@@ -81,16 +70,16 @@ export function Voices() {
       {selected === TALK ? (
         <Calls />
       ) : (
-      <ProviderDetail
-        key={provider.id}
-        provider={provider}
-        keyFrom={keyOf(provider)}
-        onKeySaved={() => hub?.vaultPaths().then(setHave).catch(fail)}
-        isLive={LIVE.has(provider.id)}
-        defaultVoiceLabel={describeVoice(defaultVoice, withCustom([], customVoices[defaultVoice.provider]))}
-        onUse={(voice, model) => set({ defaultVoice: { provider: provider.id, model, voice } })}
-        currentDefault={defaultVoice.provider === provider.id ? defaultVoice.voice : undefined}
-      />
+        <ProviderDetail
+          key={provider.id}
+          provider={provider}
+          keyFrom={keyOf(provider)}
+          onKeySaved={() => hub?.vaultPaths().then(setHave).catch(fail)}
+          isLive={LIVE.has(provider.id)}
+          defaultVoiceLabel={describeVoice(defaultVoice, withCustom([], customVoices[defaultVoice.provider]))}
+          onUse={(voice, model) => set({ defaultVoice: { provider: provider.id, model, voice } })}
+          currentDefault={defaultVoice.provider === provider.id ? defaultVoice.voice : undefined}
+        />
       )}
     </div>
   );
@@ -247,7 +236,9 @@ function ProviderDetail({
             Use a voice ID
           </button>
         ))}
-      {isLive && <p className="faint small">Give an agent one of these voices in its settings; it’s used when {provider.name} is your voice engine.</p>}
+      {isLive && (
+        <p className="faint small">Give an agent one of these voices in its settings; it’s used when {provider.name} is your voice engine.</p>
+      )}
       {problem && <p className="state-blocked small">{problem}</p>}
     </section>
   );
