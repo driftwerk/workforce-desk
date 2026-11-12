@@ -29,7 +29,8 @@ interface BoardState {
    *  hub's words. An answer older than a change heard since is dropped. */
   move: (id: string, move: TicketMove) => Promise<void>;
   edit: (id: string, patch: TicketPatch) => Promise<void>;
-  assign: (id: string, to: AssignTo) => Promise<void>;
+  /** The ticket as the hub now has it (null with no hub). */
+  assign: (id: string, to: AssignTo) => Promise<Ticket | null>;
   /** Take it: the ticket's issue is assigned to the person on its Jira or
    *  Linear, as themselves (through this computer's hub, as the person). */
   take: (id: string) => Promise<void>;
@@ -65,9 +66,11 @@ export const useBoard = create<BoardState>((set, get) => {
     set((s) => ({ tickets: { ...s.tickets, [t.id]: t } }));
   };
   /** Runs a request about ticket `id` and keeps its answer as above. */
-  const ask = async (id: string, request: () => Promise<Ticket>): Promise<void> => {
+  const ask = async (id: string, request: () => Promise<Ticket>): Promise<Ticket> => {
     const since = mark(id);
-    answered(await request(), since);
+    const t = await request();
+    answered(t, since);
+    return t;
   };
   return {
     boards: {},
@@ -155,7 +158,7 @@ export const useBoard = create<BoardState>((set, get) => {
     },
     assign: async (id, to) => {
       const hub = hubNow();
-      if (hub) await ask(id, () => hub.assignTicket(id, to));
+      return hub ? ask(id, () => hub.assignTicket(id, to)) : null;
     },
     take: async (id) => {
       const sync = localSync();

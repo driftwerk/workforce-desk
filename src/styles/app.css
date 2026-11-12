@@ -111,7 +111,9 @@ button {
 }
 
 .sidebar {
-  flex: 0 0 288px;
+  position: relative;
+  flex: 0 0 var(--side-w, 288px);
+  container: sidebar / inline-size;
   background: var(--surface);
   padding: 34px 12px 16px;
   display: flex;
@@ -119,6 +121,43 @@ button {
   gap: 12px;
   min-height: 0;
   overflow: hidden;
+}
+/* The edge you drag to set the sidebar's width. */
+.side-resize {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 8px;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+}
+.side-resize::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  background: var(--border);
+  transition:
+    background 0.12s,
+    width 0.12s;
+}
+.side-resize:hover::after,
+.side-resize:focus-visible::after,
+body.side-resizing .side-resize::after {
+  width: 3px;
+  background: var(--handle-active);
+}
+.side-resize:focus-visible {
+  outline: none;
+}
+body.side-resizing,
+body.side-resizing * {
+  cursor: col-resize !important;
+  user-select: none;
 }
 /* Always on screen: the wordmark, Ask anyone and the views. */
 .side-top {
@@ -2072,9 +2111,19 @@ button.thread-bar:hover {
   height: 8px;
   margin: 0 3px;
 }
+/* A row never squeezes its name to nothing: badges that don't fit drop to
+   a second line under it, and the least important meta hides when narrow. */
+.gi:not(.gi-editing) {
+  flex-wrap: wrap;
+  row-gap: 2px;
+}
 .gi-name {
-  flex: 1;
-  min-width: 0;
+  /* Its own length decides whether the badges fit beside it: a name that
+     would be cut takes the whole first line and they wrap under it. */
+  flex: 1 1 auto;
+  /* Never wider than what is left after the grip and dot, so they stay on its line. */
+  max-width: calc(100% - 44px);
+  min-width: 9ch;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -3376,4 +3425,52 @@ body.line-resizing * {
 .folder-suggestion:focus-visible {
   background: var(--surface);
   color: var(--text);
+}
+
+/* ── The bottom block, folded to a row of icons ─────────────────────────── */
+.side-mini {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 2px;
+}
+.side-mini-btn {
+  width: 30px;
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--muted);
+}
+.side-mini-btn:hover,
+.side-mini-btn:focus-visible {
+  background: var(--raised);
+  color: var(--text);
+}
+.side-mini-btn.on {
+  color: var(--signal);
+}
+.side-mini .side-foot-toggle {
+  margin-left: auto;
+}
+.side-foot-fold {
+  align-self: flex-end;
+  margin-bottom: -4px;
+}
+
+@container sidebar (max-width: 260px) {
+  .gi-meta,
+  .gi-machine {
+    display: none;
+  }
+}
+/* Badges that wrapped under the name sit at the row's right edge. */
+.gi > .gi-ticket,
+.gi > .gi-charge,
+.gi > .gi-meta,
+.gi > .gi-machine {
+  margin-left: auto;
 }
