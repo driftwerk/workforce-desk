@@ -1090,6 +1090,7 @@ button.ticket-crumb:hover {
   margin: 14px 0 4px;
   font-size: 15px;
   font-weight: 700;
+  line-height: inherit;
 }
 /* The view's sizes, not the plain text box's. */
 .ticket-description .ticket-text {
@@ -1720,7 +1721,7 @@ button.ticket-row:not(:disabled):hover {
   align-items: center;
   gap: 11px 10px;
   font-size: 13px;
-  line-height: 1.28;
+  line-height: 1.4;
 }
 /* A person's mark in a fact is its face alone, as tall as a line. */
 .ticket-facts .mark-xs {
@@ -1832,9 +1833,9 @@ button.ticket-row:not(:disabled):hover {
   margin-top: 8px;
 }
 .ticket-need {
+  position: relative;
   display: flex;
   align-items: center;
-  gap: 4px;
   min-width: 0;
 }
 .ticket-need-open,
@@ -1872,18 +1873,24 @@ button.ticket-row:not(:disabled):hover {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* Taking a need off shows on its row's hover or focus, and takes no room
-   from its title until then. */
+/* Taking a need off shows over its row's end on hover or focus: it takes
+   no room from its title, shown or not, and stays reachable by keyboard. */
 .ticket-need-off {
-  display: none;
+  position: absolute;
+  right: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--raised);
+  opacity: 0;
 }
 .ticket-need:hover .ticket-need-off,
 .ticket-need:focus-within .ticket-need-off {
-  display: inline-grid;
+  opacity: 1;
 }
 .ticket-need-more {
   align-self: flex-start;
   padding: 6px 8px;
+  font-size: 13px;
   color: var(--faint);
 }
 .ticket-needs-band .ticket-need-more {
@@ -1931,7 +1938,7 @@ button.ticket-row:not(:disabled):hover {
   padding-top: 8px;
 }
 .ticket-foot .link {
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--muted);
 }
 

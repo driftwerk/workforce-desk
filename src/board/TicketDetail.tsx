@@ -837,7 +837,7 @@ function Needs({ ticket: t, neededBy, onProblem, band }: { ticket: Ticket; neede
           <h3 className="ticket-band-label">Needs</h3>
           {needs.length ? <div className="ticket-needs-rows">{rows}</div> : <span className="faint">nothing yet</span>}
           {!needs.length && !adding && (
-            <button type="button" className="link small ticket-need-more" onClick={() => setAdding(true)}>
+            <button type="button" className="link ticket-need-more" onClick={() => setAdding(true)}>
               Add…
             </button>
           )}
@@ -850,7 +850,7 @@ function Needs({ ticket: t, neededBy, onProblem, band }: { ticket: Ticket; neede
       <SectionHead title="Needs" note="done first" />
       {rows}
       {adder ?? (
-        <button type="button" className="link small ticket-need-more" onClick={() => setAdding(true)}>
+        <button type="button" className="link ticket-need-more" onClick={() => setAdding(true)}>
           Add a ticket it needs first…
         </button>
       )}
