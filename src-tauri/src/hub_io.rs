@@ -337,6 +337,11 @@ impl HubIo {
         if crate::hubs::machine_of(remote).is_some() {
             return Err("A machine's hub keeps no agents of its own.".into());
         }
+        if !sync_hub_id_ok(remote) {
+            return Err(format!(
+                "Desk can't share with agents on {remote:?} yet: its name, from its address, is too long (over 40 characters) or isn't one Desk can use."
+            ));
+        }
         let there = self
             .paired
             .reach_async(remote)
@@ -346,11 +351,6 @@ impl HubIo {
             return Ok(KnowsLinked::Local {
                 agent: agent.to_string(),
             });
-        }
-        if !sync_hub_id_ok(remote) {
-            return Err(format!(
-                "Desk can't share with agents on {remote:?} yet: its name is longer than 40 letters or doesn't start with one."
-            ));
         }
         let here = self
             .paired
@@ -451,11 +451,17 @@ impl HubIo {
     /// next mint for the agent replaces it anyway.)
     async fn revoke_knows(&self, remote: &str, id: Option<&str>) {
         let Some(id) = id else { return };
-        if let Err(e) = self
+        match self
             .fetch(remote, "DELETE", &format!("{KNOWS_MINT_PATH}/{id}"), None)
             .await
         {
-            tracing::warn!(hub = %remote, error = %e, "an unkept Desk work token wasn't revoked");
+            Ok((meta, _)) if (200..300).contains(&meta.status) => {}
+            Ok((meta, _)) => {
+                tracing::warn!(hub = %remote, status = meta.status, "an unkept Desk work token wasn't revoked");
+            }
+            Err(e) => {
+                tracing::warn!(hub = %remote, error = %e, "an unkept Desk work token wasn't revoked");
+            }
         }
     }
 }
@@ -479,6 +485,7 @@ pub enum KnowsLinked {
     /// `agent` as its hub names it, which its rule is kept by.
     Kept { agent: String },
     /// An agent on this computer's hub: shared with in place, no token.
+    /// `agent` as the page named it (the sync finds it by the registry).
     Local { agent: String },
     /// The agent's hub didn't make one (it is older, or its admin turned
     /// Desk work off, or the agent declines it): its words.
@@ -634,7 +641,7 @@ pub async fn hub_fetch(
         (None, InvokeBody::Json(v)) if v.as_object().is_some_and(|o| o.is_empty()) => None,
         _ => return Err("The request's body didn't say what it is.".into()),
     };
-    if native_only(&method, &path) {
+    if page_refused(&method, &path) {
         return Err("Desk asks that of a workspace itself, never for the page.".into());
     }
     let (meta, bytes) = io.fetch(&hub, &method, &path, body).await?;
@@ -645,7 +652,7 @@ pub async fn hub_fetch(
 /// a token (its answer holds it) and keeping one for this computer's hub to
 /// send by (an address the page chose would be sent the person's work).
 /// Matched on decoded path segments, any case, whatever the query.
-fn native_only(method: &str, target: &str) -> bool {
+fn page_refused(method: &str, target: &str) -> bool {
     let (path, _) = split(target);
     let parts: Option<Vec<String>> = path
         .split('/')
@@ -1427,7 +1434,7 @@ mod tests {
             ("PUT", "/api/desk/knows-links/atlas/%61llan"),
             ("PUT", "/api/desk/%ff/x"),
         ] {
-            assert!(native_only(method, target), "{method} {target}");
+            assert!(page_refused(method, target), "{method} {target}");
         }
         for (method, target) in [
             ("GET", "/api/desk/knows"),
@@ -1436,7 +1443,7 @@ mod tests {
             ("DELETE", "/api/me/desk-knows-tokens/t1"),
             ("GET", "/api/me"),
         ] {
-            assert!(!native_only(method, target), "{method} {target}");
+            assert!(!page_refused(method, target), "{method} {target}");
         }
     }
 

@@ -298,11 +298,11 @@ Desk stopped sharing transcripts with Allan. He holds 1,032 exchanges from 14 se
 **Setting it through the API** (for an agent setting itself up, and for this rollout):
 - `GET /api/desk/knows`: every rule;
 - `GET /api/desk/knows/{hub}/{agent}`: one rule, what the agent holds outside it, and what was shared today;
-- `PUT /api/desk/knows/{hub}/{agent}` `{places, transcripts, digest}`: answers what now needs a decision (`{heldOutside: {items, transcripts, sessions, by_kind}}`);
+- `PUT /api/desk/knows/{hub}/{agent}` `{places, transcripts, digest}`: answers the rule and what now needs a decision (`{rule, heldOutside: {items, transcripts, sessions, by_kind}}`);
 - `POST /api/desk/knows/{hub}/{agent}/held` `{choice: "delete"|"keep"}`;
 - `GET /api/desk/knows/{hub}/{agent}/log`.
 
-`{hub}` is Desk's id for the agent's hub (`local` for this computer's). Changing a rule or choosing is the person's alone, as the person holding this hub (the page asks over the paired path, as board sync does). The hub refuses its own token for them, so the broker never carries them, and no agent or session can call them. Linking an agent on another hub (minting its `wfk_` token and keeping it here) is the native side's alone: the page can't ask a hub for either (`hub_io::native_only`).
+`{hub}` is Desk's id for the agent's hub (`local` for this computer's). Changing a rule or choosing is the person's alone, as the person holding this hub (the page asks over the paired path, as board sync does). The hub refuses its own token for them, so the broker never carries them, and no agent or session can call them. Linking an agent on another hub (minting its `wfk_` token and keeping it here) is the native side's alone: the page can't ask a hub for either (`hub_io::page_refused`).
 
 ## 8. Changes, narrowing and removal
 
