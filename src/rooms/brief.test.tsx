@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChatMessage } from "../chat/types";
@@ -37,6 +37,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   useDesk.setState({ hub: null });
+  useSettled.setState({ by: {} });
 });
 
 const said = (content: string, desk: DeskExtras, delivery?: ChatMessage["delivery"]): ChatMessage => ({
@@ -121,9 +122,12 @@ describe("a brief update", () => {
     const creds = screen.getByRole("region", { name: "Credentials" });
     expect(within(creds).getAllByRole("button").map((b) => b.textContent)).toEqual(["Done"]);
     fireEvent.click(within(creds).getByRole("button", { name: /^Done: Rotate/ }));
-    await waitFor(() => expect(within(creds).getByRole("img", { name: "Done" })).toBeTruthy());
+    // Done, it folds with what else was settled, by you.
+    const fold = await within(creds).findByRole("button", { name: "Settled" });
     expect(asked).toContainEqual({ method: "POST", path: "/api/desk/items/i1/done", body: undefined });
     expect(within(creds).queryByRole("button", { name: /^Done:/ })).toBeNull();
+    fireEvent.click(fold);
+    expect(within(creds).getByRole("img", { name: "Done" }).textContent).toBe("✓");
   });
 
   it("shows answers only for what the boss couldn't decide", () => {
@@ -132,13 +136,30 @@ describe("a brief update", () => {
         ...BRIEF.update,
         needsYou: [
           { itemId: "n1", question: "Ship #571 in daytime tomorrow?", items: [], recommendation: null, options: [{ label: "Yes", recommended: false }, { label: "Not yet", recommended: false }], notBlocking: null, age: "5 min" },
-          { itemId: "n2", question: "Rotate the tokens?", items: [], recommendation: null, options: [], notBlocking: null, age: "5 min" },
+          // The brief says it as for you: not twice.
+          { itemId: "i1", question: "Rotate the tokens?", items: [], recommendation: null, options: [], notBlocking: null, age: "5 min" },
         ],
       },
     };
     const { container } = show(said("Update.", undecided, "update"));
     expect(container.querySelectorAll(".needs")).toHaveLength(1);
     expect(screen.getByRole("button", { name: "Not yet" })).toBeTruthy();
+  });
+
+  it("still says what waits on you that the brief leaves out", () => {
+    const left: DeskExtras = {
+      update: { ...BRIEF.update, waiting: [{ itemId: "w1", text: "Merge the hotfix?", age: "2 min" }] },
+    };
+    show(said("Update.", left, "update"));
+    expect(screen.getByText(/Merge the hotfix/)).toBeTruthy();
+  });
+
+  it("caught up on, keeps what it held to and what more there is", () => {
+    const away = { since: "2026-11-12T18:00:00Z", until: "2026-11-12T19:40:00Z", headline: "While you were away" };
+    const extras: DeskExtras = { away, update: { ...BRIEF.update, kept: ["Kept #571 for daytime."], moreItems: 1 } };
+    show(said("Update.", extras, "update"));
+    expect(screen.getByText("Kept #571 for daytime.")).toBeTruthy();
+    expect(screen.getByText("1 more: ask “what else?”")).toBeTruthy();
   });
 
   it("is read as before by a hub that sends no brief", () => {

@@ -20,6 +20,7 @@ import { openLink } from "../shell/links";
 import { plainError } from "../ui/plainError";
 import { Brief } from "./Brief";
 import { useSettledBy } from "./settled";
+import { UNDO_LABEL, useUndo } from "./undo";
 
 // What the boss says in your chat with it, laid out as the agreed "Update"
 // board has it, in Desk's own tokens and never boxed:
@@ -361,11 +362,12 @@ function CatchUp({ away, update }: { away: MentionedAway; update: MentionedUpdat
   const brief = update.brief?.length ? update.brief : null;
   return (
     <div className={`msg-text overseer${brief ? " is-brief" : ""}`}>
-      <Head update={brief ? {} : update} headline={away.headline} handled={away.handled} />
+      <Head update={brief ? { kept: update.kept } : update} headline={away.headline} handled={away.handled} />
       {brief ? (
         <>
           <Undecided update={update} />
           <Brief groups={brief} />
+          <More n={update.moreItems} />
         </>
       ) : (
         <>
@@ -440,18 +442,37 @@ function Parked({ id, text }: { id: string; text: string }) {
 }
 
 /** What only you can decide, beside a brief update: laid out with its
- *  answers, which the hub sends only when the boss couldn't decide. */
+ *  answers, which the hub sends only when the boss couldn't decide. What
+ *  still waits and the brief doesn't say as "for you" shows as it would
+ *  without a brief, so nothing waiting goes unsaid. */
 function Undecided({ update }: { update: MentionedUpdate }) {
-  // What only you can decide comes first; what's settled folds.
+  const told = new Set((update.brief ?? []).flatMap((g) => g.items.filter((i) => i.kind === "forYou").map((i) => i.id)));
+  const needs = update.needsYou ?? [];
+  const laid = new Map(needs.map((n) => [n.itemId, n]));
+  const waiting = update.waiting ?? [];
+  const known = new Set(waiting.map((w) => w.itemId));
+  const shown = (id: string, n?: NeedsYou) => (n?.options.length ?? 0) > 0 || !told.has(id);
   return (
     <>
-      {(update.needsYou ?? [])
-        .filter((n) => n.options.length > 0)
+      {waiting
+        .filter((w) => shown(w.itemId, laid.get(w.itemId)))
+        .map((w) => {
+          const n = laid.get(w.itemId);
+          return n ? <Laid key={w.itemId} n={n} holdingUp={w.holdingUp} /> : <Waiting key={w.itemId} w={w} />;
+        })}
+      {needs
+        .filter((n) => !known.has(n.itemId) && shown(n.itemId, n))
         .map((n) => (
           <Laid key={n.itemId} n={n} />
         ))}
     </>
   );
+}
+
+/** "N more: ask “what else?”", when the brief left some out. */
+function More({ n }: { n?: number }) {
+  if (!n) return null;
+  return <p className="faint small">{n === 1 ? "1 more" : `${n} more`}: ask “what else?”</p>;
 }
 
 function Update({ update }: { update: MentionedUpdate }) {
@@ -461,11 +482,7 @@ function Update({ update }: { update: MentionedUpdate }) {
         {update.headline && <p className="upd-line">{update.headline}</p>}
         <Undecided update={update} />
         <Brief groups={update.brief} />
-        {!!update.moreItems && (
-          <p className="faint small">
-            {update.moreItems === 1 ? "1 more" : `${update.moreItems} more`}: ask “what else?”
-          </p>
-        )}
+        <More n={update.moreItems} />
         {update.footer && <p className="faint small">{update.footer}</p>}
       </div>
     );
@@ -645,7 +662,6 @@ function NeedsYouPost({ item, content }: { item: MentionedItem; content: string 
 // What you settled here, by decision and by item, for as long as Desk
 // runs: a row drawn again (scrolled away and back) says so at once, as the
 // hub would when asked again.
-const undoneHere = new Map<string, string>();
 const settledHere = new Map<string, string>();
 const heldHere = new Set<string>();
 /** Answers that offer "Always", by item: the answer given. */
@@ -824,12 +840,6 @@ function Always({ id, when, then }: { id: string; when: string; then: string }) 
 
 // ── 3. What I did ─────────────────────────────────────────────────────────
 
-export const UNDO_LABEL: Record<NonNullable<DecisionLine["undo"]>, string> = {
-  undo: "Undo",
-  correct: "Correct",
-  stop: "Stop it",
-  resume: "Resume",
-};
 
 /** The boss's decisions, one line each; the times it did nothing folded
  *  into one line that opens on a click. `labelled`: under "What I did",
@@ -864,40 +874,6 @@ function WhatIDid({ decisions, labelled = true }: { decisions: readonly Decision
       </ul>
     </section>
   );
-}
-
-/** Undoing decision `id`: what came of it (kept for as long as Desk
- *  runs), whether it can't be after all, and the hub's problem. */
-export function useUndo(id: string, undoneAlready: boolean) {
-  const [undone, setUndone] = useState<string | null>(undoneHere.get(id) ?? null);
-  // A decision that can't be undone after all: no button to press again.
-  const [fixed, setFixed] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
-  const done = (said: string) => {
-    undoneHere.set(id, said);
-    setUndone(said);
-  };
-  const undo = async () => {
-    const hub = useDesk.getState().hub;
-    if (!hub) return;
-    setBusy(true);
-    setProblem(null);
-    try {
-      const r = await hub.undoDecision(id);
-      done(r?.done ?? "");
-    } catch (e) {
-      // Undone already elsewhere, or gone with its session: it shows so.
-      if (e instanceof HubError && (e.status === 409 || e.status === 404)) done("");
-      else {
-        if (e instanceof HubError && e.status === 400) setFixed(true);
-        setProblem(plainError(e));
-      }
-    }
-    setBusy(false);
-  };
-  // Undone here, or elsewhere as the message now says.
-  return { undone, isUndone: undone !== null || undoneAlready, fixed, busy, problem, undo };
 }
 
 function DecisionRow({ line, action, why, message, timed }: { line: DecisionLine; action: string; why: string; message: string | null; timed: boolean }) {

@@ -15,8 +15,21 @@ export function heardSettled(e: ActivityEvent): void {
   const id = e.detail?.itemId;
   const by = e.detail?.by;
   if (!id || (by !== "you" && by !== "session")) return;
+  settleHere(id, by);
+}
+
+/** The most items kept: the oldest go first, long since off the screen. */
+const KEPT = 500;
+
+/** Item `id`, settled by `by`: heard, or done here. */
+export function settleHere(id: string, by: By): void {
   if (useSettled.getState().by[id] === by) return;
-  useSettled.setState((s) => ({ by: { ...s.by, [id]: by } }));
+  useSettled.setState((s) => {
+    const next = { ...s.by, [id]: by };
+    const ids = Object.keys(next);
+    for (const old of ids.slice(0, Math.max(0, ids.length - KEPT))) delete next[old];
+    return { by: next };
+  });
 }
 
 /** How item `id` was settled: as the update said, or as heard since. */
