@@ -319,14 +319,18 @@ impl HubIo {
     /// work with that agent by (Sees K5). As with [`Self::mint_for_sync`],
     /// the token goes from one hub to the other here and nowhere else, and
     /// one this computer's hub couldn't keep is revoked where it was made.
-    pub async fn link_knows(
+    pub async fn link_knows<K, F>(
         &self,
         remote: &str,
         local: &str,
         agent: &str,
-        engine_key: &str,
+        engine_key: K,
         engine_name: &str,
-    ) -> Result<KnowsLinked, String> {
+    ) -> Result<KnowsLinked, String>
+    where
+        K: FnOnce() -> F,
+        F: std::future::Future<Output = Result<String, String>>,
+    {
         if !agent_id_ok(agent) {
             return Err(format!("{agent:?} can't name an agent."));
         }
@@ -339,10 +343,14 @@ impl HubIo {
             .await
             .map_err(|e| e.to_string())?;
         if there.local {
-            return Ok(KnowsLinked::Local);
+            return Ok(KnowsLinked::Local {
+                agent: agent.to_string(),
+            });
         }
         if !sync_hub_id_ok(remote) {
-            return Err(format!("{remote:?} can't name a hub."));
+            return Err(format!(
+                "Desk can't share with agents on {remote:?} yet: its name is longer than 40 letters or doesn't start with one."
+            ));
         }
         let here = self
             .paired
@@ -354,6 +362,8 @@ impl HubIo {
         }
         sync_hub_url_ok(&there.base)?;
         let url = there.base.as_str().trim_end_matches('/').to_string();
+        // Asked only now: nothing before needed it.
+        let engine_key = engine_key().await?;
         let ask = serde_json::to_vec(&serde_json::json!({
             "agent_id": agent,
             "engine": { "id": KNOWS_ENGINE_ID, "name": engine_name, "public_key": engine_key },
@@ -383,6 +393,13 @@ impl HubIo {
             .as_ref()
             .and_then(|v| v.get("id")?.as_str().map(str::to_string))
             .filter(|i| !i.is_empty() && i.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+        // The agent as its hub names it (case and all): the link is kept,
+        // and the rule keyed, by that.
+        let named = minted
+            .as_ref()
+            .and_then(|v| v.get("agentId")?.as_str().map(str::to_string))
+            .filter(|a| agent_id_ok(a))
+            .unwrap_or_else(|| agent.to_string());
         let token = minted.and_then(|v| {
             v.get("token")?
                 .as_str()
@@ -390,8 +407,9 @@ impl HubIo {
         });
         drop(zeroize::Zeroizing::new(bytes));
         let Some(token) = token else {
+            self.revoke_knows(remote, token_id.as_deref()).await;
             return Ok(KnowsLinked::NotAllowed {
-                status: meta.status,
+                status: 502,
                 error: format!("That hub didn't make a token Desk can use for {agent}."),
             });
         };
@@ -404,12 +422,14 @@ impl HubIo {
             .fetch(
                 local,
                 "PUT",
-                &format!("/api/desk/knows-links/{remote}/{agent}"),
+                &format!("/api/desk/knows-links/{remote}/{named}"),
                 Some(("application/json".into(), body.to_vec())),
             )
             .await;
         match kept {
-            Ok((meta, _)) if (200..300).contains(&meta.status) => Ok(KnowsLinked::Kept),
+            Ok((meta, _)) if (200..300).contains(&meta.status) => {
+                Ok(KnowsLinked::Kept { agent: named })
+            }
             failed => {
                 let reason = match failed {
                     Ok((meta, answer)) => {
@@ -417,21 +437,25 @@ impl HubIo {
                     }
                     Err(e) => e,
                 };
-                if let Some(token_id) = token_id {
-                    let _ = self
-                        .fetch(
-                            remote,
-                            "DELETE",
-                            &format!("{KNOWS_MINT_PATH}/{token_id}"),
-                            None,
-                        )
-                        .await;
-                }
+                self.revoke_knows(remote, token_id.as_deref()).await;
                 let reason = reason.trim().trim_end_matches('.');
                 Err(format!(
                     "That hub made a token for {agent} but Desk couldn't keep it: {reason}. Nothing is shared with it until it's linked again."
                 ))
             }
+        }
+    }
+
+    /// Revokes Desk work token `id` on `remote`, with the device token, on
+    /// the device-only route that revokes only what this device minted. (The
+    /// next mint for the agent replaces it anyway.)
+    async fn revoke_knows(&self, remote: &str, id: Option<&str>) {
+        let Some(id) = id else { return };
+        if let Err(e) = self
+            .fetch(remote, "DELETE", &format!("{KNOWS_MINT_PATH}/{id}"), None)
+            .await
+        {
+            tracing::warn!(hub = %remote, error = %e, "an unkept Desk work token wasn't revoked");
         }
     }
 }
@@ -451,10 +475,11 @@ const KNOWS_ENGINE_ID: &str = "local";
 #[derive(Debug, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum KnowsLinked {
-    /// Kept on this computer's hub, which shares with the agent by it.
-    Kept,
+    /// Kept on this computer's hub, which shares with the agent by it:
+    /// `agent` as its hub names it, which its rule is kept by.
+    Kept { agent: String },
     /// An agent on this computer's hub: shared with in place, no token.
-    Local,
+    Local { agent: String },
     /// The agent's hub didn't make one (it is older, or its admin turned
     /// Desk work off, or the agent declines it): its words.
     NotAllowed { status: u16, error: String },
@@ -609,8 +634,39 @@ pub async fn hub_fetch(
         (None, InvokeBody::Json(v)) if v.as_object().is_some_and(|o| o.is_empty()) => None,
         _ => return Err("The request's body didn't say what it is.".into()),
     };
+    if native_only(&method, &path) {
+        return Err("Desk asks that of a workspace itself, never for the page.".into());
+    }
     let (meta, bytes) = io.fetch(&hub, &method, &path, body).await?;
     Ok(tauri::ipc::Response::new(framed(&meta, &bytes)))
+}
+
+/// What only the native side asks of a paired hub, never the page: minting
+/// a token (its answer holds it) and keeping one for this computer's hub to
+/// send by (an address the page chose would be sent the person's work).
+/// Matched on decoded path segments, any case, whatever the query.
+fn native_only(method: &str, target: &str) -> bool {
+    let (path, _) = split(target);
+    let parts: Option<Vec<String>> = path
+        .split('/')
+        .filter(|p| !p.is_empty())
+        .map(|p| {
+            percent_encoding::percent_decode_str(p)
+                .decode_utf8()
+                .ok()
+                .map(|d| d.to_ascii_lowercase())
+        })
+        .collect();
+    // What can't be read can't be checked: refused.
+    let Some(parts) = parts else { return true };
+    let parts: Vec<&str> = parts.iter().map(String::as_str).collect();
+    let method = method.to_ascii_uppercase();
+    matches!(
+        (method.as_str(), parts.as_slice()),
+        ("POST", ["api", "me", "desk-knows-tokens"])
+            | ("POST", ["api", "me", "remote-mcp-tokens", "desk"])
+            | ("PUT", ["api", "desk", "knows-links", _, _])
+    )
 }
 
 /// Mints a board-sync token on paired hub `remote` and hands it to the
@@ -636,16 +692,25 @@ pub async fn knows_link(
     remote: String,
     agent: String,
 ) -> CommandResult<KnowsLinked> {
-    let answer = local.fetch_native("GET", "/api/desk/engine-key").await?;
-    if !(200..300).contains(&answer.status) {
-        return Err("This computer's hub didn't say its engine's key.".into());
+    let key = || async {
+        let answer = local.fetch_native("GET", "/api/desk/engine-key").await?;
+        engine_key_of(answer.status, &answer.body)
+    };
+    io.link_knows(&remote, desk_core::LOCAL_HUB_ID, &agent, key, ENGINE_NAME)
+        .await
+}
+
+/// This computer's engine key, from its hub's answer.
+fn engine_key_of(status: u16, body: &str) -> Result<String, String> {
+    let refused = || "This computer's hub didn't say its engine's key.".to_string();
+    if !(200..300).contains(&status) {
+        return Err(refused());
     }
-    let key = serde_json::from_str::<serde_json::Value>(&answer.body)
+    serde_json::from_str::<serde_json::Value>(body)
         .ok()
         .and_then(|v| v.get("publicKey")?.as_str().map(str::to_string))
-        .ok_or("This computer's hub didn't say its engine's key.")?;
-    io.link_knows(&remote, desk_core::LOCAL_HUB_ID, &agent, &key, ENGINE_NAME)
-        .await
+        .filter(|k| !k.trim().is_empty())
+        .ok_or_else(refused)
 }
 
 /// What this computer's engine is called on an agent's hub.
@@ -1286,12 +1351,24 @@ mod tests {
             account("atlas", &remote, false, "ATLAS-DEVICE"),
         ]);
         let linked = io
-            .link_knows("atlas", "local", "allan", "ed25519:KEY", "Desk on this Mac")
+            .link_knows(
+                "atlas",
+                "local",
+                "Allan",
+                key("ed25519:KEY"),
+                "Desk on this Mac",
+            )
             .await
             .unwrap();
-        assert_eq!(linked, KnowsLinked::Kept);
+        // Kept under the agent as its hub names it.
+        assert_eq!(
+            linked,
+            KnowsLinked::Kept {
+                agent: "allan".into()
+            }
+        );
         let told = serde_json::to_string(&linked).unwrap();
-        assert_eq!(told, r#"{"kind":"kept"}"#);
+        assert_eq!(told, r#"{"kind":"kept","agent":"allan"}"#);
         let asked = remote_seen.recv().await.unwrap();
         assert!(
             asked.starts_with("POST /api/me/desk-knows-tokens HTTP/1.1"),
@@ -1307,7 +1384,7 @@ mod tests {
         assert_eq!(
             body,
             serde_json::json!({
-                "agent_id": "allan",
+                "agent_id": "Allan",
                 "engine": { "id": "local", "name": "Desk on this Mac", "public_key": "ed25519:KEY" }
             })
         );
@@ -1326,6 +1403,57 @@ mod tests {
             body,
             serde_json::json!({ "url": remote, "token": "wfk_SENTINEL_KNOWS_0123456789" })
         );
+    }
+
+    fn key(k: &'static str) -> impl FnOnce() -> std::future::Ready<Result<String, String>> {
+        move || std::future::ready(Ok(k.to_string()))
+    }
+
+    /// Asked for no key: the asks it is given never need one.
+    fn no_key() -> std::future::Ready<Result<String, String>> {
+        panic!("no key is asked for")
+    }
+
+    /// What the page may not ask of a workspace itself, however spelled.
+    #[test]
+    fn minting_and_keeping_tokens_is_the_native_side_s_alone() {
+        for (method, target) in [
+            ("POST", "/api/me/desk-knows-tokens"),
+            ("post", "/api/me/desk-knows-tokens?x=1"),
+            ("POST", "/api/me/desk%2Dknows-tokens"),
+            ("POST", "//api/me/Desk-Knows-Tokens/"),
+            ("POST", "/api/me/remote-mcp-tokens/desk"),
+            ("PUT", "/api/desk/knows-links/atlas/allan"),
+            ("PUT", "/api/desk/knows-links/atlas/%61llan"),
+            ("PUT", "/api/desk/%ff/x"),
+        ] {
+            assert!(native_only(method, target), "{method} {target}");
+        }
+        for (method, target) in [
+            ("GET", "/api/desk/knows"),
+            ("PUT", "/api/desk/knows/atlas/allan"),
+            ("DELETE", "/api/desk/knows-links/atlas/allan"),
+            ("DELETE", "/api/me/desk-knows-tokens/t1"),
+            ("GET", "/api/me"),
+        ] {
+            assert!(!native_only(method, target), "{method} {target}");
+        }
+    }
+
+    #[test]
+    fn this_computer_s_engine_key_is_read_from_its_hub_s_answer() {
+        assert_eq!(
+            engine_key_of(200, r#"{"publicKey":"ed25519:abc"}"#).unwrap(),
+            "ed25519:abc"
+        );
+        for (status, body) in [
+            (403, r#"{"publicKey":"k"}"#),
+            (200, "{}"),
+            (200, r#"{"publicKey":" "}"#),
+            (200, "<p>"),
+        ] {
+            assert!(engine_key_of(status, body).is_err(), "{status} {body}");
+        }
     }
 
     /// One this computer's hub couldn't keep is revoked where it was made;
@@ -1355,7 +1483,7 @@ mod tests {
             account("atlas", &remote, false, "ATLAS-DEVICE"),
         ]);
         let e = io
-            .link_knows("atlas", "local", "allan", "k", "Desk")
+            .link_knows("atlas", "local", "allan", key("k"), "Desk")
             .await
             .unwrap_err();
         assert!(e.contains("Desk couldn't keep the link. Try again"), "{e}");
@@ -1370,7 +1498,7 @@ mod tests {
         );
         let _put = local_seen.recv().await.unwrap();
         assert_eq!(
-            io.link_knows("atlas", "local", "allan", "k", "Desk")
+            io.link_knows("atlas", "local", "allan", key("k"), "Desk")
                 .await
                 .unwrap(),
             KnowsLinked::NotAllowed {
@@ -1380,10 +1508,12 @@ mod tests {
         );
         let _refused = remote_seen.recv().await.unwrap();
         assert_eq!(
-            io.link_knows("local", "local", "allan", "k", "Desk")
+            io.link_knows("local", "local", "allan", no_key, "Desk")
                 .await
                 .unwrap(),
-            KnowsLinked::Local
+            KnowsLinked::Local {
+                agent: "allan".into()
+            }
         );
         for (remote, local, agent) in [
             ("atlas", "atlas", "allan"),
@@ -1394,7 +1524,7 @@ mod tests {
             ("atlas", "local", "allan/x"),
         ] {
             assert!(
-                io.link_knows(remote, local, agent, "k", "Desk")
+                io.link_knows(remote, local, agent, no_key, "Desk")
                     .await
                     .is_err(),
                 "{remote} {local} {agent}"

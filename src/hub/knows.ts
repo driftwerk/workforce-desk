@@ -17,8 +17,9 @@ import type { HubRef } from "./net";
 export type KnowsDigest = "off" | "live" | "daily";
 
 /** One agent's rule, as the hub keeps it: `places` in the scope grammar
- *  (`everything`, `group:<id>`, `session:<id>`, `board:<id>`; none is its
- *  own work alone). */
+ *  (`all`, `group:<id>`, `board:<id>`, `grid:<id>`, `session:<id>` or
+ *  `session:<machine>/<id>`, `agent:<hub>/<agent>`; none is its own work
+ *  alone), as the hub's `knows.rs` parses it. */
 export type KnowsRule = { agent: string; places: string[]; transcripts: boolean; digest: KnowsDigest; revision: number; changedAt: string | null };
 
 /** What an agent holds, counted: items, transcripts among them, and the
@@ -38,9 +39,13 @@ export type KnowsChanged = { rule: KnowsRule; heldOutside: KnowsHeld };
 /** One line of a rule's log: counts and places, never content. */
 export type KnowsLogEntry = { id: string; at: string; what: string; detail: unknown; doneAt: string | null };
 
+/** The route of agent `agent` (`<hub>/<agent id>`, exactly one slash). */
 const path = (agent: string, rest = ""): string => {
-  const [hub, id] = agent.split("/");
-  return `/api/desk/knows/${encodeURIComponent(hub ?? "")}/${encodeURIComponent(id ?? "")}${rest}`;
+  const at = agent.indexOf("/");
+  const hub = agent.slice(0, at);
+  const id = agent.slice(at + 1);
+  if (at <= 0 || !id || id.includes("/")) throw new HubError(400, `${JSON.stringify(agent)} isn't an agent: say <hub>/<agent>.`);
+  return `/api/desk/knows/${encodeURIComponent(hub)}/${encodeURIComponent(id)}${rest}`;
 };
 
 /** The rules on hub `hub` (this computer's), as the person. `agent` is
@@ -58,9 +63,10 @@ export const knowsOf = (hub: HubRef) => ({
 export type KnowsApi = ReturnType<typeof knowsOf>;
 
 /** What linking an agent did: kept on this computer's hub, an agent of
- *  this computer's hub (shared with in place), or not allowed there (its
+ *  this computer's hub (shared with in place), each with the agent's id as
+ *  its hub names it (the rule is kept by that), or not allowed there (its
  *  words). `unavailable`: this Desk can't link at all (the browser preview). */
-export type KnowsLinked = { kind: "kept" } | { kind: "local" } | { kind: "notAllowed"; status: number; error: string } | { kind: "unavailable" };
+export type KnowsLinked = { kind: "kept"; agent: string } | { kind: "local"; agent: string } | { kind: "notAllowed"; status: number; error: string } | { kind: "unavailable" };
 
 const inTauri = typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 

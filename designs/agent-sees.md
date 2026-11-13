@@ -296,12 +296,13 @@ Desk stopped sharing transcripts with Allan. He holds 1,032 exchanges from 14 se
 - Until the person chooses, nothing more is sent for those sessions. Pressing Escape keeps the copies.
 
 **Setting it through the API** (for an agent setting itself up, and for this rollout):
-- `GET /api/desk/knows`: every rule, with counts;
-- `PUT /api/desk/knows/{agent}` `{places, transcripts, digest}`: answers what now needs a decision (`{held_outside: n}`);
-- `POST /api/desk/knows/{agent}/held` `{choice: "delete"|"keep"}`;
-- `GET /api/desk/knows/{agent}/log`.
+- `GET /api/desk/knows`: every rule;
+- `GET /api/desk/knows/{hub}/{agent}`: one rule, what the agent holds outside it, and what was shared today;
+- `PUT /api/desk/knows/{hub}/{agent}` `{places, transcripts, digest}`: answers what now needs a decision (`{heldOutside: {items, transcripts, sessions, by_kind}}`);
+- `POST /api/desk/knows/{hub}/{agent}/held` `{choice: "delete"|"keep"}`;
+- `GET /api/desk/knows/{hub}/{agent}/log`.
 
-These are the hub's own token's routes, brokered for the page (`broker/routes.rs`), and no agent's or session's.
+`{hub}` is Desk's id for the agent's hub (`local` for this computer's). Changing a rule or choosing is the person's alone, as the person holding this hub (the page asks over the paired path, as board sync does). The hub refuses its own token for them, so the broker never carries them, and no agent or session can call them. Linking an agent on another hub (minting its `wfk_` token and keeping it here) is the native side's alone: the page can't ask a hub for either (`hub_io::native_only`).
 
 ## 8. Changes, narrowing and removal
 
@@ -355,7 +356,7 @@ Per agent, also on the agent's hub: `[desk_knows] accept = true`. Only an admin 
 - **Allan** (Driftwerk): Everything, Include transcripts on, digest live.
 - **Lattice** (Patchwork): `group:<Patchwork's id>`, transcripts off, digest off.
 
-Both are set through `PUT /api/desk/knows/{agent}` once K6 ships. If the live Desk must not be touched without asking, the report says exactly what to set in the setting instead.
+Both are set through `PUT /api/desk/knows/{hub}/{agent}` once K6 ships. If the live Desk must not be touched without asking, the report says exactly what to set in the setting instead.
 
 ## 11. Tests
 
@@ -412,7 +413,7 @@ Both are set through `PUT /api/desk/knows/{agent}` once K6 ships. If the live De
 | **K2** | hub | The agent's hub: the `desk_knows` token kind (`wfk_`), the device-only mint and revoke, `migrations_knows`, the store, push, forget and status, prune, erasure, `[desk_knows]`. |
 | **K3** | hub | The Mac's sync worker: kinds, cursors, redaction at egress, batches, backoff, `knows_sent`, delete and keep through `forget`, the Floor need for a session leaving coverage, and local agents in process. |
 | **K4** | hub | The agent's tools `desk_work.*` and the digest, fenced to the person's own conversation. |
-| **K5** | desk | Native mint and hand-over (`hub_io.rs`, next to `mint_for_sync`), the brokered routes, and `hub.ref` moved to K1 to K4. |
+| **K5** | desk | Native mint and hand-over (`hub_io.rs`, next to `mint_for_sync`), the page refused the mint and the link (`native_only`), the rule client, and `hub.ref` moved to K1 to K4. |
 | **K6** | desk | The **What they see** section, the place picker, the confirm, the shared log, and screenshots in both themes. |
 | **K7** | hub + desk | Machines, straight after K6: each engine gets the rule's resolved session list for its sessions, and a token of its own. |
 | K8 | hub | The engine's signature on each push. |
