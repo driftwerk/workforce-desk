@@ -478,7 +478,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
         </div>
       ) : tab === "connectors" && local ? (
         <div className="agent-panel" role="tabpanel" id="agent-tab-panel" aria-labelledby="agent-tab-connectors">
-          <AgentConnectors agent={agent} />
+          <AgentConnectors key={agentKey(agent)} agent={agent} />
         </div>
       ) : tab === "files" && local ? (
         <div className="agent-panel" role="tabpanel" id="agent-tab-panel" aria-labelledby="agent-tab-files">

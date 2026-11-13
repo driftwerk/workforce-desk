@@ -131,17 +131,16 @@ export function AgentConnectors({
   const inFlight = useRef(0);
   /** The first save that failed and isn't saved since. */
   const failure = useRef<{ service: string; change: Change; problem: string } | null>(null);
-  /** The agent whose connections these are: a save for another one, still
-   *  running after a switch, shows nothing here. */
+  /** The agent whose connections these are, while shown: a save still
+   *  running once this has gone (another agent is keyed afresh) shows
+   *  nothing. */
   const shownFor = useRef(agent.id);
-  if (shownFor.current !== agent.id) {
+  useEffect(() => {
     shownFor.current = agent.id;
-    latest.current = null;
-    writes.current = Promise.resolve();
-    queue.current = [];
-    inFlight.current = 0;
-    failure.current = null;
-  }
+    return () => {
+      shownFor.current = "";
+    };
+  }, [agent.id]);
 
   const load = useCallback(async () => {
     if (!api) return;
