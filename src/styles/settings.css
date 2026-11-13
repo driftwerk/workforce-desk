@@ -331,7 +331,9 @@ legend.set-label {
   outline: none;
 }
 .font-search:focus-visible {
+  outline: none;
   border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .font-count {
   padding: 0 4px;
@@ -502,17 +504,19 @@ legend.set-label {
   gap: 10px;
   font-size: 13px;
 }
-.badge {
+/* A contrast check's Pass or Low: its own class, since .badge is the app's
+   count badge (whose colours win over these). */
+.contrast-badge {
   padding: 2px 8px;
   border-radius: 999px;
   font-size: 11px;
   font-weight: 700;
 }
-.badge-pass {
+.contrast-pass {
   background: color-mix(in srgb, var(--done) 20%, var(--bg));
   color: var(--done);
 }
-.badge-low {
+.contrast-low {
   background: var(--blocked-soft);
   color: var(--blocked);
 }
@@ -1609,12 +1613,17 @@ legend.set-label {
 .settings-search {
   margin: 4px 8px 8px;
   padding: 6px 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
   font: inherit;
   font-size: 13px;
+}
+.settings-search:focus {
+  outline: none;
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .settings-none {
   padding: 4px 12px;

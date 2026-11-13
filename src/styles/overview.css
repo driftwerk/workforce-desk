@@ -884,7 +884,7 @@ button.fsec-tile-head {
 .num {
   width: 64px;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--sunken);
   color: var(--text);
@@ -898,6 +898,7 @@ button.fsec-tile-head {
 }
 .num:focus {
   border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .num[aria-invalid="true"] {
   border-color: var(--blocked);

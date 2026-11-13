@@ -415,7 +415,7 @@ function Readability({
     <div className="set-group">
       <span className="set-label">Readability</span>
       <span className="check-summary">
-        <span className={`badge ${low.length ? "badge-low" : "badge-pass"}`}>{low.length ? "Low" : "Pass"}</span>
+        <span className={`contrast-badge ${low.length ? "contrast-low" : "contrast-pass"}`}>{low.length ? "Low" : "Pass"}</span>
         <span className="check-label">
           {low.length ? `${low.length} of ${checks.length} pairs read too faintly` : `All ${checks.length} pairs read`}
         </span>
@@ -425,7 +425,7 @@ function Readability({
       </span>
       {shown.map((c) => (
         <span key={c.label} className="check">
-          <span className={`badge ${c.pass ? "badge-pass" : "badge-low"}`}>{c.pass ? "Pass" : "Low"}</span>
+          <span className={`contrast-badge ${c.pass ? "contrast-pass" : "contrast-low"}`}>{c.pass ? "Pass" : "Low"}</span>
           <span className="check-label">{c.label}</span>
           <span className="mono muted">
             {c.ratio.toFixed(1)}:1 <span className="faint">/ {c.bar}</span>
