@@ -846,7 +846,10 @@ export type ActivityKind =
   | "ticket_assigned"
   | "ticket_edited"
   | "ticket_commented"
-  | "ticket_deleted";
+  | "ticket_deleted"
+  /** Something the boss told you of was settled since: by you, or in its
+   *  session. `detail` names it. */
+  | "settled";
 
 /** Something that happened on the crew, as the hub recorded it. */
 export interface ActivityEvent {
@@ -868,8 +871,9 @@ export interface ActivityEvent {
   message?: string | null;
   /** The board's ticket it's about: the ticket's history. */
   ticket?: string | null;
-  /** What the hub kept beside the text: a comment's own words. */
-  detail?: { comment?: string } | null;
+  /** What the hub kept beside the text: a comment's own words; for
+   *  `settled`, the item and by whom. */
+  detail?: { comment?: string; itemId?: string; by?: "you" | "session"; messageId?: string } | null;
   /** The sidebar group it was in when it happened, as the hub stamped it
    *  (null: ungrouped); absent from hubs that don't stamp. */
   group?: string | null;
@@ -1024,6 +1028,11 @@ export interface MentionedItem {
   items?: NeedItem[];
   /** What doesn't wait on it. */
   notBlocking?: string | null;
+  /** The longer part, behind "more". */
+  detail?: string | null;
+  /** Something only you can do (rotate a key, sign a form): marked Done
+   *  when done, with nothing to answer. */
+  forYou?: boolean;
   /** The kind of case your answer would settle from then on. */
   generalizes?: string | null;
   /** Set aside after it was said three times: still answered or dropped
@@ -1069,6 +1078,34 @@ export interface WaitingItem {
   notBlocking?: string | null;
 }
 
+/** One session's part of a brief update, or of what isn't one session's
+ *  ("Credentials"). */
+export interface BriefGroup {
+  sessionId: string | null;
+  label: string;
+  items: BriefItem[];
+  /** How many times the boss left this session alone: a count only. */
+  leftAlone?: number;
+}
+
+/** One line of a brief update: done by the boss, or for you. */
+export interface BriefItem {
+  /** A decision's id (done), or an open item's (for you). */
+  id: string;
+  kind: "done" | "forYou";
+  /** One short line. */
+  action: string;
+  /** Why, in a clause. */
+  why: string | null;
+  /** The longer reason, or the message the boss sent: behind "more". */
+  detail: string | null;
+  /** The button that undoes a done one. */
+  undo?: "undo" | "correct" | "stop" | "resume" | null;
+  /** Settled since, in the session or by you: folded into one line. */
+  settledBy?: "session" | "you" | null;
+  at?: string | null;
+}
+
 /** What needs you, laid out by the hub: the same items as `waiting`. */
 export interface NeedsYou {
   itemId: string;
@@ -1086,6 +1123,12 @@ export interface NeedsYou {
   /** The kind of case an answer would settle from then on: the chat
    *  offers "Always" with it. */
   generalizes?: string | null;
+  /** Its session, when it is one session's (a newer hub). */
+  sessionId?: string | null;
+  /** The longer reason: behind "more". */
+  detail?: string | null;
+  /** Settled since, by you or in its session: folded. */
+  settledBy?: "you" | "session" | null;
 }
 
 /** A boss's update: each session that moved, what it decided, what it
@@ -1098,6 +1141,15 @@ export interface MentionedUpdate {
   waiting?: WaitingItem[];
   /** `waiting`, laid out (a newer hub): used in its place when there. */
   needsYou?: NeedsYou[];
+  /** The update said briefly (a newer hub): one line an item, by session.
+   *  When there, it is shown in place of the sessions and decisions,
+   *  under what still waits on you. */
+  brief?: BriefGroup[];
+  /** A brief update's header line ("Cufflink Migration released tonight's
+   *  work"). */
+  headline?: string | null;
+  /** Items past the few a brief update shows. */
+  moreItems?: number;
   /** The day's cheap calls, near the ceiling. */
   footer?: string | null;
 }
