@@ -1086,6 +1086,35 @@ export interface MentionedUpdate {
   footer?: string | null;
 }
 
+/** Where a preference holds: everywhere the boss looks, one sidebar
+ *  group, or one repository (`owner/name`). */
+export type PreferenceScope = "all" | `group:${string}` | `repo:${string}`;
+
+/** One of your rules for a boss: in this kind of case, do this. */
+export interface Preference {
+  id: string;
+  /** "main", or the id of the sidebar group whose boss it is for. */
+  bossScope: string;
+  whenText: string;
+  thenText: string;
+  scope: PreferenceScope;
+  /** From an "Always", said outright, or learned from an Undo. */
+  source: "asked" | "said" | "undone";
+  fromItem: string | null;
+  createdAt: string;
+  changedAt: string;
+  appliedCount: number;
+  lastAppliedAt: string | null;
+  overruledCount: number;
+  state: "active" | "paused" | "retired";
+}
+
+export interface PreferencePatch {
+  whenText?: string;
+  thenText?: string;
+  scope?: PreferenceScope;
+}
+
 /** A catch-up: the absence it covers and what it says beyond its update. */
 export interface MentionedAway {
   since: string;

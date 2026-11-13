@@ -71,6 +71,8 @@ import type {
   MemorySettings,
   NoteChange,
   SessionMemory,
+  Preference,
+  PreferencePatch,
 } from "./types";
 import { pairedHub, type HubRef } from "./net";
 import type { Body, DeskSocket, DeskTransport } from "./transport";
@@ -766,6 +768,15 @@ export class DeskHub {
   /** Does what the overseer suggested, as you. */
   acceptSuggestion = (id: string): Promise<unknown> => this.desk("POST", `/api/desk/suggestions/${encodeURIComponent(id)}/accept`);
   dismissSuggestion = (id: string): Promise<unknown> => this.desk("POST", `/api/desk/suggestions/${encodeURIComponent(id)}/dismiss`);
+  /** Your preferences for the bosses, active and paused, by boss then
+   *  oldest first. */
+  preferences = (): Promise<Preference[]> => this.desk("GET", "/api/desk/preferences");
+  /** Changes a preference's case, what to do, or where it holds. */
+  changePreference = (id: string, patch: PreferencePatch): Promise<Preference> =>
+    this.desk("PATCH", `/api/desk/preferences/${encodeURIComponent(id)}`, patch);
+  /** Pauses, resumes or forgets (retires) a preference. */
+  setPreference = (id: string, to: "pause" | "resume" | "retire"): Promise<Preference> =>
+    this.desk("POST", `/api/desk/preferences/${encodeURIComponent(id)}/${to}`);
   /** Undoes one of the boss's decisions, as you: what was done. */
   undoDecision = (id: string): Promise<{ done: string }> => this.desk("POST", `/api/desk/decisions/${encodeURIComponent(id)}/undo`);
   /** Answers what the boss asked you, from its buttons: settled on the hub
