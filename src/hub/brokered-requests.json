@@ -676,6 +676,41 @@
   },
   {
     "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/dm/desk/typing"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/presence"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/preferences"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/preferences/p1"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/preferences/p1/pause"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/preferences/p1/resume"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/preferences/p1/retire"
+  },
+  {
+    "kind": "http",
     "method": "GET",
     "path": "/api/desk/rooms"
   },

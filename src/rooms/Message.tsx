@@ -19,7 +19,7 @@ import { readableError } from "../chat/agentError";
 import { PlanSignIn } from "../floor/PlanCards";
 import { TicketKeys } from "../board/TicketChip";
 import { commandMarkdown, shownText } from "../chat/commands";
-import { OverseerBody, QuestionBody, overseerPost, overseerShown } from "./Overseer";
+import { AwayDivider, OverseerBody, QuestionBody, overseerPost, overseerShown } from "./Overseer";
 
 /** What a delivered message is badged as, for the kinds that are shown. */
 export const DELIVERY_BADGES: Partial<Record<DeliveryKind, string>> = {
@@ -34,6 +34,7 @@ export const DELIVERY_BADGES: Partial<Record<DeliveryKind, string>> = {
  *  badge. */
 export const DELIVERY_KINDS: Partial<Record<DeliveryKind, string>> = {
   update: "update",
+  away: "while you were away",
 };
 
 const time = (iso: string) => {
@@ -163,6 +164,8 @@ export const Message = memo(function Message({
   const question = boss && !fromExtras && message.delivery === "question" && !!message.desk?.questions?.length;
   const unboxed = boss && overseerPost(message.desk, message.delivery);
   return (
+    <>
+    {boss && message.desk?.away && <AwayDivider away={message.desk.away} />}
     <article
       className={`msg msg-${fromOverseer ? "assistant" : message.role}${relayed ? " msg-relayed" : ""}${command ? " msg-command" : ""}${message.undelivered ? " msg-undelivered" : ""}`}
       data-message-id={message.id}
@@ -259,5 +262,6 @@ export const Message = memo(function Message({
         )}
       </div>
     </article>
+    </>
   );
 });

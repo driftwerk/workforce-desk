@@ -1,4 +1,5 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useId, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useBoard } from "../board/store";
 import { TicketPopup } from "../board/TicketDetail";
 import { countsLine, GridCanvas, GridName, NewTerminalButton, LayoutUndo, PresetPicker, useFillKeys, useGridCounts } from "./GridView";
@@ -14,7 +15,13 @@ import { closeContent } from "./terminals";
 import { terminalContent } from "./engine";
 import { bringBack, detach, focusGridWindow, isAway } from "./windows";
 import type { Grid } from "./model";
-import { GridMarks } from "../unread/GridMarks";
+import { GridsMarks, summaryOf, useGridSummaries } from "../unread/GridMarks";
+import { Marks } from "../unread/Marks";
+import { needsYou } from "../ui/Badge";
+import { useDesk } from "../hub/store";
+import { setSectionOpen, SideSection } from "../shell/SideSection";
+import { useUi } from "../shell/ui";
+import { JumpKey } from "../shell/JumpKey";
 
 /** The Grids view of the main window: the grid shown here, with its
  *  layouts, a new terminal, and a window of its own. With none shown (there
@@ -37,7 +44,14 @@ export function GridsMain() {
     return (
       <main className={`grids grids-none ${over ? "drop-in" : ""}`} aria-label="Grids" data-drop-new-grid="">
         <p className="muted">{dragging ? "Drop it here for a new grid." : none ? "No grids yet" : "Every grid is in a window of its own."}</p>
-        <button type="button" className="btn btn-signal" onClick={() => createGrid()}>
+        <button
+          type="button"
+          className="btn btn-signal"
+          onClick={() => {
+            createGrid();
+            setSectionOpen("grids", true);
+          }}
+        >
           New grid
         </button>
       </main>
@@ -66,20 +80,105 @@ export function GridsMain() {
   );
 }
 
-/** Where a grid is, for its row: this window, its monitor, or away. */
-const whereIs = (g: Grid, open: Record<string, true>): string =>
-  g.placement.kind === "main" ? "this window" : `${g.placement.monitor?.name ?? "its own window"}${isAway(g, open) && g.placement.monitor ? " · away" : ""}`;
+/** Where a grid in a window of its own is, for its row's tooltip: its
+ *  monitor, or away; none for one shown here. */
+const whereIs = (g: Grid, open: Record<string, true>): string | null =>
+  g.placement.kind === "main" ? null : `In ${g.placement.monitor?.name ?? "its own window"}${isAway(g, open) && g.placement.monitor ? ", away" : ""}`;
 
-/** The sidebar's list of grids, in the Grids view, drawn as a group's
- *  items are: click one to show it, drag (or Alt+↑/↓) to reorder,
- *  double-click or F2 to rename, right-click, Shift+F10 or its ⋯ for the
- *  rest. A pane dragged onto a row goes to that grid. */
+/** What a grid row says of its panes: what waits on you there, else how
+ *  many work, else that it's quiet. */
+export const gridState = (needs: number, working: number): { look: "blocked" | "working" | "idle"; says: string } =>
+  needs > 0 ? { look: "blocked", says: needsYou(needs) } : working > 0 ? { look: "working", says: `${working} working` } : { look: "idle", says: "quiet" };
+
+/** Shows grid `id`, as its sidebar row does: here, from wherever you were;
+ *  one in its own window brought forward; one whose monitor is away shown
+ *  here until it's back (or for good). True when it shows here. */
+export const showGrid = (id: string): boolean => {
+  const s = useGrids.getState();
+  const g = s.grids[id];
+  if (!g) return false;
+  if (g.placement.kind === "window" && s.open[id]) {
+    void focusGridWindow(id);
+    return false;
+  }
+  if (g.placement.kind !== "main") bringBack(id);
+  else setActive(id);
+  useUi.getState().closeSettings();
+  useDesk.getState().setView("grids");
+  return true;
+};
+
+type RowProps = {
+  id: string;
+  /** What waits on you there, how many work, and whether there's news. */
+  needs: number;
+  working: number;
+  unread: boolean;
+  lineBefore: boolean;
+  editing: boolean;
+  hint: string;
+  register: (id: string, el: HTMLElement | null) => void;
+  onOpen: (g: Grid) => void;
+  onRenamed: (id: string, name: string | null) => void;
+  onStartRename: (id: string) => void;
+  onNudge: (id: string, by: -1 | 1) => void;
+  onMenu: (id: string, at: { x: number; y: number }, from: HTMLElement | null) => void;
+};
+
+/** One grid's row: it reads its own grid and what its panes are doing, so
+ *  a session changing in one grid draws only that grid's row again. */
+const GridRow = memo(function GridRow({ id, needs, working, unread, lineBefore, editing, hint, register, onOpen, onRenamed, onStartRename, onNudge, onMenu }: RowProps) {
+  const g = useGrids((s) => s.grids[id]);
+  const active = useGrids((s) => s.active === id);
+  const inGrids = useDesk((s) => s.view === "grids");
+  const on = active && inGrids && g?.placement.kind === "main";
+  const where = useGrids((s) => (s.grids[id] ? whereIs(s.grids[id]!, s.open) : null));
+  const away = useGrids((s) => !!s.grids[id] && isAway(s.grids[id]!, s.open) && s.grids[id]!.placement.kind === "window" && !!s.grids[id]!.placement.monitor);
+  const paneOver = useGridDrag((s) => s.over?.kind === "row" && s.over.gridId === id);
+  const registerRow = useCallback((el: HTMLElement | null) => register(id, el), [register, id]);
+  if (!g) return null;
+  const state = gridState(needs, working);
+  return (
+    <SortRow
+      id={id}
+      type="grid"
+      lineBefore={lineBefore}
+      on={on}
+      className={paneOver ? "drop-in" : ""}
+      editing={
+        editing ? <RenameField label="Grid name" initial={g.name} mono={false} onDone={(name) => onRenamed(id, name)} /> : null
+      }
+      lead={<span className={`dot dot-${state.look} dot-state`} aria-hidden="true" />}
+      name={g.name}
+      meta={
+        <span className={`gi-meta small ${state.look === "blocked" ? "state-blocked" : "faint"}`}>
+          {away ? `${state.says} · away` : state.says}
+        </span>
+      }
+      title={`${where ? `${where}. ` : ""}Drag to reorder · double-click to rename`}
+      describedBy={hint}
+      more={`${g.name} options`}
+      wrap={{ "data-drop-grid-row": id }}
+      register={registerRow}
+      onOpen={() => onOpen(g)}
+      onStartRename={() => onStartRename(id)}
+      onNudge={(by) => onNudge(id, by)}
+      onMenu={(at, from) => onMenu(id, at, from)}
+    >
+      {unread && <Marks badge={{ count: 0, dot: true }} />}
+      {on && <JumpKey kind="grid" id={id} />}
+    </SortRow>
+  );
+});
+
+/** The sidebar's Grids: a section as Rooms is, each grid's row saying
+ *  what its panes are doing. Click one to show it, drag (or Alt+↑/↓) to
+ *  reorder, double-click or F2 to rename, right-click, Shift+F10 or its ⋯
+ *  for the rest. A pane dragged onto a row goes to that grid. */
 export function GridsSection() {
-  const order = useGrids((s) => s.order);
-  const grids = useGrids((s) => s.grids);
-  const active = useGrids((s) => s.active);
-  const open = useGrids((s) => s.open);
-  const paneOver = useGridDrag((s) => (s.over?.kind === "row" ? s.over.gridId : null));
+  const ids = useGrids(useShallow((s) => s.order.filter((id) => s.grids[id])));
+  const ready = useGrids((s) => s.ready);
+  const summaries = useGridSummaries();
   const [menu, setMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -87,17 +186,15 @@ export function GridsSection() {
   const justDragged = useRef(false);
   const rows = useRef(new Map<string, HTMLElement>());
   const hint = useId();
-  const choose = (g: Grid) => {
+  const grid = (id: string) => useGrids.getState().grids[id];
+  const choose = useCallback((g: Grid) => {
     if (justDragged.current) return;
-    if (g.placement.kind === "main") setActive(g.id);
-    else if (open[g.id]) void focusGridWindow(g.id);
-    // Its monitor is away: shown here until it's back (or for good).
-    else bringBack(g.id);
-  };
+    showGrid(g.id);
+  }, []);
   // Its own window closes first, so it can't write the grid back. The
   // terminals only its sessions' panes keep open close with it.
   const removeGrid = (g: Grid) => {
-    if (open[g.id]) void closeGridWindow(g.id).catch(() => undefined);
+    if (useGrids.getState().open[g.id]) void closeGridWindow(g.id).catch(() => undefined);
     setOpen(g.id, false);
     const hosted = hostedIn(g);
     deleteGrid(g.id, closeContent);
@@ -107,32 +204,49 @@ export function GridsSection() {
   const askToRemove = (g: Grid) => (g.panes.some((p) => p.content) ? setDeleting(g.id) : removeGrid(g));
   const sayWhere = (id: string) => {
     const now = useGrids.getState().order;
-    setSaid(`${grids[id]?.name}: grid ${now.indexOf(id) + 1} of ${now.length}`);
+    setSaid(`${grid(id)?.name}: grid ${now.indexOf(id) + 1} of ${now.length}`);
   };
-  const nudge = (id: string, by: -1 | 1) => {
+  const nudge = useCallback((id: string, by: -1 | 1) => {
     if (!nudgeGrid(id, by)) return setSaid(by < 0 ? "Already the first grid" : "Already the last grid");
     sayWhere(id);
     requestAnimationFrame(() => rows.current.get(id)?.focus());
-  };
+  }, []);
+  const register = useCallback((id: string, el: HTMLElement | null) => (el ? rows.current.set(id, el) : rows.current.delete(id)), []);
+  const renamed = useCallback((id: string, name: string | null) => {
+    setEditing(null);
+    if (name !== null) renameGrid(id, name);
+    requestAnimationFrame(() => rows.current.get(id)?.focus());
+  }, []);
+  const openMenu = useCallback((id: string, at: { x: number; y: number }, from: HTMLElement | null) => setMenu({ id, at, from }), []);
   const entries = (g: Grid): MenuEntry[] => [
     { kind: "item", label: "Rename grid", kbd: "F2", onSelect: () => setEditing(g.id) },
     g.placement.kind === "main"
       ? { kind: "item", label: "Open in its own window", onSelect: () => detach(g.id) }
-      : { kind: "item", label: "Move back to the main window", onSelect: () => bringBack(g.id) },
+      : {
+          kind: "item",
+          label: "Move back to the main window",
+          onSelect: () => {
+            bringBack(g.id);
+            useDesk.getState().setView("grids");
+            setSectionOpen("grids", true);
+          },
+        },
     { kind: "separator" },
     { kind: "item", label: "Delete grid…", onSelect: () => askToRemove(g) },
   ];
-  const ids = order.filter((id) => grids[id]);
+  const menuGrid = menu ? grid(menu.id) : undefined;
+  const deletingGrid = deleting ? grid(deleting) : undefined;
   return (
-    <div className="side-section" role="region" aria-label="Grids">
-      <span className="side-label side-label-action side-head">
-        Grids
-        <button type="button" className="icon-btn-sm" aria-label="New grid" title="New grid" onClick={() => createGrid()}>
-          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.8" aria-hidden="true">
-            <path d="M7 2v10M2 7h10" />
-          </svg>
-        </button>
-      </span>
+    <SideSection
+      id="grids"
+      label="Grids"
+      newLabel="New grid"
+      onNew={() => {
+        createGrid();
+        useDesk.getState().setView("grids");
+      }}
+      marks={<GridsMarks all={summaries} />}
+    >
       <span id={hint} className="sr-only">
         Alt+Up and Alt+Down move it. F2 renames. Shift+F10 opens its menu.
       </span>
@@ -140,80 +254,51 @@ export function GridsSection() {
         label="Grids"
         type="grid"
         ids={ids}
-        chip={(id) => grids[id]?.name}
+        chip={(id) => grid(id)?.name}
         onDragStart={() => setMenu(null)}
         justDragged={justDragged}
         onMove={(id, before) => {
           moveGrid(id, before);
           sayWhere(id);
         }}
-        empty={<li className="grp-empty faint small">No grids yet</li>}
-        row={(id, lineBefore) => {
-          const g = grids[id]!;
-          return (
-            <SortRow
-              key={id}
-              id={id}
-              type="grid"
-              lineBefore={lineBefore}
-              on={g.placement.kind === "main" && active === id}
-              className={paneOver === id ? "drop-in" : ""}
-              editing={
-                editing === id ? (
-                  <RenameField
-                    label="Grid name"
-                    initial={g.name}
-                    mono={false}
-                    onDone={(name) => {
-                      setEditing(null);
-                      if (name !== null) renameGrid(id, name);
-                      requestAnimationFrame(() => rows.current.get(id)?.focus());
-                    }}
-                  />
-                ) : null
-              }
-              name={g.name}
-              meta={<span className="gi-meta faint small">{whereIs(g, open)}</span>}
-              title="Drag to reorder · double-click to rename"
-              describedBy={hint}
-              more={`${g.name} options`}
-              wrap={{ "data-drop-grid-row": id }}
-              register={(el) => (el ? rows.current.set(id, el) : rows.current.delete(id))}
-              onOpen={() => choose(g)}
-              onStartRename={() => setEditing(id)}
-              onNudge={(by) => nudge(id, by)}
-              onMenu={(at, from) => setMenu({ id, at, from })}
-            >
-              <GridMarks grid={g} />
-            </SortRow>
-          );
-        }}
+        empty={ready ? <li className="grp-empty faint small">No grids yet</li> : null}
+        row={(id, lineBefore) => (
+          <GridRow
+            key={id}
+            id={id}
+            {...summaryOf(summaries, id)}
+            lineBefore={lineBefore}
+            editing={editing === id}
+            hint={hint}
+            register={register}
+            onOpen={choose}
+            onRenamed={renamed}
+            onStartRename={setEditing}
+            onNudge={nudge}
+            onMenu={openMenu}
+          />
+        )}
       />
       <span className="sr-only" aria-live="polite">
         {said}
       </span>
-      {menu && grids[menu.id] && (
+      {menu && menuGrid && (
         <Menu
-          label={`${grids[menu.id]!.name} options`}
+          label={`${menuGrid.name} options`}
           at={menu.at}
-          entries={entries(grids[menu.id]!)}
+          entries={entries(menuGrid)}
           onClose={(refocus) => {
             if (refocus) menu.from?.focus();
             setMenu(null);
           }}
         />
       )}
-      {deleting && grids[deleting] && (
-        <Confirm
-          title={`Delete “${grids[deleting]!.name}”?`}
-          action="Delete grid"
-          onConfirm={() => removeGrid(grids[deleting]!)}
-          onClose={() => setDeleting(null)}
-        >
-          <p className="muted">{deleteNote(grids[deleting]!, hostedIn(grids[deleting]!).length)}</p>
+      {deleting && deletingGrid && (
+        <Confirm title={`Delete “${deletingGrid.name}”?`} action="Delete grid" onConfirm={() => removeGrid(deletingGrid)} onClose={() => setDeleting(null)}>
+          <p className="muted">{deleteNote(deletingGrid, hostedIn(deletingGrid).length)}</p>
         </Confirm>
       )}
-    </div>
+    </SideSection>
   );
 }
 

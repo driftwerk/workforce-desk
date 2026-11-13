@@ -18,6 +18,7 @@ import { shownBoard, useBoard } from "./store";
 import { boardContent } from "../grids/engine";
 import { InGridRow, openFromRow, putInGrid } from "../grids/putIn";
 import { boardItem } from "../grids/where";
+import { JumpKey } from "../shell/JumpKey";
 
 /** Each board's tickets waiting on you, as its Waiting filter counts them. */
 const useWaitingByBoard = (): ReadonlyMap<string, number> => {
@@ -33,6 +34,14 @@ const useWaitingByBoard = (): ReadonlyMap<string, number> => {
 };
 
 const badgeOf = (n: number | undefined): Badge => (n ? { count: n, dot: false } : NO_BADGE);
+
+/** Opens board `id`, as its sidebar row does: where a grid shows it, else
+ *  in the main area. */
+export const openBoard = (id: string): void =>
+  openFromRow(boardContent(id), () => {
+    useBoard.getState().show(id);
+    useDesk.getState().setView("board");
+  });
 
 /** The sidebar's Boards: a "+" to make one, each board under it, opening
  *  it on click; dragged (or Alt+↑/↓) to reorder, its ⋯ for the rest. */
@@ -66,10 +75,7 @@ export function BoardsSection() {
   if (supported === false) return null;
   const open = (id: string) => {
     if (dragged.current) return;
-    openFromRow(boardContent(id), () => {
-      useBoard.getState().show(id);
-      useDesk.getState().setView("board");
-    });
+    openBoard(id);
   };
   const sayWhere = (id: string) => {
     const ids = arrangedBoards(useBoard.getState().boards, useBoardOrder.getState().order).map((b) => b.id);
@@ -123,6 +129,7 @@ export function BoardsSection() {
                   >
                     {mark}
                     <Marks badge={badgeOf(waiting.get(id))} />
+                    {onBoard && shown === id && <JumpKey kind="board" id={id} />}
                   </SortRow>
                 )}
               />

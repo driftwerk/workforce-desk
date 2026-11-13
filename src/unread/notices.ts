@@ -34,7 +34,7 @@ export interface Notice {
 export const QUICK_MS = 60_000;
 
 /** Deliveries that badge as for you but interrupt only at All. */
-export const QUIET: ReadonlySet<DeliveryKind> = new Set<DeliveryKind>(["job", "workflow", "check_in", "update"]);
+export const QUIET: ReadonlySet<DeliveryKind> = new Set<DeliveryKind>(["job", "workflow", "check_in", "update", "away"]);
 
 /** Whether `n` interrupts at `level`: Off never; Only things for me for
  *  needs and for-you items that are neither quick nor quiet; All always. */
@@ -62,6 +62,7 @@ export const DELIVERY_LABEL: Partial<Record<DeliveryKind, string>> = {
   check_in: "Check-in",
   question: "Needs you",
   update: "Update",
+  away: "While you were away",
 };
 
 /** A notice's first line of text, short. */

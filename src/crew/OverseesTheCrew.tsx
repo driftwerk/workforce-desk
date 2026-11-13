@@ -10,6 +10,7 @@ import { useAgentConfigs } from "./agentBrain";
 import { LevelPicker } from "./LevelPicker";
 import { PRESET_NAME, presetOf, shownPreset, withPreset, type Preset } from "./presets";
 import { WhyNotInForce } from "./WhyNotInForce";
+import { BossPreferences } from "./BossPreferences";
 import { useLayout } from "../groups/store";
 import { useHubLayout } from "../groups/hubLayout";
 import { askMove } from "../groups/move";
@@ -686,6 +687,8 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
               </div>
             </div>
           )}
+
+          <BossPreferences name={name} group={o.group ?? null} />
 
           {acts && (
             <div className="oversee-part">
