@@ -25,6 +25,7 @@
   font-weight: 800;
   font-size: 24px;
   letter-spacing: -0.03em;
+  -webkit-user-select: none;
   user-select: none;
 }
 .settings-nav .side-row.on {
