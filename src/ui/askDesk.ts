@@ -36,3 +36,23 @@ export function askDesk(p: Problem): boolean {
   attempt(0);
   return true;
 }
+
+/** Opens the DM of the agent `id` on this computer and sends it `text`.
+ *  False when it isn't there to ask. */
+export function askAgent(id: string, text: string): boolean {
+  const key = localKey(id);
+  if (!key) return false;
+  openLocalDm(id);
+  const attempt = (n: number) => {
+    if (!useChat.getState().send(key, text) && n < 40) setTimeout(() => attempt(n + 1), 150);
+  };
+  attempt(0);
+  return true;
+}
+
+/** Opens Desk's chat with `text` sent to its agent. False when there's no
+ *  Desk agent on this computer to ask. */
+export function askDeskTo(text: string): boolean {
+  const id = useOverview.getState().manager?.agentId;
+  return id ? askAgent(id, text) : false;
+}
