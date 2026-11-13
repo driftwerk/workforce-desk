@@ -3,7 +3,9 @@ import { useSessionNames } from "../groups/names";
 import { useDesk } from "../hub/store";
 
 export function RestoreBanner() {
-  const { restore, hub, fail } = useDesk();
+  const restore = useDesk((s) => s.restore);
+  const hub = useDesk((s) => s.hub);
+  const fail = useDesk((s) => s.fail);
   const names = useSessionNames();
   const [picking, setPicking] = useState(false);
   const [picked, setPicked] = useState<Set<string>>(new Set());
