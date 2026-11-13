@@ -434,6 +434,7 @@ button.ticket-chip:hover {
 .ticket-title-edit:focus,
 .board-textarea:focus {
   border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .ticket-text {
   font-size: 14px;

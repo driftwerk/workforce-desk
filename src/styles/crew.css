@@ -936,6 +936,7 @@ button.card-icon:hover:not(:disabled) {
 }
 .ability-select:focus {
   border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
   outline: none;
 }
 .ability-seg {

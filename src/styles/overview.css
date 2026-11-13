@@ -898,6 +898,7 @@ button.fsec-tile-head {
 }
 .num:focus {
   border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .num[aria-invalid="true"] {
   border-color: var(--blocked);

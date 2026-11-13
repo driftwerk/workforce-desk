@@ -1800,9 +1800,10 @@ body.side-resizing * {
   gap: 14px;
   align-items: center;
   padding: 12px 16px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--raised);
   border: 1px solid var(--border);
+  box-shadow: 0 12px 32px var(--shadow-soft);
   z-index: 20;
 }
 /* An error's toast is edged in the needs-you colour; any other in the border's. */
@@ -2696,6 +2697,7 @@ button.thread-bar:hover {
 }
 .confirm-days input:focus {
   border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 /* Text people may need to copy, in a UI that otherwise isn't selectable. */
@@ -3727,7 +3729,18 @@ button.urow-open {
   width: 38%;
   border-radius: 5px;
   background: var(--raised);
-  animation: desk-breathe 1.8s ease-in-out infinite;
+  animation: desk-loading 1.8s ease-in-out infinite;
+}
+/* A placeholder while a page reads: it fades in and out, with no ring (the
+   working dot's breathing draws one in the working colour). */
+@keyframes desk-loading {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 .urow-bar-short {
   width: 64%;
@@ -4326,6 +4339,7 @@ body.line-resizing * {
   }
 }
 /* Badges that wrapped under the name sit at the row's right edge. */
+.gi > .badge,
 .gi > .gi-ticket,
 .gi > .gi-charge,
 .gi > .gi-meta,
