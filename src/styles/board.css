@@ -1845,7 +1845,7 @@ button.ticket-row:not(:disabled):hover {
   display: flex;
   align-items: center;
   gap: 10px;
-  min-height: 30px;
+  min-height: 36px;
   padding: 4px 8px;
   border: 0;
   border-radius: var(--radius-sm);
@@ -1891,6 +1891,7 @@ button.ticket-row:not(:disabled):hover {
   align-self: flex-start;
   padding: 6px 8px;
   font-size: 13px;
+  line-height: 1.4;
   color: var(--faint);
 }
 .ticket-needs-band .ticket-need-more {
