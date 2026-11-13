@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { memo, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { OnMachine } from "../machines/OnMachine";
 import { openAgentSettings } from "../rooms/AgentPanel";
 import { createPortal } from "react-dom";
@@ -8,7 +8,7 @@ import { lookOf, shownState, statusOf, type Look } from "../floor/background";
 import { useSessionName, useSessionNames } from "../groups/names";
 import { hubFor, hubOf, localSessions, sortedSessions, useDesk } from "../hub/store";
 import { keyOf, machineOf, sessionKey, splitKey } from "../hub/machines";
-import type { Session } from "../hub/types";
+import type { Session, SessionState } from "../hub/types";
 import { DirectMessage } from "../rooms/Rooms";
 import { MicBadge } from "../voice/DmVoice";
 import { MemoryPanel } from "../memory/MemoryPanel";
@@ -89,7 +89,6 @@ const folder = (path: string | null | undefined): string | null => (path ? baseN
 
 /** Each pane's header, from what it holds. */
 export function usePaneLabel(content: PaneContent | null): Label {
-  const sessions = useDesk((s) => s.sessions);
   const roster = useChat((s) => s.roster);
   const hubs = useChat((s) => s.hubs);
   const working = useChat((s) => (content?.kind === "agent" ? (s.conversations[content.agent]?.working ?? null) : null));
@@ -97,8 +96,10 @@ export function usePaneLabel(content: PaneContent | null): Label {
   const info = useTerminals((s) => (terminal ? s.byId[terminal] : undefined));
   const programs = useTerminals((s) => (terminal ? s.programs[terminal] : undefined));
   const shows = sessionKeyIn(content);
-  const tracked = content?.kind === "terminal" ? trackedIn(sessions, terminal) : null;
-  const session = shows ? sessions[shows] : tracked;
+  // Only the session this pane shows: another session's event leaves it be.
+  const tracked = useDesk((s) => (content?.kind === "terminal" ? trackedIn(s.sessions, terminal) : null));
+  const shown = useDesk((s) => (shows ? s.sessions[shows] : undefined));
+  const session = shows ? shown : tracked;
   const name = useSessionName(session && sessionKey(session), session?.name ?? "");
   const view = useViewLabel(content);
   if (!content) return { name: "Empty pane", meta: "", state: null, tracked: null, asking: null, cwd: null, mono: false };
@@ -535,7 +536,10 @@ function DropZones({ zone, free, single }: { zone: Zone | null; free: boolean; s
   );
 }
 
-function PaneBody({ gridId, pane }: { gridId: string; pane: PaneData }) {
+/** What a pane holds. Drawn again only when the pane does: its header
+ *  following a session's every event (or a menu's every change) leaves
+ *  a conversation, a terminal or a board as it is. */
+const PaneBody = memo(function PaneBody({ gridId, pane }: { gridId: string; pane: PaneData }) {
   const c = pane.content;
   if (!c) {
     return (
@@ -564,7 +568,7 @@ function PaneBody({ gridId, pane }: { gridId: string; pane: PaneData }) {
         </div>
       );
   }
-}
+});
 
 /** The session `id` (a key, see `keyOf`) in a pane. */
 function SessionPane({ id }: { id: string }) {
@@ -640,10 +644,18 @@ function TerminalBody({ gridId, pane, content }: { gridId: string; pane: string;
  *  pane shows them in the session's own menu (`host`, then `close`, after
  *  the session's), any other pane as `entries`. */
 function usePaneMenu(gridId: string, pane: PaneData, onClose: () => void): { entries: MenuEntry[]; host: MenuEntry[]; close: MenuEntry[] } {
-  const sessions = useDesk((s) => s.sessions);
   // What to put here: this computer's sessions (a machine's are put in a
-  // pane where they're shown with their machine).
-  const mine = useDesk((s) => localSessions(s.sessions));
+  // pane where they're shown with their machine), the first twelve, as one
+  // line each, so another session's event redraws the pane only when it
+  // changes what the menu lists.
+  const listed = useDesk((s) =>
+    JSON.stringify(
+      sortedSessions(localSessions(s.sessions))
+        .filter((x) => x.state !== "closed")
+        .slice(0, 12)
+        .map((x) => [x.id, x.name, shownState(x)]),
+    ),
+  );
   const roster = useChat((s) => s.roster);
   const rooms = arranged(
     useDesk((s) => s.rooms),
@@ -663,14 +675,14 @@ function usePaneMenu(gridId: string, pane: PaneData, onClose: () => void): { ent
   const keys = useSettings((s) => s.keys.newTerminal);
   // Sessions by the names given them, as the sidebar shows them.
   const names = useSessionNames();
-  const shown = sortedSessions(mine).filter((s) => s.state !== "closed");
+  const shown = JSON.parse(listed) as [string, string, SessionState][];
   const put = (content: PaneContent) => replacePane(gridId, pane.id, content);
   // A pane showing a terminal takes the keys it takes there.
   const inShell = pane.content?.kind === "terminal" || pane.content?.kind === "session";
   const replace: MenuEntry[] = [
     { kind: "item", label: "New terminal", kbd: shortcutLabel(inShell ? terminalKeys(keys) : keys), onSelect: () => (pane.content ? put({ kind: "terminal", terminalId: null }) : newTerminal(gridId)) },
     ...(shown.length ? [{ kind: "separator" as const }] : []),
-    ...shown.slice(0, 12).map((s): MenuEntry => ({ kind: "item", label: names[s.id] ?? s.name, kbd: STATE_LABEL[shownState(s)], onSelect: () => put({ kind: "session", sessionId: s.id }) })),
+    ...shown.map(([id, name, state]): MenuEntry => ({ kind: "item", label: names[id] ?? name, kbd: STATE_LABEL[state], onSelect: () => put({ kind: "session", sessionId: id }) })),
     ...(roster.length ? [{ kind: "separator" as const }] : []),
     ...roster.slice(0, 12).map((a): MenuEntry => ({ kind: "item", label: a.name, onSelect: () => put({ kind: "agent", agent: agentKey(a) }) })),
     { kind: "separator" },
@@ -719,9 +731,9 @@ function usePaneMenu(gridId: string, pane: PaneData, onClose: () => void): { ent
       : [];
   // A tracked terminal shows as its session, and back: the same terminal
   // either way, so nothing starts or stops.
-  const tracked = pane.content?.kind === "terminal" ? trackedIn(sessions, terminalKeyIn(pane.content)) : null;
+  const tracked = useDesk((s) => (pane.content?.kind === "terminal" ? trackedIn(s.sessions, terminalKeyIn(pane.content)) : null));
   const shows = sessionKeyIn(pane.content);
-  const ranInId = shows ? (sessions[shows]?.terminalId ?? null) : null;
+  const ranInId = useDesk((s) => (shows ? (s.sessions[shows]?.terminalId ?? null) : null));
   // The terminal it runs in, on its own engine.
   const ranIn = ranInId && shows ? keyOf(splitKey(shows).machine, ranInId) : null;
   const terminal = useTerminals((s) => (ranIn && s.byId[ranIn]?.live ? s.byId[ranIn] : undefined));

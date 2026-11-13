@@ -115,7 +115,14 @@ const ROSTER_EVERY_MS = 60_000;
 const LOCAL_HUB_RETRY_MS = 5_000;
 
 export function App() {
-  const { connect, sessions, openId, view, error, clearError, fail } = useDesk();
+  // Each piece on its own: the whole store would draw everything again on
+  // every event any engine sends.
+  const connect = useDesk((s) => s.connect);
+  const view = useDesk((s) => s.view);
+  const error = useDesk((s) => s.error);
+  const clearError = useDesk((s) => s.clearError);
+  const fail = useDesk((s) => s.fail);
+  const open = useDesk((s) => (s.openId ? s.sessions[s.openId] : undefined));
   const theme = useTheme();
   const { setCustom, setSystemDark } = useThemeStore();
   // New session's sheet, with the group it was started from, if any.
@@ -309,7 +316,6 @@ export function App() {
     useDesk.getState().setView("board");
   }, true, { fromFields: false });
 
-  const open = openId ? sessions[openId] : undefined;
   const sessionName = useSessionName(open?.id, open?.name ?? "");
   const thread = useOpenThread();
   const dmThread = useOpenDmThread();

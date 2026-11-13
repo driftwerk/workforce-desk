@@ -43,7 +43,8 @@ export function AccountNeeds() {
 }
 
 function Need({ need }: { need: AccountNeed }) {
-  const { hub, fail } = useDesk();
+  const hub = useDesk((s) => s.hub);
+  const fail = useDesk((s) => s.fail);
   const [busy, setBusy] = useState(false);
   const { title, detail } = needText(need, (iso) => dayClock(iso));
   const move = async (from: string | null, to: string | null) => {
@@ -102,7 +103,8 @@ function Need({ need }: { need: AccountNeed }) {
 /** "Which of your accounts is this computer signed in to?": one of them,
  *  or none. Kept until the person changes it in Settings. */
 function WhichSignIn() {
-  const { hub, fail } = useDesk();
+  const hub = useDesk((s) => s.hub);
+  const fail = useDesk((s) => s.fail);
   const accounts = accountsOf(useAccounts((s) => s.accounts), "claude");
   const [busy, setBusy] = useState(false);
   const answer = async (account: string | null) => {
