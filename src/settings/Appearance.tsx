@@ -121,8 +121,8 @@ export function Appearance() {
   return (
     <main className="settings-main">
       <div className="settings-head">
-        <h1 className="display-xl">Appearance</h1>
-        <span className="muted">Pick three colours. Desk works out the rest, including the terminal and chart colours.</span>
+        <h1 className="display-lg">Appearance</h1>
+        <p className="muted">Pick three colours. Desk works out the rest, including the terminal and chart colours.</p>
       </div>
 
       <section className="theme-cards" aria-label="Themes">
@@ -415,7 +415,7 @@ function Readability({
     <div className="set-group">
       <span className="set-label">Readability</span>
       <span className="check-summary">
-        <span className={`badge ${low.length ? "badge-low" : "badge-pass"}`}>{low.length ? "Low" : "Pass"}</span>
+        <span className={`contrast-badge ${low.length ? "contrast-low" : "contrast-pass"}`}>{low.length ? "Low" : "Pass"}</span>
         <span className="check-label">
           {low.length ? `${low.length} of ${checks.length} pairs read too faintly` : `All ${checks.length} pairs read`}
         </span>
@@ -425,7 +425,7 @@ function Readability({
       </span>
       {shown.map((c) => (
         <span key={c.label} className="check">
-          <span className={`badge ${c.pass ? "badge-pass" : "badge-low"}`}>{c.pass ? "Pass" : "Low"}</span>
+          <span className={`contrast-badge ${c.pass ? "contrast-pass" : "contrast-low"}`}>{c.pass ? "Pass" : "Low"}</span>
           <span className="check-label">{c.label}</span>
           <span className="mono muted">
             {c.ratio.toFixed(1)}:1 <span className="faint">/ {c.bar}</span>

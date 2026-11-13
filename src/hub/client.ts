@@ -783,6 +783,12 @@ export class DeskHub {
    *  in this request, and sent on to whoever asked. */
   answerItem = (id: string, answer: string): Promise<{ done: string }> =>
     this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/answer`, { answer });
+  /** "Always", once you've answered: your answer is kept as a preference
+   *  for the kind of case the item settles, said back in the hub's words.
+   *  `then`: the answer given, for a question whose answer went on to its
+   *  session. */
+  alwaysItem = (id: string, then?: string): Promise<{ done: string }> =>
+    this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/always`, then ? { then } : {});
   /** Drops what the boss asked you, unanswered. */
   dropItem = (id: string): Promise<{ done: string }> => this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/drop`);
   /** You're typing to the boss `agent`: its posts wait for a pause. Quiet

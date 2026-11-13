@@ -1,3 +1,4 @@
+import { SwitchRow } from "../ui/SwitchRow";
 import { stopShowingImagesFrom, useSettings } from "./store";
 
 export function Chat() {
@@ -5,17 +6,16 @@ export function Chat() {
   return (
     <section className="settings-pane" aria-label="Chat">
       <h1 className="display-lg">Chat</h1>
-      <label className="toggle-row">
-        <input type="checkbox" checked={emoticons} onChange={(e) => set({ emoticons: e.target.checked })} />
-        <span>
-          <b>Turn emoticons into emoji as you type</b>
-          <span className="muted small">
-            {"<3 becomes ❤️ and :) becomes 🙂 once you type a space or punctuation after them, or send. Never in code or a link; Backspace straight after puts back what you typed. :shortcodes like :tada: and the emoji button work either way."}
-          </span>
-        </span>
-      </label>
-      <div className="set-group">
-        <b>Pictures from the web</b>
+      <SwitchRow
+        label="Turn emoticons into emoji as you type"
+        sub={
+          "<3 becomes ❤️ and :) becomes 🙂 once you type a space or punctuation after them, or send. Never in code or a link; Backspace straight after puts back what you typed. :shortcodes like :tada: and the emoji button work either way."
+        }
+        on={emoticons}
+        onChange={(on) => set({ emoticons: on })}
+      />
+      <section className="prov-section" aria-label="Pictures from the web">
+        <h2 className="field-label">Pictures from the web</h2>
         <span className="muted small">
           A picture an agent links to waits for you to click Show image, and Desk fetches it then. Showing one tells its
           site your IP address. Pictures from these sites show straight away (up to ten a message):
@@ -43,7 +43,7 @@ export function Chat() {
           Best left off: sites where anyone can post a picture (image hosts, forums, chat apps), since then anyone can
           choose what Desk fetches.
         </span>
-      </div>
+      </section>
     </section>
   );
 }

@@ -16,8 +16,8 @@ describe("Settings → Chat", () => {
     await useSettings.getState().load();
     expect(useSettings.getState().emoticons).toBe(true);
     render(<Chat />);
-    const toggle = screen.getByRole("checkbox", { name: /Turn emoticons into emoji as you type/ }) as HTMLInputElement;
-    expect(toggle.checked).toBe(true);
+    const toggle = screen.getByRole("switch", { name: /Turn emoticons into emoji as you type/ });
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
     fireEvent.click(toggle);
     expect(useSettings.getState().emoticons).toBe(false);
     expect(vi.mocked(saveSettings).mock.lastCall![0]).toMatchObject({ emoticons: false });

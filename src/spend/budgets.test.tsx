@@ -215,7 +215,7 @@ describe("Settings → Budgets", () => {
     await show(budgetsView());
     expect(screen.getByText("None yet: nothing stops for spend.")).toBeTruthy();
     expect(screen.queryByRole("region", { name: "Paused now" })).toBeNull();
-    expect((screen.getByRole("checkbox", { name: /Watch sessions for loops/ }) as HTMLInputElement).checked).toBe(false);
+    expect(screen.getByRole("switch", { name: /Watch sessions for loops/ }).getAttribute("aria-checked")).toBe("false");
   });
 
   it("lists each budget with where it stands, and changes and removes one", async () => {
@@ -267,7 +267,7 @@ describe("Settings → Budgets", () => {
     expect(paused.getByText(/Desk paused it after its turn/)).toBeTruthy();
     await act(async () => fireEvent.click(paused.getByRole("button", { name: "Continue" })));
     expect(hub.breakerContinue).toHaveBeenCalledWith("session:s-1");
-    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Watch sessions for loops/ })));
+    await act(async () => fireEvent.click(screen.getByRole("switch", { name: /Watch sessions for loops/ })));
     expect(hub.setBreakerRules).toHaveBeenCalledWith({ loops: true });
   });
 

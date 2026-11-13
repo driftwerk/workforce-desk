@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { onTupleStatus, subscribe, tupleAvailable, type TupleStatus } from "../platform";
 import { shortcutLabel } from "../shortcuts/keys";
 import { VOICE_ENGINES, voiceEngine } from "../voice/engines";
+import { SwitchRow } from "../ui/SwitchRow";
 import { useSettings } from "./store";
 
 export function Calls() {
@@ -14,20 +15,21 @@ export function Calls() {
     void tupleAvailable().then(setHasTuple, () => setHasTuple(false));
   }, []);
   return (
-    <section className="settings-pane voices-detail" aria-label="Talking to agents">
-      <h1 className="display-lg">Talking to agents</h1>
-      <label className="toggle-row">
-        <input type="checkbox" checked={voice} onChange={(e) => set({ voice: e.target.checked })} />
-        <span>
-          <b>Talk to agents by name</b>
-          <span className="muted small">
+    <section className="settings-pane voices-detail" aria-label="Voice">
+      <h1 className="display-lg">Voice</h1>
+      <SwitchRow
+        label="Talk to agents by name"
+        sub={
+          <>
             Say an agent’s name — “Atlas, what failed overnight?” — or hold {shortcutLabel(keys.pushToTalk)} to talk (change the keys in Shortcuts). {engine.privacy}
-          </span>
-        </span>
-      </label>
+          </>
+        }
+        on={voice}
+        onChange={(on) => set({ voice: on })}
+      />
       {voice && (
-        <div className="set-group">
-          <span className="set-label">Voice</span>
+        <section className="prov-section">
+          <h2 className="field-label">Voice engine</h2>
           <div className="seg" role="radiogroup" aria-label="Voice engine">
             {VOICE_ENGINES.map((e) => (
               <button key={e.id} type="button" role="radio" aria-checked={engine.id === e.id} onClick={() => set({ voiceEngine: e.id })}>
@@ -35,19 +37,15 @@ export function Calls() {
               </button>
             ))}
           </div>
-        </div>
+        </section>
       )}
       {hasTuple && (
-        <label className="toggle-row">
-          <input type="checkbox" checked={tuple} onChange={(e) => set({ tuple: e.target.checked })} />
-          <span>
-            <b>Ask agents from Tuple calls</b>
-            <span className="muted small">
-              Say an agent’s name on a call (“Atlas, what failed overnight?”) or type to it in Tuple’s chat. Only your own
-              requests count; what others say is passed on as context. Answers appear over the call.
-            </span>
-          </span>
-        </label>
+        <SwitchRow
+          label="Ask agents from Tuple calls"
+          sub="Say an agent’s name on a call (“Atlas, what failed overnight?”) or type to it in Tuple’s chat. Only your own requests count; what others say is passed on as context. Answers appear over the call."
+          on={tuple}
+          onChange={(on) => set({ tuple: on })}
+        />
       )}
       {hasTuple && tuple && (
         <p className="small">

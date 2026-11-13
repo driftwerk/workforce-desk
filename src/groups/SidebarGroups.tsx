@@ -1085,10 +1085,13 @@ function ItemRow({
       onRemove={onRemove}
       onHover={onHover}
     >
-      {local && <SessionTicketChip session={session.id} still className="gi-ticket" name={name} />}
-      <ChargeBadge charge={charge} session={local ? session.id : undefined} short className="gi-charge" />
-      {says && <InGrid id={markId} says={says} />}
-      <Marks badge={badge} />
+      {/* One group, so the marks keep together at the row's end when they wrap. */}
+      <span className="gi-trail">
+        {local && <SessionTicketChip session={session.id} still className="gi-ticket" name={name} />}
+        <ChargeBadge charge={charge} session={local ? session.id : undefined} short className="gi-charge" />
+        {says && <InGrid id={markId} says={says} />}
+        <Marks badge={badge} />
+      </span>
     </SortRow>
   );
 }

@@ -43,6 +43,13 @@ button {
   cursor: pointer;
 }
 
+/* A native tick, radio or slider in the theme's signal, wherever it is. */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  accent-color: var(--signal);
+}
+
 :focus-visible {
   outline: 2px solid var(--signal);
   outline-offset: 2px;
@@ -278,6 +285,22 @@ body.side-resizing * {
   border-radius: 999px;
   background: var(--raised);
 }
+/* On a card (cardFill, often the raised colour) the track is sunk, so it
+   still shows. */
+.setting-card .seg,
+.prov-list .seg,
+.ability-card .seg,
+.think-rows .seg,
+.engine-row .seg {
+  background: var(--sunken);
+}
+.setting-card .seg button[aria-checked="true"],
+.prov-list .seg button[aria-checked="true"],
+.ability-card .seg button[aria-checked="true"],
+.think-rows .seg button[aria-checked="true"],
+.engine-row .seg button[aria-checked="true"] {
+  background: var(--raised);
+}
 .tabs button,
 .seg button {
   flex: 1;
@@ -320,7 +343,7 @@ body.side-resizing * {
   align-items: center;
   gap: 10px;
   padding: 7px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   border: 0;
   background: transparent;
   color: var(--text);
@@ -1192,7 +1215,7 @@ body.side-resizing * {
   align-items: flex-end;
   gap: 10px;
   padding: 10px 10px 10px 18px;
-  border-radius: 18px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
   border: 1px solid var(--border);
 }
@@ -1574,7 +1597,7 @@ body.side-resizing * {
 .approval {
   margin: 0 12px 12px;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--blocked-soft);
   display: flex;
   gap: 10px;
@@ -1643,7 +1666,7 @@ body.side-resizing * {
 .quick-ask input {
   border: 1px solid var(--border);
   background: var(--bg);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
   outline: none;
 }
@@ -1800,9 +1823,10 @@ body.side-resizing * {
   gap: 14px;
   align-items: center;
   padding: 12px 16px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--raised);
   border: 1px solid var(--border);
+  box-shadow: 0 12px 32px var(--shadow-soft);
   z-index: 20;
 }
 /* An error's toast is edged in the needs-you colour; any other in the border's. */
@@ -2033,7 +2057,7 @@ button.thread-bar:hover {
   min-width: 18px;
   text-align: center;
   padding: 1px 6px;
-  border-radius: 9px;
+  border-radius: 999px;
   font-size: 11px;
   font-weight: 700;
   background: var(--signal);
@@ -2140,6 +2164,9 @@ button.thread-bar:hover {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .urow-bar {
+    animation: none;
+  }
   .dots i {
     animation: none;
     opacity: 0.8;
@@ -2160,7 +2187,7 @@ button.thread-bar:hover {
 .field-text {
   border: 1px solid var(--border);
   background: var(--bg);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
   outline: none;
   resize: vertical;
@@ -2183,7 +2210,7 @@ button.thread-bar:hover {
   gap: 8px 14px;
   align-items: center;
   padding: 10px 12px 10px 16px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--raised);
   border: 1px solid var(--border);
 }
@@ -2519,7 +2546,7 @@ button.thread-bar:hover {
   min-width: 0;
   padding: 3px 6px;
   border: 1px solid var(--signal);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--sunken);
   color: var(--text);
   font-size: 13px;
@@ -2689,13 +2716,14 @@ button.thread-bar:hover {
   width: 72px;
   border: 1px solid var(--border);
   background: var(--bg);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 6px 10px;
   outline: none;
   font: inherit;
 }
 .confirm-days input:focus {
   border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 /* Text people may need to copy, in a UI that otherwise isn't selectable. */
@@ -3725,9 +3753,20 @@ button.urow-open {
 .urow-bar {
   height: 10px;
   width: 38%;
-  border-radius: 5px;
+  border-radius: 999px;
   background: var(--raised);
-  animation: desk-breathe 1.8s ease-in-out infinite;
+  animation: desk-loading 1.8s ease-in-out infinite;
+}
+/* A placeholder while a page reads: it fades in and out, with no ring (the
+   working dot's breathing draws one in the working colour). */
+@keyframes desk-loading {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 .urow-bar-short {
   width: 64%;
@@ -3883,7 +3922,7 @@ button.urow-open {
   gap: 14px;
   align-items: center;
   padding: 10px 12px 10px 16px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--raised);
   border: 1px solid var(--border);
   z-index: 19;
@@ -4325,7 +4364,32 @@ body.line-resizing * {
     display: none;
   }
 }
+/* A session row's marks, kept together: the ticket, charge, grid glyph and
+   unread mark. */
+.gi-trail {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60%;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+/* The charge gives way inside the group; the rest keep their size. */
+.gi-trail > * {
+  flex: none;
+}
+.gi-trail > .gi-charge {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+.gi-trail:empty {
+  display: none;
+}
 /* Badges that wrapped under the name sit at the row's right edge. */
+.gi > .gi-trail,
+.gi > .badge,
+.gi > .side-dot,
 .gi > .gi-ticket,
 .gi > .gi-charge,
 .gi > .gi-meta,

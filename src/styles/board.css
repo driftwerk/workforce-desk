@@ -82,7 +82,7 @@
   background: transparent;
 }
 .board-cols::-webkit-scrollbar-thumb {
-  border-radius: 4px;
+  border-radius: 999px;
   background: color-mix(in srgb, var(--faint) 55%, transparent);
 }
 .board-cols::-webkit-scrollbar-thumb:hover {
@@ -606,7 +606,7 @@ button.ticket-chip:hover {
   box-sizing: border-box;
   padding: 8px 12px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--text);
   outline: none;
@@ -619,6 +619,7 @@ button.ticket-chip:hover {
 .ticket-title-edit:focus,
 .board-textarea:focus {
   border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .ticket-text {
   font-size: 14px;
