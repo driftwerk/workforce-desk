@@ -84,5 +84,5 @@ export const presetDesc = (preset: Preset): string =>
       "Answers “what’s everyone doing?” and tells you when something needs you.",
     suggest: "Also proposes what to do. Nothing happens until you say yes.",
     act: "Does the work itself: starts and runs sessions, nudges, answers and approves reads. Messaging agents and other terminals stays yours.",
-    full: "Does everything itself, in any repo: Desk allows every request its sessions ask at once. Only your budget, Stop and the activity log hold it.",
+    full: "Does everything itself, in any repo: it decides every request its sessions ask the moment they ask, with its reason in the activity log. Only your budget and Stop hold it.",
   })[preset];

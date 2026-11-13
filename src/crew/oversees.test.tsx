@@ -149,7 +149,7 @@ describe("Oversees the crew", () => {
       .getAllByRole("radio")
       .map((r) => r.querySelector("b")?.textContent);
     expect(levels).toEqual(["Watch", "Suggest", "Act", "Act fully"]);
-    expect(screen.getByText("Does everything itself, in any repo: Desk allows every request its sessions ask at once. Only your budget, Stop and the activity log hold it.")).toBeTruthy();
+    expect(screen.getByText("Does everything itself, in any repo: it decides every request its sessions ask the moment they ask, with its reason in the activity log. Only your budget and Stop hold it.")).toBeTruthy();
     expect(screen.queryByRole("heading", { name: "Where Ledger acts fully" })).toBeNull();
     await act(async () => fireEvent.click(screen.getByRole("radio", { name: /^Act fully/ })));
     await waitFor(() => expect(oversight()).toMatchObject({ level: "full", act: { set_mode: true, hand_off: true }, full: { anywhere: true } }));
@@ -288,7 +288,7 @@ describe("Oversees the crew", () => {
     const line = /^No limits: Desk acts on everything itself, including publishing, deploys and secrets\. Only your budget, Stop and the activity log remain\./;
     show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "full"\n[oversight.act]\n${acts}[oversight.full]\nanywhere = true\n`);
     expect(screen.getByText(line)).toBeTruthy();
-    expect(screen.getByText(/Every request its sessions ask is allowed at once/)).toBeTruthy();
+    expect(screen.getByText(/It decides every request its sessions ask the moment they ask/)).toBeTruthy();
     // A switch off, or Anywhere off: still no limits.
     await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Change sessions’ permission mode/ })));
     await waitFor(() => expect(oversight()).toMatchObject({ act: { set_mode: false } }));
