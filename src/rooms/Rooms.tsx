@@ -113,6 +113,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const person = useChat((s) => (agent ? (s.me[agent.hubId]?.name ?? null) : null));
   const convo = useChat((s) => (activeAgent ? s.conversations[activeAgent] : undefined));
   const history = useChat((s) => (activeAgent ? s.histories[activeAgent] : undefined));
+  const openedThread = useUi((u) => (activeAgent ? u.dmThreads[activeAgent] : undefined));
   const { send, loadHistory, loadEarlier, watchDm, answerPrompt } = useChat(
     useShallow((s) => ({
       send: s.send,
@@ -540,7 +541,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                         <span>New</span>
                       </div>
                     )}
-                    <div className={`room-msg${editing && editing.id !== m.id && editing.aside.includes(m.id) ? " msg-dim" : ""}`}>
+                    <div className={`room-msg${editing && editing.id !== m.id && editing.aside.includes(m.id) ? " msg-dim" : ""}${openedThread === m.id ? " thread-open" : ""}`}>
                       <DmMessage
                         message={m}
                         author={agent.name}
@@ -555,7 +556,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                         orphan={!!m.answeredDeleted || orphanSet.has(m.id)}
                       />
                       {!editing && deleting !== m.id && threadsOf.has(m.id) && (
-                        <ThreadChip agent={activeAgent} thread={threadsOf.get(m.id)!} />
+                        <ThreadChip agent={activeAgent} hub={agent.hubId} name={agent.name} thread={threadsOf.get(m.id)!} />
                       )}
                       {!editing && deleting !== m.id && ((editable && m === mine) || (deletable && yours(m)) || (threadable && keptIds.has(m.id) && !m.command)) && (
                         <span className="msg-actions" role="toolbar" aria-label="Message actions">

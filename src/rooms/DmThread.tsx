@@ -15,6 +15,8 @@ import { relayedOf } from "../chat/relayed";
 import { DmMessage } from "./Rooms";
 import { QueuedMessages } from "./QueuedMessages";
 import { repliesText } from "./ThreadBar";
+import { dayClock } from "../floor/time";
+import { AgentMark, YouMark } from "../ui/Mark";
 
 // A thread in a DM: a column beside the chat holding the message it is on,
 // the replies, and a box to reply in. It is a conversation of its own (own
@@ -42,12 +44,29 @@ export const threadsWorking = (threads: readonly ThreadSummary[]): string | null
 
 /** Under a message with replies: how many, when last, and who is working in
  *  it; opens the thread. */
-export const ThreadChip = memo(function ThreadChip({ agent, thread }: { agent: string; thread: ThreadSummary }) {
+export const ThreadChip = memo(function ThreadChip({ agent, hub, name, thread }: { agent: string; hub: string; name: string; thread: ThreadSummary }) {
   const open = useUi((u) => u.setDmThread);
+  const openNow = useUi((u) => u.dmThreads[agent]);
   return (
-    <button type="button" className="thread-bar small" onClick={() => open(agent, thread.parent)}>
-      <span className="thread-count">{repliesText(thread.replies, thread.lastAt)}</span>
-      {thread.working && <span className="thread-live thread-answering">· working</span>}
+    <button type="button" className="thread-bar thread-chip small" aria-current={openNow === thread.parent ? "true" : undefined} onClick={() => open(agent, thread.parent)}>
+      {thread.authors.length > 0 && (
+        <span className="thread-marks">
+          {thread.authors.map((a) => (a === "user" ? <YouMark key={a} hub={hub} size="xs" /> : <AgentMark key={a} agent={agent} name={name} size="xs" />))}
+        </span>
+      )}
+      <span className="thread-count">{repliesText(thread.replies, null)}</span>
+      {thread.lastAt && (
+        <>
+          {" "}
+          <span className="thread-last">last {dayClock(thread.lastAt)}</span>
+        </>
+      )}
+      {thread.working && (
+        <>
+          {" "}
+          <span className="thread-live thread-answering">· working</span>
+        </>
+      )}
     </button>
   );
 });
@@ -75,11 +94,11 @@ function ThreadComposer({ keyOf, name, connected, busy }: { keyOf: string; name:
     if (also) void copyReply(keyOf, text).then((ok) => !ok && setProblem("Your reply is in the thread, but the chat didn’t take a copy."));
   };
   return (
-    <form className="composer" onSubmit={submit} data-composer="">
+    <form className="composer thread-composer" onSubmit={submit} data-composer="">
       <textarea
         rows={1}
         value={draft}
-        placeholder={`Reply in thread to ${name}`}
+        placeholder="Reply in thread"
         aria-label={`Reply in thread to ${name}`}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={(e) => {
@@ -92,17 +111,17 @@ function ThreadComposer({ keyOf, name, connected, busy }: { keyOf: string; name:
           }
         }}
       />
+      <label className="also-in-room small">
+        <input type="checkbox" checked={also} onChange={(e) => setAlso(e.target.checked)} /> Also send to the chat
+      </label>
       {holding && (
         <button type="button" className="btn btn-ghost" title={`Stop ${name} (Esc)`} onClick={() => cancel(keyOf)}>
           Stop
         </button>
       )}
       <button type="submit" className="btn btn-signal" disabled={!draft.trim() || (!holding && !connected)}>
-        {holding ? "Queue" : "Send"}
+        {holding ? "Queue" : "Reply"}
       </button>
-      <label className="also-in-room small">
-        <input type="checkbox" checked={also} onChange={(e) => setAlso(e.target.checked)} /> Also send to the chat
-      </label>
       {problem && (
         <p className="composer-note small" role="status">
           {problem}
@@ -162,10 +181,6 @@ export function DmThreadPanel({ agent, hub, parent }: { agent: Agent; hub: HubAc
           <span className="thread-head-row">
             <b className="display rpanel-name">Thread</b>
           </span>
-          <span className="thread-bar thread-bar-head small">
-            <span className="thread-count">{repliesText(count, summary?.lastAt)}</span>
-            {(convo ? isRunning(convo) : summary?.working) && <span className="thread-live thread-answering">· working</span>}
-          </span>
         </span>
       }
     >
@@ -178,6 +193,10 @@ export function DmThreadPanel({ agent, hub, parent }: { agent: Agent; hub: HubAc
                   <DmMessage message={first} author={agent.name} authorKey={base} youOn={agent.hubId} home={hub.label} sentOn={sentOn} origin={origin} onSubmitForm={submitForm} onRetry={onRetry} onRemove={onRemove} />
                 </div>
               )}
+              <div className="thread-count-rule small">
+                <span>{count ? repliesText(count, null) : "No replies yet"}</span>
+                {(convo ? isRunning(convo) : summary?.working) && <span className="thread-live thread-answering">· working</span>}
+              </div>
               {history?.state === "loading" && replies.length === 0 && (
                 <div className="history-note">
                   <span className="faint small">Loading the thread…</span>
