@@ -1026,8 +1026,6 @@ export interface MentionedItem {
   notBlocking?: string | null;
   /** The kind of case your answer would settle from then on. */
   generalizes?: string | null;
-  /** Where an "Always" for it would hold. */
-  preferScope?: PreferenceScope | null;
   /** Set aside after it was said three times: still answered or dropped
    *  from here. */
   parked?: boolean;

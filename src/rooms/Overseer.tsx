@@ -747,7 +747,9 @@ function Always({ id, when, then }: { id: string; when: string; then: string }) 
       const r = await hub.alwaysItem(id, then);
       setSaid(`${r.done} It’s in the boss’s settings, to change or forget.`);
     } catch (e) {
-      setProblem(plainError(e));
+      // Dropped or gone since: nothing left to keep.
+      if (e instanceof HubError && e.status === 404) setSaid("Already settled.");
+      else setProblem(plainError(e));
     }
     setBusy(false);
   };

@@ -621,7 +621,6 @@ describe("always, or just this time (H10)", () => {
         { label: "Let it merge", recommended: false },
       ],
       generalizes,
-      preferScope: "repo:acme/web",
     },
   });
 
