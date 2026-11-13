@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { FloorShell as Shell } from "../floor/FloorShell";
 import { SetupFloor } from "../setup/slot";
 import { useChat } from "../chat/store";
 import { BriefCard, PausedNote, RightNow, useMinute } from "../floor/RightNow";
@@ -232,7 +233,7 @@ const sectionsOf = (sections: readonly Section[], group: string): Section[] =>
 
 /** The Floor as the crew's overview: the overseer's brief, then who needs
  *  you, who's working and what's done, beside what's happening. */
-export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNewSession: () => void }) {
+export function CrewFloor({ overview, onNewSession, heading }: { overview: Overview; onNewSession: () => void; heading?: ReactNode }) {
   const activitySupport = useOverview((s) => s.activitySupport);
   const manager = useOverview((s) => s.manager);
   const managerAgent = useLocalAgent(manager?.agentId);
@@ -256,9 +257,9 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
   };
 
   return (
-    <main className="crew-floor" aria-label="Floor">
+    <Shell heading={heading} className="crew-floor">
       <header className="crew-floor-head">
-        <h1 className="display">Floor</h1>
+        {heading ?? <h1 className="display">Floor</h1>}
         <span className="crew-floor-counts">
           {counts.working} working ·{" "}
           <span className={counts.needsYou ? "state-blocked strong" : undefined}>
@@ -293,7 +294,7 @@ export function CrewFloor({ overview, onNewSession }: { overview: Overview; onNe
             </DockStrip>
           ))}
       </div>
-    </main>
+    </Shell>
   );
 }
 

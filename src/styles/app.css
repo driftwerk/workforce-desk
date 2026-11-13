@@ -3307,6 +3307,57 @@ button.thread-bar:hover {
   background: var(--working);
   border-color: var(--working);
 }
+/* ── The Dashboard: a title, then its sections (the Floor, for now) ────────── */
+
+.dashboard {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 34px 32px 24px;
+  overflow: hidden;
+}
+.dash-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  flex: none;
+}
+.dash-title {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+.dash-line {
+  margin: 0;
+}
+/* One section, a card: the only one fills what's left, and what's in it
+   scrolls inside it as it did on its own page. */
+.dash-section {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 0 0 1px var(--border);
+}
+.dash-section-title {
+  margin: 0;
+  flex: 1;
+}
+.floor-in .crew-floor-head {
+  padding: 20px 24px 14px;
+}
+.floor.floor-in {
+  padding: 20px 24px 24px;
+}
 /* ── The Unread page: the Floor's cards, with two-line rows ─────────────── */
 
 .unread-page {
