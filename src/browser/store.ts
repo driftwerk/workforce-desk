@@ -29,7 +29,9 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   problem: null,
   read: async (browser) => {
     try {
-      set({ live: await browser.live() });
+      const live = await browser.live();
+      // Asked every few seconds: the same answer leaves the store as it is.
+      if (JSON.stringify(live) !== JSON.stringify(get().live)) set({ live });
     } catch (e) {
       if (e instanceof HubError && e.status === 404) set({ supported: false, live: [] });
     }
