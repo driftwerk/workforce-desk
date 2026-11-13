@@ -15,8 +15,8 @@ export function Calls() {
     void tupleAvailable().then(setHasTuple, () => setHasTuple(false));
   }, []);
   return (
-    <section className="settings-pane voices-detail" aria-label="Talking to agents">
-      <h1 className="display-lg">Talking to agents</h1>
+    <section className="settings-pane voices-detail" aria-label="Voice">
+      <h1 className="display-lg">Voice</h1>
       <SwitchRow
         label="Talk to agents by name"
         sub={
@@ -28,8 +28,8 @@ export function Calls() {
         onChange={(on) => set({ voice: on })}
       />
       {voice && (
-        <section className="prov-section" aria-label="Voice">
-          <h2 className="field-label">Voice</h2>
+        <section className="prov-section" aria-label="Voice engine">
+          <h2 className="field-label">Voice engine</h2>
           <div className="seg" role="radiogroup" aria-label="Voice engine">
             {VOICE_ENGINES.map((e) => (
               <button key={e.id} type="button" role="radio" aria-checked={engine.id === e.id} onClick={() => set({ voiceEngine: e.id })}>
