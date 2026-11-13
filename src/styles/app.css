@@ -1907,16 +1907,11 @@ button.thread-bar:hover {
   accent-color: var(--signal);
 }
 .thread-composer .also-in-room {
-  order: 1;
   flex: 1;
   min-width: 0;
 }
-.thread-composer .btn {
-  order: 2;
-}
 .thread-composer .composer-note,
 .thread-composer > :not(textarea):not(label):not(.btn) {
-  order: 3;
   flex-basis: 100%;
 }
 .dm-panel {

@@ -46,8 +46,9 @@ export const threadsWorking = (threads: readonly ThreadSummary[]): string | null
  *  it; opens the thread. */
 export const ThreadChip = memo(function ThreadChip({ agent, hub, name, thread }: { agent: string; hub: string; name: string; thread: ThreadSummary }) {
   const open = useUi((u) => u.setDmThread);
+  const openNow = useUi((u) => u.dmThreads[agent]);
   return (
-    <button type="button" className="thread-bar thread-chip small" onClick={() => open(agent, thread.parent)}>
+    <button type="button" className="thread-bar thread-chip small" aria-current={openNow === thread.parent ? "true" : undefined} onClick={() => open(agent, thread.parent)}>
       {thread.authors.length > 0 && (
         <span className="thread-marks">
           {thread.authors.map((a) => (a === "user" ? <YouMark key={a} hub={hub} size="xs" /> : <AgentMark key={a} agent={agent} name={name} size="xs" />))}
@@ -60,7 +61,12 @@ export const ThreadChip = memo(function ThreadChip({ agent, hub, name, thread }:
           <span className="thread-last">last {dayClock(thread.lastAt)}</span>
         </>
       )}
-      {thread.working && <span className="thread-live thread-answering">· working</span>}
+      {thread.working && (
+        <>
+          {" "}
+          <span className="thread-live thread-answering">· working</span>
+        </>
+      )}
     </button>
   );
 });
@@ -105,6 +111,9 @@ function ThreadComposer({ keyOf, name, connected, busy }: { keyOf: string; name:
           }
         }}
       />
+      <label className="also-in-room small">
+        <input type="checkbox" checked={also} onChange={(e) => setAlso(e.target.checked)} /> Also send to the chat
+      </label>
       {holding && (
         <button type="button" className="btn btn-ghost" title={`Stop ${name} (Esc)`} onClick={() => cancel(keyOf)}>
           Stop
@@ -113,9 +122,6 @@ function ThreadComposer({ keyOf, name, connected, busy }: { keyOf: string; name:
       <button type="submit" className="btn btn-signal" disabled={!draft.trim() || (!holding && !connected)}>
         {holding ? "Queue" : "Reply"}
       </button>
-      <label className="also-in-room small">
-        <input type="checkbox" checked={also} onChange={(e) => setAlso(e.target.checked)} /> Also send to the chat
-      </label>
       {problem && (
         <p className="composer-note small" role="status">
           {problem}
@@ -188,7 +194,7 @@ export function DmThreadPanel({ agent, hub, parent }: { agent: Agent; hub: HubAc
                 </div>
               )}
               <div className="thread-count-rule small">
-                <span>{repliesText(count, null)}</span>
+                <span>{count ? repliesText(count, null) : "No replies yet"}</span>
                 {(convo ? isRunning(convo) : summary?.working) && <span className="thread-live thread-answering">· working</span>}
               </div>
               {history?.state === "loading" && replies.length === 0 && (
