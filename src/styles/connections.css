@@ -108,6 +108,14 @@
 .conn-card-trouble {
   border-color: var(--blocked);
 }
+/* What is wrong with a connection, and its fix: the service's own words,
+   which can run long. */
+.conn-fix {
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  background: var(--sunken);
+  overflow-wrap: anywhere;
+}
 .conn-card-head {
   display: flex;
   align-items: center;

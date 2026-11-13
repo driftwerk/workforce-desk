@@ -3,7 +3,7 @@ import { parse } from "smol-toml";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Agent } from "../chat/types";
 import { HubError, type DeskHub } from "../hub/client";
-import type { ConnectionsApi, Pick as Choice, PicksChange, ServicePicks } from "../hub/connections";
+import type { ConnectionsApi, Connector, Listing, Pick as Choice, PicksChange, ServicePicks } from "../hub/connections";
 import { useDesk } from "../hub/store";
 import { AgentConnectors } from "./AgentConnectors";
 import { useAgentConfigs } from "./agentBrain";
@@ -202,4 +202,140 @@ it("says what went wrong saving, and tries again", async () => {
     fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   });
   expect(screen.getByRole("status").textContent).toBe("Saved.");
+});
+
+/** A hub that keeps what it is told, and answers each save only when let. */
+const slowHub = (start: ServicePicks[]) => {
+  let state = start;
+  const waiting: (() => void)[] = [];
+  const setPicks = vi.fn(
+    (_agent: string, change: PicksChange) =>
+      new Promise<ServicePicks[]>((done) => {
+        waiting.push(() => {
+          state = state.map((s) =>
+            s.id !== change.service
+              ? s
+              : {
+                  ...s,
+                  chosen: true,
+                  connections: s.connections.map((p) => {
+                    const use = change.connections.find((c) => c.id === p.id);
+                    return { ...p, picked: !!use, write: use?.write ?? p.write, default: change.default === p.id };
+                  }),
+                },
+          );
+          done(state);
+        });
+      }),
+  );
+  return { setPicks, answer: () => waiting.shift()!(), state: () => state };
+};
+
+it("keeps every quick tick: a queued save works from what the last one left, not what was on screen", async () => {
+  const off = svc({
+    id: "jira",
+    name: "Jira",
+    connections: [pick({ id: "all~~acme", name: "Acme" }), pick({ id: "all~~globex", name: "Globex" })],
+  });
+  const hub = slowHub([off]);
+  const a = api([off], { setPicks: hub.setPicks });
+  await show(a);
+  // Both ticked before the first save comes back.
+  await act(async () => {
+    fireEvent.click(within(box("Jira")).getByRole("checkbox", { name: /Acme/ }));
+  });
+  await act(async () => {
+    fireEvent.click(within(box("Jira")).getByRole("checkbox", { name: /Globex/ }));
+  });
+  await act(async () => hub.answer());
+  await act(async () => hub.answer());
+  const second = hub.setPicks.mock.calls[1]![1];
+  expect(second.connections.map((c) => c.id)).toEqual(["all~~acme", "all~~globex"]);
+  expect(within(box("Jira")).getByText("2 of 2 on")).toBeTruthy();
+});
+
+it("tries a failed save again from what is there now", async () => {
+  const off = svc({
+    id: "jira",
+    name: "Jira",
+    connections: [pick({ id: "all~~acme", name: "Acme" }), pick({ id: "all~~globex", name: "Globex" })],
+  });
+  const hub = slowHub([off]);
+  let fail = true;
+  const a = api([off], {
+    setPicks: vi.fn(async (agent: string, change: PicksChange) => {
+      if (fail && change.connections.some((c) => c.id === "all~~globex")) throw new Error("Desk couldn’t save that just now.");
+      const p = hub.setPicks(agent, change);
+      hub.answer();
+      return p;
+    }),
+  });
+  await show(a);
+  // Acme saves; Globex, queued behind it, fails.
+  await act(async () => {
+    fireEvent.click(within(box("Jira")).getByRole("checkbox", { name: /Acme/ }));
+    fireEvent.click(within(box("Jira")).getByRole("checkbox", { name: /Globex/ }));
+  });
+  expect(screen.getByRole("status").textContent).toMatch(/couldn’t save/);
+  fail = false;
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  });
+  const last = (a.setPicks as ReturnType<typeof vi.fn>).mock.calls.at(-1)![1] as PicksChange;
+  expect(last.connections.map((c) => c.id)).toEqual(["all~~acme", "all~~globex"]);
+  expect(screen.getByRole("status").textContent).toBe("Saved.");
+});
+
+const listing = (ids: string[], adapters: string[]): Listing => ({
+  connectors: ids.map((id) => ({ id, usedBy: [] }) as unknown as Connector),
+  adapters,
+});
+
+it("turning Slack on for an agent nobody chose connectors for keeps every other one it had", async () => {
+  const slack = svc({ id: "slack", name: "Slack", several: false, connections: [pick({ id: "all~~default", name: "Slack" })] });
+  const a = api([slack, JIRA], { list: vi.fn(async () => listing(["slack", "jira", "linear"], ["notion", "hubspot"])) });
+  await show(a);
+  await act(async () => {
+    fireEvent.click(within(box("Slack")).getByRole("checkbox", { name: /Slack/ }));
+  });
+  expect((parse(config).skills as { enabled: string[] }).enabled).toEqual(["hubspot", "jira", "linear", "notion", "slack"]);
+});
+
+it("keeps Slack on its own connection where the agent has one", async () => {
+  const slack = svc({
+    id: "slack",
+    name: "Slack",
+    several: false,
+    connections: [pick({ id: "agent~allan~default", name: "Slack", level: "agent" })],
+  });
+  const a = api([slack], { list: vi.fn(async () => listing(["slack"], [])) });
+  await show(a);
+  await act(async () => {
+    fireEvent.click(within(box("Slack")).getByRole("checkbox", { name: /Slack/ }));
+  });
+  expect((parse(config).skills as { own_credential: string[] }).own_credential).toEqual(["slack"]);
+});
+
+it("makes Slack read only, and says so once the hub does", async () => {
+  const on = (write: boolean) =>
+    svc({ id: "slack", name: "Slack", several: false, connections: [pick({ id: "all~~default", name: "Slack", picked: true, write })] });
+  let write = true;
+  const a = api([on(true)], {
+    list: vi.fn(async () => listing(["slack"], [])),
+    picks: vi.fn(async () => [on(write)]),
+  });
+  config = `[skills]\nenabled = ["slack"]\n`;
+  await show(a);
+  write = false;
+  await act(async () => {
+    fireEvent.click(within(box("Slack")).getByRole("button", { name: /Slack: read and write/ }));
+  });
+  expect((parse(config).skills as { read_only: string[] }).read_only).toEqual(["slack"]);
+  expect(within(box("Slack")).getByRole("button", { name: /Slack: read only/ })).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toBe("Saved.");
+});
+
+it("has its saving line there before the first save, so the first is read out", async () => {
+  await show(api([EMAIL]));
+  expect(screen.getByRole("status").textContent).toBe("");
 });

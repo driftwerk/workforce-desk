@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { HubError } from "../hub/client";
-import type { Connection, ConnectionsApi, Connector } from "../hub/connections";
+import type { Connection, ConnectionsApi, Connector, ServicePicks } from "../hub/connections";
 import { Connections } from "./Connections";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
@@ -307,4 +307,138 @@ it("says when Desk couldn't read the connections, and asks again", async () => {
 it("says so when Desk on this computer has no connections yet", async () => {
   await show(api([], { list: vi.fn(async () => Promise.reject(new HubError(404, "no route"))) }));
   expect(screen.getByText(/doesn’t offer connections yet/)).toBeTruthy();
+});
+
+describe("reconnecting a connection made by signing in", () => {
+  const work = connection({
+    id: "all~~work",
+    name: "Work",
+    account: "sam@acme.example",
+    status: "needs_reconnect",
+    usedBy: [
+      { agent: "allan", name: "Allan", connection: "mine" },
+      { agent: "lattice", name: "Lattice", connection: "mine" },
+    ],
+  });
+  const personal = connection({ id: "all~~personal", name: "Personal" });
+  const google = connector({ id: "google", name: "Google", signIn: "google", fields: [], connections: [work, personal] });
+  const fresh = connection({ id: "all~~work-2", name: "Work" });
+  const picksOf = (agent: string): ServicePicks[] =>
+    agent === "allan"
+      ? [
+          {
+            id: "google",
+            name: "Google",
+            several: true,
+            readOnlyEach: false,
+            chosen: true,
+            connections: [
+              { id: "all~~personal", name: "Personal", site: null, account: null, level: "all", status: "connected", picked: true, write: false, default: false },
+              { id: "all~~work", name: "Work", site: null, account: null, level: "all", status: "needs_reconnect", picked: true, write: false, default: true },
+            ],
+          },
+        ]
+      : // Lattice follows whom a connection is for: the new one reaches it already.
+        [{ id: "google", name: "Google", several: true, readOnlyEach: false, chosen: false, connections: [] }];
+
+  const signIn = async (a: ConnectionsApi) => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await show(a);
+    const card = within(service("Google")).getByLabelText("Work");
+    fireEvent.click(within(card).getByRole("button", { name: "Reconnect" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Sign in with Google" }));
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+  };
+
+  const hub = (over: Partial<ConnectionsApi> = {}) => {
+    let signedIn = false;
+    return api([], {
+      list: vi.fn(async () => ({
+        connectors: [{ ...google, connections: signedIn ? [work, personal, fresh] : [work, personal] }],
+        adapters: [],
+      })),
+      start: vi.fn(async () => ({ flow: "g1", url: "https://accounts.google.com/x", userCode: null, verificationUri: null, expiresIn: 900 })),
+      flow: vi.fn(async () => {
+        signedIn = true;
+        return { state: "connected" as const, account: "sam@acme.example" };
+      }),
+      picks: vi.fn(async (agent: string) => picksOf(agent)),
+      ...over,
+    });
+  };
+
+  it("moves each agent that picked it over to the new sign-in, as it was, before the old one goes", async () => {
+    const order: string[] = [];
+    const a = hub({
+      setPicks: vi.fn(async () => (order.push("picks"), [])),
+      disconnect: vi.fn(async () => (order.push("disconnect"), { stillKept: null, note: null })),
+    });
+    await signIn(a);
+    expect(a.setPicks).toHaveBeenCalledTimes(1);
+    expect(a.setPicks).toHaveBeenCalledWith("allan", {
+      service: "google",
+      connections: [
+        { id: "all~~personal", write: false },
+        { id: "all~~work-2", write: false },
+      ],
+      default: "all~~work-2",
+    });
+    expect(a.disconnect).toHaveBeenCalledWith("google", "all~~work");
+    expect(order).toEqual(["picks", "disconnect"]);
+  });
+
+  it("says so when the old one couldn't be removed, and keeps it", async () => {
+    const a = hub({ disconnect: vi.fn(async () => Promise.reject(new HubError(500, "The vault is locked"))) });
+    await signIn(a);
+    const old = within(service("Google")).getAllByLabelText("Work")[0]!;
+    expect(within(old).getByRole("alert").textContent).toBe(
+      "Signed in again, but Desk couldn’t remove the old Work: The vault is locked. Disconnect the old one here.",
+    );
+  });
+
+  it("keeps the old one when an agent couldn't be moved over", async () => {
+    const a = hub({ setPicks: vi.fn(async () => Promise.reject(new Error("no"))) });
+    await signIn(a);
+    expect(a.disconnect).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert").textContent).toMatch(/couldn’t move Allan over to it, so the old Work is kept/);
+  });
+});
+
+it("reconnects GitHub with a token in place, so its agents keep it", async () => {
+  const a = api([connector({ id: "github", name: "GitHub", signIn: "github", fields: [{ name: "token", label: "Token", secret: true, required: true, placeholder: "" }], connections: [connection({ id: "all~~acme", name: "acme" })] })]);
+  await show(a);
+  fireEvent.click(within(service("GitHub")).getByRole("button", { name: "Manage" }));
+  fireEvent.click(screen.getByRole("button", { name: "Reconnect" }));
+  fireEvent.click(screen.getByRole("button", { name: "Use a token instead" }));
+  fireEvent.change(screen.getByLabelText("Token"), { target: { value: "t" } });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Save and connect" }));
+  });
+  expect(a.reconnect).toHaveBeenCalledWith("github", "all~~acme", { token: "t" });
+  expect(a.connect).not.toHaveBeenCalled();
+  expect(a.disconnect).not.toHaveBeenCalled();
+});
+
+it("won't add or rename a connection to a name the service has already", async () => {
+  const a = api([jira]);
+  await show(a);
+  fireEvent.click(screen.getByRole("button", { name: "+ Add another Jira" }));
+  const form = screen.getByRole("group", { name: "Add another Jira" });
+  fireEvent.change(within(form).getByLabelText("Name"), { target: { value: " globex " } });
+  fireEvent.change(within(form).getByLabelText("API key"), { target: { value: "key" } });
+  expect(within(form).getByRole("alert").textContent).toBe("Jira has a connection called Globex already. Give this one another name.");
+  expect((within(form).getByRole("button", { name: "Save and connect" }) as HTMLButtonElement).disabled).toBe(true);
+
+  const acme = within(service("Jira")).getByLabelText("Acme");
+  fireEvent.click(within(acme).getByRole("button", { name: "Rename" }));
+  fireEvent.change(within(acme).getByLabelText("New name for Acme"), { target: { value: "Globex" } });
+  expect(within(acme).getByRole("alert").textContent).toMatch(/called Globex already/);
+  expect((within(acme).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+  // Its own name, in other letters, is fine.
+  fireEvent.change(within(acme).getByLabelText("New name for Acme"), { target: { value: "ACME" } });
+  expect(within(acme).queryByRole("alert")).toBeNull();
 });

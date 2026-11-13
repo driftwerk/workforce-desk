@@ -17,7 +17,7 @@ import { askAgent } from "../ui/askDesk";
 import { useAgentConfigs } from "./agentBrain";
 import { ago } from "./files";
 import "../styles/connections.css";
-import { choose, setAgentConnectors, writesOf, type Writes } from "./connectors";
+import { allowWrites, choose, setAgentConnectors, todayOf, writesOf, type Writes } from "./connectors";
 
 /** How the agent's changes in its connectors go, as its access says. */
 const WRITES_SAY: Record<Writes, (name: string) => string> = {
@@ -35,6 +35,33 @@ const localApi = (): ConnectionsApi | null => {
 };
 
 const plain = (e: unknown): string => (e instanceof Error ? e.message : String(e));
+
+/** One change of an agent's connections of a service, made against the
+ *  service as it is when its save runs. */
+export type Change = { kind: "use"; id: string; on: boolean } | { kind: "write"; id: string; write: boolean } | { kind: "default"; id: string };
+
+/** The connections of `s` the agent uses once `change` is made, and its
+ *  default. */
+export const applied = (s: ServicePicks, change: Change): { picked: Pick[]; def: string | null } => {
+  const picked = s.connections.filter((p) => p.picked);
+  const def = (picked.find((p) => p.default) ?? picked[0])?.id ?? null;
+  switch (change.kind) {
+    case "use": {
+      const p = s.connections.find((x) => x.id === change.id);
+      const next = change.on
+        ? picked.some((x) => x.id === change.id) || !p
+          ? picked
+          : [...picked, { ...p, picked: true }]
+        : picked.filter((x) => x.id !== change.id);
+      return { picked: next, def: def && next.some((x) => x.id === def) ? def : null };
+    }
+    case "write":
+      // Without each its own, they take writes all together.
+      return { picked: picked.map((x) => (x.id === change.id || !s.readOnlyEach ? { ...x, write: change.write } : x)), def };
+    case "default":
+      return { picked, def: picked.some((x) => x.id === change.id) ? change.id : def };
+  }
+};
 
 type Saving = { state: "idle" } | { state: "saving" } | { state: "saved" } | { state: "failed"; problem: string; retry: () => void };
 
@@ -68,12 +95,18 @@ export function AgentConnectors({
   const [calls, setCalls] = useState<ComputerActivityRow[] | null>(null);
   const openSettings = useUi((u) => u.openSettings);
   const writes = useRef<Promise<unknown>>(Promise.resolve());
+  /** The services as the hub last said, kept as each save comes back:
+   *  a queued save works from these, never from what was on screen when
+   *  it was clicked. */
+  const latest = useRef<ServicePicks[] | null>(null);
 
   const load = useCallback(async () => {
     if (!api) return;
     setProblem(null);
     try {
-      setServices(await api.picks(agent.id));
+      const got = await api.picks(agent.id);
+      latest.current = got;
+      setServices(got);
     } catch (e) {
       setProblem(
         e instanceof HubError && e.status === 404
@@ -99,6 +132,11 @@ export function AgentConnectors({
 
   const writeMode: Writes = config === undefined ? "sends_ask" : writesOf(config);
 
+  const said = (next: ServicePicks[]) => {
+    latest.current = next;
+    setServices(next);
+  };
+
   /** Writes one change at a time, in order. */
   const save = (work: () => Promise<void>) => {
     setSaving({ state: "saving" });
@@ -110,25 +148,38 @@ export function AgentConnectors({
     );
   };
 
-  /** `s` with the agent using `picked`, `def` first. */
-  const pick = (s: ServicePicks, picked: Pick[], def: string | null) =>
+  /** Makes `change` to service `id`, from the services as they are when
+   *  its turn comes. */
+  const make = (id: string, change: Change) =>
     save(async () => {
       if (!api) return;
+      const s = (latest.current ?? []).find((x) => x.id === id);
+      if (!s) return;
       if (!s.several) {
-        // Slack's one connection: on or off for the agent, as before.
+        // Slack's one connection: on or off for the agent, and whether it
+        // takes changes, in its own settings.
         if (!desk) return;
-        const reaching = (services ?? []).filter((x) => x.connections.length === 0 || x.connections.some((p) => p.picked)).map((x) => x.id);
-        const toml = await setAgentConnectors(desk, agent.id, (b) => choose(b, s.id, picked.length ? "mine" : "off", { reaching, own: [] }));
+        const today = todayOf(await api.list(), agent.id);
+        const p = s.connections.find((x) => x.id === change.id);
+        const toml = await setAgentConnectors(desk, agent.id, (b) =>
+          change.kind === "use"
+            ? choose(b, s.id, change.on ? (p?.level === "agent" ? "own" : "mine") : "off", today)
+            : change.kind === "write"
+              ? allowWrites(b, s.id, change.write, today)
+              : b,
+        );
         put(key, toml);
-        await load();
+        said(await api.picks(agent.id));
         return;
       }
-      const next = await api.setPicks(agent.id, {
-        service: s.id,
-        connections: picked.map((p) => ({ id: p.id, write: p.write })),
-        default: picked.length === 0 ? null : (def ?? picked[0]!.id),
-      });
-      setServices(next);
+      const { picked, def } = applied(s, change);
+      said(
+        await api.setPicks(agent.id, {
+          service: s.id,
+          connections: picked.map((p) => ({ id: p.id, write: p.write })),
+          default: picked.length === 0 ? null : (def ?? picked[0]!.id),
+        }),
+      );
     });
 
   return (
@@ -159,7 +210,7 @@ export function AgentConnectors({
                   key={s.id}
                   agent={agent}
                   service={s}
-                  onPick={(picked, def) => pick(s, picked, def)}
+                  onChange={(c) => make(s.id, c)}
                   onAsk={SET_UP_BY_AGENT.has(s.id) ? () => ask(agent, s.name) : undefined}
                   onConnect={() => openSettings("connections")}
                 />
@@ -167,25 +218,24 @@ export function AgentConnectors({
             </div>
           )}
 
-          {saving.state !== "idle" && (
-            <p
-              className={`small ${saving.state === "failed" ? "state-blocked" : saving.state === "saved" ? "state-done" : "faint"}`}
-              role="status"
-            >
-              {saving.state === "failed" ? (
-                <>
-                  {saving.problem}{" "}
-                  <button type="button" className="link small" onClick={saving.retry}>
-                    Try again
-                  </button>
-                </>
-              ) : saving.state === "saving" ? (
-                "Saving…"
-              ) : (
-                "Saved."
-              )}
-            </p>
-          )}
+          {/* There from the first, so its first word is read out. */}
+          <p
+            className={`small ${saving.state === "failed" ? "state-blocked" : saving.state === "saved" ? "state-done" : "faint"}`}
+            role="status"
+          >
+            {saving.state === "failed" ? (
+              <>
+                {saving.problem}{" "}
+                <button type="button" className="link small" onClick={saving.retry}>
+                  Try again
+                </button>
+              </>
+            ) : saving.state === "saving" ? (
+              "Saving…"
+            ) : saving.state === "saved" ? (
+              "Saved."
+            ) : null}
+          </p>
 
           {calls && calls.length > 0 && (
             <section className="conn-sub" aria-label="Recent connector calls">
@@ -216,13 +266,13 @@ export function AgentConnectors({
 function ServiceChoice({
   agent,
   service: s,
-  onPick,
+  onChange,
   onAsk,
   onConnect,
 }: {
   agent: Agent;
   service: ServicePicks;
-  onPick: (picked: Pick[], def: string | null) => void;
+  onChange: (change: Change) => void;
   onAsk?: () => void;
   onConnect: () => void;
 }) {
@@ -251,16 +301,6 @@ function ServiceChoice({
     );
   }
 
-  const toggle = (p: Pick, on: boolean) => {
-    const next = on ? [...picked, { ...p, picked: true }] : picked.filter((x) => x.id !== p.id);
-    onPick(next, def && next.some((x) => x.id === def.id) ? def.id : null);
-  };
-  const setWrite = (p: Pick, write: boolean) => {
-    // Without each its own, they take writes all together.
-    const next = picked.map((x) => (x.id === p.id || !s.readOnlyEach ? { ...x, write } : x));
-    onPick(next, def?.id ?? null);
-  };
-
   return (
     <section className="conn-pick" role="listitem" aria-label={`${s.name} for ${agent.name}`}>
       <div className="conn-pick-head">
@@ -273,7 +313,7 @@ function ServiceChoice({
         {s.connections.map((p) => (
           <div key={p.id} className="conn-pick-row">
             <label className="conn-pick-label">
-              <input type="checkbox" checked={p.picked} onChange={(e) => toggle(p, e.target.checked)} />
+              <input type="checkbox" checked={p.picked} onChange={(e) => onChange({ kind: "use", id: p.id, on: e.target.checked })} />
               <span className="conn-pick-name">
                 <b>{p.name}</b>
                 {(p.site ?? p.account) && <span className={p.site ? "mono conn-site" : "small muted"}>{(p.site ?? p.account)!.replace(/^https?:\/\//, "")}</span>}
@@ -286,7 +326,7 @@ function ServiceChoice({
                 type="button"
                 className="link small conn-pick-write"
                 aria-label={`${p.name}: ${p.write ? "read and write" : "read only"}. Change`}
-                onClick={() => setWrite(p, !p.write)}
+                onClick={() => onChange({ kind: "write", id: p.id, write: !p.write })}
               >
                 {p.write ? "read and write" : "read only"}
               </button>
@@ -307,7 +347,7 @@ function ServiceChoice({
               value={def.id}
               onChange={(e) => {
                 setChanging(false);
-                onPick(picked, e.target.value);
+                onChange({ kind: "default", id: e.target.value });
               }}
               onBlur={() => setChanging(false)}
             >

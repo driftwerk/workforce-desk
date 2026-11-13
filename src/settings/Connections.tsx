@@ -33,6 +33,58 @@ const message = (e: unknown): string => (e instanceof Error ? e.message : String
 /** `text` ending as a sentence does. */
 const sentence = (text: string): string => (/[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`);
 
+/** What a name the person gives a connection of `c` clashes with: another
+ *  of its connections by that name (`but` aside), or none. */
+export const nameTaken = (c: Connector, name: string, but?: string): string | null => {
+  const n = name.trim().toLowerCase();
+  if (!n) return null;
+  const same = c.connections.find((x) => x.id !== but && x.name.trim().toLowerCase() === n);
+  return same ? `${c.name} has a connection called ${same.name} already. Give this one another name.` : null;
+};
+
+/** After a sign-in made `x` again as a new connection: each agent that
+ *  picked `x` by name picks the new one in its place (taking changes as
+ *  before, its default still), then `x` goes. What went wrong, in the
+ *  person's words, or null. */
+export const carryOver = async (api: ConnectionsApi, c: Connector, x: Connection): Promise<string | null> => {
+  const before = new Set(c.connections.map((k) => k.id));
+  let fresh: Connection | undefined;
+  try {
+    const now = (await api.list()).connectors.find((k) => k.id === c.id);
+    fresh = now?.connections.find((k) => !before.has(k.id) && k.level === x.level && k.agent === x.agent);
+  } catch {
+    // Said below.
+  }
+  if (!fresh) return `Desk couldn’t find the new sign-in, so ${x.name} is kept as it was. Reconnect it again in a moment.`;
+  const stuck: string[] = [];
+  for (const u of x.usedBy) {
+    try {
+      const s = (await api.picks(u.agent)).find((v) => v.id === c.id);
+      // One that follows whom a connection is for reaches the new one already.
+      if (!s?.chosen) continue;
+      const picked = s.connections.filter((p) => p.picked);
+      if (!picked.some((p) => p.id === x.id)) continue;
+      const swap = (id: string) => (id === x.id ? fresh.id : id);
+      const def = picked.find((p) => p.default)?.id ?? null;
+      await api.setPicks(u.agent, {
+        service: c.id,
+        connections: picked.map((p) => ({ id: swap(p.id), write: p.write })),
+        default: def && swap(def),
+      });
+    } catch {
+      stuck.push(u.name);
+    }
+  }
+  if (stuck.length > 0)
+    return `Signed in again, but Desk couldn’t move ${names(stuck)} over to it, so the old ${x.name} is kept for now. Reconnect it again to finish.`;
+  try {
+    await api.disconnect(c.id, x.id);
+  } catch (e) {
+    return `Signed in again, but Desk couldn’t remove the old ${x.name}: ${sentence(message(e))} Disconnect the old one here.`;
+  }
+  return null;
+};
+
 /** The local hub's Connections, asked as the person. */
 const localApi = (): ConnectionsApi | null => {
   const hub = useChat.getState().hubs.find((h) => h.local);
@@ -309,6 +361,7 @@ function AddConnection({
   const [whom, setWhom] = useState<string>("all");
   const at: At = whom === "all" ? { level: "all" } : { level: "agent", agent: whom };
   const title = first ? `Connect ${c.name}` : `Add another ${c.name}`;
+  const clash = c.several ? nameTaken(c, name) : null;
   return (
     <div className="conn-card conn-add" role="group" aria-label={title}>
       <b>{title}</b>
@@ -340,7 +393,22 @@ function AddConnection({
           </select>
         </label>
       </div>
-      <Connect api={api} connector={c} at={at} name={name} label={`Connect ${c.name}`} onDone={onDone} onCancel={onCancel} open />
+      {clash && (
+        <p className="small state-blocked" role="alert">
+          {clash}
+        </p>
+      )}
+      <Connect
+        api={api}
+        connector={c}
+        at={at}
+        name={name}
+        label={`Connect ${c.name}`}
+        blocked={!!clash}
+        onDone={() => onDone()}
+        onCancel={onCancel}
+        open
+      />
     </div>
   );
 }
@@ -383,7 +451,7 @@ function ConnectionCard({
   };
 
   const at: At = x.level === "all" ? { level: "all" } : { level: "agent", agent: x.agent ?? "" };
-  const signedIn = c.signIn === "google" || (c.signIn === "github" && c.signInReady);
+  const clash = renaming !== null ? nameTaken(c, renaming, x.id) : null;
 
   if (reconnecting) {
     return (
@@ -394,11 +462,13 @@ function ConnectionCard({
           connector={c}
           at={at}
           name={x.name}
-          reconnect={c.fields.length > 0 && !signedIn ? x.id : undefined}
+          reconnect={c.fields.length > 0 ? x.id : undefined}
           label={`Reconnect ${x.name}`}
-          onDone={async () => {
-            // A sign-in makes a new connection: the old one goes.
-            if (signedIn) await api.disconnect(c.id, x.id).catch(() => {});
+          onDone={async (inPlace) => {
+            // New keys keep the connection as it is; a sign-in makes a new
+            // one, which takes the old one's place for its agents.
+            const wrong = inPlace ? null : await carryOver(api, c, x);
+            setProblem(wrong);
             setReconnecting(false);
             await reload();
           }}
@@ -418,7 +488,7 @@ function ConnectionCard({
             className="conn-rename"
             onSubmit={(e) => {
               e.preventDefault();
-              if (!renaming.trim()) return;
+              if (!renaming.trim() || clash) return;
               void run("rename", () => api.rename(c.id, x.id, renaming.trim())).then((done) => done && setRenaming(null));
             }}
           >
@@ -430,7 +500,7 @@ function ConnectionCard({
               value={renaming}
               onChange={(e) => setRenaming(e.target.value)}
             />
-            <button type="submit" className="btn btn-sm btn-signal" disabled={busy !== null || !renaming.trim()}>
+            <button type="submit" className="btn btn-sm btn-signal" disabled={busy !== null || !renaming.trim() || !!clash}>
               {busy === "rename" ? "Saving…" : "Save"}
             </button>
             <button type="button" className="btn btn-sm btn-ghost" onClick={() => setRenaming(null)}>
@@ -445,6 +515,11 @@ function ConnectionCard({
         )}
         <span className={`conn-status small ${ok ? "state-on" : "state-blocked"}`}>{statusLine(x)}</span>
       </div>
+      {clash && (
+        <p className="small state-blocked" role="alert">
+          {clash}
+        </p>
+      )}
       <dl className="conn-facts">
         <div>
           <dt>Account</dt>
@@ -525,6 +600,7 @@ export function Connect({
   onCancel,
   open: startOpen = false,
   title,
+  blocked = false,
 }: {
   api: ConnectionsApi;
   connector: Connector;
@@ -534,17 +610,19 @@ export function Connect({
   /** The connection whose keys these replace. */
   reconnect?: string;
   label: string;
-  onDone: () => void | Promise<void>;
+  onDone: (inPlace?: boolean) => void | Promise<void>;
   onCancel?: () => void;
   /** Show the form at once, rather than behind the button. */
   open?: boolean;
   title?: string;
+  /** It can't go ahead yet (its name is taken): said beside it. */
+  blocked?: boolean;
 }) {
   const [form, setForm] = useState(startOpen && c.signIn === "fields");
   const [problem, setProblem] = useState<string | null>(null);
 
   if (c.signIn === "google") {
-    return <GoogleSignIn api={api} connector={c} at={at} name={name} onDone={onDone} onCancel={onCancel} />;
+    return <GoogleSignIn api={api} connector={c} at={at} name={name} blocked={blocked} onDone={() => onDone()} onCancel={onCancel} />;
   }
   if (c.signIn === "github" && !form) {
     return (
@@ -560,7 +638,8 @@ export function Connect({
             connector={c}
             at={at}
             name={name}
-            onDone={onDone}
+            blocked={blocked}
+            onDone={() => onDone()}
             onProblem={setProblem}
             onToken={() => setForm(true)}
             onCancel={onCancel}
@@ -597,6 +676,7 @@ export function Connect({
       name={name}
       reconnect={reconnect}
       title={title}
+      blocked={blocked}
       onDone={onDone}
       onCancel={() => {
         setForm(false);
@@ -614,6 +694,7 @@ export function FieldsForm({
   name,
   reconnect,
   title,
+  blocked = false,
   onDone,
   onCancel,
 }: {
@@ -622,8 +703,10 @@ export function FieldsForm({
   at: At;
   name?: string;
   reconnect?: string;
+  blocked?: boolean;
   title?: string;
-  onDone: () => void | Promise<void>;
+  /** Told whether the keys went to the connection being reconnected. */
+  onDone: (inPlace?: boolean) => void | Promise<void>;
   onCancel?: () => void;
 }) {
   const [values, setValues] = useState<Record<string, string>>({});
@@ -633,7 +716,7 @@ export function FieldsForm({
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!ready || busy) return;
+    if (!ready || busy || blocked) return;
     setBusy(true);
     setProblem(null);
     try {
@@ -644,7 +727,7 @@ export function FieldsForm({
       );
       if (reconnect) await api.reconnect(c.id, reconnect, fields);
       else await api.connect(c.id, at, fields, name?.trim() || undefined);
-      await onDone();
+      await onDone(!!reconnect);
     } catch (err) {
       setProblem(message(err));
     } finally {
@@ -684,7 +767,7 @@ export function FieldsForm({
             Cancel
           </button>
         )}
-        <button type="submit" className="btn btn-signal" disabled={busy || !ready}>
+        <button type="submit" className="btn btn-signal" disabled={busy || !ready || blocked}>
           {busy ? "Testing…" : "Save and connect"}
         </button>
       </div>
@@ -758,6 +841,7 @@ function DeviceSignIn({
   connector: c,
   at,
   name,
+  blocked = false,
   onDone,
   onProblem,
   onToken,
@@ -767,6 +851,7 @@ function DeviceSignIn({
   connector: Connector;
   at: At;
   name?: string;
+  blocked?: boolean;
   onDone: () => void | Promise<void>;
   onProblem: (p: string | null) => void;
   onToken: () => void;
@@ -827,7 +912,7 @@ function DeviceSignIn({
             Cancel
           </button>
         )}
-        <button type="button" className="btn btn-signal" disabled={busy} onClick={() => void begin()}>
+        <button type="button" className="btn btn-signal" disabled={busy || blocked} onClick={() => void begin()}>
           {busy ? "Starting…" : "Sign in with GitHub"}
         </button>
       </div>
@@ -842,6 +927,7 @@ function GoogleSignIn({
   connector: c,
   at,
   name,
+  blocked = false,
   onDone,
   onCancel,
 }: {
@@ -849,6 +935,7 @@ function GoogleSignIn({
   connector: Connector;
   at: At;
   name?: string;
+  blocked?: boolean;
   onDone: () => void | Promise<void>;
   onCancel?: () => void;
 }) {
@@ -966,7 +1053,7 @@ function GoogleSignIn({
             Cancel
           </button>
         )}
-        <button type="button" className="btn btn-signal" disabled={busy} onClick={() => void begin()}>
+        <button type="button" className="btn btn-signal" disabled={busy || blocked} onClick={() => void begin()}>
           {busy ? "Starting…" : "Sign in with Google"}
         </button>
       </div>

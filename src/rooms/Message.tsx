@@ -19,7 +19,7 @@ import { readableError } from "../chat/agentError";
 import { PlanSignIn } from "../floor/PlanCards";
 import { TicketKeys } from "../board/TicketChip";
 import { commandMarkdown, shownText } from "../chat/commands";
-import { SetupCards, setupsStarted } from "../chat/SetupCard";
+import { SetupCards, setupsSince, setupsStarted } from "../chat/SetupCard";
 import { AwayDivider, OverseerBody, QuestionBody, overseerPost, overseerShown } from "./Overseer";
 
 /** What a delivered message is badged as, for the kinds that are shown. */
@@ -113,6 +113,8 @@ export const Message = memo(function Message({
   onSubmitForm,
   onRetry,
   onRemove,
+  turnSince,
+  turnUntil,
 }: {
   message: ChatMessage;
   author: string;
@@ -141,6 +143,10 @@ export const Message = memo(function Message({
   onRetry?: (id: string) => void;
   /** Takes a message that wasn't delivered away. */
   onRemove?: (id: string) => void;
+  /** When the message before it came: its turn had started by then. */
+  turnSince?: string;
+  /** When the message after it came. */
+  turnUntil?: string;
 }) {
   const host = useMemo<RichHost>(
     () => ({
@@ -151,6 +157,7 @@ export const Message = memo(function Message({
     }),
     [onSubmitForm, answered],
   );
+  const setups = message.role === "assistant" ? Math.max(setupsStarted(steps), setupsStarted(message.tools)) : 0;
   const fromOverseer = relayed?.by === "overseer";
   const you = message.role === "user" && !fromOverseer;
   const name = fromOverseer ? relayed.overseer : you ? "You" : message.role === "system" ? "Desk" : author;
@@ -241,8 +248,8 @@ export const Message = memo(function Message({
             <Steps steps={stepsOf(steps)} />
           </details>
         )}
-        {message.role === "assistant" && origin && Math.max(setupsStarted(steps), setupsStarted(message.tools)) > 0 && (
-          <SetupCards origin={origin} at={message.at} count={Math.max(setupsStarted(steps), setupsStarted(message.tools))} />
+        {message.role === "assistant" && origin && setups > 0 && (
+          <SetupCards origin={origin} since={setupsSince(message, turnSince)} until={turnUntil} count={setups} />
         )}
         {message.attachments && <Attachments files={message.attachments} home={origin} />}
         {message.undelivered && you && (

@@ -26,6 +26,7 @@ import { useProviders } from "../providers/store";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { AgentMark } from "../ui/Mark";
 import { WorkingRow } from "../chat/WorkingRow";
+import { setupsStarted } from "../chat/SetupCard";
 import { EmojiButton } from "../emoji/EmojiButton";
 import { useEmojiInput } from "../emoji/useEmojiInput";
 import { Message } from "./Message";
@@ -535,7 +536,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                     <span className="faint small">This is the start of your conversation with {agent.name}.</span>
                   </div>
                 )}
-                {shown.map((m) => (
+                {shown.map((m, i) => (
                   <Fragment key={m.id}>
                     {m.id === newLine.current && (
                       <div className="new-divider" role="separator" aria-label="New messages">
@@ -555,6 +556,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                         onRetry={retry}
                         onRemove={discard}
                         orphan={!!m.answeredDeleted || orphanSet.has(m.id)}
+                        {...turnOf(shown, m, i)}
                       />
                       {!editing && deleting !== m.id && threadsOf.has(m.id) && (
                         <ThreadChip agent={activeAgent} hub={agent.hubId} name={agent.name} thread={threadsOf.get(m.id)!} />
@@ -691,6 +693,14 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
     </Root>
   );
 }
+
+/** Where a message's turn lies among `shown`, for one that set
+ *  connections up: from the message before it to the one after. Others get
+ *  none, so a message coming after them doesn't render them again. */
+const turnOf = (shown: readonly ChatMessage[], m: ChatMessage, i: number): { turnSince?: string; turnUntil?: string } =>
+  m.role === "assistant" && (setupsStarted(m.steps) > 0 || setupsStarted(m.tools) > 0)
+    ? { turnSince: shown[i - 1]?.at, turnUntil: shown[i + 1]?.at }
+    : {};
 
 /** A message in a DM, rendered again only when it, or how it's shown,
  *  changes: not while you type, nor as another message streams in. */

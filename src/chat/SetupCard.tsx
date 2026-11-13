@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { FileHome } from "../attachments/Attachments";
 import { browserOf } from "../hub/browser";
+import { HubError } from "../hub/client";
 import { connectionsOf, type ConnectionsApi, type Setup, type SetupStep } from "../hub/connections";
 import { useUi } from "../shell/ui";
 import { useLive } from "../ui/useLive";
@@ -9,26 +10,40 @@ import "../styles/connections.css";
 
 /** How often a setup under way is asked about. */
 const POLL_MS = 2000;
-/** A setup counts as this message's when it started this long before it,
- *  at most: the clocks of Desk and its hub differ a little. */
+/** How long between asks at most, while the hub keeps failing. */
+const MOST_MS = 60_000;
+/** How far the clocks of Desk and its hub may differ. */
 const SKEW_MS = 5000;
+/** How long the hub keeps a setup: its `SETUP_TTL`. */
+export const SETUP_LIFE_MS = 60 * 60_000;
+/** How long a turn's setups are waited for before the hub lists any:
+ *  one the hub refused never shows. */
+const FIRST_SHOW_MS = 60_000;
+/** Times sending "I'm signed in" is tried while the chat reconnects. */
+const SEND_TRIES = 20;
+const SEND_EVERY_MS = 150;
 
 /** Whether a setup has nothing left to show changing. */
 const settled = (s: Setup): boolean =>
   (!!s.connected?.onFor || s.steps.every((x) => x.state === "done")) || s.steps.some((x) => x.state === "failed");
 
-/** The setups an agent's message started (`count` of them, from `at`),
- *  as the hub keeps them: never what the agent wrote. Shown while they
- *  run, and once they are done. */
+/** The setups an agent's message started (`count` of them, between
+ *  `since` and `until`), as the hub keeps them: never what the agent
+ *  wrote. Shown while they run, and once they are done. */
 export function SetupCards({
   origin,
-  at,
+  since,
+  until,
   count,
   api: given,
   showPage: givenShow,
 }: {
   origin: FileHome;
-  at: string;
+  /** When its turn started, at the latest: its first setup's call, else
+   *  the message before it. */
+  since: string;
+  /** When the next message came, where one has. */
+  until?: string;
   count: number;
   api?: ConnectionsApi;
   /** Brings the agent's page to the front; false when it can't. */
@@ -47,29 +62,46 @@ export function SetupCards({
     if (!api) return;
     let stop = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const from = Date.parse(at) - SKEW_MS;
+    const from = Date.parse(since) - SKEW_MS;
+    const to = until ? Date.parse(until) + SKEW_MS : Infinity;
+    // Past this the hub keeps none of them.
+    const gone = from + SKEW_MS + SETUP_LIFE_MS + SKEW_MS;
+    const began = Date.now();
+    let failures = 0;
     const tick = async () => {
+      let wait = POLL_MS;
       try {
         const all = await api.setups(origin.agent);
         if (stop || !live.current) return;
+        failures = 0;
         const mine = all
-          .filter((s) => Date.parse(s.startedAt) >= from)
+          .filter((s) => {
+            const t = Date.parse(s.startedAt);
+            return t >= from && t <= to;
+          })
           .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))
           .slice(0, count);
         setSetups(mine);
-        if (mine.length > 0 && mine.every(settled)) return;
-      } catch {
-        // A hub without setups shows none; one that failed is asked again.
+        // Done: every one shown has settled, and the rest the turn started
+        // haven't come by now (the hub refused them, or keeps them no more).
+        const waited = Date.now() - began >= FIRST_SHOW_MS;
+        if (mine.every(settled) && (waited || (mine.length > 0 && mine.length >= count))) return;
+      } catch (e) {
         if (stop) return;
+        // A hub without setups shows none.
+        if (e instanceof HubError && e.status === 404) return;
+        failures += 1;
+        wait = Math.min(POLL_MS * 2 ** failures, MOST_MS);
       }
-      timer = setTimeout(() => void tick(), POLL_MS);
+      if (Date.now() + wait > gone) return;
+      timer = setTimeout(() => void tick(), wait);
     };
     void tick();
     return () => {
       stop = true;
       if (timer) clearTimeout(timer);
     };
-  }, [api, origin.agent, at, count]);
+  }, [api, origin.agent, since, until, count]);
 
   if (!api || !setups || setups.length === 0) return null;
   return (
@@ -113,7 +145,11 @@ export function SetupCard({
 }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const agentName = useChat((c) => c.roster.find((a) => a.hubId === origin.hub && a.id === origin.agent)?.name) ?? "The agent";
+  /** The hub has it signed in, but the agent wasn't told. */
+  const [untold, setUntold] = useState(false);
+  const live = useLive();
+  const named = useChat((c) => c.roster.find((a) => a.hubId === origin.hub && a.id === origin.agent)?.name);
+  const agentName = named ?? "The agent";
   const title = `${s.serviceName} · ${s.name}`;
   const at = s.steps.findIndex((x) => x.state !== "done");
   const n = s.steps.length;
@@ -125,17 +161,42 @@ export function SetupCard({
     if (!shown) useUi.getState().openSettings("browser");
   };
 
+  /** Tells the agent, trying again while its chat reconnects. */
+  const tell = async (): Promise<boolean> => {
+    for (let n = 0; n < SEND_TRIES; n++) {
+      if (useChat.getState().send(`${origin.hub}/${origin.agent}`, SIGNED_IN)) return true;
+      await new Promise((r) => setTimeout(r, SEND_EVERY_MS));
+      if (!live.current) return false;
+    }
+    return false;
+  };
+
   const signedIn = async () => {
     setBusy(true);
     setProblem(null);
     try {
       onChange(await api.signedIn(s.id));
-      useChat.getState().send(`${origin.hub}/${origin.agent}`, "I’m signed in.");
-    } catch {
-      setProblem("That setup has ended. Ask again to start over.");
-    } finally {
+    } catch (e) {
+      setProblem(
+        e instanceof HubError && (e.status === 404 || e.status === 409)
+          ? "That setup has ended. Ask again to start over."
+          : "Desk couldn’t be reached just now. Try again in a moment.",
+      );
       setBusy(false);
+      return;
     }
+    const told = await tell();
+    if (!live.current) return;
+    setUntold(!told);
+    setBusy(false);
+  };
+
+  const tellAgain = async () => {
+    setBusy(true);
+    const told = await tell();
+    if (!live.current) return;
+    setUntold(!told);
+    setBusy(false);
   };
 
   return (
@@ -167,11 +228,6 @@ export function SetupCard({
                       Already signed in
                     </button>
                   </span>
-                  {problem && (
-                    <span className="small state-blocked" role="alert">
-                      {problem}
-                    </span>
-                  )}
                 </span>
               </li>
             ) : (
@@ -187,6 +243,19 @@ export function SetupCard({
             ),
           )}
         </ol>
+        {problem && (
+          <p className="small state-blocked" role="alert">
+            {problem}
+          </p>
+        )}
+        {untold && (
+          <p className="small state-blocked" role="alert">
+            Desk couldn’t tell {named ?? "the agent"} you’re signed in.{" "}
+            <button type="button" className="link small" disabled={busy} onClick={() => void tellAgain()}>
+              Tell {named ?? "the agent"}
+            </button>
+          </p>
+        )}
         {s.steps.some((x) => x.state === "failed") && (
           <p className="small state-blocked">Nothing was kept. Ask the agent to try again, or connect it yourself in Settings → Connections.</p>
         )}
@@ -212,6 +281,9 @@ export function SetupCard({
   );
 }
 
+/** What Desk tells the agent once the person says they're signed in. */
+export const SIGNED_IN = "I’m signed in.";
+
 /** What Desk says while a step waits on the person to sign in. */
 export const WAITING_SAYS =
   "Your password stays with you: Desk never reads or types it. The page is open in your browser, and the agent carries on the moment you’re in.";
@@ -219,3 +291,15 @@ export const WAITING_SAYS =
 /** How many setups a turn's tools started. */
 export const setupsStarted = (tools: readonly { name?: string; tool?: string }[] | undefined): number =>
   (tools ?? []).filter((t) => (t.name ?? t.tool) === "connections.setup").length;
+
+/** When a message's setups started, at the latest: its first setup call,
+ *  timed live; else when the message before it came (a kept message's own
+ *  time is when its turn ended); else an hour before it, as long as the
+ *  hub keeps a setup. */
+export const setupsSince = (m: { at: string; tools?: readonly { name: string; startedAt?: number }[] }, before?: string): string => {
+  const calls = (m.tools ?? []).filter((t) => t.name === "connections.setup" && t.startedAt !== undefined).map((t) => t.startedAt!);
+  if (calls.length > 0) return new Date(Math.min(...calls)).toISOString();
+  if (before && !Number.isNaN(Date.parse(before))) return before;
+  const at = Date.parse(m.at);
+  return Number.isNaN(at) ? new Date(0).toISOString() : new Date(at - SETUP_LIFE_MS).toISOString();
+};
