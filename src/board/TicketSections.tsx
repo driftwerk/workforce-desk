@@ -17,7 +17,7 @@ import {
   ProjectIcon,
   StateGlyph,
   TypeGlyph,
-  seriesOf,
+  seriesColour,
   stateShape,
   type PrLook,
 } from "./cardFacts";
@@ -398,7 +398,7 @@ function OwnLink({ link: l }: { link: TicketLink }) {
 export function Dotted({ name }: { name: string }) {
   return (
     <span className="board-label ticket-dotted">
-      <i style={{ background: `var(--series${seriesOf(name)})` }} aria-hidden="true" />
+      <i style={{ background: seriesColour(name) }} aria-hidden="true" />
       {name}
     </span>
   );

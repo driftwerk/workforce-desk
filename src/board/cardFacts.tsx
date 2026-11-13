@@ -188,6 +188,12 @@ export function PriorityBars({ rank, name }: { rank: number; name?: string }) {
   );
 }
 
+/** The chart series' colours, slot by slot. */
+const SERIES = ["var(--series1)", "var(--series2)", "var(--series3)", "var(--series4)", "var(--series5)", "var(--series6)", "var(--series7)", "var(--series8)"] as const;
+
+/** The colour of the series `name` takes. */
+export const seriesColour = (name: string): string => SERIES[seriesOf(name) - 1]!;
+
 /** The chart series a name takes, 1 to 8, the same every time. */
 export const seriesOf = (name: string): number => {
   let h = 2166136261;
@@ -203,7 +209,7 @@ export const seriesOf = (name: string): number => {
 export function GroupChip({ name, title }: { name: string; title: string }) {
   return (
     <span className="board-group" title={title}>
-      <i className="board-group-dot" style={{ background: `var(--series${seriesOf(name)})` }} aria-hidden="true" />
+      <i className="board-group-dot" style={{ background: seriesColour(name) }} aria-hidden="true" />
       <span>{name}</span>
     </span>
   );
@@ -213,7 +219,7 @@ export function GroupChip({ name, title }: { name: string; title: string }) {
 export function LabelChip({ name }: { name: string }) {
   return (
     <span className="board-label">
-      <i style={{ background: `var(--series${seriesOf(name)})` }} aria-hidden="true" />
+      <i style={{ background: seriesColour(name) }} aria-hidden="true" />
       {name}
     </span>
   );
