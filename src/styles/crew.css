@@ -1294,6 +1294,7 @@ button.card-icon:hover:not(:disabled) {
 .crop-view img {
   position: absolute;
   max-width: none;
+  -webkit-user-select: none;
   user-select: none;
   pointer-events: none;
 }
