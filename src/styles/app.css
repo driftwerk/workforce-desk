@@ -3263,7 +3263,7 @@ button.thread-bar:hover {
   margin-top: 8px;
   padding: 6px 10px;
   border: 0;
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius);
   background: none;
   color: var(--text);
   font-weight: 600;
@@ -3302,6 +3302,9 @@ button.thread-bar:hover {
 .gi .dot-state.dot-blocked {
   background: var(--blocked);
   border-color: var(--blocked);
+}
+.gi .gi-meta.state-blocked {
+  font-weight: 500;
 }
 .gi .dot-state.dot-working {
   background: var(--working);

@@ -493,30 +493,68 @@ describe("grid rows", () => {
     expect(gridRow("Grid 2").getAttribute("aria-current")).toBe("true");
   });
 
-  it("says where a grid in its own window is", () => {
+  it("says where a grid in its own window is, and when it's away", () => {
     act(() => {
       const g = useGrids.getState().grids[MAIN_GRID]!;
       useGrids.setState({ grids: { [MAIN_GRID]: { ...g, placement: { kind: "window", mode: "fill", monitor: { id: "m", name: "Studio Display", origin: { x: 0, y: 0 } } as never } } }, open: { [MAIN_GRID]: true } });
     });
     sidebar();
-    expect(gridRow("Main").querySelector(".gi-meta")!.textContent).toBe("quiet · Studio Display");
+    expect(gridRow("Main").querySelector(".gi-meta")!.textContent).toBe("quiet");
+    expect(gridRow("Main").title).toMatch(/^In Studio Display\. /);
+    act(() => useGrids.setState({ open: {} }));
+    expect(gridRow("Main").querySelector(".gi-meta")!.textContent).toBe("quiet · away");
   });
 
-  it("folds, remembered, and folded still says what's for you in its grids", async () => {
-    const { useUnread } = await import("../unread/summary");
-    useChat.setState({
-      hubs: [{ id: "local", label: "This computer", url: "", local: true, revision: "" }],
-      roster: [{ hubId: "local", id: "allan", name: "Allan", model: null, provider: null, isDefault: false }],
-    });
-    useUnread.setState({ dms: { "local/allan": { count: 3, for_you: 2, first: null, last: null, capped: false } } });
-    act(() => {
-      const g = useGrids.getState().grids[MAIN_GRID]!;
-      useGrids.setState({ grids: { [MAIN_GRID]: { ...g, panes: [{ ...g.panes[0]!, content: { kind: "agent", agent: "local/allan" } }, ...g.panes.slice(1)] } } });
-    });
+  it("shows a grid from the Dashboard: an away one brought back, one in its own window brought forward", async () => {
+    const windows = await import("../grids/windows");
+    const forward = vi.spyOn(windows, "focusGridWindow").mockResolvedValue();
+    const place = (open: boolean) =>
+      act(() => {
+        const g = useGrids.getState().grids[MAIN_GRID]!;
+        useGrids.setState({ grids: { [MAIN_GRID]: { ...g, placement: { kind: "window", mode: "fill", monitor: { id: "m", name: "Studio Display", origin: { x: 0, y: 0 } } as never } } }, open: open ? { [MAIN_GRID]: true } : {} });
+      });
+    place(true);
+    useDesk.setState({ view: "rooms" });
+    sidebar();
+    fireEvent.click(gridRow("Main"));
+    expect(forward).toHaveBeenCalledWith(MAIN_GRID);
+    expect(useDesk.getState().view).toBe("rooms");
+    // Away: shown here, from wherever you were.
+    place(false);
+    act(() => useDesk.setState({ view: "floor" }));
+    fireEvent.click(gridRow("Main"));
+    expect(useGrids.getState().grids[MAIN_GRID]!.placement.kind).toBe("main");
+    expect(useDesk.getState().view).toBe("grids");
+    // Moved back from its menu, from the Dashboard, it shows.
+    place(false);
+    act(() => useDesk.setState({ view: "floor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Main options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move back to the main window" }));
+    expect(useDesk.getState().view).toBe("grids");
+    forward.mockRestore();
+  });
+
+  it("says nothing of no grids until it knows", () => {
+    useGrids.setState({ ready: false, order: [], grids: {} });
+    sidebar();
+    expect(within(screen.getByRole("region", { name: "Grids" })).queryByText("No grids yet")).toBeNull();
+    act(() => useGrids.setState({ ready: true }));
+    expect(within(screen.getByRole("region", { name: "Grids" })).getByText("No grids yet")).toBeTruthy();
+  });
+
+  it("folds, remembered, and folded still says what waits on you in its grids, each thing once", () => {
+    useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "", local: true, revision: "" }] });
+    let two = "";
+    act(() => void (two = createGrid()));
+    useDesk.setState({ sessions: { a: s("a", "blocked"), b: s("b", "asking"), c: s("c", "working") } });
+    show(MAIN_GRID, ["a", "c"]);
+    show(two, ["b"]);
+    // a waits on you twice over (blocked, and a need on the Floor): once.
+    useFloor.setState({ hubs: { local: ready(floorView({ needs: [need("q-1", asker("a"))] })) } });
     sidebar();
     const toggle = within(screen.getByRole("region", { name: "Grids" })).getByRole("button", { name: /^Grids/ });
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
-    expect(gridRow("Main").querySelector(".gi-meta")!.textContent).toBe("2 need you");
+    expect(gridRow("Main").querySelector(".gi-meta")!.textContent).toBe("1 needs you");
     fireEvent.click(toggle);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
     expect(screen.queryByRole("list", { name: "Grids" })).toBeNull();
@@ -526,18 +564,54 @@ describe("grid rows", () => {
     reloadSections();
     sidebar();
     expect(screen.queryByRole("list", { name: "Grids" })).toBeNull();
-    useUnread.setState({ dms: {} });
+    useFloor.setState({ hubs: {} });
   });
 
-  it("opens a folded Grids when a grid is shown from elsewhere", () => {
+  it("opens a folded Grids when a grid is shown from elsewhere", async () => {
+    const { revealIn } = await import("../grids/windows");
+    useDesk.setState({ sessions: { a: s("a", "working") } });
+    show(MAIN_GRID, ["a"]);
+    useDesk.setState({ view: "floor" });
     sidebar();
     fireEvent.click(within(screen.getByRole("region", { name: "Grids" })).getByRole("button", { name: /^Grids/ }));
-    let other = "";
+    expect(screen.queryByRole("list", { name: "Grids" })).toBeNull();
+    act(() => void revealIn(MAIN_GRID, { kind: "session", sessionId: "a" }));
+    expect(useDesk.getState().view).toBe("grids");
+    expect(gridRow("Main").getAttribute("aria-current")).toBe("true");
+  });
+
+  it("unfolds Grids to show a grid made from its + while folded", () => {
+    sidebar();
+    fireEvent.click(within(screen.getByRole("region", { name: "Grids" })).getByRole("button", { name: /^Grids/ }));
+    fireEvent.click(screen.getByRole("button", { name: "New grid" }));
+    expect(gridRow("Grid 2").getAttribute("aria-current")).toBe("true");
+  });
+
+  it("stays folded when Desk starts on a grid, as it was left", () => {
+    localStorage.setItem(SECTIONS_KEY, JSON.stringify({ grids: true }));
+    reloadSections();
+    useDesk.setState({ view: "grids" });
+    sidebar();
+    act(() => useGrids.setState({ active: MAIN_GRID }));
+    expect(screen.queryByRole("list", { name: "Grids" })).toBeNull();
+  });
+
+  it("counts a session once however many panes show it, a machine's in its terminal too", () => {
+    const remote = (state: Session["state"]) =>
+      ({ ...s("t1", state), machine: "mac2", terminalId: "term1" }) as Session;
     act(() => {
-      other = createGrid();
-      useDesk.getState().setView("grids");
+      const g = useGrids.getState().grids[MAIN_GRID]!;
+      const panes = [
+        { id: "p1", content: { kind: "session" as const, sessionId: "mac2/t1" }, rect: { x: 0, y: 0, w: 1, h: 1 } },
+        { id: "p2", content: { kind: "terminal" as const, terminalId: "term1", machine: "mac2" }, rect: { x: 1, y: 0, w: 1, h: 1 } },
+      ];
+      useGrids.setState((st) => ({ grids: { ...st.grids, [MAIN_GRID]: { ...g, panes } } }));
     });
-    expect(gridRow(useGrids.getState().grids[other]!.name).getAttribute("aria-current")).toBe("true");
+    useDesk.setState({ sessions: { "mac2/t1": remote("working") } });
+    sidebar();
+    expect(gridRow("Main").querySelector(".gi-meta")!.textContent).toBe("1 working");
+    act(() => useDesk.setState({ sessions: { "mac2/t1": remote("blocked") } }));
+    expect(gridRow("Main").querySelector(".gi-meta")!.textContent).toBe("1 needs you");
   });
 });
 
@@ -689,7 +763,10 @@ describe("unread in the sidebar", () => {
       useGrids.setState({ grids: { [MAIN_GRID]: { ...g, panes: [{ ...g.panes[0]!, content: { kind: "agent", agent: "local/allan" } }, ...g.panes.slice(1)] } } });
     });
     sidebar();
-    expect(within(rowOf("Main")).getByText("2 need you")).toBeTruthy();
+    // What's new in a grid's panes that isn't a need is its dot; the row's
+    // words say what waits on you.
+    expect(rowOf("Main").querySelector(".side-dot")).not.toBeNull();
+    expect(rowOf("Main").querySelector(".gi-meta")!.textContent).toBe("quiet");
   });
 
   it("opens the Unread page from its row, which counts everything once", async () => {

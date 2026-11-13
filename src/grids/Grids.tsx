@@ -15,7 +15,7 @@ import { closeContent } from "./terminals";
 import { terminalContent } from "./engine";
 import { bringBack, detach, focusGridWindow, isAway } from "./windows";
 import type { Grid } from "./model";
-import { GridsMarks, useGridsBadge } from "../unread/GridMarks";
+import { GridsMarks, summaryOf, useGridSummaries } from "../unread/GridMarks";
 import { Marks } from "../unread/Marks";
 import { needsYou } from "../ui/Badge";
 import { useDesk } from "../hub/store";
@@ -42,7 +42,14 @@ export function GridsMain() {
     return (
       <main className={`grids grids-none ${over ? "drop-in" : ""}`} aria-label="Grids" data-drop-new-grid="">
         <p className="muted">{dragging ? "Drop it here for a new grid." : none ? "No grids yet" : "Every grid is in a window of its own."}</p>
-        <button type="button" className="btn btn-signal" onClick={() => createGrid()}>
+        <button
+          type="button"
+          className="btn btn-signal"
+          onClick={() => {
+            createGrid();
+            setSectionOpen("grids", true);
+          }}
+        >
           New grid
         </button>
       </main>
@@ -71,10 +78,10 @@ export function GridsMain() {
   );
 }
 
-/** Where a grid in a window of its own is, for its row: its monitor, or
- *  away; none for one shown here. */
+/** Where a grid in a window of its own is, for its row's tooltip: its
+ *  monitor, or away; none for one shown here. */
 const whereIs = (g: Grid, open: Record<string, true>): string | null =>
-  g.placement.kind === "main" ? null : `${g.placement.monitor?.name ?? "its own window"}${isAway(g, open) && g.placement.monitor ? " · away" : ""}`;
+  g.placement.kind === "main" ? null : `In ${g.placement.monitor?.name ?? "its own window"}${isAway(g, open) && g.placement.monitor ? ", away" : ""}`;
 
 /** What a grid row says of its panes: what waits on you there, else how
  *  many work, else that it's quiet. */
@@ -83,6 +90,10 @@ export const gridState = (needs: number, working: number): { look: "blocked" | "
 
 type RowProps = {
   id: string;
+  /** What waits on you there, how many work, and whether there's news. */
+  needs: number;
+  working: number;
+  unread: boolean;
   lineBefore: boolean;
   editing: boolean;
   hint: string;
@@ -96,19 +107,17 @@ type RowProps = {
 
 /** One grid's row: it reads its own grid and what its panes are doing, so
  *  a session changing in one grid draws only that grid's row again. */
-const GridRow = memo(function GridRow({ id, lineBefore, editing, hint, register, onOpen, onRenamed, onStartRename, onNudge, onMenu }: RowProps) {
+const GridRow = memo(function GridRow({ id, needs, working, unread, lineBefore, editing, hint, register, onOpen, onRenamed, onStartRename, onNudge, onMenu }: RowProps) {
   const g = useGrids((s) => s.grids[id]);
   const active = useGrids((s) => s.active === id);
   const inGrids = useDesk((s) => s.view === "grids");
   const on = active && inGrids && g?.placement.kind === "main";
   const where = useGrids((s) => (s.grids[id] ? whereIs(s.grids[id]!, s.open) : null));
+  const away = useGrids((s) => !!s.grids[id] && isAway(s.grids[id]!, s.open) && s.grids[id]!.placement.kind === "window" && !!s.grids[id]!.placement.monitor);
   const paneOver = useGridDrag((s) => s.over?.kind === "row" && s.over.gridId === id);
-  const counts = useGridCounts(g);
-  const badge = useGridsBadge(g ? [g] : []);
+  const registerRow = useCallback((el: HTMLElement | null) => register(id, el), [register, id]);
   if (!g) return null;
-  // What's for you there (an agent asking, a mention) and the sessions
-  // stopped on you, as the grid's own header counts them.
-  const state = gridState(Math.max(badge.count, counts.needsYou), counts.working);
+  const state = gridState(needs, working);
   return (
     <SortRow
       id={id}
@@ -123,20 +132,20 @@ const GridRow = memo(function GridRow({ id, lineBefore, editing, hint, register,
       name={g.name}
       meta={
         <span className={`gi-meta small ${state.look === "blocked" ? "state-blocked" : "faint"}`}>
-          {where ? `${state.says} · ${where}` : state.says}
+          {away ? `${state.says} · away` : state.says}
         </span>
       }
-      title="Drag to reorder · double-click to rename"
+      title={`${where ? `${where}. ` : ""}Drag to reorder · double-click to rename`}
       describedBy={hint}
       more={`${g.name} options`}
       wrap={{ "data-drop-grid-row": id }}
-      register={(el) => register(id, el)}
+      register={registerRow}
       onOpen={() => onOpen(g)}
       onStartRename={() => onStartRename(id)}
       onNudge={(by) => onNudge(id, by)}
       onMenu={(at, from) => onMenu(id, at, from)}
     >
-      {badge.dot && <Marks badge={{ count: 0, dot: true }} />}
+      {unread && <Marks badge={{ count: 0, dot: true }} />}
     </SortRow>
   );
 });
@@ -147,7 +156,8 @@ const GridRow = memo(function GridRow({ id, lineBefore, editing, hint, register,
  *  for the rest. A pane dragged onto a row goes to that grid. */
 export function GridsSection() {
   const ids = useGrids(useShallow((s) => s.order.filter((id) => s.grids[id])));
-  const active = useGrids((s) => s.active);
+  const ready = useGrids((s) => s.ready);
+  const summaries = useGridSummaries();
   const [menu, setMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [deleting, setDeleting] = useState<string | null>(null);
@@ -155,15 +165,6 @@ export function GridsSection() {
   const justDragged = useRef(false);
   const rows = useRef(new Map<string, HTMLElement>());
   const hint = useId();
-  // A grid shown from elsewhere (a pane revealed, a new terminal) opens
-  // Grids, so its row shows; once each time, so it can be closed again.
-  const shownBefore = useRef(active);
-  const shown = useDesk((s) => s.view === "grids");
-  useEffect(() => {
-    if (!shown || active === shownBefore.current) return;
-    shownBefore.current = active;
-    if (active) setSectionOpen("grids", true);
-  }, [active, shown]);
   const grid = (id: string) => useGrids.getState().grids[id];
   const choose = useCallback((g: Grid) => {
     if (justDragged.current) return;
@@ -172,7 +173,6 @@ export function GridsSection() {
     // Its monitor is away: shown here until it's back (or for good).
     if (g.placement.kind !== "main") bringBack(g.id);
     else setActive(g.id);
-    shownBefore.current = g.id;
     useDesk.getState().setView("grids");
   }, []);
   // Its own window closes first, so it can't write the grid back. The
@@ -212,6 +212,7 @@ export function GridsSection() {
           onSelect: () => {
             bringBack(g.id);
             useDesk.getState().setView("grids");
+            setSectionOpen("grids", true);
           },
         },
     { kind: "separator" },
@@ -228,7 +229,7 @@ export function GridsSection() {
         createGrid();
         useDesk.getState().setView("grids");
       }}
-      marks={<GridsMarks />}
+      marks={<GridsMarks all={summaries} />}
     >
       <span id={hint} className="sr-only">
         Alt+Up and Alt+Down move it. F2 renames. Shift+F10 opens its menu.
@@ -244,11 +245,12 @@ export function GridsSection() {
           moveGrid(id, before);
           sayWhere(id);
         }}
-        empty={<li className="grp-empty faint small">No grids yet</li>}
+        empty={ready ? <li className="grp-empty faint small">No grids yet</li> : null}
         row={(id, lineBefore) => (
           <GridRow
             key={id}
             id={id}
+            {...summaryOf(summaries, id)}
             lineBefore={lineBefore}
             editing={editing === id}
             hint={hint}
