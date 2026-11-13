@@ -3320,7 +3320,7 @@ button.thread-bar:hover {
   display: flex;
   flex-direction: column;
   gap: 28px;
-  padding: 40px 48px 28px;
+  padding: 40px 48px;
   overflow-y: auto;
 }
 .dash-head {
@@ -3345,8 +3345,11 @@ button.thread-bar:hover {
 .dash-line {
   margin: 0;
 }
-/* Add a widget, until widgets come: a quiet raised pill. */
-.dash-add {
+/* Add a widget, until widgets come: a quiet raised pill, disabled at full
+   strength (its label says it's to come). */
+.btn.dash-add,
+.btn.dash-add:disabled {
+  opacity: 1;
   min-height: 36px;
   padding: 6px 14px;
   border: 0;

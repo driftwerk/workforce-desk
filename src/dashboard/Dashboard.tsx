@@ -67,7 +67,7 @@ export function Dashboard({ onNewSession }: { onNewSession: () => void }) {
           <h1 className="display-lg">Dashboard</h1>
           <Summary />
         </div>
-        <button type="button" className="btn btn-ghost dash-add" disabled title="Widgets are coming soon">
+        <button type="button" className="btn dash-add" disabled title="Widgets are coming soon">
           + Add a widget · soon
         </button>
       </header>
