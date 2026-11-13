@@ -977,28 +977,50 @@ export interface DeskExtras {
 /** A decision of the boss's, said as its row says it. */
 export interface DecisionLine {
   id: string;
-  /** What it did ("told it to wait for green CI"). */
+  /** What it did ("told it to wait for green CI"), as one line. */
   text: string;
+  /** What it did, short, when the hub says it apart from the message it
+   *  sent; `text` otherwise. */
+  action?: string | null;
   /** Why, as said to you. */
   why?: string;
+  /** The message it sent, in full, when it sent one: shown on asking. */
+  message?: string | null;
+  /** `left_alone`: it chose to do nothing ("let it wait"). */
+  kind?: "acted" | "left_alone" | null;
   /** The button that undoes it; none when it can't be undone. */
   undo?: "undo" | "correct" | "stop" | "resume" | null;
   undone?: boolean;
   /** The preference it applied, by id. */
   preference?: string | null;
+  /** When it was decided (a newer hub says): its line shows the time. */
+  at?: string | null;
 }
 
 /** Something the boss asks of you, as its message carries it. */
 export interface MentionedItem {
   itemId: string;
   recommendation?: string | null;
-  options?: string[];
+  options?: AnswerOption[];
+  /** The question in one line, when the hub says it apart. */
+  question?: string | null;
+  /** What the question is about, one by one. */
+  items?: NeedItem[];
+  /** What doesn't wait on it. */
+  notBlocking?: string | null;
   /** The kind of case your answer would settle from then on. */
   generalizes?: string | null;
   /** Set aside after it was said three times: still answered or dropped
    *  from here. */
   parked?: boolean;
 }
+
+/** An answer to what the boss asks: its words, or (from a newer hub)
+ *  its words and whether it is the one recommended. */
+export type AnswerOption = string | { label: string; recommended?: boolean };
+
+/** One of what a question is about: its words, or a lead and the rest. */
+export type NeedItem = string | { text: string; detail?: string | null };
 
 /** A PR, ticket, commit or deploy a session's work names. */
 export interface WorkRef {
@@ -1025,7 +1047,10 @@ export interface WaitingItem {
   age?: string;
   holdingUp?: string | null;
   recommendation?: string | null;
-  options?: string[];
+  options?: AnswerOption[];
+  question?: string | null;
+  items?: NeedItem[];
+  notBlocking?: string | null;
 }
 
 /** A boss's update: each session that moved, what it decided, what it
