@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Ticket, TicketComment, TicketFile } from "../hub/types";
 import { ticket, YOU } from "./testing";
@@ -14,7 +14,8 @@ const hub = vi.hoisted(() => ({
   comments: vi.fn(),
   comment: vi.fn(),
 }));
-vi.mock("./ticketView", async (real) => ({ ...(await real<typeof import("./ticketView")>()), localTicketView: () => hub }));
+const local = vi.hoisted(() => ({ known: true }));
+vi.mock("./ticketView", async (real) => ({ ...(await real<typeof import("./ticketView")>()), localTicketView: () => (local.known ? hub : null) }));
 
 const sent = vi.hoisted(() => ({ uploads: [] as File[][], messages: [] as { key: string; text: string; opts: unknown }[], opened: [] as string[] }));
 vi.mock("../attachments/upload", () => ({
@@ -26,10 +27,13 @@ vi.mock("../attachments/upload", () => ({
 vi.mock("../overview/people", () => ({ localKey: (id: string) => `local/${id}`, openLocalDm: (id: string) => sent.opened.push(id) }));
 
 import { useChat } from "../chat/store";
+import { useDesk } from "../hub/store";
 import { useOverview } from "../overview/store";
 import { askDeskAbout, FileViewer } from "./FileViewer";
-import { TicketComments, whereSaid } from "./TicketComments";
-import { TicketFiles, useUploads } from "./TicketFiles";
+import { useBoard } from "./store";
+import { ACME } from "./testing";
+import { onBehalfOf, TicketComments, whereSaid } from "./TicketComments";
+import { forgetFetchedFiles, KEPT, TicketFiles, useFileUrl, useUploads } from "./TicketFiles";
 import { useFileDrop } from "../attachments/Compose";
 import { fileKind, fileLine } from "./ticketView";
 
@@ -67,6 +71,8 @@ const synced = (over: Partial<Ticket> = {}): Ticket =>
 
 beforeEach(() => {
   Object.values(hub).forEach((f) => f.mockReset());
+  local.known = true;
+  forgetFetchedFiles();
   hub.fileBlob.mockImplementation(async () => new Blob([PNG], { type: "image/png" }));
   hub.comments.mockResolvedValue({ comments: [], problem: null });
   sent.uploads.length = 0;
@@ -100,16 +106,42 @@ describe("a ticket's files", () => {
     const viewer = await screen.findByRole("dialog", { name: "one.png" });
     expect(viewer.textContent).toContain("1 of 3 · ACME-1 · 240 KB");
     // The strip holds every file but the link.
-    expect(screen.getAllByRole("tab")).toHaveLength(3);
+    const strip = screen.getByRole("group", { name: "Files" });
+    expect(within(strip).getAllByRole("button")).toHaveLength(3);
+    expect(within(strip).getByRole("button", { name: "one.png" }).getAttribute("aria-current")).toBe("true");
     fireEvent.click(screen.getByRole("button", { name: "Next" }));
     expect(await screen.findByRole("dialog", { name: "two.png" })).toBeTruthy();
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "ArrowRight" });
     expect(await screen.findByRole("dialog", { name: "spec.pdf" })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Previous" }));
     expect(await screen.findByRole("dialog", { name: "two.png" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("tab", { name: "one.png" }));
+    fireEvent.click(within(strip).getByRole("button", { name: "one.png" }));
     expect(await screen.findByRole("dialog", { name: "one.png" })).toBeTruthy();
     await waitFor(() => expect(document.querySelector(".file-viewer-image")).not.toBeNull());
+  });
+
+  it("is drawn on the page itself, over the ticket's panel, and closes with Escape", async () => {
+    const closed = vi.fn();
+    const t = synced({ files: [file("one")] });
+    render(
+      <div className="ticket-panel">
+        <FileViewer ticket={t} files={t.files!} at={0} onAt={() => {}} onClose={closed} />
+      </div>,
+    );
+    const viewer = await screen.findByRole("dialog", { name: "one.png" });
+    expect(viewer.parentElement).toBe(document.body);
+    expect(viewer.contains(document.activeElement)).toBe(true);
+    fireEvent.keyDown(document.activeElement!, { key: "Escape" });
+    expect(closed).toHaveBeenCalled();
+  });
+
+  it("never draws a PDF in place: it says to save it", async () => {
+    hub.fileBlob.mockImplementation(async () => new Blob(["%PDF-1.7"], { type: "application/pdf" }));
+    const t = synced({ files: [file("spec", { name: "spec.pdf", mediaType: "application/pdf" })] });
+    render(<FileViewer ticket={t} files={t.files!} at={0} onAt={() => {}} onClose={() => {}} />);
+    expect(await screen.findByText(/Save it to open it/)).toBeTruthy();
+    expect(document.querySelector("iframe")).toBeNull();
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("never draws a file in place as a picture unless its bytes are one", async () => {
@@ -120,11 +152,23 @@ describe("a ticket's files", () => {
     expect(document.querySelector(".file-viewer-image")).toBeNull();
   });
 
-  it("adds files to a ticket of your own, dropped (as the shared drop hook gives them) or picked, and takes one off", async () => {
-    hub.upload.mockResolvedValue(file("new", { source: "upload" }));
-    hub.removeFile.mockResolvedValue(undefined);
-    const t = ticket(2, { files: [file("mine", { source: "upload" })] });
+  it("adds files to a ticket of your own, dropped (as the shared drop hook gives them) or picked, and takes one off: the list shows each", async () => {
+    const mine = file("mine", { source: "upload" });
+    const shot = new File([PNG], "shot.png", { type: "image/png" });
+    const added = file("shot", { source: "upload", name: "shot.png" });
+    let now = ticket(2, { files: [mine] });
+    hub.upload.mockImplementation(async () => {
+      now = { ...now, files: [...now.files!, added] };
+      return added;
+    });
+    hub.removeFile.mockImplementation(async () => {
+      now = { ...now, files: now.files!.filter((f) => f.id !== "mine") };
+    });
+    // The hub's own answer when the ticket is read again, with no event heard.
+    useDesk.setState({ hub: { ticket: vi.fn(async () => now) } as never });
+    useBoard.setState({ tickets: { t2: now } });
     function Dropping() {
+      const t = useBoard((s) => s.tickets.t2!);
       const uploads = useUploads(t, () => {});
       const drop = useFileDrop((files) => void uploads.add(files));
       return (
@@ -134,12 +178,58 @@ describe("a ticket's files", () => {
       );
     }
     render(<Dropping />);
-    const shot = new File([PNG], "shot.png", { type: "image/png" });
+    expect(screen.getByText(/Attachments · 1/)).toBeTruthy();
     fireEvent.drop(screen.getByTestId("read"), { dataTransfer: { types: ["Files"], files: [shot] } });
     await waitFor(() => expect(hub.upload).toHaveBeenCalledWith("t2", shot));
+    expect(await screen.findByRole("button", { name: "Open picture: shot.png" })).toBeTruthy();
+    expect(screen.getByText(/Attachments · 2/)).toBeTruthy();
     expect(screen.getByRole("button", { name: /Add a file/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Take mine.png off" }));
     expect(hub.removeFile).toHaveBeenCalledWith("t2", "mine");
+    await waitFor(() => expect(screen.queryByRole("button", { name: "Open picture: mine.png" })).toBeNull());
+    expect(screen.getByText(/Attachments · 1/)).toBeTruthy();
+  });
+
+  it("says what went wrong with each of several files, not only the last", async () => {
+    hub.upload.mockImplementation(async (_t: string, f: File) => {
+      throw new Error(f.name === "a.png" ? "That file is empty." : "A ticket holds at most 20 files: take one off first.");
+    });
+    const said: (string | null)[] = [];
+    const t = ticket(3);
+    function Adding() {
+      const uploads = useUploads(t, (p) => said.push(p));
+      return <button type="button" onClick={() => void uploads.add([new File([PNG], "a.png"), new File([PNG], "b.png")])}>add</button>;
+    }
+    render(<Adding />);
+    fireEvent.click(screen.getByRole("button", { name: "add" }));
+    await waitFor(() => expect(said.at(-1)).toContain("b.png"));
+    expect(said.at(-1)).toContain("a.png: That file is empty.");
+    expect(said.at(-1)).toContain("b.png: A ticket holds at most 20 files");
+  });
+
+  it("keeps a picture's URL while it's drawn, past the most kept, and lets it go once it isn't", async () => {
+    const t = synced();
+    const first = file("first");
+    function Shown({ f }: { f: TicketFile }) {
+      const got = useFileUrl(t.id, f);
+      return got.url ? <img alt={f.id} src={got.url} /> : null;
+    }
+    const drawn = render(<Shown f={first} />);
+    const img = (await screen.findByRole("img", { name: "first" })) as HTMLImageElement;
+    const url = img.getAttribute("src")!;
+    // More fetched since than are kept: the first is evicted while drawn.
+    const others = render(
+      <>
+        {Array.from({ length: KEPT }, (_, i) => (
+          <Shown key={i} f={file(`more-${i}`)} />
+        ))}
+      </>,
+    );
+    await waitFor(() => expect(screen.getAllByRole("img")).toHaveLength(KEPT + 1));
+    expect(URL.revokeObjectURL).not.toHaveBeenCalledWith(url);
+    drawn.unmount();
+    await waitFor(() => expect(URL.revokeObjectURL).toHaveBeenCalledWith(url));
+    others.unmount();
   });
 
   it("asks Desk about a picture: it goes to Desk's chat as an attachment", async () => {
@@ -195,6 +285,39 @@ describe("a ticket's comments", () => {
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Hi" } });
     fireEvent.click(screen.getByRole("button", { name: "Comment" }));
     expect(await screen.findByText(/to post it/)).toBeTruthy();
+  });
+
+  it("says a comment Desk posted to its issue for you is Desk's, on your behalf", async () => {
+    const t = synced();
+    const session = { kind: "session" as const, id: "s-web", name: "acme-web" };
+    const boss = { kind: "manager" as const, id: "boss", name: "Boss" };
+    expect(onBehalfOf(comment("a", { author: { kind: "agent", name: "acme-web", on: "Desk" }, postedBy: session }), t, "Dana Kim")).toBe("Desk on behalf of Dana Kim");
+    // The boss's is said as a person's by the hub: still Desk's, for you.
+    expect(onBehalfOf(comment("b", { author: { kind: "person", name: "Boss", on: "Desk" }, postedBy: boss }), t, null)).toBe("Desk on behalf of you");
+    expect(onBehalfOf(comment("c", { author: { kind: "person", name: "You", on: "Desk" }, postedBy: YOU }), t, "Dana Kim")).toBeNull();
+    // A note that stays in Desk went nowhere for anyone.
+    expect(onBehalfOf(comment("d", { author: { kind: "agent", name: "acme-web", on: "Desk" }, postedBy: session, onlyHere: true }), t, "Dana Kim")).toBeNull();
+    expect(onBehalfOf(comment("e", { postedBy: session }), ticket(4), "Dana Kim")).toBeNull();
+
+    useBoard.setState({ boards: { [ACME.id]: { ...ACME, sync: { meName: "Dana Kim" } as never } } });
+    hub.comments.mockResolvedValue({ comments: [comment("a", { author: { kind: "agent", name: "acme-web", on: "Desk" }, postedBy: session, body: "Fixed in #12." })], problem: null });
+    const { container } = render(<TicketComments ticket={t} />);
+    await screen.findByText("Fixed in #12.");
+    expect(container.querySelector(".ticket-comment-behalf")?.textContent).toContain("Desk on behalf of Dana Kim");
+    useBoard.setState({ boards: {} });
+  });
+
+  it("says when this computer's hub isn't known yet, then reads them once it is", async () => {
+    local.known = false;
+    useChat.setState({ hubs: [] });
+    render(<TicketComments ticket={synced()} />);
+    expect(await screen.findByText("This computer's hub isn't there yet.")).toBeTruthy();
+    expect(screen.queryByText(/Comments · …/)).toBeNull();
+    local.known = true;
+    hub.comments.mockResolvedValue({ comments: [comment("a")], problem: null });
+    act(() => useChat.setState({ hubs: [{ id: "local", url: "http://127.0.0.1:1", local: true } as never] }));
+    expect(await screen.findByText(/Comments · 1/)).toBeTruthy();
+    expect(screen.queryByText("This computer's hub isn't there yet.")).toBeNull();
   });
 
   it("offers no box on a ticket kept after leaving its filter", async () => {

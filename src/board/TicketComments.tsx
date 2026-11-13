@@ -1,10 +1,12 @@
 import { RichHostProvider, RichMarkdown } from "@workforce/rich";
 import { useCallback, useEffect, useState } from "react";
+import { useChat } from "../chat/store";
 import { dayClock } from "../floor/time";
 import type { Ticket, TicketComment } from "../hub/types";
 import { DESK_RICH_HOST } from "../shell/richHost";
 import { plainError } from "../ui/plainError";
 import { SYSTEM_TITLE } from "../hub/boardSync";
+import { useBoard } from "./store";
 import { localTicketView } from "./ticketView";
 
 /** The longest comment Desk posts. */
@@ -19,15 +21,30 @@ export const whereSaid = (c: TicketComment): string | null => {
   return null;
 };
 
+/** Who a comment went to its issue for, when Desk's agent, a session or
+ *  the boss posted it there as the person: said "Desk on behalf of
+ *  <them>", never as the person's own words. Null for the person's own,
+ *  and for a note that stays in Desk. */
+export const onBehalfOf = (c: TicketComment, t: Ticket, person: string | null | undefined): string | null => {
+  const by = c.postedBy?.kind;
+  if (!by || by === "you" || by === "desk" || !t.external?.synced || c.onlyHere) return null;
+  return `Desk on behalf of ${person?.trim() || "you"}`;
+};
+
 /** A ticket's comments, read when it opens (a synced ticket's from its
  *  issue, when they're stale), kept current as you post. */
 const useComments = (t: Ticket) => {
   const [comments, setComments] = useState<TicketComment[] | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const changed = t.external?.remoteUpdatedAt;
+  // Read once this computer's hub is known, if it wasn't yet.
+  const hubKnown = useChat((s) => s.hubs.some((h) => h.local));
   const read = useCallback(() => {
     const api = localTicketView();
-    if (!api) return () => {};
+    if (!api) {
+      setProblem("This computer's hub isn't there yet.");
+      return () => {};
+    }
     let live = true;
     api.comments(t.id).then(
       (got) => {
@@ -40,7 +57,8 @@ const useComments = (t: Ticket) => {
     return () => {
       live = false;
     };
-  }, [t.id]);
+    // Read again once the hub is known.
+  }, [t.id, hubKnown]);
   // Read again when its issue changes.
   useEffect(() => read(), [read, changed]);
   return { comments, problem, setComments };
@@ -55,6 +73,7 @@ export function TicketComments({ ticket: t }: { ticket: Ticket }) {
   const [said, setSaid] = useState<string | null>(null);
   const system = t.external?.synced ? t.external.system : null;
   const writable = !t.external || (t.external.synced && !t.external.kept);
+  const person = useBoard((s) => s.boards[t.board]?.sync?.meName);
   const post = () => {
     const body = draft.trim();
     const api = localTicketView();
@@ -75,13 +94,13 @@ export function TicketComments({ ticket: t }: { ticket: Ticket }) {
   return (
     <section className="ticket-comments" aria-label="Comments">
       <h2 className="ticket-section-head">
-        Comments · {comments ? list.length : "…"}
+        Comments{comments ? ` · ${list.length}` : problem ? "" : " · …"}
         {system && <span className="ticket-section-note"> · synced with {SYSTEM_TITLE[system]}</span>}
       </h2>
       {problem && <p className="small faint ticket-comments-problem">{problem}</p>}
       <ol className="ticket-comment-list">
         {list.map((c) => (
-          <CommentRow key={c.id} comment={c} />
+          <CommentRow key={c.id} comment={c} behalf={onBehalfOf(c, t, person)} />
         ))}
       </ol>
       {writable && (
@@ -121,8 +140,9 @@ export function TicketComments({ ticket: t }: { ticket: Ticket }) {
   );
 }
 
-function CommentRow({ comment: c }: { comment: TicketComment }) {
-  const where = whereSaid(c);
+function CommentRow({ comment: c, behalf }: { comment: TicketComment; behalf: string | null }) {
+  // Posted there on the person's behalf, it's said so in place of where.
+  const where = behalf ?? whereSaid(c);
   return (
     <li className={`ticket-comment ticket-comment-${c.author.kind}${c.flagged ? " is-flagged" : ""}`}>
       <span className="ticket-comment-mark" aria-hidden="true">
@@ -131,7 +151,7 @@ function CommentRow({ comment: c }: { comment: TicketComment }) {
       <div className="ticket-comment-main">
         <div className="ticket-comment-by">
           <b>{c.author.name}</b>
-          {where && <span> · {where}</span>}
+          {where && <span className={behalf ? "ticket-comment-behalf" : undefined}> · {where}</span>}
           <span> · </span>
           <time dateTime={c.at}>{dayClock(c.at)}</time>
           {c.editedAt && <span> · edited</span>}

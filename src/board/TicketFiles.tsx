@@ -3,29 +3,43 @@ import type { Ticket, TicketFile } from "../hub/types";
 import { openUrl } from "../platform";
 import { plainError } from "../ui/plainError";
 import { FileViewer } from "./FileViewer";
+import { useBoard } from "./store";
 import { fileKind, fileLine, localTicketView, UPLOAD_MAX } from "./ticketView";
 
 /** The most files' bytes kept fetched (as `blob:` URLs) at once. */
-const KEPT = 48;
+export const KEPT = 48;
 
 type Fetched = { blob: Blob; url: string };
 
+/** A fetch, in flight or settled, and how many cards and viewers draw its
+ *  `blob:` URL now. */
+interface Kept {
+  fetched: Promise<Fetched>;
+  users: number;
+  evicted: boolean;
+}
+
 /** Fetches in flight and settled, by ticket, file and size, least recently
  *  used first: a card re-rendered, or a file opened after its card drew it,
- *  isn't fetched again. A failure isn't kept, so it can be tried again. */
-const kept = new Map<string, Promise<Fetched>>();
+ *  isn't fetched again. A failure isn't kept, so it can be tried again. Past
+ *  {@link KEPT}, the oldest goes, and its `blob:` URL is revoked once nothing
+ *  draws it. */
+const kept = new Map<string, Kept>();
 
-const keep = (key: string, p: Promise<Fetched>): void => {
-  kept.set(key, p);
+const revoke = (k: Kept): void => void k.fetched.then((f) => URL.revokeObjectURL(f.url)).catch(() => {});
+
+const keep = (key: string, k: Kept): void => {
+  kept.set(key, k);
   while (kept.size > KEPT) {
     const [oldest, gone] = kept.entries().next().value!;
     kept.delete(oldest);
-    void gone.then((f) => URL.revokeObjectURL(f.url)).catch(() => {});
+    if (gone.users === 0) revoke(gone);
+    else gone.evicted = true;
   }
 };
 
-/** `file`'s bytes on ticket `ticket` (its small picture, with `thumb`). */
-export const fetchFile = (ticket: string, file: TicketFile, thumb = false): Promise<Fetched> => {
+/** The kept fetch of `file`'s bytes, started if there is none. */
+const fetchKept = (ticket: string, file: TicketFile, thumb: boolean): Kept => {
   const key = `${ticket}/${file.id}/${thumb && file.thumb ? "thumb" : "whole"}`;
   const was = kept.get(key);
   if (was) {
@@ -34,14 +48,28 @@ export const fetchFile = (ticket: string, file: TicketFile, thumb = false): Prom
     return was;
   }
   const api = localTicketView();
-  if (!api) return Promise.reject(new Error("This computer's hub isn't there yet."));
-  const p = api.fileBlob(ticket, file.id, thumb && file.thumb).then((blob) => ({ blob, url: URL.createObjectURL(blob) }));
-  keep(key, p);
-  p.catch(() => kept.get(key) === p && kept.delete(key));
-  return p;
+  const fetched = api
+    ? api.fileBlob(ticket, file.id, thumb && file.thumb).then((blob) => ({ blob, url: URL.createObjectURL(blob) }))
+    : Promise.reject(new Error("This computer's hub isn't there yet."));
+  const k: Kept = { fetched, users: 0, evicted: false };
+  if (!api) return k;
+  keep(key, k);
+  fetched.catch(() => kept.get(key) === k && kept.delete(key));
+  return k;
 };
 
-/** `file`'s bytes as a URL to draw, once fetched; why not, if they weren't. */
+/** `file`'s bytes on ticket `ticket` (its small picture, with `thumb`): to
+ *  read, not to draw (a URL drawn is counted by {@link useFileUrl}). */
+export const fetchFile = (ticket: string, file: TicketFile, thumb = false): Promise<Fetched> => fetchKept(ticket, file, thumb).fetched;
+
+/** For tests: forget every fetch. */
+export const forgetFetchedFiles = (): void => {
+  for (const k of kept.values()) revoke(k);
+  kept.clear();
+};
+
+/** `file`'s bytes as a URL to draw, once fetched; why not, if they weren't.
+ *  While it is drawn here, its URL isn't revoked. */
 export const useFileUrl = (ticket: string, file: TicketFile | null, thumb = false): { url: string | null; blob: Blob | null; problem: string | null } => {
   const [got, setGot] = useState<{ url: string | null; blob: Blob | null; problem: string | null }>({ url: null, blob: null, problem: null });
   const id = file?.id;
@@ -49,12 +77,18 @@ export const useFileUrl = (ticket: string, file: TicketFile | null, thumb = fals
     if (!file || file.source === "linear_link") return setGot({ url: null, blob: null, problem: null });
     let live = true;
     setGot({ url: null, blob: null, problem: null });
-    fetchFile(ticket, file, thumb).then(
+    // This entry, not whatever has its key by the time this is drawn no
+    // more: one evicted meanwhile may have been fetched again.
+    const k = fetchKept(ticket, file, thumb);
+    k.users += 1;
+    k.fetched.then(
       (f) => live && setGot({ url: f.url, blob: f.blob, problem: null }),
       (e) => live && setGot({ url: null, blob: null, problem: plainError(e) }),
     );
     return () => {
       live = false;
+      k.users -= 1;
+      if (k.evicted && k.users === 0) revoke(k);
     };
     // The file is the same file while its id is.
   }, [ticket, id, thumb]);
@@ -66,8 +100,15 @@ const openLink = (f: TicketFile): void => {
   if (f.url && /^https:\/\//i.test(f.url)) void openUrl(f.url);
 };
 
+/** Reads ticket `id` again once its files changed: the hub announces the
+ *  change too, and an answer older than what it announced is dropped. */
+const reread = (id: string): void => void useBoard
+  .getState()
+  .fetched(id)
+  .catch(() => {});
+
 /** Dropping files on a ticket of your own: how many are on their way, and
- *  what went wrong, said through `onProblem`. */
+ *  what went wrong (with each file that did), said through `onProblem`. */
 export const useUploads = (t: Ticket, onProblem: (p: string | null) => void) => {
   const [adding, setAdding] = useState(0);
   const add = async (picked: readonly File[]) => {
@@ -75,22 +116,31 @@ export const useUploads = (t: Ticket, onProblem: (p: string | null) => void) => 
     if (!api || !picked.length) return;
     onProblem(null);
     setAdding((n) => n + picked.length);
+    const problems: string[] = [];
+    let added = 0;
     for (const file of picked) {
       try {
         if (file.size > UPLOAD_MAX) throw new Error(`${file.name} is over ${UPLOAD_MAX / (1024 * 1024)} MB.`);
         await api.upload(t.id, file);
+        added++;
       } catch (e) {
-        onProblem(plainError(e));
+        const why = plainError(e);
+        problems.push(picked.length > 1 && !why.includes(file.name) ? `${file.name}: ${why}` : why);
       } finally {
         setAdding((n) => n - 1);
       }
     }
+    if (added) reread(t.id);
+    if (problems.length) onProblem(problems.join(" "));
   };
   const remove = (f: TicketFile) => {
     const api = localTicketView();
     if (!api) return;
     onProblem(null);
-    api.removeFile(t.id, f.id).catch((e) => onProblem(plainError(e)));
+    api.removeFile(t.id, f.id).then(
+      () => reread(t.id),
+      (e) => onProblem(plainError(e)),
+    );
   };
   return { adding, add, remove };
 };
@@ -108,7 +158,7 @@ export function TicketFiles({ ticket: t, local, uploads }: { ticket: Ticket; loc
   const { adding, add, remove } = uploads;
   if (!files.length && !local) return null;
   return (
-    <section className="ticket-files" aria-label="Attachments">
+    <section aria-label="Attachments">
       <h2 className="ticket-section-head">
         Attachments · {files.length}
         {adding > 0 && <span className="ticket-section-note"> · adding {adding}…</span>}

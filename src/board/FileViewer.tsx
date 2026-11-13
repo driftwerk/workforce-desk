@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useChat } from "../chat/store";
 import { DESK_DM } from "../chat/types";
 import { uploadAll } from "../attachments/upload";
@@ -40,7 +41,9 @@ export const askDeskAbout = async (t: Ticket, f: TicketFile): Promise<boolean> =
 };
 
 /** A ticket's files over everything, one at a time: back and on (← →), a
- *  strip of them all, Save, and Ask Desk about a picture. */
+ *  strip of them all, Save, and Ask Desk about a picture. It is drawn on the
+ *  page itself, not inside the ticket's panel: that panel is a container
+ *  (and its view clips), which would hold a fixed layer inside it. */
 export function FileViewer({ ticket: t, files, at, onAt, onClose }: { ticket: Ticket; files: TicketFile[]; at: number; onAt: (i: number) => void; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const modal = useModal(ref, onClose);
@@ -53,7 +56,7 @@ export function FileViewer({ ticket: t, files, at, onAt, onClose }: { ticket: Ti
   useEffect(() => setProblem(null), [at]);
   const go = (step: number) => files.length > 1 && onAt((at + step + files.length) % files.length);
   const size = sizeText(f.size ?? shown.blob?.size);
-  return (
+  return createPortal(
     <div
       ref={ref}
       className="file-viewer"
@@ -61,6 +64,10 @@ export function FileViewer({ ticket: t, files, at, onAt, onClose }: { ticket: Ti
       aria-modal="true"
       aria-label={f.name}
       tabIndex={-1}
+      // React passes its events up to what opened it: a press in it never
+      // drags a grid's pane, a right click never opens the menu behind it.
+      onPointerDown={(e) => e.stopPropagation()}
+      onContextMenu={(e) => e.stopPropagation()}
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
       onKeyDown={(e) => {
         if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
@@ -123,8 +130,9 @@ export function FileViewer({ ticket: t, files, at, onAt, onClose }: { ticket: Ti
           ) : RASTER.has(shown.blob?.type ?? "") ? (
             <img className="file-viewer-image" src={shown.url} alt={f.name} />
           ) : shown.blob?.type === "application/pdf" ? (
-            // Shown in place only as what the hub sniffed it to be.
-            <iframe className="file-viewer-pdf" src={shown.url} title={f.name} />
+            // Never drawn in place: a PDF viewer won't draw in a sandboxed
+            // frame, and an unsandboxed one would run as Desk's own page.
+            <p className="muted">Desk opens PDFs outside itself: Save it to open it.</p>
           ) : (
             <p className="muted">Desk doesn't show this kind of file. Save it to open it.</p>
           )}
@@ -134,13 +142,14 @@ export function FileViewer({ ticket: t, files, at, onAt, onClose }: { ticket: Ti
         </button>
       </div>
       {files.length > 1 && (
-        <div className="file-viewer-strip" role="tablist" aria-label="Files">
+        <div className="file-viewer-strip" role="group" aria-label="Files">
           {files.map((o, i) => (
             <StripItem key={o.id} ticket={t.id} file={o} current={i === at} onPick={() => onAt(i)} />
           ))}
         </div>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -148,7 +157,7 @@ function StripItem({ ticket, file: f, current, onPick }: { ticket: string; file:
   const kind = fileKind(f);
   const small = useFileUrl(ticket, kind === "image" ? f : null, true);
   return (
-    <button type="button" role="tab" aria-selected={current} aria-label={f.name} title={f.name} className={`file-viewer-thumb file-viewer-thumb-${kind}`} onClick={onPick}>
+    <button type="button" aria-current={current || undefined} aria-label={f.name} title={f.name} className={`file-viewer-thumb file-viewer-thumb-${kind}`} onClick={onPick}>
       {kind === "image" && small.url ? <img src={small.url} alt="" draggable={false} /> : <span aria-hidden="true">{kind === "pdf" ? "PDF" : "FILE"}</span>}
     </button>
   );

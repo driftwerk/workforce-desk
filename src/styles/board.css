@@ -966,6 +966,13 @@ button.ticket-chip:hover {
   background: var(--raised);
   overflow: hidden;
 }
+/* A picture's small picture on its way: its place, a shade off the card's. */
+.ticket-file-shot-wait {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: color-mix(in srgb, var(--border) 45%, var(--raised));
+}
 .ticket-file-shot img {
   display: block;
   width: 100%;
@@ -1070,6 +1077,11 @@ button.ticket-chip:hover {
 }
 .ticket-comment-by b {
   color: var(--text);
+}
+/* Posted to its issue by Desk on the person's behalf: said plainly. */
+.ticket-comment-behalf {
+  color: var(--muted);
+  font-weight: 600;
 }
 .ticket-comment-body {
   margin-top: 2px;
@@ -1361,12 +1373,6 @@ details.ticket-history > summary .floor-time {
   max-height: 100%;
   object-fit: contain;
 }
-.file-viewer-pdf {
-  width: 100%;
-  height: 100%;
-  border: 0;
-  background: var(--raised);
-}
 .file-viewer-strip {
   flex: none;
   display: flex;
@@ -1398,7 +1404,7 @@ details.ticket-history > summary .floor-time {
   background: var(--blocked-soft);
   color: var(--blocked);
 }
-.file-viewer-thumb[aria-selected="true"] {
+.file-viewer-thumb[aria-current="true"] {
   border: 2px solid var(--signal);
 }
 
