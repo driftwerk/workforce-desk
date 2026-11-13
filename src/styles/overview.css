@@ -231,18 +231,24 @@
 .crew-floor-body > .stage-dock {
   padding: 12px 10px 0 0;
 }
+/* Too narrow for both side by side: the rail sits under Right now, and the
+   two scroll as one. */
 @container crew-floor (max-width: 680px) {
   .crew-floor-body {
     flex-direction: column;
+    overflow-y: auto;
   }
   .crew-floor-main {
-    flex: 1 1 50%;
+    overflow: visible;
   }
   .activity {
-    flex: 1 1 50%;
+    flex: none;
     min-width: 0;
     border-left: 0;
     border-top: 1px solid var(--border);
+  }
+  .activity-scroll {
+    overflow: visible;
   }
   .crew-floor-body > .stage-dock {
     width: auto;
@@ -346,29 +352,6 @@
   color: var(--faint);
   letter-spacing: 0.03em;
   text-transform: uppercase;
-}
-
-@media (max-width: 1180px) {
-  .activity {
-    flex-basis: 300px;
-  }
-}
-@media (max-width: 920px) {
-  .crew-floor-body {
-    flex-direction: column;
-    overflow-y: auto;
-  }
-  .crew-floor-main {
-    overflow: visible;
-  }
-  .activity {
-    flex: none;
-    border-left: 0;
-    border-top: 1px solid var(--border);
-  }
-  .activity-scroll {
-    overflow: visible;
-  }
 }
 
 /* ── The Floor by group ─────────────────────────────────────────────────── */

@@ -1725,7 +1725,6 @@ legend.set-label {
   padding-left: 0;
   padding-right: 0;
 }
-/* Within an engine's card, under its accounts: a row of the card's own. */
 /* Which account this computer's sign-in is: a row of the list like the
    others, its Change at the right where the rows' actions are. */
 .account-share-row {
@@ -1746,6 +1745,7 @@ legend.set-label {
 .accounts > .account-actions-start > .btn-ghost {
   margin-left: -12px;
 }
+/* Within an engine's card, under its accounts: a row of the card's own. */
 .accounts .switch-row {
   padding: 8px 0 4px;
   border-top: 1px solid var(--border);

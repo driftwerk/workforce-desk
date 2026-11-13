@@ -28,7 +28,7 @@ export function Calls() {
         onChange={(on) => set({ voice: on })}
       />
       {voice && (
-        <section className="prov-section" aria-label="Voice engine">
+        <section className="prov-section">
           <h2 className="field-label">Voice engine</h2>
           <div className="seg" role="radiogroup" aria-label="Voice engine">
             {VOICE_ENGINES.map((e) => (

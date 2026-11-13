@@ -4367,10 +4367,21 @@ body.line-resizing * {
 /* A session row's marks, kept together: the ticket, charge, grid glyph and
    unread mark. */
 .gi-trail {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60%;
   display: inline-flex;
   align-items: center;
   gap: 7px;
+}
+/* The charge gives way inside the group; the rest keep their size. */
+.gi-trail > * {
+  flex: none;
+}
+.gi-trail > .gi-charge {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: none;
 }
 .gi-trail:empty {
   display: none;
