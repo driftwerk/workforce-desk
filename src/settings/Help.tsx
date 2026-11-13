@@ -167,97 +167,99 @@ export function Help() {
     <section className="settings-pane" aria-label="Help">
       <h1 className="display-lg">Help</h1>
 
-      <div className="setting-card">
-        <span className="card-text">
-          <b>Set up with an agent</b>
-          <span>Desk’s agent walks you through signing in, its helper, your overseer, connections, workspaces and machines.</span>
-        </span>
-        <button
-          type="button"
-          className="btn btn-signal"
-          onClick={() => {
-            useUi.getState().closeSettings();
-            startSetup();
-          }}
-        >
-          Set up with an agent
-        </button>
-      </div>
-
-      <div className="setting-card">
-        <span className="card-text">
-          <b>Desk {version}</b>
-          <span>
-            {updateLine(update, waiting, never, checked)}
-          </span>
-        </span>
-        {update.phase === "available" && update.download ? (
-          <button type="button" className="btn btn-signal" onClick={() => void openUrl(update.download!)}>
-            Download
-          </button>
-        ) : (
-          <button
-            type="button"
-            className="btn"
-            disabled={!inApp || !(update.phase === "idle" || (update.phase === "ready" && !waiting))}
-            onClick={() => void checkNow()}
-          >
-            Check for updates
-          </button>
-        )}
-      </div>
-
-      <div className="setting-card">
-        <span className="card-text">
-          <b>Desk Helper</b>
-          <span className={helper?.state === "running" ? undefined : "state-blocked"}>{helperLine(helper, platform)}</span>
-        </span>
-        {helper?.state === "needs-approval" && openStartup && (
-          <button type="button" className="btn" onClick={() => void openLoginItems()}>
-            {openStartup}
-          </button>
-        )}
-      </div>
-
-      {platform === "windows" && <WhereDeskRuns host={host} helper={helper} />}
-
-      {platform === "linux" && (
+      <div className="prov-list">
         <div className="setting-card">
           <span className="card-text">
-            <b>Grid windows on Wayland</b>
+            <b>Set up with an agent</b>
+            <span>Desk’s agent walks you through signing in, its helper, your overseer, connections, workspaces and machines.</span>
+          </span>
+          <button
+            type="button"
+            className="btn btn-signal"
+            onClick={() => {
+              useUi.getState().closeSettings();
+              startSetup();
+            }}
+          >
+            Set up with an agent
+          </button>
+        </div>
+
+        <div className="setting-card">
+          <span className="card-text">
+            <b>Desk {version}</b>
             <span>
-              A grid in a window of its own opens on its monitor, but on Wayland the desktop decides where on it, so it may not be
-              where you left it.
+              {updateLine(update, waiting, never, checked)}
             </span>
           </span>
+          {update.phase === "available" && update.download ? (
+            <button type="button" className="btn btn-signal" onClick={() => void openUrl(update.download!)}>
+              Download
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn"
+              disabled={!inApp || !(update.phase === "idle" || (update.phase === "ready" && !waiting))}
+              onClick={() => void checkNow()}
+            >
+              Check for updates
+            </button>
+          )}
         </div>
-      )}
 
-      <div className="setting-card">
-        <span className="card-text">
-          <b>Keys</b>
-          <span>Desk keeps your agents’ logins and keys in {keys}.</span>
-        </span>
-      </div>
+        <div className="setting-card">
+          <span className="card-text">
+            <b>Desk Helper</b>
+            <span className={helper?.state === "running" ? undefined : "state-blocked"}>{helperLine(helper, platform)}</span>
+          </span>
+          {helper?.state === "needs-approval" && openStartup && (
+            <button type="button" className="btn" onClick={() => void openLoginItems()}>
+              {openStartup}
+            </button>
+          )}
+        </div>
 
-      <div className="setting-card">
-        <span className="card-text">
-          <b>Send a report</b>
-          <span>{report ?? "Saves Desk’s recent logs as a zip, with passwords, keys and tokens taken out."}</span>
-        </span>
-        <button type="button" className="btn" disabled={!inApp} onClick={() => void sendReport()}>
-          Save report…
-        </button>
-      </div>
+        {platform === "windows" && <WhereDeskRuns host={host} helper={helper} />}
 
-      <div className="setting-card">
-        <span className="card-text">
-          <b>Remove Desk’s data</b>
-          <span>Stops Desk Helper and, if you choose, deletes your agents, sessions and logins from this computer.</span>
-        </span>
-        <button type="button" className="btn btn-danger" disabled={!inApp} onClick={() => setRemoving(true)}>
-          Remove Desk’s data…
-        </button>
+        {platform === "linux" && (
+          <div className="setting-card">
+            <span className="card-text">
+              <b>Grid windows on Wayland</b>
+              <span>
+                A grid in a window of its own opens on its monitor, but on Wayland the desktop decides where on it, so it may not be
+                where you left it.
+              </span>
+            </span>
+          </div>
+        )}
+
+        <div className="setting-card">
+          <span className="card-text">
+            <b>Keys</b>
+            <span>Desk keeps your agents’ logins and keys in {keys}.</span>
+          </span>
+        </div>
+
+        <div className="setting-card">
+          <span className="card-text">
+            <b>Send a report</b>
+            <span>{report ?? "Saves Desk’s recent logs as a zip, with passwords, keys and tokens taken out."}</span>
+          </span>
+          <button type="button" className="btn" disabled={!inApp} onClick={() => void sendReport()}>
+            Save report…
+          </button>
+        </div>
+
+        <div className="setting-card">
+          <span className="card-text">
+            <b>Remove Desk’s data</b>
+            <span>Stops Desk Helper and, if you choose, deletes your agents, sessions and logins from this computer.</span>
+          </span>
+          <button type="button" className="btn btn-danger" disabled={!inApp} onClick={() => setRemoving(true)}>
+            Remove Desk’s data…
+          </button>
+        </div>
       </div>
 
       {removing && <RemoveData platform={platform} keys={keys} onClose={() => setRemoving(false)} />}

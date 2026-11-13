@@ -5,6 +5,7 @@ import { useLayout } from "../groups/store";
 import { useDesk, localSessions } from "../hub/store";
 import type { BreakerView, BudgetScope, BudgetUnit, BudgetView, NewBudget, OnExceed, SpendPeriod } from "../hub/types";
 import { plainError } from "../ui/plainError";
+import { SwitchRow } from "../ui/SwitchRow";
 import {
   PERIODS,
   PERIOD_LABEL,
@@ -131,16 +132,12 @@ export function Budgets() {
 
           <section className="prov-section" aria-label="Loops and failures">
             <h2 className="field-label">Loops and failures</h2>
-            <label className="budget-check">
-              <input type="checkbox" checked={view.rules.loops} onChange={(e) => void run(hub!.setBreakerRules({ loops: e.target.checked }))} />
-              <span>
-                Watch sessions for loops
-                <span className="faint small budget-hint">
-                  When a session keeps running the same tool call, or its tool calls keep failing, Desk tells it to stop and ask you. If it
-                  carries on, it finishes that turn and waits for you.
-                </span>
-              </span>
-            </label>
+            <SwitchRow
+              label="Watch sessions for loops"
+              sub="When a session keeps running the same tool call, or its tool calls keep failing, Desk tells it to stop and ask you. If it carries on, it finishes that turn and waits for you."
+              on={view.rules.loops}
+              onChange={(loops) => void run(hub!.setBreakerRules({ loops }))}
+            />
           </section>
         </>
       )}

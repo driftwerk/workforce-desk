@@ -151,7 +151,7 @@ it("turns auto-switch on devbox, not on this Mac, and removes an account from de
   const { devbox, local } = setUp([account("d-w", "Work", { isDefault: true }), account("d-p", "Personal")]);
   render(<Accounts engine={claude} machine="devbox" name="devbox" native={fakeNative().native} canAdd={false} />);
   await act(async () => {});
-  await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Switch automatically/ })));
+  await act(async () => fireEvent.click(screen.getByRole("switch", { name: /Switch automatically/ })));
   expect(devbox.setAutoSwitch).toHaveBeenCalledWith(true);
   expect(accountsOn("devbox").getState().autoSwitch).toBe(true);
   fireEvent.click(screen.getAllByRole("button", { name: "Remove…" })[1]!);
