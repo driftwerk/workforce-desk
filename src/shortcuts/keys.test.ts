@@ -15,6 +15,8 @@ import {
   usable,
   warning,
   withDigit,
+  refusalFor,
+  desksInTerminal,
   type KeyPress,
 } from "./keys";
 
@@ -175,6 +177,24 @@ describe("the Go to keys", () => {
     expect(withDigit("Control+Alt+1", 9)).toBe("Control+Alt+9");
     expect(shortcutLabel(withDigit(MAC.goTo, 2), "macos")).toBe("⌘2");
     expect(shortcutLabel(withDigit(defaultShortcuts("windows").goTo, 2), "windows")).toBe("Ctrl+2");
+  });
+
+  it("are checked as all nine: another shortcut on one is a clash, and each must be free", () => {
+    expect(clash(MAC, "board", "Primary+3", "macos")).toMatch(/already Go to a sidebar item/);
+    expect(clash(MAC, "goTo", "Primary+Shift+1", "macos")).toBeNull();
+    expect(clash({ ...MAC, board: "Primary+Shift+5" }, "goTo", "Primary+Shift+1", "macos")).toMatch(/already Board/);
+    // ⇧⌘3 to ⇧⌘5 are the Mac's screenshots.
+    expect(refusalFor("goTo", "Primary+Shift+1", "macos")).toMatch(/uses/);
+    expect(refusalFor("goTo", "Primary+J", "macos")).toMatch(/1 to 9/);
+    expect(refusalFor("goTo", "Control+Alt+1", "windows")).toMatch(/types a character/);
+    expect(refusalFor("goTo", "Primary+1", "macos")).toBeNull();
+    expect(usable("Primary+J", "goTo", "macos")).toBe("Primary+1");
+  });
+
+  it("reach Desk from a terminal pane, every digit", () => {
+    const linux = defaultShortcuts("linux");
+    const taken = desksInTerminal(linux);
+    for (let d = 1; d <= 9; d++) expect(taken).toContain(`Primary+${d}`);
   });
 });
 

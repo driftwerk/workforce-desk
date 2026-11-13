@@ -15,7 +15,7 @@ import { useDesk } from "../hub/store";
 import { useRoomOrder } from "../rooms/order";
 import { useSettings } from "../settings/store";
 import { matches, terminalKeys, withDigit } from "../shortcuts/keys";
-import { useShortcuts } from "../shortcuts/manager";
+import { inTerminal, useShortcuts } from "../shortcuts/manager";
 import { boardIds, gridIds, jumps, roomIds, type Jump } from "./JumpKey";
 import { useSections } from "./SideSection";
 import { useUi } from "./ui";
@@ -42,18 +42,18 @@ export const goTo = (j: Jump): void => {
   }
 };
 
-const inTerminal = (target: EventTarget | null): boolean => target instanceof Element && target.closest("[data-terminal]") !== null;
-
-/** Takes the Go to keys while Desk is in front: from anywhere, a field or
- *  a terminal pane too (⌘ and a digit types nothing). Reads what the
- *  sidebar shows only when they're pressed. */
+/** Takes the Go to keys while Desk's main window is in front (a grid's own
+ *  window has no sidebar): from a field or a terminal pane too, and from
+ *  Settings, which they close. Reads what the sidebar shows only when
+ *  they're pressed. */
 export function useSidebarJumps(): void {
   const keys = useSettings((s) => s.keys.goTo);
   const recording = useShortcuts((s) => s.recording);
   useEffect(() => {
     if (recording || !keys) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.repeat) return;
+      // Not behind a dialog or an open menu, nor for a key already taken.
+      if (e.repeat || e.defaultPrevented || document.querySelector('[aria-modal="true"], [role="menu"]')) return;
       for (let d = 1; d <= 9; d++) {
         const k = withDigit(keys, d);
         if (!matches(e, inTerminal(e.target) ? terminalKeys(k) : k)) continue;

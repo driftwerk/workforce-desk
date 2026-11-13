@@ -480,21 +480,50 @@ export const defaultShortcuts = (platform: Platform = platformNow()): Record<Sho
  *  Desk can't read it, or it can't be Desk's. */
 export const usable = (stored: string | undefined | null, id: ShortcutId, platform: Platform = platformNow()): string => {
   const n = stored ? normalize(stored, platform) : null;
-  return n && !refusal(n, scopeOf(id), platform) ? n : defaultShortcuts(platform)[id];
+  return n && !refusalFor(id, n, platform) ? n : defaultShortcuts(platform)[id];
 };
 
 /** Why `accel` can't be `id`'s when Desk's shortcuts are `keys`: another
  *  of Desk's own already has it. */
 export const clash = (keys: Record<ShortcutId, string>, id: ShortcutId, accel: string, platform: Platform = platformNow()): string | null => {
-  const mine = keysByPlace(id, accel, platform);
-  const others = SHORTCUT_IDS.filter((o) => o !== id).map((o) => [o, keysByPlace(o, keys[o], platform)] as const);
-  const other = others.find(([, k]) => k.desk === mine.desk)?.[0];
-  if (other) return `${shortcutLabel(accel, platform)} is already ${SHORTCUT_NAMES[other]} — choose another`;
-  const inTerminal = mine.terminal === null ? undefined : others.find(([, k]) => k.terminal === mine.terminal)?.[0];
-  return inTerminal
-    ? `In a terminal, ${shortcutLabel(mine.terminal!, platform)} is already ${SHORTCUT_NAMES[inTerminal]} — choose another`
-    : null;
+  // Go to is nine shortcuts, one for each digit: each is checked.
+  const placesOf = (o: ShortcutId, a: string) => variants(o, a).map((v) => keysByPlace(o, v, platform));
+  const mine = placesOf(id, accel);
+  const others = SHORTCUT_IDS.filter((o) => o !== id).map((o) => [o, placesOf(o, keys[o])] as const);
+  for (const m of mine) {
+    const other = others.find(([, ks]) => ks.some((k) => k.desk === m.desk))?.[0];
+    if (other) return `${shortcutLabel(m.desk ?? accel, platform)} is already ${SHORTCUT_NAMES[other]} — choose another`;
+  }
+  for (const m of mine) {
+    const inTerminal = m.terminal === null ? undefined : others.find(([, ks]) => ks.some((k) => k.terminal === m.terminal))?.[0];
+    if (inTerminal) return `In a terminal, ${shortcutLabel(m.terminal!, platform)} is already ${SHORTCUT_NAMES[inTerminal]} — choose another`;
+  }
+  return null;
 };
+
+/** The keys shortcut `id` set to `accel` takes: Go to's nine, one per
+ *  digit; any other's one. */
+export const variants = (id: ShortcutId, accel: string): string[] =>
+  id === "goTo" ? Array.from({ length: 9 }, (_, i) => withDigit(accel, i + 1)) : [accel];
+
+/** Why shortcut `id` can't be `accel`, as `refusal` says, for each of the
+ *  keys it takes; Go to's must end in 1 (it takes 1 to 9). */
+export const refusalFor = (id: ShortcutId, accel: string, platform: Platform = platformNow()): string | null => {
+  if (id === "goTo") {
+    const p = parse(accel, platform);
+    if (p && p.key !== "1") return "Go to takes 1 to 9 as its last key — press it with 1";
+    if (p && platform === "windows" && (p.mods.has("Control") || p.mods.has("Primary")) && p.mods.has("Alt")) return "Ctrl+Alt and a digit types a character on many keyboards — choose another";
+  }
+  for (const v of variants(id, accel)) {
+    const why = refusal(v, scopeOf(id), platform);
+    if (why) return why;
+  }
+  return null;
+};
+
+/** Every key Desk takes in a terminal pane, in place of the shell. */
+export const desksInTerminal = (keys: Record<ShortcutId, string>): string[] =>
+  SHORTCUT_IDS.filter((id) => scopeOf(id) === "app").flatMap((id) => variants(id, keys[id]).map((v) => terminalKeys(v)));
 
 /** Desk's shortcuts from the chosen ones (saved by id, only where they
  *  differ from the default): each one's keys, and the choices that still
@@ -589,3 +618,11 @@ export const matches = (e: KeyPress, accel: string, platform: Platform = platfor
 /** Shortcut `keys` with its last key made `digit`: the Go to keys for
  *  the sidebar's `digit`th item. */
 export const withDigit = (keys: string, digit: number): string => keys.replace(/[^+]+$/, String(digit));
+
+/** Keys as `aria-keyshortcuts` writes them ("Meta+1", "Control+Alt+1"). */
+export const ariaKeys = (accel: string, platform: Platform = platformNow()): string => {
+  const p = parse(accel, platform);
+  if (!p) return "";
+  const name: Record<Modifier, string> = { Primary: platform === "macos" ? "Meta" : "Control", Control: "Control", Alt: "Alt", Shift: "Shift", Super: "Meta" };
+  return [...[...p.mods].map((m) => name[m]), p.key].join("+");
+};

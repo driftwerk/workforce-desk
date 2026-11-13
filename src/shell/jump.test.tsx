@@ -13,6 +13,7 @@ import { useSettings } from "../settings/store";
 import { defaultShortcuts } from "../shortcuts/keys";
 import { DEFAULT_HOST, useHost } from "./host";
 import { jumps } from "./JumpKey";
+import { useSidebarJumps } from "./jump";
 import { reloadSections, SECTIONS_KEY, setSectionOpen } from "./SideSection";
 import { Sidebar } from "./Sidebar";
 import { useUi } from "./ui";
@@ -49,7 +50,13 @@ afterEach(() => {
   useHost.setState(DEFAULT_HOST);
 });
 
-const sidebar = () => render(<Sidebar onAsk={none} onNewSession={none} onNewRoom={none} onNewCrew={none} onSettings={none} />);
+// As App has it: the keys taken beside the sidebar, which Settings replaces.
+function Harness() {
+  useSidebarJumps();
+  const settings = useUi((u) => u.settings);
+  return settings ? <p>Settings</p> : <Sidebar onAsk={none} onNewSession={none} onNewRoom={none} onNewCrew={none} onSettings={none} />;
+}
+const sidebar = () => render(<Harness />);
 
 describe("the sidebar's order for the Go to keys", () => {
   it("is the Dashboard, then the grids, rooms and boards of the open sections, nine at most", () => {
@@ -69,8 +76,9 @@ describe("the sidebar's order for the Go to keys", () => {
 
 describe("⌘1 to ⌘9", () => {
   it("open the sidebar's items in order, from wherever you are, Settings too", () => {
-    sidebar();
     useUi.setState({ settings: "appearance" });
+    sidebar();
+    expect(screen.queryByRole("navigation")).toBeNull();
     press(1);
     expect(useDesk.getState().view).toBe("floor");
     expect(useUi.getState().settings).toBeNull();
@@ -104,11 +112,30 @@ describe("⌘1 to ⌘9", () => {
     term.remove();
   });
 
-  it("leave other keys alone: a digit alone, or with other modifiers", () => {
+  it("leave other keys alone: a digit alone, or with other modifiers, or behind a dialog", () => {
     sidebar();
     press(1, {});
     press(1, { metaKey: true, shiftKey: true });
     expect(useDesk.getState().view).toBe("rooms");
+    const dialog = document.body.appendChild(document.createElement("div"));
+    dialog.setAttribute("aria-modal", "true");
+    press(1);
+    expect(useDesk.getState().view).toBe("rooms");
+    dialog.remove();
+    press(1);
+    expect(useDesk.getState().view).toBe("floor");
+  });
+
+  it("skip boards on a hub without them, and a folded Rooms", () => {
+    useBoard.setState({ supported: false });
+    act(() => setSectionOpen("rooms", false));
+    sidebar();
+    // ⌘1 the Dashboard, ⌘2 and ⌘3 the grids; nothing after.
+    press(4);
+    expect(useDesk.getState().view).toBe("rooms");
+    expect(useDesk.getState().openRoom).not.toHaveBeenCalled();
+    press(3);
+    expect(useDesk.getState().view).toBe("grids");
   });
 
   it("follow the keys set in Settings", () => {
@@ -131,5 +158,6 @@ describe("⌘1 to ⌘9", () => {
     press(4);
     expect(document.querySelector(".gi-kbd")?.textContent).toBe("⌘4");
     expect(screen.getByRole("button", { name: /^Dashboard/ }).title).toBe("Dashboard (⌘1)");
+    expect(screen.getByRole("button", { name: /^Dashboard/ }).getAttribute("aria-keyshortcuts")).toBe("Meta+1");
   });
 });

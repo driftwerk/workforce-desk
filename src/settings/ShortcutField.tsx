@@ -5,8 +5,7 @@ import {
   inTerminals,
   isGlobal,
   pressed,
-  refusal,
-  scopeOf,
+  refusalFor,
   SHORTCUTS,
   shortcutLabel,
   terminalKeys,
@@ -52,7 +51,7 @@ export function ShortcutField({ id }: { id: ShortcutId }) {
       if (p.kind === "modifiers") return setHeld(p.label);
       if (e.type !== "keydown") return;
       if (p.kind === "unknown") return setReason("Desk can’t use that key — choose another");
-      const why = refusal(p.accel, scopeOf(id)) ?? clash(keys, id, p.accel);
+      const why = refusalFor(id, p.accel) ?? clash(keys, id, p.accel);
       if (why) return setReason(why);
       setReason(null);
       setShortcut(id, p.accel);
