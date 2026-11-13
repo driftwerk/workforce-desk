@@ -651,7 +651,7 @@ describe("a ticket opened from a board pane", () => {
   it("Esc in its Delete confirmation closes only that", () => {
     withPopup();
     fireEvent.click(card("ACM-1"));
-    fireEvent.click(within(dialog()!).getByRole("button", { name: "Delete ticket…" }));
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "Delete…" }));
     const confirm = screen.getByRole("dialog", { name: "Delete ACM-1?" });
     fireEvent.keyDown(document.activeElement ?? confirm, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Delete ACM-1?" })).toBeNull();

@@ -3,9 +3,8 @@ import { parse } from "smol-toml";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { Agent } from "../chat/types";
 import { HubError, type DeskHub } from "../hub/client";
-import type { Connection, ConnectionsApi, Connector } from "../hub/connections";
+import type { ConnectionsApi, Connector, Listing, Pick as Choice, PicksChange, ServicePicks } from "../hub/connections";
 import { useDesk } from "../hub/store";
-import { useUi } from "../shell/ui";
 import { AgentConnectors } from "./AgentConnectors";
 import { useAgentConfigs } from "./agentBrain";
 
@@ -13,186 +12,417 @@ vi.mock("@tauri-apps/plugin-notification", () => ({}));
 
 const ALLAN: Agent = { hubId: "local", id: "allan", name: "Allan", model: null, provider: null, isDefault: false };
 
-const mineConn = (c: Partial<Connection> = {}): Connection => ({
+const pick = (p: Partial<Choice> & Pick<Choice, "id" | "name">): Choice => ({
+  site: null,
+  account: null,
   level: "all",
-  agent: null,
-  agentName: null,
-  account: "sarah@acme.example",
   status: "connected",
-  detail: null,
-  connectedAt: null,
-  checkedAt: null,
-  source: "global_per_user",
-  ...c,
+  picked: false,
+  write: true,
+  default: false,
+  ...p,
 });
 
-const connector = (c: Partial<Connector> & Pick<Connector, "id" | "name">): Connector => ({
-  about: "",
-  signIn: "fields",
-  fields: [{ name: "api_key", label: "API key", secret: true, required: true, placeholder: "" }],
-  signInReady: true,
+const svc = (s: Partial<ServicePicks> & Pick<ServicePicks, "id" | "name">): ServicePicks => ({
+  several: true,
+  readOnlyEach: true,
+  chosen: false,
   connections: [],
-  usedBy: [],
-  ...c,
+  ...s,
 });
 
-const LIST = [
-  connector({ id: "linear", name: "Linear", connections: [mineConn()], usedBy: [{ agent: "allan", name: "Allan", connection: "mine" }] }),
-  connector({ id: "jira", name: "Jira" }),
-];
+const JIRA = svc({
+  id: "jira",
+  name: "Jira",
+  connections: [
+    pick({ id: "all~~default", name: "Acme", site: "acme.atlassian.net", picked: true, default: true }),
+    pick({ id: "all~~globex", name: "Globex", site: "globex.atlassian.net", picked: true, write: false }),
+  ],
+});
+const EMAIL = svc({
+  id: "email",
+  name: "Email",
+  readOnlyEach: false,
+  connections: [
+    pick({ id: "all~~work", name: "Work", account: "sam@acme.example", picked: true, write: false }),
+    pick({ id: "all~~personal", name: "Personal", account: "sam@mail.example" }),
+  ],
+});
+const DATADOG = svc({ id: "datadog", name: "Datadog" });
 
 let config = "";
-let saved: string[] = [];
-let calls: unknown = [];
 
-const api = (list: Connector[], over: Partial<ConnectionsApi> = {}): ConnectionsApi => ({
-  list: vi.fn(async () => ({ connectors: list, adapters: ["xero"] })),
-  connect: vi.fn(async () => mineConn({ level: "agent", agent: "allan" })),
+const api = (services: ServicePicks[], over: Partial<ConnectionsApi> = {}): ConnectionsApi => ({
+  list: vi.fn(),
+  connect: vi.fn(),
+  reconnect: vi.fn(),
+  rename: vi.fn(),
   test: vi.fn(),
   disconnect: vi.fn(),
   saveGoogleClient: vi.fn(),
   start: vi.fn(),
   flow: vi.fn(),
   cancel: vi.fn(),
+  picks: vi.fn(async () => services),
+  setPicks: vi.fn(async () => services),
+  setups: vi.fn(async () => []),
+  signedIn: vi.fn(),
   ...over,
 });
 
 beforeEach(() => {
   config = "";
-  saved = [];
-  calls = [];
   useAgentConfigs.setState({ configs: {} });
   useDesk.setState({
     hub: {
       agentConfig: vi.fn(async () => config),
       saveAgentConfig: vi.fn(async (_id: string, toml: string) => {
         config = toml;
-        saved.push(toml);
       }),
-      computerActivity: vi.fn(async () => {
-        if (calls instanceof Error) throw calls;
-        return { rows: calls, next: null };
-      }),
+      computerActivity: vi.fn(async () => ({ rows: [], next: null })),
     } as unknown as DeskHub,
   });
 });
 afterEach(cleanup);
 
-const show = async (a: ConnectionsApi) => {
-  render(<AgentConnectors agent={ALLAN} api={a} />);
+const show = async (a: ConnectionsApi, ask?: (agent: Agent, service: string) => boolean) => {
+  render(<AgentConnectors agent={ALLAN} api={a} ask={ask} />);
   await act(async () => {});
 };
 
-const row = (name: string) => screen.getByRole("listitem", { name });
-const radio = (name: string, label: string) => within(row(name)).getByRole("radio", { name: label }) as HTMLButtonElement;
-const skills = () => (parse(saved.at(-1)!) as { skills?: Record<string, unknown> }).skills;
+const box = (name: string) => screen.getByRole("listitem", { name: `${name} for Allan` });
 
-it("says there's nothing to turn on before anything is connected", async () => {
-  await show(api([connector({ id: "linear", name: "Linear" })]));
-  expect(screen.getByText("No connections yet")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Open Connections" }));
-  expect(useUi.getState().settings).toBe("connections");
+it("shows a checkbox per connection, whether each takes changes, and the default", async () => {
+  await show(api([JIRA, EMAIL, DATADOG]));
+  const jira = box("Jira");
+  expect(within(jira).getByText("2 of 2 on")).toBeTruthy();
+  expect((within(jira).getByRole("checkbox", { name: /Acme/ }) as HTMLInputElement).checked).toBe(true);
+  expect(within(jira).getByRole("button", { name: /Acme: read and write/ })).toBeTruthy();
+  expect(within(jira).getByRole("button", { name: /Globex: read only/ })).toBeTruthy();
+  expect(within(jira).getByText("Acme", { selector: ".conn-pick-default-name" })).toBeTruthy();
+  const email = box("Email");
+  expect(within(email).getByText("1 of 2 on")).toBeTruthy();
+  expect(within(email).getByText("off")).toBeTruthy();
+  expect(document.body.textContent).not.toMatch(/~/);
 });
 
-it("shows an agent nobody has chosen for with every connector, and keeps them when one goes off", async () => {
-  await show(api(LIST));
-  expect(screen.getByRole("note").textContent).toContain("Allan has every connector");
-  expect(radio("Linear", "My connection").getAttribute("aria-checked")).toBe("true");
-  expect(within(row("Linear")).getByText(/sends to people ask first/)).toBeTruthy();
-  await act(async () => {
-    fireEvent.click(radio("Jira", "Off"));
-  });
-  expect(skills()).toEqual({ enabled: ["linear", "xero"] });
-});
-
-it("can't use my connection before it's connected, and links to Connections", async () => {
-  config = "[skills]\nenabled = []\n";
-  await show(api(LIST));
-  expect(radio("Jira", "Off").getAttribute("aria-checked")).toBe("true");
-  expect(radio("Jira", "My connection").disabled).toBe(true);
-  expect(radio("Linear", "My connection").disabled).toBe(false);
-  fireEvent.click(within(row("Jira")).getByRole("button", { name: "Connect Jira first" }));
-  expect(useUi.getState().settings).toBe("connections");
-});
-
-it("turns a connector on through my connection, read only, as the grammar says", async () => {
-  config = "[skills]\nenabled = []\n";
-  await show(api(LIST));
-  await act(async () => {
-    fireEvent.click(radio("Linear", "My connection"));
-  });
-  expect(skills()).toEqual({ enabled: ["linear"] });
-  await act(async () => {
-    fireEvent.click(radio("Linear", "Read only"));
-  });
-  expect(skills()).toEqual({ enabled: ["linear"], read_only: ["linear"] });
-  expect(within(row("Linear")).getByText(/reads only/)).toBeTruthy();
-});
-
-it("connects its own connection first, just for this agent, then uses it", async () => {
-  config = "[skills]\nenabled = []\n";
-  const a = api(LIST);
+it("turns a connection on, keeping the rest and the default", async () => {
+  const a = api([EMAIL]);
   await show(a);
   await act(async () => {
-    fireEvent.click(radio("Jira", "Its own connection"));
+    fireEvent.click(within(box("Email")).getByRole("checkbox", { name: /Personal/ }));
   });
-  const form = screen.getByRole("group", { name: "Jira for Allan only" });
-  fireEvent.change(within(form).getByLabelText("API key"), { target: { value: "jira-key" } });
+  const change = (a.setPicks as ReturnType<typeof vi.fn>).mock.calls[0]![1] as PicksChange;
+  expect(change).toEqual({
+    service: "email",
+    connections: [
+      { id: "all~~work", write: false },
+      { id: "all~~personal", write: true },
+    ],
+    default: "all~~work",
+  });
+  expect(screen.getByRole("status").textContent).toBe("Saved.");
+});
+
+it("lets one connection only read, or, where they go together, all of them", async () => {
+  const a = api([JIRA, EMAIL]);
+  await show(a);
   await act(async () => {
-    fireEvent.click(within(form).getByRole("button", { name: "Save and connect" }));
+    fireEvent.click(within(box("Jira")).getByRole("button", { name: /Globex: read only/ }));
   });
-  expect(a.connect).toHaveBeenCalledWith("jira", { level: "agent", agent: "allan" }, { api_key: "jira-key" });
-  expect(skills()).toEqual({ enabled: ["jira"], own_credential: ["jira"] });
-});
-
-it("says its changes ask first below Full access", async () => {
-  config = '[computer]\naccess = "own_folder"\n\n[skills]\nenabled = ["linear"]\n';
-  await show(api(LIST));
-  expect(within(row("Linear")).getByText(/asks before changes/)).toBeTruthy();
-  expect(screen.getByText(/asks you before it changes anything/)).toBeTruthy();
-});
-
-it("says the agent works on its own when it asks before nothing", async () => {
-  config = '[computer]\nasks = "never"\n\n[skills]\nenabled = ["linear"]\n';
-  await show(api(LIST));
-  expect(within(row("Linear")).getByText(/works on its own/)).toBeTruthy();
-});
-
-it("lists its recent connector calls, and nothing when the hub keeps none", async () => {
-  calls = [
-    {
-      id: "1",
-      at: new Date().toISOString(),
-      agent: "allan",
-      kind: "connector",
-      doing: "change something in linear",
-      folder: null,
-      tool: "linear.issue_create",
-      decided_by: "rule",
-      outcome: { outcome: "ran" },
-      reason: null,
-    },
-  ];
-  await show(api(LIST));
-  const recent = screen.getByRole("region", { name: "Recent connector calls" });
-  expect(within(recent).getByText("linear.issue_create")).toBeTruthy();
-  cleanup();
-  calls = new HubError(404, "no route");
-  await show(api(LIST));
-  expect(screen.queryByRole("region", { name: "Recent connector calls" })).toBeNull();
-});
-
-it("says when its settings file can't be changed", async () => {
-  config = "[skills\nenabled = []\n";
-  await show(api(LIST));
+  expect((a.setPicks as ReturnType<typeof vi.fn>).mock.calls[0]![1]).toEqual({
+    service: "jira",
+    connections: [
+      { id: "all~~default", write: true },
+      { id: "all~~globex", write: true },
+    ],
+    default: "all~~default",
+  });
   await act(async () => {
-    fireEvent.click(radio("Jira", "Off"));
+    fireEvent.click(within(box("Email")).getByRole("button", { name: /Work: read only/ }));
   });
-  expect(screen.getByRole("status").textContent).toBe("Their settings file has a mistake in it, so Desk won’t change it.");
-  expect(saved).toEqual([]);
+  expect((a.setPicks as ReturnType<typeof vi.fn>).mock.calls[1]![1]).toEqual({
+    service: "email",
+    connections: [{ id: "all~~work", write: true }],
+    default: "all~~work",
+  });
 });
 
-it("says when the hub couldn't be asked", async () => {
-  await show(api([], { list: vi.fn(async () => Promise.reject(new Error("down"))) }));
-  expect(screen.getByRole("alert").textContent).toContain("Desk couldn’t read your connections just now.");
+it("changes the default", async () => {
+  const a = api([JIRA]);
+  await show(a);
+  fireEvent.click(within(box("Jira")).getByRole("button", { name: "change" }));
+  await act(async () => {
+    fireEvent.change(within(box("Jira")).getByLabelText("Jira default"), { target: { value: "all~~globex" } });
+  });
+  expect(((a.setPicks as ReturnType<typeof vi.fn>).mock.calls[0]![1] as PicksChange).default).toBe("all~~globex");
+});
+
+it("asks the agent to set up a service it has no connection to, or offers to connect it", async () => {
+  const asked: string[] = [];
+  await show(api([DATADOG, svc({ id: "slack", name: "Slack", several: false })]), (_a, s) => {
+    asked.push(s);
+    return true;
+  });
+  const dd = box("Datadog");
+  expect(within(dd).getByText("no connection yet")).toBeTruthy();
+  fireEvent.click(within(dd).getByRole("button", { name: "Ask Allan to set it up" }));
+  expect(asked).toEqual(["Datadog"]);
+  expect(within(dd).getByRole("button", { name: "Connect myself" })).toBeTruthy();
+  // Slack the person connects.
+  expect(within(box("Slack")).queryByRole("button", { name: "Ask Allan to set it up" })).toBeNull();
+});
+
+it("turns Slack's one connection on through the agent's own settings", async () => {
+  const slack = svc({ id: "slack", name: "Slack", several: false, connections: [pick({ id: "all~~default", name: "Slack" })] });
+  const a = api([slack]);
+  await show(a);
+  await act(async () => {
+    fireEvent.click(within(box("Slack")).getByRole("checkbox", { name: /Slack/ }));
+  });
+  expect(a.setPicks).not.toHaveBeenCalled();
+  expect((parse(config).skills as { enabled: string[] }).enabled).toContain("slack");
+});
+
+it("says what went wrong saving, and tries again", async () => {
+  let fail = true;
+  const a = api([EMAIL], {
+    setPicks: vi.fn(async () => {
+      if (fail) throw new HubError(400, "That Email connection isn’t there any more. Reload Connections.");
+      return [EMAIL];
+    }),
+  });
+  await show(a);
+  await act(async () => {
+    fireEvent.click(within(box("Email")).getByRole("checkbox", { name: /Personal/ }));
+  });
+  expect(screen.getByRole("status").textContent).toMatch(/isn’t there any more/);
+  fail = false;
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  });
+  expect(screen.getByRole("status").textContent).toBe("Saved.");
+});
+
+/** A hub that keeps what it is told, and answers each save only when let. */
+const slowHub = (start: ServicePicks[]) => {
+  let state = start;
+  const waiting: (() => void)[] = [];
+  const setPicks = vi.fn(
+    (_agent: string, change: PicksChange) =>
+      new Promise<ServicePicks[]>((done) => {
+        waiting.push(() => {
+          state = state.map((s) =>
+            s.id !== change.service
+              ? s
+              : {
+                  ...s,
+                  chosen: true,
+                  connections: s.connections.map((p) => {
+                    const use = change.connections.find((c) => c.id === p.id);
+                    return { ...p, picked: !!use, write: use?.write ?? p.write, default: change.default === p.id };
+                  }),
+                },
+          );
+          done(state);
+        });
+      }),
+  );
+  return { setPicks, answer: () => waiting.shift()!(), state: () => state };
+};
+
+it("keeps every quick tick: a queued save works from what the last one left, not what was on screen", async () => {
+  const off = svc({
+    id: "jira",
+    name: "Jira",
+    connections: [pick({ id: "all~~acme", name: "Acme" }), pick({ id: "all~~globex", name: "Globex" })],
+  });
+  const hub = slowHub([off]);
+  const a = api([off], { setPicks: hub.setPicks });
+  await show(a);
+  // Both ticked before the first save comes back.
+  await act(async () => {
+    fireEvent.click(within(box("Jira")).getByRole("checkbox", { name: /Acme/ }));
+  });
+  await act(async () => {
+    fireEvent.click(within(box("Jira")).getByRole("checkbox", { name: /Globex/ }));
+  });
+  await act(async () => hub.answer());
+  await act(async () => hub.answer());
+  const second = hub.setPicks.mock.calls[1]![1];
+  expect(second.connections.map((c) => c.id)).toEqual(["all~~acme", "all~~globex"]);
+  expect(within(box("Jira")).getByText("2 of 2 on")).toBeTruthy();
+});
+
+it("tries a failed save again from what is there now", async () => {
+  const off = svc({
+    id: "jira",
+    name: "Jira",
+    connections: [pick({ id: "all~~acme", name: "Acme" }), pick({ id: "all~~globex", name: "Globex" })],
+  });
+  const hub = slowHub([off]);
+  let fail = true;
+  const a = api([off], {
+    setPicks: vi.fn(async (agent: string, change: PicksChange) => {
+      if (fail && change.connections.some((c) => c.id === "all~~globex")) throw new Error("Desk couldn’t save that just now.");
+      const p = hub.setPicks(agent, change);
+      hub.answer();
+      return p;
+    }),
+  });
+  await show(a);
+  // Acme saves; Globex, queued behind it, fails.
+  await act(async () => {
+    fireEvent.click(within(box("Jira")).getByRole("checkbox", { name: /Acme/ }));
+    fireEvent.click(within(box("Jira")).getByRole("checkbox", { name: /Globex/ }));
+  });
+  expect(screen.getByRole("status").textContent).toMatch(/couldn’t save/);
+  fail = false;
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  });
+  const last = (a.setPicks as ReturnType<typeof vi.fn>).mock.calls.at(-1)![1] as PicksChange;
+  expect(last.connections.map((c) => c.id)).toEqual(["all~~acme", "all~~globex"]);
+  expect(screen.getByRole("status").textContent).toBe("Saved.");
+});
+
+const listing = (ids: string[], adapters: string[]): Listing => ({
+  connectors: ids.map((id) => ({ id, usedBy: [] }) as unknown as Connector),
+  adapters,
+});
+
+it("turning Slack on for an agent nobody chose connectors for keeps every other one it had", async () => {
+  const slack = svc({ id: "slack", name: "Slack", several: false, connections: [pick({ id: "all~~default", name: "Slack" })] });
+  const a = api([slack, JIRA], { list: vi.fn(async () => listing(["slack", "jira", "linear"], ["notion", "hubspot"])) });
+  await show(a);
+  await act(async () => {
+    fireEvent.click(within(box("Slack")).getByRole("checkbox", { name: /Slack/ }));
+  });
+  expect((parse(config).skills as { enabled: string[] }).enabled).toEqual(["hubspot", "jira", "linear", "notion", "slack"]);
+});
+
+it("keeps Slack on its own connection where the agent has one", async () => {
+  const slack = svc({
+    id: "slack",
+    name: "Slack",
+    several: false,
+    connections: [pick({ id: "agent~allan~default", name: "Slack", level: "agent" })],
+  });
+  const a = api([slack], { list: vi.fn(async () => listing(["slack"], [])) });
+  await show(a);
+  await act(async () => {
+    fireEvent.click(within(box("Slack")).getByRole("checkbox", { name: /Slack/ }));
+  });
+  expect((parse(config).skills as { own_credential: string[] }).own_credential).toEqual(["slack"]);
+});
+
+it("makes Slack read only, and says so once the hub does", async () => {
+  const on = (write: boolean) =>
+    svc({ id: "slack", name: "Slack", several: false, connections: [pick({ id: "all~~default", name: "Slack", picked: true, write })] });
+  let write = true;
+  const a = api([on(true)], {
+    list: vi.fn(async () => listing(["slack"], [])),
+    picks: vi.fn(async () => [on(write)]),
+  });
+  config = `[skills]\nenabled = ["slack"]\n`;
+  await show(a);
+  write = false;
+  await act(async () => {
+    fireEvent.click(within(box("Slack")).getByRole("button", { name: /Slack: read and write/ }));
+  });
+  expect((parse(config).skills as { read_only: string[] }).read_only).toEqual(["slack"]);
+  expect(within(box("Slack")).getByRole("button", { name: /Slack: read only/ })).toBeTruthy();
+  expect(screen.getByRole("status").textContent).toBe("Saved.");
+});
+
+it("has its saving line there before the first save, so the first is read out", async () => {
+  await show(api([EMAIL]));
+  expect(screen.getByRole("status").textContent).toBe("");
+});
+
+it("takes two quick clicks on the same control as two: on then off, writes then not", async () => {
+  const off = svc({
+    id: "jira",
+    name: "Jira",
+    connections: [pick({ id: "all~~acme", name: "Acme" }), pick({ id: "all~~globex", name: "Globex", picked: true, default: true })],
+  });
+  const hub = slowHub([off]);
+  const a = api([off], { setPicks: hub.setPicks });
+  await show(a);
+  const acme = () => within(box("Jira")).getByRole("checkbox", { name: /Acme/ }) as HTMLInputElement;
+  await act(async () => {
+    fireEvent.click(acme());
+  });
+  // Shown as made while it saves, so the next click turns it off.
+  expect(acme().checked).toBe(true);
+  await act(async () => {
+    fireEvent.click(acme());
+  });
+  expect(acme().checked).toBe(false);
+  const globex = () => within(box("Jira")).getByRole("button", { name: /Globex: / });
+  await act(async () => {
+    fireEvent.click(globex());
+  });
+  await act(async () => {
+    fireEvent.click(globex());
+  });
+  expect(globex().textContent).toBe("read and write");
+  for (let i = 0; i < 4; i++) await act(async () => hub.answer());
+  const sent = hub.setPicks.mock.calls.map((c) => c[1].connections);
+  expect(sent).toEqual([
+    [
+      { id: "all~~globex", write: true },
+      { id: "all~~acme", write: true },
+    ],
+    [{ id: "all~~globex", write: true }],
+    [{ id: "all~~globex", write: false }],
+    [{ id: "all~~globex", write: true }],
+  ]);
+  expect(acme().checked).toBe(false);
+  expect(globex().textContent).toBe("read and write");
+  expect(screen.getByRole("status").textContent).toBe("Saved.");
+});
+
+it("says Saved only once every save is in and none failed since", async () => {
+  const off = svc({
+    id: "jira",
+    name: "Jira",
+    connections: [pick({ id: "all~~acme", name: "Acme" }), pick({ id: "all~~globex", name: "Globex" })],
+  });
+  const hub = slowHub([off]);
+  let failAcme = true;
+  const answers: (() => void)[] = [];
+  const a = api([off], {
+    setPicks: vi.fn(
+      (agent: string, change: PicksChange) =>
+        new Promise<ServicePicks[]>((done, fail) => {
+          answers.push(() => {
+            if (failAcme && change.connections.some((c) => c.id === "all~~acme")) return fail(new Error("Desk couldn’t save Acme."));
+            const p = hub.setPicks(agent, change);
+            hub.answer();
+            void p.then(done);
+          });
+        }),
+    ),
+  });
+  await show(a);
+  await act(async () => {
+    fireEvent.click(within(box("Jira")).getByRole("checkbox", { name: /Acme/ }));
+  });
+  await act(async () => {
+    fireEvent.click(within(box("Jira")).getByRole("checkbox", { name: /Globex/ }));
+  });
+  await act(async () => answers.shift()!());
+  // Acme failed; Globex still saving.
+  expect(screen.getByRole("status").textContent).toBe("Saving…");
+  await act(async () => answers.shift()!());
+  // Globex is in, but Acme isn't: not "Saved."
+  expect(screen.getByRole("status").textContent).toMatch(/couldn’t save Acme/);
+  failAcme = false;
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  });
+  await act(async () => answers.shift()!());
+  expect(screen.getByRole("status").textContent).toBe("Saved.");
+  expect(within(box("Jira")).getByText("2 of 2 on")).toBeTruthy();
 });

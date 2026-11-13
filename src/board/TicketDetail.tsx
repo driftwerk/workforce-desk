@@ -20,6 +20,10 @@ import { STATE_TITLE, historyLine, sessionsOf, spendOf } from "./board";
 import { useWaiting } from "./BoardView";
 import { StartSession } from "./StartSession";
 import { TicketBody } from "./TicketBody";
+import { TicketComments } from "./TicketComments";
+import { TicketFiles, useUploads } from "./TicketFiles";
+import { useFileDrop } from "../attachments/Compose";
+import { localTicketView } from "./ticketView";
 import { TicketOpener, TicketPopupContext, useOpenTicket, useTicketPopup, type TicketPopupFrame } from "./opener";
 import { useBoard } from "./store";
 import { Assignee, TakeIt, Upstream } from "./TicketCard";
@@ -284,6 +288,23 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
     ...(t.snoozedUntil ? [{ kind: "separator" as const }, { kind: "item" as const, label: "Wake it now", onSelect: () => act(store().edit(t.id, { snoozedUntil: null })) }] : []),
   ];
   const agentName = (id: string) => roster.find((a) => a.id === id)?.name;
+  const local = !t.external && !sync;
+  const uploads = useUploads(t, setProblem);
+  // Files dropped on a ticket of your own: the system's drag and drop in
+  // the app, the page's in the browser preview (drop/route.ts).
+  const drop = useFileDrop((files) => void uploads.add(files), setProblem);
+  const issue = t.external ? issueUrl(t) : null;
+  const details = t.external?.details;
+  const labels = details?.labels?.length ? details.labels : null;
+  // A synced ticket's issue is read whole for its files when it opens, now
+  // and then: what the pull doesn't bring (a file attached since).
+  useEffect(() => {
+    if (!t.external?.synced) return;
+    localTicketView()
+      ?.readIssue(t.id)
+      .then((v) => useBoard.getState().heard(v))
+      .catch(() => {});
+  }, [t.id, t.external?.synced]);
   const popup = useTicketPopup();
   return (
     <TicketFrame
@@ -293,7 +314,12 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
       onClose={() => store().openTicket(null)}
       title={
         <>
-          {t.key && <span className="chip">{t.key}</span>}
+          {t.key && <span className="chip ticket-key">{t.key}</span>}
+          {issue && t.external && (
+            <button type="button" className="link small ticket-open-issue" aria-label={`Open in ${SYSTEM_TITLE[t.external.system]}`} onClick={() => openUrl(issue)}>
+              Open in {SYSTEM_TITLE[t.external.system]} ↗
+            </button>
+          )}
           <span className="rpanel-name" />
         </>
       }
@@ -315,187 +341,230 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
         </>
       }
     >
-      <div className="ticket-body">
-        {editing === "title" ? (
-          <input
-            className="ticket-title-edit display"
-            autoFocus
-            aria-label="Title"
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={save}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") save();
-              else if (e.key === "Escape") {
-                e.stopPropagation();
-                setEditing(null);
-              }
-            }}
-          />
-        ) : (
-          <h2 className="ticket-title display">
-            <button
-              type="button"
-              className="ticket-edit"
-              title="Change the title"
-              onClick={() => startEditing("title")}
-            >
-              {t.title}
-            </button>
-          </h2>
-        )}
-        {t.createdBy.kind !== "you" && <WrittenBy who={t.createdBy} />}
-        {t.external && <IssueLine ticket={t} />}
-        {t.pushProblem && (
-          <p className="small state-blocked ticket-push-problem" role="status">
-            {t.pushProblem}
-          </p>
-        )}
-        {conflict && (
-          <div className="ticket-conflict" role="alert">
-            <p className="small state-blocked">Changed meanwhile. The {conflict.field === "title" ? "title" : "description"} now says:</p>
-            <p className="ticket-text muted">{conflict.theirs || "(nothing)"}</p>
-            <div className="ticket-actions">
+      <div className="ticket-body ticket-view">
+        <div className={`ticket-read${local && drop.dragging ? " is-dropping" : ""}`} {...(local ? drop.handlers : {})}>
+          {editing === "title" ? (
+            <input
+              className="ticket-title-edit display"
+              autoFocus
+              aria-label="Title"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onBlur={save}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") save();
+                else if (e.key === "Escape") {
+                  e.stopPropagation();
+                  setEditing(null);
+                }
+              }}
+            />
+          ) : (
+            <h1 className="ticket-title display">
+              <button type="button" className="ticket-edit" title="Change the title" onClick={() => startEditing("title")}>
+                {t.title}
+              </button>
+            </h1>
+          )}
+          {t.createdBy.kind !== "you" && <WrittenBy who={t.createdBy} />}
+          {t.external && !t.external.synced && <IssueLine ticket={t} />}
+          {t.pushProblem && (
+            <p className="small state-blocked ticket-push-problem" role="status">
+              {t.pushProblem}
+            </p>
+          )}
+          {conflict && (
+            <div className="ticket-conflict" role="alert">
+              <p className="small state-blocked">Changed meanwhile. The {conflict.field === "title" ? "title" : "description"} now says:</p>
+              <p className="ticket-text muted">{conflict.theirs || "(nothing)"}</p>
+              <div className="ticket-actions">
+                <button
+                  type="button"
+                  className="btn btn-sm"
+                  onClick={() => {
+                    act(store().edit(t.id, { [conflict.field]: conflict.mine }));
+                    setConflict(null);
+                  }}
+                >
+                  Keep mine
+                </button>
+                <button type="button" className="link" onClick={() => setConflict(null)}>
+                  Take the new one
+                </button>
+              </div>
+            </div>
+          )}
+          {problem && (
+            <p className="small state-blocked" role="alert">
+              {problem}
+            </p>
+          )}
+          <article className="ticket-description" aria-label="Description">
+            {editing === "body" ? (
+              <textarea
+                className="board-textarea"
+                autoFocus
+                aria-label="What it's about"
+                rows={8}
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onBlur={save}
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") {
+                    e.stopPropagation();
+                    setEditing(null);
+                  }
+                }}
+              />
+            ) : t.body ? (
+              <TicketBody text={t.body} onEdit={() => startEditing("body")} />
+            ) : (
+              <button type="button" className="ticket-edit ticket-text" title="Change what it's about" onClick={() => startEditing("body")}>
+                <span className="faint">Add what it's about, and what done looks like</span>
+              </button>
+            )}
+          </article>
+          <TicketFiles ticket={t} local={local} uploads={uploads} />
+          <TicketComments ticket={t} />
+        </div>
+        <aside className="ticket-side" aria-label="Details">
+          <div className="ticket-side-acts">
+            {canTake && <TakeIt ticket={t} className="btn btn-signal ticket-take" />}
+            {session && (
               <button
                 type="button"
-                className="btn btn-sm"
+                className="btn ticket-take"
                 onClick={() => {
-                  act(store().edit(t.id, { [conflict.field]: conflict.mine }));
-                  setConflict(null);
+                  popup?.close();
+                  useDesk.getState().open(session.id);
                 }}
               >
-                Keep mine
+                Go to session
               </button>
-              <button type="button" className="link" onClick={() => setConflict(null)}>
-                Take the new one
+            )}
+            <div className="ticket-side-pair">
+              <button type="button" className="btn btn-sm" onClick={() => setStarting(true)}>
+                Start a session
+              </button>
+              <button type="button" className="btn btn-sm" aria-haspopup="menu" onClick={(e) => setMenu({ kind: "hand", at: below(e.currentTarget), from: e.currentTarget })}>
+                Hand to…
               </button>
             </div>
           </div>
-        )}
-        <div className="ticket-row">
-          <label htmlFor={`ticket-state-${t.id}`} className="ov-label muted">
-            State
-          </label>
-          <select id={`ticket-state-${t.id}`} className="board-select" value={t.state} onChange={(e) => act(store().move(t.id, { state: e.target.value as TicketState }))}>
-            {STATES.map((s) => (
-              <option key={s} value={s}>
-                {STATE_TITLE[s]}
-              </option>
-            ))}
-          </select>
-          {t.assignee ? <Assignee who={t.assignee} waiting={waiting} /> : <span className="faint small">No one has it</span>}
-        </div>
-        {sync && t.external && t.external.assignee !== undefined && (
-          <div className="ticket-row">
-            <span className="ov-label muted">On {SYSTEM_TITLE[sync.system]}</span>
-            <Upstream who={t.external.assignee} me={sync.me} system={sync.system} />
-          </div>
-        )}
-        <div className="ticket-actions">
-          {session && (
+          <dl className="ticket-facts">
+            <dt>
+              <label htmlFor={`ticket-state-${t.id}`}>State</label>
+            </dt>
+            <dd>
+              <select id={`ticket-state-${t.id}`} className="board-select" value={t.state} onChange={(e) => act(store().move(t.id, { state: e.target.value as TicketState }))}>
+                {STATES.map((s) => (
+                  <option key={s} value={s}>
+                    {STATE_TITLE[s]}
+                  </option>
+                ))}
+              </select>
+            </dd>
+            <dt>Assignee</dt>
+            <dd>{t.assignee ? <Assignee who={t.assignee} waiting={waiting} /> : <span className="muted">Unassigned</span>}</dd>
+            {sync && t.external && t.external.assignee !== undefined && (
+              <>
+                <dt>On {SYSTEM_TITLE[sync.system]}</dt>
+                <dd>
+                  <Upstream who={t.external.assignee} me={sync.me} system={sync.system} />
+                </dd>
+              </>
+            )}
+            {details?.priority && (
+              <>
+                <dt>Priority</dt>
+                <dd>{details.priority}</dd>
+              </>
+            )}
+            {labels && (
+              <>
+                <dt>Labels</dt>
+                <dd className="ticket-labels">
+                  {labels.map((l) => (
+                    <span key={l} className="ticket-label">
+                      {l}
+                    </span>
+                  ))}
+                </dd>
+              </>
+            )}
+            {details?.project && (
+              <>
+                <dt>Project</dt>
+                <dd>{details.project}</dd>
+              </>
+            )}
+            {details?.due && (
+              <>
+                <dt>Due</dt>
+                <dd>{dueText(details.due)}</dd>
+              </>
+            )}
+          </dl>
+          <Needs ticket={t} neededBy={neededBy} onProblem={setProblem} />
+          <Links links={t.links} />
+          <section aria-label="History">
+          <details className="ticket-history">
+            <summary className="ticket-history-head">
+              History · {history.events.length}
+              {history.more ? "+" : ""}
+              {spend && spend.calls > 0 && (
+                <span className="floor-time" title="What its sessions spent on it this month, at API prices">
+                  {spend.capped ? "at least " : ""}
+                  {tokensText(spend.tokens)} tokens · {usdText(spend.usd)} this month
+                </span>
+              )}
+            </summary>
+            {history.problem && <p className="small state-blocked">{history.problem}</p>}
+            <ol className="ticket-history-rows">
+              {[...history.events].reverse().map((e) => (
+                <HistoryRow key={e.id} event={e} ticketKey={t.key} names={names} agentName={agentName} />
+              ))}
+            </ol>
+            {history.more && (
+              <button type="button" className="link small" onClick={history.older}>
+                Show older
+              </button>
+            )}
+          </details>
+          </section>
+          <div className="ticket-foot">
             <button
               type="button"
-              className="btn btn-sm"
-              onClick={() => {
-                popup?.close();
-                useDesk.getState().open(session.id);
-              }}
-            >
-              Go to session
-            </button>
-          )}
-          {canTake && <TakeIt ticket={t} className="btn btn-sm btn-signal" />}
-          <button type="button" className="btn btn-sm" aria-haspopup="menu" onClick={(e) => setMenu({ kind: "hand", at: below(e.currentTarget), from: e.currentTarget })}>
-            Hand to…
-          </button>
-          <button type="button" className="btn btn-sm" onClick={() => setStarting(true)}>
-            Start a session on it
-          </button>
-          {t.state === "dropped" ? (
-            <button type="button" className="link" onClick={() => act(store().move(t.id, { state: "backlog" }))}>
-              Bring it back
-            </button>
-          ) : (
-            <button type="button" className="link" onClick={() => act(store().move(t.id, { state: "dropped" }))}>
-              Drop
-            </button>
-          )}
-        </div>
-        {problem && (
-          <p className="small state-blocked" role="alert">
-            {problem}
-          </p>
-        )}
-        {editing === "body" ? (
-          <textarea
-            className="board-textarea"
-            autoFocus
-            aria-label="What it's about"
-            rows={5}
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onBlur={save}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                e.stopPropagation();
-                setEditing(null);
+              className="link small"
+              title="A link that opens this ticket, to paste in a room"
+              onClick={() =>
+                void navigator.clipboard
+                  .writeText(ticketLink(t.id))
+                  .then(() => setProblem(null))
+                  .catch(() => setProblem("Couldn't copy the link."))
               }
-            }}
-          />
-        ) : t.body ? (
-          <TicketBody text={t.body} onEdit={() => startEditing("body")} />
-        ) : (
-          <button type="button" className="ticket-edit ticket-text" title="Change what it's about" onClick={() => startEditing("body")}>
-            <span className="faint">Add what it's about, and what done looks like</span>
-          </button>
-        )}
-        <Needs ticket={t} neededBy={neededBy} onProblem={setProblem} />
-        <Links links={t.links} />
-        <section className="ticket-history" aria-label="History">
-          <div className="ticket-history-head">
-            <h3 className="ov-label muted">History</h3>
-            {spend && spend.calls > 0 && (
-              <span className="floor-time" title="What its sessions spent on it this month, at API prices">
-                {spend.capped ? "at least " : ""}
-                {tokensText(spend.tokens)} tokens · {usdText(spend.usd)} this month
-              </span>
+            >
+              Copy link
+            </button>
+            {movable && (
+              <button type="button" className="link small" onClick={() => askMove(ticketSubject(t))}>
+                Move to group…
+              </button>
             )}
+            {t.state === "dropped" ? (
+              <button type="button" className="link small" onClick={() => act(store().move(t.id, { state: "backlog" }))}>
+                Bring it back
+              </button>
+            ) : (
+              <button type="button" className="link small" onClick={() => act(store().move(t.id, { state: "dropped" }))}>
+                Drop
+              </button>
+            )}
+            <button type="button" className="link small" onClick={() => setDeleting(true)}>
+              Delete…
+            </button>
           </div>
-          {history.problem && <p className="small state-blocked">{history.problem}</p>}
-          <ol className="ticket-history-rows">
-            {[...history.events].reverse().map((e) => (
-              <HistoryRow key={e.id} event={e} ticketKey={t.key} names={names} agentName={agentName} />
-            ))}
-          </ol>
-          {history.more && (
-            <button type="button" className="link small" onClick={history.older}>
-              Show older
-            </button>
-          )}
-        </section>
-        <div className="ticket-foot">
-          <button
-            type="button"
-            className="link small"
-            title="A link that opens this ticket, to paste in a room"
-            onClick={() =>
-              void navigator.clipboard
-                .writeText(ticketLink(t.id))
-                .then(() => setProblem(null))
-                .catch(() => setProblem("Couldn't copy the link."))
-            }
-          >
-            Copy link
-          </button>
-          {movable && (
-            <button type="button" className="link small" onClick={() => askMove(ticketSubject(t))}>
-              Move to group…
-            </button>
-          )}
-          <button type="button" className="link small" onClick={() => setDeleting(true)}>
-            Delete ticket…
-          </button>
-        </div>
+        </aside>
       </div>
       {menu && (
         <Menu
@@ -517,6 +586,12 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
     </TicketFrame>
   );
 }
+
+/** A due date as the details say it: "Fri 14 Nov". */
+export const dueText = (due: string): string => {
+  const d = new Date(`${due}T12:00:00`);
+  return Number.isNaN(d.getTime()) ? due : d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
+};
 
 /** Who wrote a ticket that wasn't the person: its words are theirs. */
 function WrittenBy({ who }: { who: ActivityParty }) {

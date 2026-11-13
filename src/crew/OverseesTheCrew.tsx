@@ -692,7 +692,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
           title={(id) => (
             <header className="dialog-head">
               <span className="dialog-title">
-                <h1 id={id} className="display-md">
+                <h1 id={id} className="display-lg">
                   Make {name} the {o?.group ? "main boss" : "overseer"}?
                 </h1>
                 {other && (

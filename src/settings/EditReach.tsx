@@ -141,7 +141,7 @@ export function EditReach({
   return (
     <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && close()}>
       <div className="sheet machine-add" role="dialog" aria-label={`Change how Desk reaches ${machine.name}`} onKeyDown={(e) => e.key === "Escape" && close()}>
-        <h2 className="display-md">Change how Desk reaches {machine.name}</h2>
+        <h2 className="display-lg">Change how Desk reaches {machine.name}</h2>
         <p className="muted">Its sessions, sign-ins and settings stay. Desk checks the new way reaches the same machine before it switches.</p>
         <div className="seg seg-on-raised" role="radiogroup" aria-label="How">
           <button type="button" role="radio" aria-checked={tab === "config"} onClick={() => setTab("config")}>

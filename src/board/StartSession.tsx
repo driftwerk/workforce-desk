@@ -77,7 +77,7 @@ export function StartSession({ ticket: t, onClose }: { ticket: Ticket; onClose: 
   return (
     <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()} onKeyDown={keys}>
       <form ref={sheet} className="sheet" onSubmit={start} aria-label={`Start a session on ${t.key ?? "the ticket"}`} tabIndex={-1}>
-        <h2 className="display-md">Start a session on {t.key ?? "it"}</h2>
+        <h2 className="display-lg">Start a session on {t.key ?? "it"}</h2>
         <p className="muted small">It starts with “{t.title}” as its goal and first prompt, and the ticket moves to Doing.</p>
         <div className="seg" role="radiogroup" aria-label="Engine">
           {choices.map((k) => (

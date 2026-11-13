@@ -1693,6 +1693,125 @@ export interface TicketExternal {
   /** Who has the issue there; null when no one does, absent from an older
    *  hub. */
   assignee?: SyncAssignee | null;
+  /** What the issue says of itself besides its words: shown, never pushed. */
+  details?: TicketDetails;
+}
+
+/** A synced ticket's issue's priority, labels, project and due date there,
+ *  and when it was last read whole. */
+export interface TicketDetails {
+  priority?: string;
+  labels?: string[];
+  project?: string;
+  /** `2026-11-14`. */
+  due?: string;
+  readAt?: string;
+  commentsAt?: string;
+  /** Its priority as bars: 1 the most urgent, 4 the least. */
+  priorityRank?: number;
+  /** Its type there (Story, Bug, Epic …) and the type's level: 1 an epic,
+   *  0 a standard issue, -1 a sub-task. Jira only. */
+  kind?: string;
+  kindLevel?: number;
+  /** Its state's name there, and on Linear the state's type (`started`). */
+  remoteState?: string;
+  stateKind?: string;
+  /** Its parent there, and (Jira) the epic it belongs to. */
+  parent?: IssueRef;
+  epic?: IssueRef;
+  /** Story points or estimate. */
+  points?: number;
+  /** The sprint (Jira) or cycle (Linear) it is in. */
+  sprint?: SprintRef;
+  /** How many of its sub-tasks or sub-issues are done. */
+  subItems?: { done: number; total: number };
+  links?: IssueLink[];
+  components?: string[];
+  fixVersions?: string[];
+  reporter?: string;
+  created?: string;
+  /** `2026-11-14`. */
+  start?: string;
+  /** How many comments it has there, when the listing says. */
+  comments?: number;
+  prs?: PrSummary;
+}
+
+/** Another issue a ticket's issue points at. */
+export interface IssueRef {
+  key: string;
+  title: string;
+  kind?: string;
+  state?: string;
+  done?: boolean;
+}
+
+/** How a linked issue stands to a ticket's: it blocks it, is blocked by it,
+ *  or is linked some other way (`words`: "relates to", "duplicates"). */
+export interface IssueLink {
+  rel: "blockedBy" | "blocks" | "other";
+  words?: string;
+  issue: IssueRef;
+}
+
+/** A sprint (Jira) or cycle (Linear, which may have only a number). */
+export interface SprintRef {
+  name?: string;
+  number?: number;
+  /** `2026-11-14`. */
+  starts?: string;
+  ends?: string;
+}
+
+/** An issue's pull requests: how many, their overall state there, and the
+ *  one PR's number and address when known. */
+export interface PrSummary {
+  count: number;
+  state: "open" | "review" | "changes" | "merged" | "declined" | "draft";
+  number?: number;
+  url?: string;
+}
+
+/** Where a ticket's file comes from: dropped on a ticket of your own, a
+ *  Jira attachment, a file uploaded to Linear, or a Linear link. */
+export type TicketFileSource = "upload" | "jira" | "linear_upload" | "linear_link";
+
+/** A ticket's file. Its bytes are at `GET /api/desk/tickets/{ticket}/files/{id}`
+ *  (`?thumb=1` for Jira's small picture, when `thumb`); a link has none. */
+export interface TicketFile {
+  id: string;
+  source: TicketFileSource;
+  name: string;
+  mediaType: string;
+  size: number | null;
+  /** A link's address, or a Linear upload's, which its description shows. */
+  url: string | null;
+  thumb: boolean;
+  addedBy: ActivityParty;
+  addedAt: string;
+}
+
+/** Who wrote a comment: a person, an agent or app, or Desk's own note. */
+export interface CommentAuthor {
+  kind: "person" | "agent" | "desk";
+  name: string;
+  /** Where: "Linear", "Jira" or "Desk". */
+  on: string;
+}
+
+export interface TicketComment {
+  id: string;
+  author: CommentAuthor;
+  /** Who in Desk posted it, when Desk did. */
+  postedBy?: ActivityParty;
+  /** Markdown, or Jira's words. */
+  body: string;
+  /** The hub warned its words read as instructions to an AI. */
+  flagged: boolean;
+  at: string;
+  editedAt?: string;
+  /** On a synced ticket, it stays in Desk: a session's or an agent's note. */
+  onlyHere: boolean;
 }
 
 /** A hub the local hub may sync boards through (`GET /api/desk/sync-hubs`). */
@@ -1804,6 +1923,9 @@ export interface Ticket {
   leftFilter?: boolean;
   /** What stops its change going out to its issue, in plain words. */
   pushProblem?: string | null;
+  /** Its files: its issue's, or what you dropped on it; absent from an
+   *  older hub. */
+  files?: TicketFile[];
 }
 
 export interface NewTicket {

@@ -215,7 +215,7 @@ function useRemovePane(gridId: string, pane: PaneData, label: Label): { remove: 
       title={(id) => (
         <header className="dialog-head">
           <span className="dialog-title">
-            <h1 id={id} className="display-md">
+            <h1 id={id} className="display-lg">
               {ask.title}
             </h1>
             <p>{ask.says}</p>
