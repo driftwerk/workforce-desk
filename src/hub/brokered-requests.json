@@ -687,6 +687,21 @@
   {
     "kind": "http",
     "method": "GET",
+    "path": "/api/desk/preferences"
+  },
+  {
+    "kind": "http",
+    "method": "PATCH",
+    "path": "/api/desk/preferences/p1"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/preferences/p1/pause"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
     "path": "/api/desk/rooms"
   },
   {
