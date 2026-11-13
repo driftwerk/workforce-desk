@@ -21,13 +21,14 @@ import { SwapIcon } from "../handoff/LineageChips";
 import { continuedFrom, fromShort } from "../handoff/words";
 import { below, MoreIcon } from "../groups/rows";
 import { Menu } from "../ui/Menu";
-import type { BossView, PlanProgress } from "../hub/types";
+import type { BossView, Handled, Manager, PlanProgress } from "../hub/types";
 import { localKey, openLocalDm } from "../overview/people";
 import { useSessionName } from "../groups/names";
 import { Mark } from "../ui/Mark";
 import { openTarget } from "../shell/navigate";
 import { standingText } from "../spend/budgets";
 import { fullBudgetText } from "../crew/oversight";
+import { useOverview } from "../overview/store";
 import { AgentMark } from "../ui/Mark";
 import type { Target } from "../shell/navigate";
 import type { FloorNeed, FloorWork } from "./merge";
@@ -95,9 +96,30 @@ function BossState({ boss }: { boss: BossView }) {
   return boss.state === "working" ? <span className="state-working">working</span> : <span>idle</span>;
 }
 
+/** "handled 23 of 25 itself today, 4 by your preferences", as the hub
+ *  counts it; nothing on a day with no needs. */
+export function handledSaid(h: Handled | null | undefined): string | null {
+  if (!h) return null;
+  const itself = h.own + h.preference;
+  const needs = itself + h.escalated + h.personFirst;
+  if (needs === 0) return null;
+  const prefs = h.preference === 0 ? "" : `, ${h.preference} by your preferences`;
+  return `handled ${itself} of ${needs} itself today${prefs}`;
+}
+
+/** The boss `agent`'s count for today, from this computer's hub's word on
+ *  who oversees what. */
+export const handledOf = (manager: Manager | null, agent: string | undefined): Handled | null =>
+  !manager || !agent
+    ? null
+    : manager.agentId === agent
+      ? (manager.handled ?? null)
+      : (manager.bosses?.find((b) => b.agentId === agent)?.handled ?? null);
+
 /** Who runs the section, how, and how far its budget has gone. */
 function BossLine({ section }: { section: Section }) {
   const { boss } = section;
+  const handled = handledSaid(useOverview((s) => handledOf(s.manager, boss?.agent)));
   if (section.kind === "sealed") return <span className="fsec-boss">No one oversees it now · what it asks comes to you</span>;
   const covers =
     section.kind === "main"
@@ -124,6 +146,7 @@ function BossLine({ section }: { section: Section }) {
           · <span className={`mono${boss.actFully.spent ? " state-blocked" : ""}`}>{fullBudgetText(boss.actFully)}</span>
         </>
       )}
+      {handled && <> · {handled}</>}
       {covers && <> · {covers}</>}
     </span>
   );

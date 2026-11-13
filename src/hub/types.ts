@@ -935,6 +935,17 @@ export interface Manager {
   /** Groups closed to everyone but the person: named for a boss that
    *  oversees nothing now. */
   sealed?: string[];
+  /** What the main boss handled today; none when the hub can't say. */
+  handled?: Handled | null;
+}
+
+/** Of the needs a boss met (approvals, questions, stalls): settled itself,
+ *  by your preferences, given to you, and ones you got to first. */
+export interface Handled {
+  own: number;
+  preference: number;
+  escalated: number;
+  personFirst: number;
 }
 
 /** A sidebar group's boss: an agent of this computer's hub that oversees
@@ -945,6 +956,8 @@ export interface GroupBoss {
   /** The group's id. */
   group: string;
   level: OversightLevel;
+  /** What it handled today; none when the hub can't say. */
+  handled?: Handled | null;
 }
 
 export interface Suggestion {
