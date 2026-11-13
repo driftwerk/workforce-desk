@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { SetupLauncher } from "../setup/SetupLauncher";
 import { ShareAsk } from "../rooms/share";
 import { useChat } from "../chat/store";
-import { Floor } from "../floor/Floor";
+import { Dashboard } from "../dashboard/Dashboard";
 import { watchFloor } from "../floor/store";
 import { hearElsewhere } from "./elsewhere";
 import { GridsMain } from "../grids/Grids";
@@ -440,7 +440,7 @@ export function App() {
             main={
               <ErrorBoundary name="main">
                 {view === "floor" ? (
-                  <Floor onNewSession={() => setNewSession({})} />
+                  <Dashboard onNewSession={() => setNewSession({})} />
                 ) : view === "grids" ? (
                   <GridsMain />
                 ) : view === "board" ? (

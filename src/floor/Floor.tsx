@@ -1,4 +1,5 @@
-import { useEffect } from "react";
+import { useEffect, type ReactNode } from "react";
+import { FloorShell } from "./FloorShell";
 import { LocalSetupCard } from "../setup/LocalSetupCard";
 import { SetupFloor } from "../setup/slot";
 import { sortedSessions, useDesk, localSessions } from "../hub/store";
@@ -77,15 +78,18 @@ export function useFloorReads(): void {
 }
 
 /** The crew's overview where the hub has one; the sessions as they were
- *  shown before, where it doesn't (or until it answers). */
-export function Floor({ onNewSession }: { onNewSession: () => void }) {
+ *  shown before, where it doesn't (or until it answers). Given `heading`
+ *  (a Dashboard section's), it's part of that page, headed by it. */
+export function Floor({ onNewSession, heading }: { onNewSession: () => void; heading?: ReactNode }) {
   const overview = useOverview((s) => s.overview);
   useFloorReads();
-  return overview ? <CrewFloor overview={overview} onNewSession={onNewSession} /> : <SessionsFloor />;
+  return overview ? <CrewFloor overview={overview} onNewSession={onNewSession} heading={heading} /> : <SessionsFloor heading={heading} />;
 }
 
 /** Today's sessions, grouped by what they're doing. */
-export function SessionsFloor() {
+export function SessionsFloor({ heading }: { heading?: ReactNode } = {}) {
+  // Drawn around what it shows, so the level its shell gives isn't read here.
+  const H = heading ? "h3" : "h2";
   const sessions = sortedSessions(useDesk((s) => localSessions(s.sessions)));
   const blocked = sessions.filter(waitsOnYou).length;
   const seen = new Set<string>();
@@ -96,9 +100,9 @@ export function SessionsFloor() {
   }).filter((g) => g.tiles.length);
   const scroller = useSavedScroll<HTMLElement>("floor");
   return (
-    <main ref={scroller} className="floor" aria-label="Floor">
+    <FloorShell heading={heading} className="floor" scroller={scroller}>
       <header className="floor-head">
-        <h1 className="display-xl">Floor</h1>
+        {heading ?? <h1 className="display-xl">Floor</h1>}
         <span className="floor-summary">
           {summary(sessions)}
           {blocked > 0 && <span className="state-blocked strong">, {blocked} needs you</span>}
@@ -112,7 +116,7 @@ export function SessionsFloor() {
       ) : (
         groups.map((g) => (
           <section key={g.title} className="floor-group">
-            <h2>{g.title}</h2>
+            <H>{g.title}</H>
             <div className="tiles">
               {g.tiles.map((s) => (
                 <Tile key={s.id} session={s} />
@@ -121,6 +125,6 @@ export function SessionsFloor() {
           </section>
         ))
       )}
-    </main>
+    </FloorShell>
   );
 }
