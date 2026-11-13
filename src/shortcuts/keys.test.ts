@@ -14,6 +14,7 @@ import {
   terminalKeys,
   usable,
   warning,
+  withDigit,
   type KeyPress,
 } from "./keys";
 
@@ -48,11 +49,12 @@ describe("shortcut keys on macOS", () => {
       unread: "Primary+Shift+U",
       searchMemory: "Primary+K",
       board: "Primary+B",
+      goTo: "Primary+1",
     });
     expect(refusal(MAC.pushToTalk, "global", "macos")).toBeNull();
     expect(refusal(MAC.ask, "global", "macos")).toBeNull();
     expect(warning(MAC.ask, "macos")).toBeNull();
-    for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread", "searchMemory", "board"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
+    for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread", "searchMemory", "board", "goTo"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
     expect(new Set(Object.values(MAC)).size).toBe(Object.keys(MAC).length);
   });
 
@@ -167,6 +169,15 @@ describe("shortcut keys on macOS", () => {
   });
 });
 
+describe("the Go to keys", () => {
+  it("are one shortcut whose last key is the sidebar item's number", () => {
+    expect(withDigit(MAC.goTo, 3)).toBe("Primary+3");
+    expect(withDigit("Control+Alt+1", 9)).toBe("Control+Alt+9");
+    expect(shortcutLabel(withDigit(MAC.goTo, 2), "macos")).toBe("⌘2");
+    expect(shortcutLabel(withDigit(defaultShortcuts("windows").goTo, 2), "windows")).toBe("Ctrl+2");
+  });
+});
+
 describe("shortcut keys on Windows and Linux", () => {
   const WIN = defaultShortcuts("windows");
 
@@ -199,6 +210,7 @@ describe("shortcut keys on Windows and Linux", () => {
       unread: "Primary+Shift+U",
       searchMemory: "Primary+K",
       board: "Primary+B",
+      goTo: "Primary+1",
     });
     expect(defaultShortcuts("linux")).toEqual(WIN);
     for (const platform of ["windows", "linux"] as const) {

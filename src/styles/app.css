@@ -3303,6 +3303,13 @@ button.thread-bar:hover {
   background: var(--blocked);
   border-color: var(--blocked);
 }
+/* The lit row's Go to keys (⌘2): quiet, after its marks. */
+.gi-kbd {
+  flex: none;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+}
 .gi .gi-meta.state-blocked {
   font-weight: 500;
 }

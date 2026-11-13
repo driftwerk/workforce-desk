@@ -16,7 +16,7 @@ import { NOTIFY_LEVELS, levelOf, setLevel } from "../unread/prefs";
 import { SidebarGroups } from "../groups/SidebarGroups";
 import { useDesk } from "../hub/store";
 import { useSettings } from "../settings/store";
-import { shortcutLabel } from "../shortcuts/keys";
+import { shortcutLabel, withDigit } from "../shortcuts/keys";
 import { VoicePill } from "../voice";
 import { dragWindow } from "../ui/drag";
 import { Menu } from "../ui/Menu";
@@ -32,6 +32,8 @@ import { Badge, needsYou } from "../ui/Badge";
 import { useNeeds } from "../floor/store";
 import { useSavedScroll } from "../restore/scroll";
 import { NEW_CREW_LINE, NEW_SESSION_LINE } from "./newLines";
+import { JumpKey } from "./JumpKey";
+import { useSidebarJumps } from "./jump";
 
 /** The Unread page's row: everything new for you, each item once; with
  *  nothing to show it goes, but while the page is open. */
@@ -59,11 +61,13 @@ function UnreadRow() {
  *  you there. */
 function DashboardRow() {
   const on = useDesk((s) => s.view === "floor" && !s.inbox);
+  const goTo = useSettings((s) => s.keys.goTo);
   return (
     <button
       type="button"
       className={`side-dash${on ? " on" : ""}`}
       aria-current={on ? "page" : undefined}
+      title={`Dashboard (${shortcutLabel(withDigit(goTo, 1))})`}
       onClick={() => {
         useUi.getState().closeSettings();
         useDesk.getState().setView("floor");
@@ -150,6 +154,8 @@ export function Sidebar({
   const { view, connected, activeRoom, openRoom } = useDesk(
     useShallow((s) => ({ view: s.view, connected: s.connected, activeRoom: s.activeRoom, openRoom: s.openRoom })),
   );
+  // ⌘1 to ⌘9: the Dashboard, then the rows below it.
+  useSidebarJumps();
   const roomOrder = useRoomOrder((s) => s.order);
   const rooms = arranged(useDesk((s) => s.rooms), roomOrder);
   const [roomMenu, setRoomMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
@@ -253,6 +259,7 @@ export function Sidebar({
                       >
                         {mark}
                         <RoomMarks room={r} />
+                        {view === "rooms" && activeRoom === id && <JumpKey kind="room" id={id} />}
                       </SortRow>
                     )}
                   />

@@ -101,6 +101,13 @@ export const SHORTCUTS = [
     terminal: false,
   },
   { id: "board", name: "Board", about: "Opens the board: the tickets sessions and agents work on.", keys: "Primary+B", scope: "app", terminal: false },
+  {
+    id: "goTo",
+    name: "Go to a sidebar item",
+    about: "With 1 to 9 as the last key: 1 opens the Dashboard, 2 to 9 the grids, rooms and boards under it, in the order the sidebar shows them.",
+    keys: "Primary+1",
+    scope: "app",
+  },
 ] as const satisfies readonly ShortcutSpec[];
 
 type Spec = (typeof SHORTCUTS)[number];
@@ -578,3 +585,7 @@ export const matches = (e: KeyPress, accel: string, platform: Platform = platfor
   const p = pressed(e, platform);
   return p.kind === "shortcut" && p.accel === normalize(accel, platform);
 };
+
+/** Shortcut `keys` with its last key made `digit`: the Go to keys for
+ *  the sidebar's `digit`th item. */
+export const withDigit = (keys: string, digit: number): string => keys.replace(/[^+]+$/, String(digit));
