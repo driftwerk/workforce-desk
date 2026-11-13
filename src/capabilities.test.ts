@@ -196,6 +196,8 @@ describe("each window's capabilities", () => {
       // Minting a board's sync token: the Board view's header, in the main
       // window only (a grid's board panes have none; see board/chrome.tsx).
       "board_sync_mint",
+      // Linking an agent for Desk work: Settings, in the main window only.
+      "knows_link",
     ])
       expect(grid.has(c), c).toBe(false);
     expect(capability("grid").windows).toEqual(["grid-*"]);
