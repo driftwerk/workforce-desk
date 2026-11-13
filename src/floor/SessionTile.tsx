@@ -50,6 +50,7 @@ export function Tile({ session }: { session: Session }) {
   const state = shownState(session);
   return (
     <article className={`tile tile-${lookOf(session)}`}>
+      <span className="tile-flow" aria-hidden="true" />
       <button type="button" className="tile-open" onClick={() => open(session.id)}>
         <Mark name={name} engine={session.engine} state={lookOf(session)} size="lg" />
         <span className="tile-name">
