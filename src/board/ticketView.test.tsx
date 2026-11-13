@@ -135,6 +135,26 @@ describe("a ticket's files", () => {
     expect(closed).toHaveBeenCalled();
   });
 
+  it("keeps a drop, a press and a key in the viewer from the ticket behind it", async () => {
+    const behind = { drop: vi.fn(), over: vi.fn(), down: vi.fn(), key: vi.fn() };
+    const t = synced({ files: [file("one")] });
+    render(
+      <div className="ticket-panel" onDrop={behind.drop} onDragOver={behind.over} onPointerDown={behind.down} onKeyDown={behind.key}>
+        <FileViewer ticket={t} files={t.files!} at={0} onAt={() => {}} onClose={() => {}} />
+      </div>,
+    );
+    const viewer = await screen.findByRole("dialog", { name: "one.png" });
+    const dataTransfer = { dropEffect: "copy", files: [], types: ["Files"] };
+    fireEvent.dragOver(viewer, { dataTransfer });
+    fireEvent.drop(viewer, { dataTransfer });
+    fireEvent.pointerDown(viewer);
+    fireEvent.keyDown(viewer, { key: "Escape" });
+    expect(behind.drop).not.toHaveBeenCalled();
+    expect(behind.over).not.toHaveBeenCalled();
+    expect(behind.down).not.toHaveBeenCalled();
+    expect(behind.key).not.toHaveBeenCalled();
+  });
+
   it("never draws a PDF in place: it says to save it", async () => {
     hub.fileBlob.mockImplementation(async () => new Blob(["%PDF-1.7"], { type: "application/pdf" }));
     const t = synced({ files: [file("spec", { name: "spec.pdf", mediaType: "application/pdf" })] });

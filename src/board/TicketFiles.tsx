@@ -71,7 +71,7 @@ export const forgetFetchedFiles = (): void => {
 /** `file`'s bytes as a URL to draw, once fetched; why not, if they weren't.
  *  While it is drawn here, its URL isn't revoked. */
 export const useFileUrl = (ticket: string, file: TicketFile | null, thumb = false): { url: string | null; blob: Blob | null; problem: string | null } => {
-  const [got, setGot] = useState<{ url: string | null; blob: Blob | null; problem: string | null }>({ url: null, blob: null, problem: null });
+  const [got, setGot] = useState<{ of?: string; url: string | null; blob: Blob | null; problem: string | null }>({ url: null, blob: null, problem: null });
   const id = file?.id;
   useEffect(() => {
     if (!file || file.source === "linear_link") return setGot({ url: null, blob: null, problem: null });
@@ -82,8 +82,8 @@ export const useFileUrl = (ticket: string, file: TicketFile | null, thumb = fals
     const k = fetchKept(ticket, file, thumb);
     k.users += 1;
     k.fetched.then(
-      (f) => live && setGot({ url: f.url, blob: f.blob, problem: null }),
-      (e) => live && setGot({ url: null, blob: null, problem: plainError(e) }),
+      (f) => live && setGot({ of: id, url: f.url, blob: f.blob, problem: null }),
+      (e) => live && setGot({ of: id, url: null, blob: null, problem: plainError(e) }),
     );
     return () => {
       live = false;
@@ -92,7 +92,9 @@ export const useFileUrl = (ticket: string, file: TicketFile | null, thumb = fals
     };
     // The file is the same file while its id is.
   }, [ticket, id, thumb]);
-  return got;
+  // Until this file's own answer, nothing: never the last file's picture
+  // under this one's name, for the render before its effect runs.
+  return got.of === id ? { url: got.url, blob: got.blob, problem: got.problem } : { url: null, blob: null, problem: null };
 };
 
 /** Opens a link file where it is, if it's an `https` address. */

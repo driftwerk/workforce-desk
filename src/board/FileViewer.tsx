@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type DragEvent } from "react";
 import { createPortal } from "react-dom";
 import { useChat } from "../chat/store";
 import { DESK_DM } from "../chat/types";
@@ -44,6 +44,13 @@ export const askDeskAbout = async (t: Ticket, f: TicketFile): Promise<boolean> =
  *  strip of them all, Save, and Ask Desk about a picture. It is drawn on the
  *  page itself, not inside the ticket's panel: that panel is a container
  *  (and its view clips), which would hold a fixed layer inside it. */
+/** A drag over the viewer: nothing behind it takes the drop. */
+const noDrop = (e: DragEvent) => {
+  e.stopPropagation();
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "none";
+};
+
 export function FileViewer({ ticket: t, files, at, onAt, onClose }: { ticket: Ticket; files: TicketFile[]; at: number; onAt: (i: number) => void; onClose: () => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const modal = useModal(ref, onClose);
@@ -68,6 +75,11 @@ export function FileViewer({ ticket: t, files, at, onAt, onClose }: { ticket: Ti
       // drags a grid's pane, a right click never opens the menu behind it.
       onPointerDown={(e) => e.stopPropagation()}
       onContextMenu={(e) => e.stopPropagation()}
+      // Nor is a file dropped on it added to the ticket behind it.
+      onDragEnter={noDrop}
+      onDragOver={noDrop}
+      onDragLeave={(e) => e.stopPropagation()}
+      onDrop={noDrop}
       onMouseDown={(e) => e.target === e.currentTarget && onClose()}
       onKeyDown={(e) => {
         if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
