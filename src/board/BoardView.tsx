@@ -317,7 +317,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
       <TicketOpener.Provider value={pane.openTicket}>
         <div ref={setPaneRoot} className="board board-in-pane" aria-label={`Board ${board.name}`}>
           {board.sync && <PaneSync board={board} now={now} />}
-          <LeftFilterShelf key={board.id} board={board} tickets={left} />
+          <LeftFilterShelf key={`left:${board.id}`} board={board} tickets={left} />
           {columnsShown}
           <BoardShort counts={counts} waiting={waitingCount} />
           {live}
@@ -381,8 +381,10 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
           New ticket
         </button>
       </header>
-      {board.sync && <SyncBar key={board.id} board={board} now={now} onToken={tokenFor && chrome ? () => setNewToken(true) : undefined} />}
-      <LeftFilterShelf key={board.id} board={board} tickets={left} />
+      {/* Keyed apart: siblings sharing a key leave the old board's bar behind
+          on every switch, stacking another board's sync above this one. */}
+      {board.sync && <SyncBar key={`sync:${board.id}`} board={board} now={now} onToken={tokenFor && chrome ? () => setNewToken(true) : undefined} />}
+      <LeftFilterShelf key={`left:${board.id}`} board={board} tickets={left} />
       {columnsShown}
       {live}
       {menu && (

@@ -647,6 +647,27 @@ describe("the board, synced", () => {
     return render(<Board chrome={BOARD_CHROME} />);
   };
 
+  it("keeps one sync bar, the shown board's, however often the board shown changes", async () => {
+    const plt: BoardT = { ...synced({ target: "PLT" }), id: "b-plt", name: "Platform board" };
+    const man: BoardT = { ...synced({ link: "l2", system: "linear", target: "MAN" }), id: "b-man", name: "Mantis board" };
+    useBoard.setState({ boards: { [plt.id]: plt, [man.id]: man }, tickets: {}, supported: true, shown: plt.id });
+    useSyncHubs.setState({ hubs: kept });
+    render(<Board chrome={BOARD_CHROME} />);
+    const bars = () => document.querySelectorAll(".board-sync");
+    const once = (target: RegExp, other: RegExp) => {
+      expect(bars()).toHaveLength(1);
+      expect(bars()[0]!.textContent).toMatch(target);
+      expect(bars()[0]!.textContent).not.toMatch(other);
+    };
+    once(/Jira PLT/, /Linear MAN/);
+    for (let i = 0; i < 3; i++) {
+      act(() => useBoard.getState().show(man.id));
+      once(/Linear MAN/, /Jira PLT/);
+      act(() => useBoard.getState().show(plt.id));
+      once(/Jira PLT/, /Linear MAN/);
+    }
+  });
+
   it("shows synced, with the issues' keys, a push problem on its card, and syncs on opening", async () => {
     show(synced(), [
       ticket(1, { key: "ACME-482", title: "Checkout <b>loses</b> the postcode", external: ext("ACME-482") }),
