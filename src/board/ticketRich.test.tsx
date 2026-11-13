@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { ActivityEvent, HistoryEvent, TicketComment, TicketDev } from "../hub/types";
-import { counts, eventParts, factOrder, filtered, layoutOf, prRows, remoteStateWord, timeline, type EventWords, type FactId } from "./ticketRich";
+import { counts, eventParts, factOrder, filtered, firstParagraph, foldSections, layoutOf, prRows, remoteStateWord, timeline, type EventWords, type FactId } from "./ticketRich";
 import { ticket, YOU } from "./testing";
 
 const comment = (id: string, at: string, over: Partial<TicketComment> = {}): TicketComment => ({
@@ -96,6 +96,12 @@ describe("a ticket's activity", () => {
     expect(text(eventParts(rows[0] as never, words))).toContain("Desk moved it to Doing");
   });
 
+  it("keeps both rows when someone there changed it after Desk's move: Desk didn't follow it", () => {
+    const rows = timeline([], [moved("e1", "2026-10-30T10:00:00Z")], [state("2026-10-30T10:04:00Z", "remote", "In Progress")]);
+    expect(rows.map((r) => r.kind)).toEqual(["desk", "remote"]);
+    expect(rows[0]!.kind === "desk" && rows[0]!.remote).toBeUndefined();
+  });
+
   it("keeps a move and a change there apart when they're more than ten minutes apart", () => {
     const rows = timeline([], [moved("e1", "2026-10-30T10:11:00Z")], [state("2026-10-30T10:00:00Z", "remote", "In Progress")]);
     expect(rows.map((r) => r.kind)).toEqual(["remote", "desk"]);
@@ -133,5 +139,25 @@ describe("a ticket's facts", () => {
     expect(remoteStateWord("doing", "doing")).toBeNull();
     expect(remoteStateWord("done", "Done")).toBeNull();
     expect(remoteStateWord("doing", undefined)).toBeNull();
+  });
+});
+
+describe("a ticket's description", () => {
+  it("folds after its first sections, the words before the first heading one of them", () => {
+    const body = "Intro\n\n## One\na\n\n## Two\nb\n\n## Three\nc";
+    expect(foldSections(body)).toEqual({ shown: "Intro\n\n## One\na", more: 2 });
+  });
+
+  it("doesn't count blank lines before the first heading as a section", () => {
+    // Three sections, one past those kept, show whole; were the blank lines
+    // a section, there'd be four, folded.
+    const three = "\n\n## One\na\n\n## Two\nb\n\n## Three\nc";
+    expect(foldSections(three)).toEqual({ shown: three, more: 0 });
+    expect(foldSections("\n\n## One\na\n\n## Two\nb\n\n## Three\nc\n\n## Four\nd")).toEqual({ shown: "\n\n## One\na\n\n## Two\nb", more: 2 });
+  });
+
+  it("shows its first paragraph in the shortest view, or all of it when it has none", () => {
+    expect(firstParagraph("## Background\n\nWe need it.\n\nMore.")).toBe("We need it.");
+    expect(firstParagraph("## Only a heading")).toBe("## Only a heading");
   });
 });

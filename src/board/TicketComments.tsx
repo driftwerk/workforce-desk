@@ -183,6 +183,11 @@ export function TicketActivity({ ticket: t, layout = "wide" }: { ticket: Ticket;
       .finally(() => setSending(false));
   };
   const compact = layout === "compact";
+  // The shortest view has no History or Only in Desk chip: shrunk to it
+  // with one of those on, it shows all again.
+  useEffect(() => {
+    if (compact && (filter === "history" || filter === "desk")) setFilter("all");
+  }, [compact, filter]);
   // The shortest view keeps its chips to All and Comments.
   const chips = FILTERS.filter((f) => (compact ? f.id === "all" || f.id === "comments" : f.id !== "desk" || (system && n.desk > 0)));
   const shown = filtered(rows, filter);
@@ -216,7 +221,7 @@ export function TicketActivity({ ticket: t, layout = "wide" }: { ticket: Ticket;
           r.kind === "comment" ? (
             <CommentRow key={r.comment.id} comment={r.comment} replies={r.replies} ticket={t} me={sync?.meName} person={sync?.meName} />
           ) : (
-            <EventRow key={r.kind === "desk" ? r.event.id : `${r.event.at}:${r.event.kind}:${r.event.to ?? ""}`} row={r} words={words} wide={layout === "wide"} />
+            <EventRow key={r.kind === "desk" ? r.event.id : `${r.event.at}:${r.event.kind}:${r.event.field ?? ""}:${r.event.to ?? ""}`} row={r} words={words} wide={layout === "wide"} />
           ),
         )}
       </ol>

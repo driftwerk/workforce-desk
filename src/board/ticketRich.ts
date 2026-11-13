@@ -87,7 +87,10 @@ export const timeline = (comments: readonly TicketComment[], desk: readonly Acti
   const deskRows: TimelineRow[] = [];
   const followed = new Map<HistoryEvent, ActivityEvent>();
   for (const e of [...desk].sort((a, b) => time(a.at) - time(b.at))) {
-    const near = e.kind === "ticket_moved" ? nearest(e.at, remote.filter((r) => r.kind === "state" && !joined.has(r))) : undefined;
+    const close = e.kind === "ticket_moved" ? nearest(e.at, remote.filter((r) => r.kind === "state" && !joined.has(r))) : undefined;
+    // Desk followed a change there only if it moved after it; a change by
+    // someone there after Desk's move is its own row.
+    const near = close && (close.by === "desk" || time(e.at) >= time(close.at)) ? close : undefined;
     if (near) joined.add(near);
     if (near && near.by !== "desk") followed.set(near, e);
     else deskRows.push({ kind: "desk", at: e.at, event: e, remote: near });
@@ -316,15 +319,17 @@ export const foldSections = (body: string, keep = 2): { shown: string; more: num
     if (/^\s*(```|~~~)/.test(l)) fenced = !fenced;
     else if (!fenced && /^#{1,6}\s/.test(l)) starts.push(i);
   });
-  // Words before the first heading are a section of their own.
-  if (starts[0] !== 0) starts.unshift(0);
+  // Words before the first heading are a section of their own; blank lines
+  // alone aren't.
+  if (starts[0] !== 0 && lines.slice(0, starts[0] ?? lines.length).some((l) => l.trim())) starts.unshift(0);
   if (starts.length <= keep + 1) return { shown: body, more: 0 };
   return { shown: lines.slice(0, starts[keep]).join("\n").trimEnd(), more: starts.length - keep };
 };
 
-/** A description's first paragraph, for the shortest view: no heading. */
+/** A description's first paragraph, for the shortest view: no heading.
+ *  One with no paragraph of words (only headings or code) is all of it. */
 export const firstParagraph = (body: string): string =>
   body
     .split(/\n\s*\n/)
     .map((b) => b.trim())
-    .find((b) => b && !/^#{1,6}\s/.test(b) && !/^(```|~~~)/.test(b)) ?? "";
+    .find((b) => b && !/^#{1,6}\s/.test(b) && !/^(```|~~~)/.test(b)) ?? body;

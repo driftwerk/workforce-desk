@@ -35,11 +35,16 @@ import { agoText, checksText, devOf, prRows, type Layout, type PrRow } from "./t
 const useOpenIssue = (t: Ticket) => {
   const all = useBoard((s) => s.tickets);
   const openTicket = useOpenTicket();
-  return (key: string) => {
-    const here = Object.values(all).find((o) => o.external?.key === key || o.key === key);
-    if (here) return openTicket(here.id);
-    const url = remoteUrl(t, key);
-    if (url) void openUrl(url);
+  const here = (key: string) => Object.values(all).find((o) => o.external?.key === key || o.key === key);
+  return {
+    open: (key: string) => {
+      const found = here(key);
+      if (found) return openTicket(found.id);
+      const url = remoteUrl(t, key);
+      if (url) void openUrl(url);
+    },
+    /** Whether there's anywhere to open it: a board here, or an https address. */
+    can: (key: string) => !!here(key) || !!remoteUrl(t, key),
   };
 };
 
@@ -57,7 +62,7 @@ const useHere = (key: string | undefined) => useBoard((s) => (key ? Object.value
 /** Where it sits: the team and board, its epic (Jira) or project (Linear),
  *  its parent; on Jira, itself. Each issue in it opens. */
 export function Crumbs({ ticket: t, board, layout }: { ticket: Ticket; board: Board | undefined; layout: Layout }) {
-  const open = useOpenIssue(t);
+  const issue = useOpenIssue(t);
   const parentHere = useHere(t.external?.details?.parent?.key);
   const e = t.external;
   const d = e?.details;
@@ -72,7 +77,7 @@ export function Crumbs({ ticket: t, board, layout }: { ticket: Ticket; board: Bo
       {d?.epic && (
         <>
           <Sep />
-          <button type="button" className="ticket-crumb" title={`Open ${d.epic.key}`} onClick={() => open(d.epic!.key)}>
+          <button type="button" className="ticket-crumb" title={`Open ${d.epic.key}`} disabled={!issue.can(d.epic.key)} onClick={() => issue.open(d.epic!.key)}>
             <TypeGlyph kind={d.epic.kind ?? "Epic"} level={1} size={12} />
             <span className="mono ticket-crumb-key">{d.epic.key}</span>
             <span className="ticket-crumb-title">{d.epic.title}</span>
@@ -91,7 +96,7 @@ export function Crumbs({ ticket: t, board, layout }: { ticket: Ticket; board: Bo
       {parent && (
         <>
           <Sep />
-          <button type="button" className="ticket-crumb" title={`Open ${parent.key}`} onClick={() => open(parent.key)}>
+          <button type="button" className="ticket-crumb" title={`Open ${parent.key}`} disabled={!issue.can(parent.key)} onClick={() => issue.open(parent.key)}>
             {e.system === "linear" ? <StateGlyph kind={parentKind ?? stateKindOf(parent.state, parent.done)} name={parent.state} size={12} /> : <TypeGlyph kind={parent.kind} size={12} />}
             <span className="mono ticket-crumb-key">{parent.key}</span>
             <span className="ticket-crumb-title">{parent.title}</span>
@@ -163,7 +168,7 @@ const stateTone = (state: string | undefined, done?: boolean): string =>
  *  not done and folds the rest. */
 export function SubItems({ ticket: t, layout }: { ticket: Ticket; layout: Layout }) {
   const [unfold, setUnfold] = useState(false);
-  const open = useOpenIssue(t);
+  const issue = useOpenIssue(t);
   const me = useBoard((s) => s.boards[t.board]?.sync?.meName);
   const d = t.external?.details;
   const children = d?.children ?? [];
@@ -191,7 +196,7 @@ export function SubItems({ ticket: t, layout }: { ticket: Ticket; layout: Layout
       />
       <div className="ticket-rows">
         {rows.map((c) => (
-          <ChildRow key={c.key} child={c} me={me} who={!compact} onOpen={() => open(c.key)} />
+          <ChildRow key={c.key} child={c} me={me} who={!compact} onOpen={issue.can(c.key) ? () => issue.open(c.key) : undefined} />
         ))}
         {fold && (
           <button type="button" className="link small ticket-rows-more" onClick={() => setUnfold(true)}>
@@ -203,12 +208,12 @@ export function SubItems({ ticket: t, layout }: { ticket: Ticket; layout: Layout
   );
 }
 
-function ChildRow({ child: c, me, who, onOpen }: { child: TicketChild; me?: string | null; who: boolean; onOpen: () => void }) {
+function ChildRow({ child: c, me, who, onOpen }: { child: TicketChild; me?: string | null; who: boolean; onOpen?: () => void }) {
   // Linear's state types draw the state; Jira's categories don't, so its
   // type leads and its state is said.
   const glyph = stateShape(c.stateKind, c.state);
   return (
-    <button type="button" className="ticket-row" onClick={onOpen}>
+    <button type="button" className="ticket-row" disabled={!onOpen} onClick={onOpen}>
       {glyph ? <StateGlyph kind={c.stateKind} name={c.state} /> : <TypeGlyph kind={c.kind ?? "Sub-task"} level={c.kindLevel ?? -1} />}
       <span className="mono ticket-row-key">{c.key}</span>
       <span className="ticket-row-title">{c.title}</span>
@@ -278,7 +283,8 @@ function PrRowView({ row: r, ticket: t, compact }: { row: PrRow; ticket: Ticket;
           {checksText(r.checks)}
         </span>
       )}
-      {r.state && <PrChip look={lookOf(r.state)} text={r.state} checks={compact ? r.checks?.state : undefined} />}
+      {/* Short of room its checks ride on its chip, while they still matter: not once it's merged. */}
+      {r.state && <PrChip look={lookOf(r.state)} text={r.state} checks={compact && !merged ? r.checks?.state : undefined} />}
       {!compact && (r.ours && opener ? <SessionName id={opener} /> : r.author ? <Person name={r.author} me={me} /> : null)}
     </button>
   );
@@ -318,7 +324,7 @@ export function Person({ name, me }: { name: string; me?: string | null }) {
  *  the sessions and rooms Desk linked; read-only. What it's blocked by is
  *  one of its needs. */
 export function LinkedWork({ ticket: t, working }: { ticket: Ticket; working: string | null }) {
-  const open = useOpenIssue(t);
+  const issue = useOpenIssue(t);
   const issues = (t.external?.details?.links ?? []).filter((l) => l.rel !== "blockedBy");
   const pages = (devOf(t)?.links ?? []).filter((l) => l.words);
   const own = t.links.filter((l) => (l.kind === "session" && l.session !== working) || l.kind === "room");
@@ -328,7 +334,7 @@ export function LinkedWork({ ticket: t, working }: { ticket: Ticket; working: st
       <SectionHead title="Linked work" />
       <div className="ticket-rows">
         {issues.map((l) => (
-          <button key={`${l.rel}:${l.issue.key}`} type="button" className="ticket-row" onClick={() => open(l.issue.key)}>
+          <button key={`${l.rel}:${l.issue.key}`} type="button" className="ticket-row" disabled={!issue.can(l.issue.key)} onClick={() => issue.open(l.issue.key)}>
             <span className="ticket-row-rel">{l.words ?? (l.rel === "blocks" ? "blocks" : "relates to")}</span>
             {l.issue.kind ? <TypeGlyph kind={l.issue.kind} /> : <LinkIcon size={14} />}
             <span className="mono ticket-row-key">{l.issue.key}</span>

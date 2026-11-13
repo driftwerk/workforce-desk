@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { useChat } from "../chat/store";
 import { useSessionName, useSessionNames } from "../groups/names";
 import { below } from "../groups/rows";
@@ -204,7 +204,8 @@ function TicketFrame({ label, chrome, ...props }: ComponentProps<typeof SidePane
 const useLayout = (): [(el: HTMLElement | null) => void, Layout] => {
   const [el, setEl] = useState<HTMLElement | null>(null);
   const [layout, setLayout] = useState<Layout>("wide");
-  useEffect(() => {
+  // Measured before it paints, so a narrow popup never shows two columns first.
+  useLayoutEffect(() => {
     if (!el || typeof ResizeObserver === "undefined") return;
     const measure = () => setLayout(layoutOf(el.getBoundingClientRect().width));
     measure();
@@ -323,7 +324,7 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
           <TicketBody text={cut ? (compact ? first! : fold.shown) : t.body} onEdit={() => startEditing("body")} />
         </div>
         {cut && (
-          <button type="button" className="link small ticket-whole" onClick={() => setWhole(true)}>
+          <button type="button" className="link ticket-whole" onClick={() => setWhole(true)}>
             Show all of it{!compact && fold.more ? ` · ${fold.more} more section${fold.more === 1 ? "" : "s"}` : ""}
           </button>
         )}
@@ -346,7 +347,7 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
     <div className="ticket-foot">
       <button
         type="button"
-        className="link small"
+        className="link"
         title="A link that opens this ticket, to paste in a room"
         onClick={() =>
           void navigator.clipboard
@@ -358,11 +359,11 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
         Copy link
       </button>
       {movable && (
-        <button type="button" className="link small" onClick={() => askMove(ticketSubject(t))}>
+        <button type="button" className="link" onClick={() => askMove(ticketSubject(t))}>
           Move to group…
         </button>
       )}
-      <button type="button" className="link small" onClick={() => setDeleting(true)}>
+      <button type="button" className="link" onClick={() => setDeleting(true)}>
         Delete…
       </button>
     </div>
