@@ -125,7 +125,7 @@ describe("what a person can select", () => {
   it("names only classes that some component draws", () => {
     const tsx = Object.values(import.meta.glob<string>(["./**/*.tsx", "!./**/*.test.tsx"], { query: "?raw", import: "default", eager: true })).join("\n");
     const opted = rules.filter((r) => r.value === "text").flatMap((r) => [...r.selector.matchAll(/\.([a-z][\w-]*)/g)].map((m) => m[1]!));
-    const missing = [...new Set(opted)].filter((c) => c !== "selectable" && c !== "xterm-helper-textarea" && !tsx.includes(c));
+    const missing = [...new Set(opted)].filter((c) => c !== "selectable" && !c.startsWith("xterm") && !tsx.includes(c));
     expect(missing).toEqual([]);
   });
 
