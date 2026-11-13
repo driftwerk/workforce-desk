@@ -71,6 +71,7 @@ import { WindowsSetup } from "../setup/WindowsSetup";
 import { useHost } from "./host";
 import { resumeAfterUpdate } from "../updates/store";
 import { UpdateNotice, useRestartWhenIdle, useUpdateChecks } from "../updates/UpdateNotice";
+import { useSidebarJumps } from "./jump";
 
 // An `@` by an agent's name before a rename still reaches them.
 rememberFormerNames();
@@ -295,6 +296,8 @@ export function App() {
   }, []);
   useGridWindows(useGrids((s) => s.ready));
 
+  // ⌘1 to ⌘9: the Dashboard, then the sidebar's rows; from Settings too.
+  useSidebarJumps();
   useAppShortcut("newSession", () => setNewSession({}));
   useAppShortcut("newTerminal", () => {
     useUi.getState().closeSettings();

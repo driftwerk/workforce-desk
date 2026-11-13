@@ -20,6 +20,8 @@ import { Marks } from "../unread/Marks";
 import { needsYou } from "../ui/Badge";
 import { useDesk } from "../hub/store";
 import { setSectionOpen, SideSection } from "../shell/SideSection";
+import { useUi } from "../shell/ui";
+import { JumpKey } from "../shell/JumpKey";
 
 /** The Grids view of the main window: the grid shown here, with its
  *  layouts, a new terminal, and a window of its own. With none shown (there
@@ -88,6 +90,24 @@ const whereIs = (g: Grid, open: Record<string, true>): string | null =>
 export const gridState = (needs: number, working: number): { look: "blocked" | "working" | "idle"; says: string } =>
   needs > 0 ? { look: "blocked", says: needsYou(needs) } : working > 0 ? { look: "working", says: `${working} working` } : { look: "idle", says: "quiet" };
 
+/** Shows grid `id`, as its sidebar row does: here, from wherever you were;
+ *  one in its own window brought forward; one whose monitor is away shown
+ *  here until it's back (or for good). True when it shows here. */
+export const showGrid = (id: string): boolean => {
+  const s = useGrids.getState();
+  const g = s.grids[id];
+  if (!g) return false;
+  if (g.placement.kind === "window" && s.open[id]) {
+    void focusGridWindow(id);
+    return false;
+  }
+  if (g.placement.kind !== "main") bringBack(id);
+  else setActive(id);
+  useUi.getState().closeSettings();
+  useDesk.getState().setView("grids");
+  return true;
+};
+
 type RowProps = {
   id: string;
   /** What waits on you there, how many work, and whether there's news. */
@@ -146,6 +166,7 @@ const GridRow = memo(function GridRow({ id, needs, working, unread, lineBefore, 
       onMenu={(at, from) => onMenu(id, at, from)}
     >
       {unread && <Marks badge={{ count: 0, dot: true }} />}
+      {on && <JumpKey kind="grid" id={id} />}
     </SortRow>
   );
 });
@@ -168,12 +189,7 @@ export function GridsSection() {
   const grid = (id: string) => useGrids.getState().grids[id];
   const choose = useCallback((g: Grid) => {
     if (justDragged.current) return;
-    const s = useGrids.getState();
-    if (g.placement.kind === "window" && s.open[g.id]) return void focusGridWindow(g.id);
-    // Its monitor is away: shown here until it's back (or for good).
-    if (g.placement.kind !== "main") bringBack(g.id);
-    else setActive(g.id);
-    useDesk.getState().setView("grids");
+    showGrid(g.id);
   }, []);
   // Its own window closes first, so it can't write the grid back. The
   // terminals only its sessions' panes keep open close with it.
