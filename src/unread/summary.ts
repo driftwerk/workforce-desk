@@ -7,6 +7,7 @@ import type { DeskEvent, UnreadSummary } from "../hub/types";
 import { activeConversations, type Active, type ConversationUnread } from "../hubs/surface";
 import { deskState } from "../restore/boot";
 import { shareFocus } from "./focus";
+import { sharePresence } from "./presence";
 import { merged } from "../floor/merge";
 import { useFloor } from "../floor/store";
 import { NEEDS_DISMISSED_KEY, NEEDS_SEEN_KEY, noteDismissed, noteSeen, seenFrom, useNeedsDismissed, useNeedsSeen } from "./needsSeen";
@@ -251,6 +252,7 @@ export function startUnread(): () => void {
   const unforget = forgetMachines();
   const unwatch = watchDmTurns();
   const unshare = shareFocus();
+  const unpresent = sharePresence();
   const unsee = watchNeedsSeen();
   return () => {
     deskListeners.delete(onEvent);
@@ -258,6 +260,7 @@ export function startUnread(): () => void {
     unforget();
     unwatch();
     unshare();
+    unpresent();
     unsee();
     clearTimeout(soon);
     for (const t of machineSoon.values()) clearTimeout(t);

@@ -2,7 +2,7 @@ import { RichMarkdown } from "@workforce/rich";
 import { useState } from "react";
 import { useDesk } from "../hub/store";
 import { HubError } from "../hub/client";
-import type { DecisionLine, DeskExtras, MentionedItem, MentionedUpdate, WaitingItem, WorkRef } from "../hub/types";
+import type { DecisionLine, DeskExtras, MentionedAway, MentionedItem, MentionedUpdate, WaitingItem, WorkRef } from "../hub/types";
 import type { DeliveryKind } from "../chat/types";
 import { openLink } from "../shell/links";
 import { plainError } from "../ui/plainError";
@@ -12,23 +12,44 @@ import { plainError } from "../ui/plainError";
 // session in semibold with what it's for in faint, then where it is; "I
 // decided:" lines are muted, with Undo as a small link; what needs you
 // leads in the blocked colour, its recommendation muted, and its answers
-// as a row of buttons, the recommended one in the signal colour.
+// as a row of buttons, the recommended one in the signal colour. A
+// catch-up follows a faint "you were away" line, opens with its headline
+// and says each decision with its time.
+
+const clock = (iso?: string | null): string => {
+  if (!iso) return "";
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+};
+
+/** "you were away 21:00 – 22:40", above a catch-up. */
+export function AwayDivider({ away }: { away: MentionedAway }) {
+  const from = clock(away.since);
+  const to = clock(away.until);
+  if (!from || !to) return null;
+  return (
+    <div className="away-divider" role="separator">
+      you were away {from} – {to}
+    </div>
+  );
+}
 
 /** Whether the boss's message is shown from its extras in place of its
  *  markdown: an update, something it asks of you, or a decision of its
  *  own. */
 export const overseerShown = (extras: DeskExtras | undefined): boolean =>
-  !!extras && (!!extras.update || !!extras.item || !!extras.decisions?.length);
+  !!extras && (!!extras.update || !!extras.away || !!extras.item || !!extras.decisions?.length);
 
 /** Whether the boss's message is one of what the chat shows unboxed: an
  *  update, a decision, or something it asks of you (its own, or a
  *  session's question it gave you). Its cards go inline. */
 export const overseerPost = (extras: DeskExtras | undefined, delivery: DeliveryKind | undefined): boolean =>
-  overseerShown(extras) || delivery === "update" || delivery === "question";
+  overseerShown(extras) || delivery === "update" || delivery === "away" || delivery === "question";
 
 /** What the boss's message shows in place of its markdown, from its
  *  extras; `content` stands in for anything they don't say. */
 export function OverseerBody({ extras, content }: { extras: DeskExtras; content: string }) {
+  if (extras.away) return <CatchUp away={extras.away} update={extras.update ?? {}} />;
   if (extras.update) return <Update update={extras.update} />;
   if (extras.item) return <NeedsYou item={extras.item} content={content} />;
   if (extras.decisions?.length)
@@ -104,9 +125,9 @@ function Ref({ r }: { r: WorkRef }) {
   );
 }
 
-function Update({ update }: { update: MentionedUpdate }) {
+function Sessions({ update }: { update: MentionedUpdate }) {
   return (
-    <div className="msg-text overseer">
+    <>
       {(update.sessions ?? []).map((s) => (
         <p key={s.sessionId}>
           <strong>{s.name}</strong>
@@ -119,6 +140,14 @@ function Update({ update }: { update: MentionedUpdate }) {
           ))}
         </p>
       ))}
+    </>
+  );
+}
+
+function Update({ update }: { update: MentionedUpdate }) {
+  return (
+    <div className="msg-text overseer">
+      <Sessions update={update} />
       {(update.decisions ?? []).map((d) => (
         <Decision key={d.id} line={d} />
       ))}
@@ -131,11 +160,97 @@ function Update({ update }: { update: MentionedUpdate }) {
   );
 }
 
+function CatchUp({ away, update }: { away: MentionedAway; update: MentionedUpdate }) {
+  const decisions = update.decisions ?? [];
+  const parked = away.parked ?? [];
+  return (
+    <div className="msg-text overseer">
+      {away.headline && <p>{away.headline}</p>}
+      <Sessions update={update} />
+      {decisions.length === 1 ? (
+        <Decision line={decisions[0]!} timed />
+      ) : decisions.length > 1 ? (
+        <>
+          <p className="muted">
+            <span className="dec-label">I decided</span> {decisions.length} things:
+          </p>
+          <p className="muted">
+            {decisions.map((d, i) => (
+              <span key={d.id}>
+                {i > 0 && <br />}– <DecisionText line={d} timed />
+              </span>
+            ))}
+          </p>
+        </>
+      ) : null}
+      {(update.kept ?? []).map((k, i) => (
+        <p key={`kept-${i}`}>{k}</p>
+      ))}
+      {away.handled && <p className="muted">{away.handled}</p>}
+      <Waiting items={update.waiting ?? []} />
+      {parked.length > 0 && (
+        <>
+          <p className="faint">Set aside until you say:</p>
+          {parked.map((p) => (
+            <Parked key={p.itemId} id={p.itemId} text={p.text} />
+          ))}
+        </>
+      )}
+      {update.footer && <p className="faint small">{update.footer}</p>}
+    </div>
+  );
+}
+
+/** A parked item, by its words, with Drop. */
+function Parked({ id, text }: { id: string; text: string }) {
+  const connected = useDesk((s) => !!s.hub);
+  const [state, setState] = useState<"open" | "busy" | "dropped">(settledHere.has(id) ? "dropped" : "open");
+  const dropped = () => {
+    settledHere.set(id, "Dropped.");
+    setState("dropped");
+  };
+  const [problem, setProblem] = useState<string | null>(null);
+  const drop = async () => {
+    const hub = useDesk.getState().hub;
+    if (!hub) return;
+    setState("busy");
+    setProblem(null);
+    try {
+      await hub.dropItem(id);
+      dropped();
+    } catch (e) {
+      if (e instanceof HubError && (e.status === 404 || e.status === 409)) dropped();
+      else {
+        setProblem(plainError(e));
+        setState("open");
+      }
+    }
+  };
+  return (
+    <p className="faint">
+      – {text}{" "}
+      {state === "dropped" ? (
+        <span className="small">dropped</span>
+      ) : (
+        <button type="button" className="link small" aria-label={`Drop: ${text}`} disabled={state === "busy" || !connected} onClick={() => void drop()}>
+          Drop
+        </button>
+      )}
+      {problem && (
+        <span className="small state-blocked" role="alert">
+          {" "}
+          {problem}
+        </span>
+      )}
+    </p>
+  );
+}
+
 /** "I decided: what — why", with its Undo. */
-function Decision({ line }: { line: DecisionLine }) {
+function Decision({ line, timed }: { line: DecisionLine; timed?: boolean }) {
   return (
     <p className="muted">
-      <span className="dec-label">I decided:</span> <DecisionText line={line} />
+      <span className="dec-label">I decided:</span> <DecisionText line={line} timed={timed} />
     </p>
   );
 }
@@ -153,7 +268,7 @@ export const UNDO_LABEL: Record<NonNullable<DecisionLine["undo"]>, string> = {
   resume: "Resume",
 };
 
-function DecisionText({ line }: { line: DecisionLine }) {
+function DecisionText({ line, timed }: { line: DecisionLine; timed?: boolean }) {
   const connected = useDesk((s) => !!s.hub);
   const [undone, setUndone] = useState<string | null>(undoneHere.get(line.id) ?? null);
   // A decision that can't be undone after all: no button to press again.
@@ -168,6 +283,7 @@ function DecisionText({ line }: { line: DecisionLine }) {
   const [problem, setProblem] = useState<string | null>(null);
   const what = line.text.trim().replace(/\.$/, "");
   const said = line.why?.trim() ? `${what} — ${line.why.trim()}` : `${what}.`;
+  const at = timed ? clock(line.at) : "";
   const undo = async () => {
     const hub = useDesk.getState().hub;
     if (!hub) return;
@@ -188,6 +304,7 @@ function DecisionText({ line }: { line: DecisionLine }) {
   };
   return (
     <>
+      {at && <>{at} · </>}
       <span className={isUndone ? "dec-undone" : undefined}>{said}</span>
       {isUndone ? (
         <span className="faint small" role="status">

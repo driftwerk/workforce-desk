@@ -12,6 +12,7 @@ import { onceEach, shownWith } from "../chat/reconcile";
 import { useCommandMenu, useHubCommands } from "../chat/commands";
 import { isRunning, useChat } from "../chat/store";
 import { useDesk, localSessions } from "../hub/store";
+import { DM_TYPING_EVERY_MS, typingPinger } from "../line/typing";
 import { RoomView } from "./RoomView";
 import { Unread as UnreadPage } from "../unread/Unread";
 import { agentKey, describeAgent, DESK_DM, FEATURES } from "../chat/types";
@@ -659,6 +660,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
             busy={busy}
             connected={convo.connected}
             overseeing={!!overseeing}
+            boss={local && (manager?.agentId === agent.id || !!manager?.bosses?.some((b) => b.agentId === agent.id))}
             inPane={!!inPane}
             files={files}
             sending={sending}
@@ -931,6 +933,7 @@ function DmComposer({
   busy,
   connected,
   overseeing,
+  boss,
   inPane,
   files,
   sending: [sending, setSending],
@@ -946,6 +949,9 @@ function DmComposer({
   busy: boolean;
   connected: boolean;
   overseeing: boolean;
+  /** A boss on this computer (the main one or a group's): its posts wait
+   *  while you type to it. */
+  boss: boolean;
   /** In a grid's pane: its placeholder is short, as a room's is there. */
   inPane: boolean;
   files: Files;
@@ -984,6 +990,8 @@ function DmComposer({
   }, [editBack]);
   const composer = useRef<HTMLTextAreaElement>(null);
   useFocusRequest(`agent:${to}`, composer);
+  // Typing to a boss on this computer: its posts wait for your pause.
+  const pingBoss = useMemo(() => typingPinger((id) => void useDesk.getState().hub?.dmTyping?.(id), DM_TYPING_EVERY_MS), []);
   const emoji = useEmojiInput({
     field: composer,
     value: draft,
@@ -1050,6 +1058,7 @@ function DmComposer({
           onChange={(e) => {
             setDraft(e.target.value);
             emoji.onChange(e);
+            if (boss) pingBoss(agent.id, e.target.value);
           }}
           onSelect={emoji.onSelect}
           onFocus={emoji.onFocus}
