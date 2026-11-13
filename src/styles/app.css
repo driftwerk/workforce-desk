@@ -4364,7 +4364,19 @@ body.line-resizing * {
     display: none;
   }
 }
+/* A session row's marks, kept together: the ticket, charge, grid glyph and
+   unread mark. */
+.gi-trail {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+.gi-trail:empty {
+  display: none;
+}
 /* Badges that wrapped under the name sit at the row's right edge. */
+.gi > .gi-trail,
 .gi > .badge,
 .gi > .side-dot,
 .gi > .gi-ticket,
