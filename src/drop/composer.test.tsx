@@ -116,8 +116,14 @@ describe("a composer, with the system's drag and drop", () => {
     expect(invoke).toHaveBeenCalledWith("privacy_open", { pane: "filesAndFolders" });
     // Allowed, and Desk back in front: read again without a new drop.
     allowed = true;
-    await act(async () => void window.dispatchEvent(new Event("focus")));
-    await waitFor(() => expect(screen.getByText("shot.png")).toBeTruthy());
+    // The composer asks again on each focus, once the note has shown and its
+    // effect has attached the listener. That attaches after the note is on
+    // screen, not with it, so a focus sent the instant the note appears can
+    // go nowhere on a slow machine. Focus as Desk would, until it is read.
+    await waitFor(() => {
+      act(() => void window.dispatchEvent(new Event("focus")));
+      expect(screen.getByText("shot.png")).toBeTruthy();
+    });
     expect(screen.queryByText("Allow Desk to read shot.png.")).toBeNull();
     expect(sent).toHaveLength(1);
   });
