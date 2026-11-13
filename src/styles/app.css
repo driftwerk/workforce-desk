@@ -294,6 +294,13 @@ body.side-resizing * {
 .engine-row .seg {
   background: var(--sunken);
 }
+.setting-card .seg button[aria-checked="true"],
+.prov-list .seg button[aria-checked="true"],
+.ability-card .seg button[aria-checked="true"],
+.think-rows .seg button[aria-checked="true"],
+.engine-row .seg button[aria-checked="true"] {
+  background: var(--raised);
+}
 .tabs button,
 .seg button {
   flex: 1;

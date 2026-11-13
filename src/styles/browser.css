@@ -118,7 +118,6 @@
 }
 .browser-sites {
   align-self: stretch;
-  max-width: 520px;
 }
 .browser-thumb {
   flex: none;
