@@ -25,6 +25,7 @@ import { besideOf } from "./target";
 import { clock } from "./time";
 import { ImageBudget } from "../shell/RemoteImage";
 import { BrowserPill } from "../browser/BrowserPill";
+import { useSubHeading } from "./FloorShell";
 
 /** The clock the floor's times are said against, moving every minute. */
 export const useMinute = (): number => {
@@ -50,6 +51,7 @@ const useParagraph = (m: Merged, entries: readonly FloorEntry[], names: Readonly
  *  With `needs` false (the Floor in sections), the sections list what needs
  *  the person instead. */
 export function RightNow({ brief, needs = true }: { brief: ReactNode | null; needs?: boolean }) {
+  const H = useSubHeading();
   const m = useMerged();
   const now = useMinute();
   const names = useSessionNames();
@@ -58,7 +60,7 @@ export function RightNow({ brief, needs = true }: { brief: ReactNode | null; nee
   return (
     <section className="floor-card right-now" aria-label="Right now">
       <div className="floor-card-head">
-        <h2 className="display floor-card-title">Right now</h2>
+        <H className="display floor-card-title">Right now</H>
         {!brief && <span className="floor-time">updated {clock(paragraph.at)}</span>}
       </div>
       {brief ?? (

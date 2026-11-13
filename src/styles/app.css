@@ -925,7 +925,8 @@ body.side-resizing * {
   flex-direction: column;
   gap: 12px;
 }
-.floor-group h2 {
+.floor-group h2,
+.floor-group h3 {
   margin: 0;
   font-size: 13px;
   font-weight: 600;
@@ -3318,9 +3319,9 @@ button.thread-bar:hover {
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 22px;
-  padding: 34px 32px 24px;
-  overflow: hidden;
+  gap: 28px;
+  padding: 40px 48px 28px;
+  overflow-y: auto;
 }
 .dash-head {
   display: flex;
@@ -3336,14 +3337,31 @@ button.thread-bar:hover {
   gap: 6px;
   min-width: 0;
 }
+.dash-title h1 {
+  font-size: 34px;
+  font-weight: 800;
+  letter-spacing: -0.03em;
+}
 .dash-line {
   margin: 0;
+}
+/* Add a widget, until widgets come: a quiet raised pill. */
+.dash-add {
+  min-height: 36px;
+  padding: 6px 14px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--raised);
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 500;
+  box-shadow: 0 0 0 1px var(--border);
 }
 /* One section, a card: the only one fills what's left, and what's in it
    scrolls inside it as it did on its own page. */
 .dash-section {
   flex: 1;
-  min-height: 0;
+  min-height: 240px;
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -3354,12 +3372,20 @@ button.thread-bar:hover {
 .dash-section-title {
   margin: 0;
   flex: 1;
+  font-weight: 800;
+  letter-spacing: -0.02em;
+}
+/* The Floor in a section fills it, and what's in it scrolls inside, as
+   on its own page: without a min-height it would grow to its content. */
+.crew-floor.floor-in {
+  flex: 1;
+  min-height: 0;
 }
 .floor-in .crew-floor-head {
-  padding: 20px 24px 14px;
+  padding: 24px 28px 14px;
 }
 .floor.floor-in {
-  padding: 20px 24px 24px;
+  padding: 24px 28px;
 }
 /* ── The Unread page: the Floor's cards, with two-line rows ─────────────── */
 

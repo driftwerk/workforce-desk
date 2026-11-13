@@ -5,11 +5,13 @@ import { useWho, useWhoName } from "./Row";
 import { useFloor, useMerged } from "./store";
 import { asWho, axis, box, LANE_CAP, ordered, type Axis } from "./timeline";
 import { clock } from "./time";
+import { useSubHeading } from "./FloorShell";
 
 const WHAT: Record<SpanKind, string> = { working: "working", waiting: "waited on you", background: "background work" };
 
 /** Who worked today, and when something waited on the person: one lane each. */
 export function Today({ now }: { now: number }) {
+  const H = useSubHeading();
   const m = useMerged();
   const day = useFloor((s) => s.day);
   const [expanded, setExpanded] = useState(false);
@@ -29,7 +31,7 @@ export function Today({ now }: { now: number }) {
   return (
     <section className="floor-card today" aria-label="Today">
       <div className="floor-card-head">
-        <h2 className="display floor-card-title">Today</h2>
+        <H className="display floor-card-title">Today</H>
         <span className="muted small">who was working, and when something waited on you</span>
         <span className="today-legend small muted" aria-hidden="true">
           {(["working", "waiting", "background"] as const).map((k) => (

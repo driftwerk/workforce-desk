@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { FloorShell as Shell } from "../floor/FloorShell";
+import { FloorShell as Shell, useSubHeading } from "../floor/FloorShell";
 import { SetupFloor } from "../setup/slot";
 import { useChat } from "../chat/store";
 import { BriefCard, PausedNote, RightNow, useMinute } from "../floor/RightNow";
@@ -301,10 +301,11 @@ export function CrewFloor({ overview, onNewSession, heading }: { overview: Overv
 const TONE: Record<string, string> = { "Needs you": "blocked", Working: "working", "Done today": "done" };
 
 function Group({ group }: { group: FloorGroup }) {
+  const H = useSubHeading();
   const tone = TONE[group.title] ?? "idle";
   return (
     <section className="floor-group" aria-label={group.title}>
-      <h2 className={`ov-label state-${tone}`}>{group.title}</h2>
+      <H className={`ov-label state-${tone}`}>{group.title}</H>
       <div className={group.title === "Needs you" ? "ov-tiles ov-tiles-wide" : "ov-tiles"}>
         {group.agents.map((i) => (
           <ItemTile key={`agent:${i.id}`} item={i} />

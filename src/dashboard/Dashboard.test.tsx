@@ -7,7 +7,7 @@ import { agent, need, ready, view } from "../floor/testing";
 import { useDesk } from "../hub/store";
 import type { Overview, Session } from "../hub/types";
 import { useOverview } from "../overview/store";
-import { Dashboard, dashboardLine, dayPart, SECTIONS } from "./Dashboard";
+import { Dashboard, dayPart, SECTIONS } from "./Dashboard";
 
 vi.mock("@workforce/rich", () => ({
   RichHostProvider: ({ children }: { children: ReactNode }) => children,
@@ -40,10 +40,13 @@ describe("the Dashboard", () => {
     // One main landmark: the Floor in it is a part of the page, not a page.
     expect(screen.getAllByRole("main").map((m) => m.getAttribute("aria-label"))).toEqual(["Dashboard"]);
     expect(screen.getByRole("heading", { level: 1, name: "Dashboard" })).toBeTruthy();
-    expect(screen.getByText(/· 2 sessions working, 1 needs you$/)).toBeTruthy();
+    expect(screen.getByText(/^(Monday|Tuesday|Wednesday|Thursday|Friday|Saturday|Sunday) (morning|afternoon|evening|night)$/)).toBeTruthy();
     const floor = screen.getByRole("region", { name: "Floor" });
     expect(within(floor).getByRole("heading", { level: 2, name: "Floor" })).toBeTruthy();
     expect(within(floor).queryByRole("heading", { level: 1 })).toBeNull();
+    // Its own headings sit under the section's: the Floor's groups are h3s.
+    expect(within(floor).queryAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["Floor"]);
+    expect(within(floor).getAllByRole("heading", { level: 3 }).length).toBeGreaterThan(0);
     // What the Floor showed on its own page, it shows here.
     expect(within(floor).getByText("a")).toBeTruthy();
   });
@@ -56,6 +59,9 @@ describe("the Dashboard", () => {
     const floor = screen.getByRole("region", { name: "Floor" });
     expect(within(floor).getByRole("heading", { level: 2, name: "Floor" })).toBeTruthy();
     expect(within(floor).getByText(/need(s)? you/, { selector: ".crew-floor-counts *" })).toBeTruthy();
+    expect(within(floor).queryAllByRole("heading", { level: 2 }).map((h) => h.textContent)).toEqual(["Floor"]);
+    // It fills its card and scrolls inside it, as on its own page.
+    expect(floor.querySelector(".crew-floor.floor-in")).toBeTruthy();
     fireEvent.click(within(floor).getByRole("button", { name: "New session" }));
     expect(onNewSession).toHaveBeenCalledOnce();
   });
@@ -84,9 +90,4 @@ describe("the Dashboard's line", () => {
     expect(dayPart(new Date(2026, 10, 14, 2, 0).getTime())).toBe("Saturday night");
   });
 
-  it("says what works and what waits on you", () => {
-    expect(dashboardLine(7, 2)).toBe("7 sessions working, 2 need you");
-    expect(dashboardLine(1, 1)).toBe("1 session working, 1 needs you");
-    expect(dashboardLine(0, 0)).toBe("nothing working");
-  });
 });

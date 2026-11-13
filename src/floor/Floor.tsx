@@ -88,6 +88,8 @@ export function Floor({ onNewSession, heading }: { onNewSession: () => void; hea
 
 /** Today's sessions, grouped by what they're doing. */
 export function SessionsFloor({ heading }: { heading?: ReactNode } = {}) {
+  // Drawn around what it shows, so the level its shell gives isn't read here.
+  const H = heading ? "h3" : "h2";
   const sessions = sortedSessions(useDesk((s) => localSessions(s.sessions)));
   const blocked = sessions.filter(waitsOnYou).length;
   const seen = new Set<string>();
@@ -114,7 +116,7 @@ export function SessionsFloor({ heading }: { heading?: ReactNode } = {}) {
       ) : (
         groups.map((g) => (
           <section key={g.title} className="floor-group">
-            <h2>{g.title}</h2>
+            <H>{g.title}</H>
             <div className="tiles">
               {g.tiles.map((s) => (
                 <Tile key={s.id} session={s} />

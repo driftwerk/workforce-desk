@@ -4,10 +4,7 @@
 
 import { useId, type ComponentType, type ReactNode } from "react";
 import { Floor } from "../floor/Floor";
-import { useNeeds } from "../floor/store";
 import { useMinute } from "../floor/RightNow";
-import { localSessions, useDesk } from "../hub/store";
-import { needsYou } from "../ui/Badge";
 
 /** What a section's widget is given: its heading, for it to put at the
  *  head of its own header (beside its counts and actions), and what the
@@ -24,7 +21,11 @@ export interface DashboardSection {
 }
 
 /** The Dashboard's sections, in order. */
-export const SECTIONS: readonly DashboardSection[] = [{ id: "floor", title: "Floor", Widget: ({ heading, onNewSession }) => <Floor heading={heading} onNewSession={onNewSession} /> }];
+function FloorWidget({ heading, onNewSession }: WidgetProps) {
+  return <Floor heading={heading} onNewSession={onNewSession} />;
+}
+
+export const SECTIONS: readonly DashboardSection[] = [{ id: "floor", title: "Floor", Widget: FloorWidget }];
 
 /** "Friday afternoon", for the moment `now`. */
 export const dayPart = (now: number): string => {
@@ -34,22 +35,11 @@ export const dayPart = (now: number): string => {
   return `${d.toLocaleDateString("en-GB", { weekday: "long" })} ${part}`;
 };
 
-/** "7 sessions working, 2 need you": what the Dashboard's line says. */
-export const dashboardLine = (working: number, needs: number): string =>
-  [working ? `${working} ${working === 1 ? "session" : "sessions"} working` : "nothing working", needs ? needsYou(needs) : ""].filter(Boolean).join(", ");
-
-/** The Dashboard's line under its title: the time of day, what works and
- *  what waits on you. Read on its own, so the sections don't draw again
- *  for it. */
+/** The Dashboard's line under its title: the day and its part. What
+ *  works and waits on you, its sections say, each as it counts it. */
 function Summary() {
   const now = useMinute();
-  const working = useDesk((s) => Object.values(localSessions(s.sessions)).filter((x) => x.state === "working" || x.state === "starting").length);
-  const needs = useNeeds().length;
-  return (
-    <p className="muted dash-line">
-      {dayPart(now)} · {dashboardLine(working, needs)}
-    </p>
-  );
+  return <p className="muted dash-line">{dayPart(now)}</p>;
 }
 
 function Section({ section, onNewSession }: { section: DashboardSection; onNewSession: () => void }) {
