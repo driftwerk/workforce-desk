@@ -268,11 +268,11 @@ it("switches automatically only once the person turns it on", async () => {
   withHub({ setAutoSwitch }, [account("a-w", "Work", { isDefault: true })]);
   render(<Accounts engine={claude} />);
   await act(async () => {});
-  const toggle = screen.getByRole("checkbox", { name: /Switch automatically when an account hits its limit/ }) as HTMLInputElement;
-  expect(toggle.checked).toBe(false);
+  const toggle = screen.getByRole("switch", { name: /Switch automatically when an account hits its limit/ });
+  expect(toggle.getAttribute("aria-checked")).toBe("false");
   await act(async () => fireEvent.click(toggle));
   expect(setAutoSwitch).toHaveBeenCalledWith(true);
-  expect(toggle.checked).toBe(true);
+  expect(toggle.getAttribute("aria-checked")).toBe("true");
 });
 
 it("says when a sign-in can't be used, in plain words, until the person says OK", async () => {

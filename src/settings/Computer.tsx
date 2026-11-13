@@ -12,6 +12,7 @@ import { useUi } from "../shell/ui";
 import { plainError } from "../ui/plainError";
 import { openPane, useRecheckOnFocus } from "../ui/privacy";
 import "../styles/computer.css";
+import { SwitchRow } from "../ui/SwitchRow";
 
 /** Settings → This computer: whether agents may use it at all, how far each
  *  local agent reaches, what is always allowed, and what they did here. */
@@ -110,7 +111,7 @@ export function Computer() {
   return (
     <section className="settings-pane" aria-label="This computer">
       <h1 className="display-lg">This computer</h1>
-      <p className="muted small">
+      <p className="muted">
         What your agents may read, change and run on this computer. At Full access an agent asks you only before what can’t be undone, unless you let it do anything.
       </p>
       {!hub ? (
@@ -129,22 +130,17 @@ export function Computer() {
               </button>
             </div>
           ) : (
-            <div className="toggle-row">
-              <input
-                id="computer-switch"
-                type="checkbox"
-                checked={stopped === false}
-                disabled={stopped === null}
-                onChange={(e) => void setSwitch(!e.target.checked)}
-              />
-              <span>
-                <label htmlFor="computer-switch">Agents can use this computer</label>
-                <span className="small muted">Off, nothing an agent asks to read, change or run here goes ahead.</span>
-              </span>
-              <button type="button" className="btn btn-danger" disabled={stopped === null} onClick={() => void setSwitch(true)}>
+            <SwitchRow
+              label="Agents can use this computer"
+              sub="Off, nothing an agent asks to read, change or run here goes ahead."
+              on={stopped === false}
+              disabled={stopped === null}
+              onChange={(on) => void setSwitch(!on)}
+            >
+              <button type="button" className="btn btn-sm btn-danger" disabled={stopped === null} onClick={() => void setSwitch(true)}>
                 Stop all access now
               </button>
-            </div>
+            </SwitchRow>
           )}
           {problem && (
             <p className="small state-blocked" role="alert">

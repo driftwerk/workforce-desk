@@ -43,6 +43,13 @@ button {
   cursor: pointer;
 }
 
+/* A native tick, radio or slider in the theme's signal, wherever it is. */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  accent-color: var(--signal);
+}
+
 :focus-visible {
   outline: 2px solid var(--signal);
   outline-offset: 2px;
@@ -276,6 +283,22 @@ body.side-resizing * {
   display: flex;
   padding: 3px;
   border-radius: 999px;
+  background: var(--raised);
+}
+/* On a card (cardFill, often the raised colour) the track is sunk, so it
+   still shows. */
+.setting-card .seg,
+.prov-list .seg,
+.ability-card .seg,
+.think-rows .seg,
+.engine-row .seg {
+  background: var(--sunken);
+}
+.setting-card .seg button[aria-checked="true"],
+.prov-list .seg button[aria-checked="true"],
+.ability-card .seg button[aria-checked="true"],
+.think-rows .seg button[aria-checked="true"],
+.engine-row .seg button[aria-checked="true"] {
   background: var(--raised);
 }
 .tabs button,
@@ -1800,9 +1823,10 @@ body.side-resizing * {
   gap: 14px;
   align-items: center;
   padding: 12px 16px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--raised);
   border: 1px solid var(--border);
+  box-shadow: 0 12px 32px var(--shadow-soft);
   z-index: 20;
 }
 /* An error's toast is edged in the needs-you colour; any other in the border's. */
@@ -2140,6 +2164,9 @@ button.thread-bar:hover {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .urow-bar {
+    animation: none;
+  }
   .dots i {
     animation: none;
     opacity: 0.8;
@@ -2689,13 +2716,14 @@ button.thread-bar:hover {
   width: 72px;
   border: 1px solid var(--border);
   background: var(--bg);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 6px 10px;
   outline: none;
   font: inherit;
 }
 .confirm-days input:focus {
   border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 /* Text people may need to copy, in a UI that otherwise isn't selectable. */
@@ -3727,7 +3755,18 @@ button.urow-open {
   width: 38%;
   border-radius: 5px;
   background: var(--raised);
-  animation: desk-breathe 1.8s ease-in-out infinite;
+  animation: desk-loading 1.8s ease-in-out infinite;
+}
+/* A placeholder while a page reads: it fades in and out, with no ring (the
+   working dot's breathing draws one in the working colour). */
+@keyframes desk-loading {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 .urow-bar-short {
   width: 64%;
@@ -4326,6 +4365,8 @@ body.line-resizing * {
   }
 }
 /* Badges that wrapped under the name sit at the row's right edge. */
+.gi > .badge,
+.gi > .side-dot,
 .gi > .gi-ticket,
 .gi > .gi-charge,
 .gi > .gi-meta,
