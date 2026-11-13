@@ -170,6 +170,7 @@
   min-width: 0;
 }
 .gpane-head .dot {
+  --ripple-from: 0.5294;
   width: 9px;
   height: 9px;
 }
@@ -400,6 +401,7 @@ body.gpane-moving * {
   cursor: grab;
 }
 .gtray-chip .dot {
+  --ripple-from: 0.5;
   width: 8px;
   height: 8px;
 }

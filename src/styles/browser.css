@@ -22,6 +22,7 @@
   border-color: var(--working);
 }
 .browser-pill .dot {
+  --ripple-from: 0.5;
   width: 8px;
   height: 8px;
 }
@@ -104,6 +105,7 @@
   background: var(--raised);
 }
 .browser-profile .dot {
+  --ripple-from: 0.5;
   width: 8px;
   height: 8px;
   flex: none;
