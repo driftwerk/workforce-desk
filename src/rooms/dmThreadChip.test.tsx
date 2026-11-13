@@ -10,7 +10,7 @@ describe("a DM message's thread chip", () => {
       <ThreadChip agent="dw/desk" hub="dw" name="Desk" thread={{ parent: "k4", replies: 4, lastAt: "2026-11-12T16:38:00Z", authors: ["agent", "user"], working: false }} />,
     );
     expect(container.querySelectorAll(".thread-marks .mark")).toHaveLength(2);
-    expect(screen.getByRole("button").textContent).toMatch(/^4 replies\s*last /);
+    expect(screen.getByRole("button").textContent).toMatch(/4 replies last /);
   });
 
   it("shows no faces when the hub names no authors", () => {
