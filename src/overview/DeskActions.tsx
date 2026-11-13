@@ -20,25 +20,26 @@ type Question = NonNullable<DeskExtras["questions"]>[number];
 /** What an overseer's message mentions, to act on where it's said: a
  *  session's request to allow or deny, its suggestions, the questions it
  *  gave you, and its plan (`text`, the message's own words, shown while
- *  the plan can't be). */
-export function DeskActions({ extras, text }: { extras: DeskExtras; text?: string }) {
+ *  the plan can't be). `inline`: in the flow of the boss's update or
+ *  needs-you, as the chat's own text does, never boxed. */
+export function DeskActions({ extras, text, inline = false }: { extras: DeskExtras; text?: string; inline?: boolean }) {
   return (
     <>
       {extras.plan && <PlanCard mentioned={extras.plan} text={text} />}
       {(extras.approvals ?? []).map((a) => (
-        <InlineApproval key={a.approvalId} approval={a} />
+        <InlineApproval key={a.approvalId} approval={a} inline={inline} />
       ))}
       {(extras.suggestions ?? []).map((s) => (
-        <SuggestionCard key={s.id} mentioned={s} />
+        <SuggestionCard key={s.id} mentioned={s} inline={inline} />
       ))}
       {(extras.questions ?? []).map((q) => (
-        <QuestionCard key={q.messageId} question={q} />
+        <QuestionCard key={q.messageId} question={q} inline={inline} />
       ))}
     </>
   );
 }
 
-function InlineApproval({ approval }: { approval: Approval }) {
+function InlineApproval({ approval, inline }: { approval: Approval; inline: boolean }) {
   const session = useDesk((s) => s.sessions[approval.sessionId]);
   const item = useOverview((s) => s.overview?.items.find((i) => i.approval?.id === approval.approvalId));
   const decided = useOverview((s) => s.decided[approval.approvalId]);
@@ -66,7 +67,7 @@ function InlineApproval({ approval }: { approval: Approval }) {
   };
 
   return (
-    <div className="dm-action dm-approval" role="group" aria-label={approval.summary}>
+    <div className={`${inline ? "dm-inline" : "dm-action"} dm-approval`} role="group" aria-label={approval.summary}>
       <span className="dm-action-text">
         <span>{approval.summary}</span>
         {decided ? (
@@ -101,7 +102,7 @@ function InlineApproval({ approval }: { approval: Approval }) {
   );
 }
 
-function SuggestionCard({ mentioned }: { mentioned: Mentioned }) {
+function SuggestionCard({ mentioned, inline }: { mentioned: Mentioned; inline: boolean }) {
   const live = useOverview((s) => s.suggestions[mentioned.id]);
   const { accept, dismiss, wantSuggestions } = useOverview();
   const [busy, setBusy] = useState<"accept" | "dismiss" | null>(null);
@@ -131,7 +132,7 @@ function SuggestionCard({ mentioned }: { mentioned: Mentioned }) {
   };
 
   return (
-    <div className={`dm-action dm-suggestion dm-suggestion-${state}`} role="group" aria-label="Suggestion">
+    <div className={`${inline ? "dm-inline" : "dm-action"} dm-suggestion dm-suggestion-${state}`} role="group" aria-label="Suggestion">
       <span className="small muted">Suggestion</span>
       <span className="dm-suggestion-text">{text}</span>
       {state === "open" ? (
@@ -160,8 +161,9 @@ function SuggestionCard({ mentioned }: { mentioned: Mentioned }) {
 
 /** A question a session asked on its line that the overseer gave you:
  *  answered here, or already answered (here, on the Floor, in the
- *  session's thread, or by the overseer). */
-function QuestionCard({ question }: { question: Question }) {
+ *  session's thread, or by the overseer). `inline`: under the message that
+ *  already says the question, so only its answers show. */
+function QuestionCard({ question, inline }: { question: Question; inline: boolean }) {
   const live = useLine((s) => messageIn(s.threads, question.messageId));
   const loaded = useLine((s) => question.sessionId in s.threads);
   const connected = useDesk((s) => !!s.hub);
@@ -171,11 +173,13 @@ function QuestionCard({ question }: { question: Question }) {
   }, [connected, loaded, known, question.sessionId]);
   const open = live ? live.asked === "open" || live.asked === "escalated" : !loaded || !known;
   return (
-    <div className="dm-action dm-question" role="group" aria-label={`${question.session}'s question`}>
-      <span className="dm-action-text">
-        <span className="small muted">{question.session} asks</span>
-        <span>{question.ask}</span>
-      </span>
+    <div className={`${inline ? "dm-inline" : "dm-action"} dm-question`} role="group" aria-label={`${question.session}'s question`}>
+      {!inline && (
+        <span className="dm-action-text">
+          <span className="small muted">{question.session} asks</span>
+          <span>{question.ask}</span>
+        </span>
+      )}
       {open ? (
         <LineAnswer
           compact
@@ -184,7 +188,7 @@ function QuestionCard({ question }: { question: Question }) {
             sessionId: question.sessionId,
             session: question.session,
             ask: question.ask,
-            why: question.why,
+            why: inline ? undefined : question.why,
             options: question.options,
             draft: question.draft,
           }}

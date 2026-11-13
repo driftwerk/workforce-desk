@@ -129,7 +129,8 @@
 }
 .ov-ask .btn,
 .brief .btn,
-.dm-action .btn {
+.dm-action .btn,
+.dm-inline .btn {
   min-height: 32px;
   padding: 0 12px;
   font-size: 13px;
@@ -1048,4 +1049,69 @@ button.fsec-tile-head {
   margin: 0;
   padding-left: 18px;
   flex-basis: 100%;
+}
+
+/* ── The boss in your chat: updates, decisions, what needs you ─────────── */
+
+/* Plain text, as the agreed look has it: paragraphs in Desk's tokens,
+   never a box. */
+.msg-text.overseer {
+  white-space: normal;
+}
+.msg-text.overseer > p,
+.msg-text.overseer > .rich,
+.msg-text.overseer > .dm-waiting > p {
+  margin: 0 0 8px;
+}
+.msg-text.overseer > :last-child,
+.msg-text.overseer > .dm-waiting:last-child > :last-child {
+  margin-bottom: 0;
+}
+.msg-text.overseer > .rich p {
+  margin: 0;
+}
+/* "I decided:" in the text colour, the rest of its line muted. */
+.msg-text.overseer .dec-label {
+  color: var(--text);
+  font-weight: 600;
+}
+.msg-text.overseer .dec-undone {
+  text-decoration: line-through;
+}
+/* What leads a needs-you or still-waiting message: semibold, in the
+   blocked colour. */
+.msg-text.needs-you > .rich:first-child p:first-of-type > strong:first-child {
+  color: var(--blocked);
+}
+/* What a session's work names (#622): its id, faint, in mono. */
+.ref {
+  font-family: var(--font-mono);
+  font-size: var(--font-size-code);
+  color: var(--faint);
+}
+a.ref {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+/* What answers or acts on the boss's message, in the chat's flow: no
+   border, no fill, no padding; a row with a gap. */
+.dm-inline {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 8px;
+}
+.dm-inline:last-child {
+  margin-bottom: 0;
+}
+.dm-inline.dm-question,
+.dm-inline.dm-suggestion {
+  flex-direction: column;
+  align-items: flex-start;
+}
+.dm-inline .line-answer {
+  background: transparent;
+  padding: 0;
+  margin: 0;
 }
