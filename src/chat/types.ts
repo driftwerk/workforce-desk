@@ -196,6 +196,9 @@ export const FEATURES = {
   /** A DM's whole history can be searched on the hub, and read around a
    *  match (./search.ts). */
   search: "desk.search",
+  /** A DM has threads: a conversation of its own on a message, listed by the
+   *  hub, a reply in one optionally also sent to the DM (./thread.ts). */
+  dmThreads: "desk.dm_threads",
   /** A room turn may name the room's members (`members`), which the hub
    *  tells the agent in its own words. A hub without it is told them as a
    *  line of the room's, from Desk. */
@@ -205,7 +208,7 @@ export const FEATURES = {
 export type DeliveryKind = "reminder" | "job" | "workflow" | "check_in" | "approval" | "file" | "resumed" | "notice" | "plan" | "other";
 
 export type DeskPlace =
-  | { kind: "dm" }
+  | { kind: "dm"; thread?: string }
   | { kind: "room"; room: string; name: string; thread?: string }
   | { kind: "call" }
   | { kind: "legacy_room"; slug: string };

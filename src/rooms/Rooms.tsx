@@ -33,6 +33,7 @@ import { relayedOf } from "../chat/relayed";
 import { memoriesFrom, type SavedMemory } from "../chat/remove";
 import { termsOf } from "../chat/search";
 import { SearchBar, SearchResults, useDmSearch, useSearchMarks } from "./DmSearch";
+import { ThreadChip, threadsWorking, useDmThreads } from "./DmThread";
 import { useOverview } from "../overview/store";
 import { useUi, type AgentTab } from "../shell/ui";
 import { draftKey, useDraft } from "../restore/drafts";
@@ -181,6 +182,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // ⌘F: the search, the stretch of the chat shown around a match not
   // loaded, and the match to show once it's rendered.
   const [searching, setSearching] = useState(false);
+  // The threads on this DM's messages, and the one open beside it.
+  const threads = useDmThreads(activeAgent ?? null);
+  const openThread = useUi((u) => u.setDmThread);
   const search = useDmSearch(hub, agent?.id ?? "");
   const around = useChat((s) => (activeAgent ? s.around[activeAgent] : undefined));
   const showAround = useChat((s) => s.showAround);
@@ -337,6 +341,8 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
             ? "A message with files can’t be edited. Send a new one instead."
             : null;
   const deletable = !around && !!convo.features?.has(FEATURES.delete);
+  const threadable = !around && !!convo.features?.has(FEATURES.dmThreads);
+  const threadsOf = new Map(threads.map((t) => [t.parent, t]));
   const yours = (m: ChatMessage) =>
     m.role === "user" && (!m.author || m.author.kind === "you") && !m.undelivered && !m.command && !relayedOf(m, sentOn);
   const keptIds = new Set((history?.messages ?? []).map((k) => k.id));
@@ -438,6 +444,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
             </span>
             <span className="faint small">
               {subtitle}
+              {threadsWorking(threads) ? ` · ${threadsWorking(threads)}` : ""}
               {convo.connected ? "" : " · reconnecting…"}
             </span>
           </span>
@@ -547,8 +554,16 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                         onRemove={discard}
                         orphan={!!m.answeredDeleted || orphanSet.has(m.id)}
                       />
-                      {!editing && deleting !== m.id && ((editable && m === mine) || (deletable && yours(m))) && (
+                      {!editing && deleting !== m.id && threadsOf.has(m.id) && (
+                        <ThreadChip agent={activeAgent} thread={threadsOf.get(m.id)!} />
+                      )}
+                      {!editing && deleting !== m.id && ((editable && m === mine) || (deletable && yours(m)) || (threadable && keptIds.has(m.id) && !m.command)) && (
                         <span className="msg-actions" role="toolbar" aria-label="Message actions">
+                          {threadable && keptIds.has(m.id) && !m.command && (
+                            <button type="button" className="msg-action" title="Reply in thread" onClick={() => openThread(activeAgent, m.id)}>
+                              Reply in thread
+                            </button>
+                          )}
                           {editable && m === mine && (
                             <button type="button" className="msg-action" title={whyNot ?? "Edit (↑)"} onClick={startEdit}>
                               Edit
@@ -676,7 +691,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
 
 /** A message in a DM, rendered again only when it, or how it's shown,
  *  changes: not while you type, nor as another message streams in. */
-const DmMessage = memo(function DmMessage({
+export const DmMessage = memo(function DmMessage({
   message,
   sentOn,
   orphan,

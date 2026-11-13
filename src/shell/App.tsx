@@ -33,6 +33,8 @@ import { resumePairing } from "../hubs/PairHub";
 import { NewRoom } from "../rooms/NewRoom";
 import { Rooms } from "../rooms/Rooms";
 import { ThreadPanel, useOpenThread } from "../rooms/RoomView";
+import { DmThreadPanel, useOpenDmThread } from "../rooms/DmThread";
+import { agentKey } from "../chat/types";
 import { SearchPanel } from "../rooms/SearchPanel";
 import { OpenRoomDetails } from "../rooms/RoomDetails";
 import { MoveDialog } from "../groups/MoveDialog";
@@ -310,6 +312,7 @@ export function App() {
   const open = openId ? sessions[openId] : undefined;
   const sessionName = useSessionName(open?.id, open?.name ?? "");
   const thread = useOpenThread();
+  const dmThread = useOpenDmThread();
   const beside = useAgentPanel();
   const mainName = useMainName();
   const mainKey = useMainKey();
@@ -324,6 +327,17 @@ export function App() {
       element: (
         <ErrorBoundary name="thread">
           <ThreadPanel key={`${thread.room.id}/${thread.thread}`} room={thread.room} thread={thread.thread} />
+        </ErrorBoundary>
+      ),
+    });
+  }
+  if (dmThread && !thread) {
+    panels.push({
+      kind: "thread",
+      label: "Thread",
+      element: (
+        <ErrorBoundary name="thread">
+          <DmThreadPanel key={`${agentKey(dmThread.agent)}#${dmThread.parent}`} agent={dmThread.agent} hub={dmThread.hub} parent={dmThread.parent} />
         </ErrorBoundary>
       ),
     });

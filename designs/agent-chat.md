@@ -93,4 +93,4 @@ Hover a message you sent and choose Delete. You confirm in place, under the mess
 
 ## 5. Threads in a DM
 
-Reply in thread opens a side panel. Each thread runs its own turn, with the parent message, the thread, and the chat up to that point as context. "Also send to the chat" posts the reply in both places. Memory is shared. Slack DM threads map to these one to one. The hub needs DM replies to carry a thread id. This one gets its own design note before it's built.
+Reply in thread opens a side panel. Each thread runs its own turn, with the parent message, the thread, and the chat up to that point as context. "Also send to the chat" posts the reply in both places. Memory is shared. Slack DM threads map to these one to one. The hub needs DM replies to carry a thread id. Its design is in [agent-chat-threads.md](agent-chat-threads.md).
