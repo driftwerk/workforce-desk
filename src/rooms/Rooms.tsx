@@ -694,16 +694,25 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   );
 }
 
-/** Where a message's turn lies among `shown`, for one that set
+const startsSetups = (m: ChatMessage): boolean =>
+  m.role === "assistant" && (setupsStarted(m.steps) > 0 || setupsStarted(m.tools) > 0);
+
+/** Where a message's setups lie among `shown`, for one that set
  *  connections up: from your message it answers (else your last before it:
- *  a delivery between them came mid-turn) to the message after it. Others
- *  get none, so a message coming after them doesn't render them again. */
+ *  a delivery between them came mid-turn), or from an answer of the same
+ *  turn that set some up before it (kept once its own had started), to the
+ *  next of either. Others get none, so a message coming after them
+ *  doesn't render them again. */
 export const turnOf = (shown: readonly ChatMessage[], m: ChatMessage, i: number): { turnSince?: string; turnUntil?: string } => {
-  if (m.role !== "assistant" || (setupsStarted(m.steps) === 0 && setupsStarted(m.tools) === 0)) return {};
-  const asked =
-    (m.replyTo ? shown.find((x) => x.role === "user" && x.clientId === m.replyTo) : undefined) ??
-    shown.slice(0, i).findLast((x) => x.role === "user");
-  return { turnSince: asked?.at, turnUntil: shown[i + 1]?.at };
+  if (!startsSetups(m)) return {};
+  const said = m.replyTo ? shown.findIndex((x) => x.role === "user" && x.clientId === m.replyTo) : -1;
+  const asked = said >= 0 && said < i ? said : shown.slice(0, i).findLastIndex((x) => x.role === "user");
+  const earlier = shown.slice(asked + 1, i).findLastIndex(startsSetups);
+  const from = earlier >= 0 ? shown[asked + 1 + earlier] : asked >= 0 ? shown[asked] : undefined;
+  // Up to your next message, or the next answer that set some up: a
+  // delivery between came mid-turn.
+  const until = shown.slice(i + 1).find((x) => x.role === "user" || startsSetups(x));
+  return { turnSince: from?.at, turnUntil: until?.at };
 };
 
 /** A message in a DM, rendered again only when it, or how it's shown,

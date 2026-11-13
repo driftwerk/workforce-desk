@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HubError } from "../hub/client";
-import type { Connection, ConnectionsApi, Connector, ServicePicks } from "../hub/connections";
+import type { Connection, ConnectionsApi, Connector, PicksChange, ServicePicks } from "../hub/connections";
 import { Connections } from "./Connections";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
@@ -322,7 +322,9 @@ describe("reconnecting a connection made by signing in", () => {
   });
   const personal = connection({ id: "all~~personal", name: "Personal" });
   const google = connector({ id: "google", name: "Google", signIn: "google", fields: [], connections: [work, personal] });
-  const fresh = connection({ id: "all~~work-2", name: "Work" });
+  // Another sign-in, of someone else's account, made just before.
+  const other = connection({ id: "all~~work-3", name: "Work", account: "kim@acme.example" });
+  const fresh = connection({ id: "all~~work-2", name: "Work", account: "sam@acme.example", connectedAt: new Date().toISOString() });
   const picksOf = (agent: string): ServicePicks[] =>
     agent === "allan"
       ? [
@@ -356,9 +358,10 @@ describe("reconnecting a connection made by signing in", () => {
 
   const hub = (over: Partial<ConnectionsApi> = {}) => {
     let signedIn = false;
+    const moved = new Set<string>();
     return api([], {
       list: vi.fn(async () => ({
-        connectors: [{ ...google, connections: signedIn ? [work, personal, fresh] : [work, personal] }],
+        connectors: [{ ...google, connections: signedIn ? [work, personal, other, fresh] : [work, personal] }],
         adapters: [],
       })),
       start: vi.fn(async () => ({ flow: "g1", url: "https://accounts.google.com/x", userCode: null, verificationUri: null, expiresIn: 900 })),
@@ -366,8 +369,15 @@ describe("reconnecting a connection made by signing in", () => {
         signedIn = true;
         return { state: "connected" as const, account: "sam@acme.example" };
       }),
-      picks: vi.fn(async (agent: string) => picksOf(agent)),
+      // Ben picks as Allan does.
+      picks: vi.fn(async (agent: string) => (moved.has(agent) ? [] : picksOf(agent === "ben" ? "allan" : agent))),
       ...over,
+      // An agent moved over picks the old one no more.
+      setPicks: vi.fn(async (agent: string, change: PicksChange) => {
+        const got = await (over.setPicks ?? (async () => []))(agent, change);
+        moved.add(agent);
+        return got;
+      }),
     });
   };
 
@@ -391,20 +401,71 @@ describe("reconnecting a connection made by signing in", () => {
     expect(order).toEqual(["picks", "disconnect"]);
   });
 
-  it("says so when the old one couldn't be removed, and keeps it", async () => {
-    const a = hub({ disconnect: vi.fn(async () => Promise.reject(new HubError(500, "The vault is locked"))) });
+  it("says so when the old one couldn't be removed, keeps it, and finishes from there", async () => {
+    let locked = true;
+    const a = hub({
+      setPicks: vi.fn(async () => []),
+      disconnect: vi.fn(async () => {
+        if (locked) throw new HubError(500, "The vault is locked");
+        return { stillKept: null, note: null };
+      }),
+    });
     await signIn(a);
     const old = within(service("Google")).getAllByLabelText("Work")[0]!;
-    expect(within(old).getByRole("alert").textContent).toBe(
-      "Signed in again, but Desk couldn’t remove the old Work: The vault is locked. Disconnect the old one here.",
-    );
+    const said = within(old).getByRole("alert");
+    expect(said.textContent).toMatch(/^Signed in again, but Desk couldn’t remove the old Work: The vault is locked\./);
+    locked = false;
+    await act(async () => {
+      fireEvent.click(within(said).getByRole("button", { name: "Finish moving to the new sign-in" }));
+    });
+    expect(a.disconnect).toHaveBeenCalledTimes(2);
+    // Nothing more made: no third sign-in.
+    expect(a.start).toHaveBeenCalledTimes(1);
   });
 
-  it("keeps the old one when an agent couldn't be moved over", async () => {
-    const a = hub({ setPicks: vi.fn(async () => Promise.reject(new Error("no"))) });
+  it("keeps the new sign-in and the old one when an agent couldn't be moved, and moves it on asking again", async () => {
+    let down = true;
+    const setPicks = vi.fn(async () => {
+      if (down) throw new Error("no");
+      return [];
+    });
+    const a = hub({ setPicks });
     await signIn(a);
     expect(a.disconnect).not.toHaveBeenCalled();
-    expect(screen.getByRole("alert").textContent).toMatch(/couldn’t move Allan over to it, so the old Work is kept/);
+    const said = screen.getByRole("alert");
+    expect(said.textContent).toMatch(/couldn’t move Allan over to it yet, so the old Work is kept too/);
+    down = false;
+    await act(async () => {
+      fireEvent.click(within(said).getByRole("button", { name: "Finish moving to the new sign-in" }));
+    });
+    expect(a.setPicks).toHaveBeenLastCalledWith("allan", expect.objectContaining({ default: "all~~work-2" }));
+    expect(a.disconnect).toHaveBeenCalledWith("google", "all~~work");
+    expect(a.start).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves an agent that picked the old one while the sign-in ran, read again before it goes", async () => {
+    const a = hub();
+    let reads = 0;
+    const lists = a.list as ReturnType<typeof vi.fn>;
+    const real = lists.getMockImplementation() as () => Promise<{ connectors: Connector[]; adapters: string[] }>;
+    lists.mockImplementation(async () => {
+      const got = await real();
+      reads += 1;
+      // From the second read on, Ben uses it too.
+      return reads < 3
+        ? got
+        : {
+            ...got,
+            connectors: got.connectors.map((k: Connector) => ({
+              ...k,
+              connections: k.connections.map((x: Connection) =>
+                x.id === "all~~work" ? { ...x, usedBy: [...x.usedBy, { agent: "ben", name: "Ben", connection: "mine" as const }] } : x,
+              ),
+            })),
+          };
+    });
+    await signIn(a);
+    expect((a.setPicks as ReturnType<typeof vi.fn>).mock.calls.map((c) => c[0])).toContain("ben");
   });
 });
 

@@ -42,47 +42,94 @@ export const nameTaken = (c: Connector, name: string, but?: string): string | nu
   return same ? `${c.name} has a connection called ${same.name} already. Give this one another name.` : null;
 };
 
-/** After a sign-in made `x` again as a new connection: each agent that
- *  picked `x` by name picks the new one in its place (taking changes as
- *  before, its default still), then `x` goes. What went wrong, in the
- *  person's words, or null. */
-export const carryOver = async (api: ConnectionsApi, c: Connector, x: Connection): Promise<string | null> => {
-  const before = new Set(c.connections.map((k) => k.id));
-  let fresh: Connection | undefined;
-  try {
-    const now = (await api.list()).connectors.find((k) => k.id === c.id);
-    fresh = now?.connections.find((k) => !before.has(k.id) && k.level === x.level && k.agent === x.agent);
-  } catch {
-    // Said below.
-  }
-  if (!fresh) return `Desk couldn’t find the new sign-in, so ${x.name} is kept as it was. Reconnect it again in a moment.`;
-  const stuck: string[] = [];
-  for (const u of x.usedBy) {
+/** How far the hub's clock may be behind Desk's. */
+const CLOCK_SKEW_MS = 60_000;
+
+/** The connection a sign-in made `x` again as, in `now`: new since
+ *  `before`, kept where `x` is, made since the sign-in began, and of the
+ *  account it signed in as where that was said. */
+export const madeAgain = (
+  now: Connector | undefined,
+  before: ReadonlySet<string>,
+  x: Connection,
+  signedIn: { account?: string; since: number },
+): Connection | undefined => {
+  const account = signedIn.account?.trim().toLowerCase();
+  return (now?.connections ?? [])
+    .filter((k) => !before.has(k.id) && k.level === x.level && k.agent === x.agent)
+    .filter((k) => !k.connectedAt || Date.parse(k.connectedAt) >= signedIn.since - CLOCK_SKEW_MS)
+    .filter((k) => !account || k.account?.trim().toLowerCase() === account)
+    .sort((a, b) => Date.parse(b.connectedAt ?? "") - Date.parse(a.connectedAt ?? ""))[0];
+};
+
+/** What moving agents off a connection left. */
+export type Moved = { problem: null } | { problem: string; fresh: Connection | null };
+
+/** Each agent that picked `x` by name picks `fresh` in its place (taking
+ *  changes as before, its default still), read again until none is left
+ *  to move; then `x` goes. */
+export const moveOver = async (api: ConnectionsApi, c: Connector, x: Connection, fresh: Connection): Promise<Moved> => {
+  for (let pass = 0; pass < 3; pass++) {
+    let users: Connection["usedBy"];
     try {
-      const s = (await api.picks(u.agent)).find((v) => v.id === c.id);
-      // One that follows whom a connection is for reaches the new one already.
-      if (!s?.chosen) continue;
-      const picked = s.connections.filter((p) => p.picked);
-      if (!picked.some((p) => p.id === x.id)) continue;
-      const swap = (id: string) => (id === x.id ? fresh.id : id);
-      const def = picked.find((p) => p.default)?.id ?? null;
-      await api.setPicks(u.agent, {
-        service: c.id,
-        connections: picked.map((p) => ({ id: swap(p.id), write: p.write })),
-        default: def && swap(def),
-      });
+      const now = (await api.list()).connectors.find((k) => k.id === c.id);
+      // Who uses it now, not when the page was read.
+      users = now?.connections.find((k) => k.id === x.id)?.usedBy ?? [];
     } catch {
-      stuck.push(u.name);
+      return { problem: `Desk couldn’t read who uses ${x.name} just now, so it is kept for now.`, fresh };
     }
+    let moved = 0;
+    const stuck: string[] = [];
+    for (const u of users) {
+      try {
+        const s = (await api.picks(u.agent)).find((v) => v.id === c.id);
+        // One that follows whom a connection is for reaches the new one already.
+        if (!s?.chosen) continue;
+        const picked = s.connections.filter((p) => p.picked);
+        if (!picked.some((p) => p.id === x.id)) continue;
+        const swap = (id: string) => (id === x.id ? fresh.id : id);
+        const def = picked.find((p) => p.default)?.id ?? null;
+        const seen = new Set<string>();
+        await api.setPicks(u.agent, {
+          service: c.id,
+          connections: picked
+            .map((p) => ({ id: swap(p.id), write: p.write }))
+            .filter((p) => !seen.has(p.id) && !!seen.add(p.id)),
+          default: def && swap(def),
+        });
+        moved += 1;
+      } catch {
+        stuck.push(u.name);
+      }
+    }
+    if (stuck.length > 0) return { problem: `Signed in again, but Desk couldn’t move ${names(stuck)} over to it yet, so the old ${x.name} is kept too.`, fresh };
+    if (moved === 0) break;
   }
-  if (stuck.length > 0)
-    return `Signed in again, but Desk couldn’t move ${names(stuck)} over to it, so the old ${x.name} is kept for now. Reconnect it again to finish.`;
   try {
     await api.disconnect(c.id, x.id);
   } catch (e) {
-    return `Signed in again, but Desk couldn’t remove the old ${x.name}: ${sentence(message(e))} Disconnect the old one here.`;
+    return { problem: `Signed in again, but Desk couldn’t remove the old ${x.name}: ${sentence(message(e))}`, fresh };
   }
-  return null;
+  return { problem: null };
+};
+
+/** After a sign-in made `x` again as a new connection: the new one takes
+ *  its place for its agents, then `x` goes. */
+export const carryOver = async (
+  api: ConnectionsApi,
+  c: Connector,
+  x: Connection,
+  signedIn: { account?: string; since: number },
+): Promise<Moved> => {
+  const before = new Set(c.connections.map((k) => k.id));
+  let fresh: Connection | undefined;
+  try {
+    fresh = madeAgain((await api.list()).connectors.find((k) => k.id === c.id), before, x, signedIn);
+  } catch {
+    // Said below.
+  }
+  if (!fresh) return { problem: `Desk couldn’t find the new sign-in, so ${x.name} is kept as it was. Reconnect it again in a moment.`, fresh: null };
+  return moveOver(api, c, x, fresh);
 };
 
 /** The local hub's Connections, asked as the person. */
@@ -428,14 +475,18 @@ function ConnectionCard({
   reload: () => Promise<void>;
   onNotice: (n: string | null) => void;
 }) {
-  const [busy, setBusy] = useState<null | "test" | "disconnect" | "rename">(null);
+  const [busy, setBusy] = useState<null | "test" | "disconnect" | "rename" | "move">(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
+  /** When the reconnect began: its sign-in's connection is newer. */
+  const [since, setSince] = useState(0);
+  /** The new sign-in its agents weren't all moved over to yet. */
+  const [moving, setMoving] = useState<Connection | null>(null);
   const losing = x.usedBy.map((u) => u.name);
 
-  const run = async (kind: "test" | "disconnect" | "rename", work: () => Promise<unknown>): Promise<boolean> => {
+  const run = async (kind: "test" | "disconnect" | "rename" | "move", work: () => Promise<unknown>): Promise<boolean> => {
     setBusy(kind);
     setProblem(null);
     try {
@@ -464,11 +515,12 @@ function ConnectionCard({
           name={x.name}
           reconnect={c.fields.length > 0 ? x.id : undefined}
           label={`Reconnect ${x.name}`}
-          onDone={async (inPlace) => {
+          onDone={async (inPlace, account) => {
             // New keys keep the connection as it is; a sign-in makes a new
             // one, which takes the old one's place for its agents.
-            const wrong = inPlace ? null : await carryOver(api, c, x);
-            setProblem(wrong);
+            const left: Moved = inPlace ? { problem: null } : await carryOver(api, c, x, { account, since });
+            setProblem(left.problem);
+            setMoving(left.problem ? left.fresh : null);
             setReconnecting(false);
             await reload();
           }}
@@ -544,6 +596,28 @@ function ConnectionCard({
       {problem && (
         <p className="small state-blocked" role="alert">
           {problem}
+          {moving && (
+            <>
+              {" "}
+              <button
+                type="button"
+                className="link small"
+                disabled={busy !== null}
+                onClick={() =>
+                  void run("move", async () => {
+                    const left = await moveOver(api, c, x, moving);
+                    if (left.problem) {
+                      setMoving(left.fresh);
+                      throw new Error(left.problem);
+                    }
+                    setMoving(null);
+                  })
+                }
+              >
+                {busy === "move" ? "Moving…" : "Finish moving to the new sign-in"}
+              </button>
+            </>
+          )}
         </p>
       )}
       {confirming ? (
@@ -576,7 +650,7 @@ function ConnectionCard({
               Rename
             </button>
           )}
-          <button type="button" className={`btn btn-sm ${ok ? "" : "btn-signal"}`} disabled={busy !== null} onClick={() => setReconnecting(true)}>
+          <button type="button" className={`btn btn-sm ${ok ? "" : "btn-signal"}`} disabled={busy !== null} onClick={() => (setSince(Date.now()), setReconnecting(true))}>
             Reconnect
           </button>
           <button type="button" className="btn btn-sm btn-ghost conn-disconnect" disabled={busy !== null} onClick={() => setConfirming(true)}>
@@ -610,7 +684,7 @@ export function Connect({
   /** The connection whose keys these replace. */
   reconnect?: string;
   label: string;
-  onDone: (inPlace?: boolean) => void | Promise<void>;
+  onDone: (inPlace?: boolean, account?: string) => void | Promise<void>;
   onCancel?: () => void;
   /** Show the form at once, rather than behind the button. */
   open?: boolean;
@@ -622,7 +696,7 @@ export function Connect({
   const [problem, setProblem] = useState<string | null>(null);
 
   if (c.signIn === "google") {
-    return <GoogleSignIn api={api} connector={c} at={at} name={name} blocked={blocked} onDone={() => onDone()} onCancel={onCancel} />;
+    return <GoogleSignIn api={api} connector={c} at={at} name={name} blocked={blocked} onDone={(account) => onDone(false, account)} onCancel={onCancel} />;
   }
   if (c.signIn === "github" && !form) {
     return (
@@ -639,7 +713,7 @@ export function Connect({
             at={at}
             name={name}
             blocked={blocked}
-            onDone={() => onDone()}
+            onDone={(account) => onDone(false, account)}
             onProblem={setProblem}
             onToken={() => setForm(true)}
             onCancel={onCancel}
@@ -706,7 +780,7 @@ export function FieldsForm({
   blocked?: boolean;
   title?: string;
   /** Told whether the keys went to the connection being reconnected. */
-  onDone: (inPlace?: boolean) => void | Promise<void>;
+  onDone: (inPlace?: boolean, account?: string) => void | Promise<void>;
   onCancel?: () => void;
 }) {
   const [values, setValues] = useState<Record<string, string>>({});
@@ -777,7 +851,7 @@ export function FieldsForm({
 
 /** Waits on a sign-in the hub is finishing: asks where it is until it
  *  ends, then says so. */
-const useFlow = (api: ConnectionsApi, onDone: () => void | Promise<void>) => {
+const useFlow = (api: ConnectionsApi, onDone: (account?: string) => void | Promise<void>) => {
   const [started, setStarted] = useState<Started | null>(null);
   const [said, setSaid] = useState<string | null>(null);
   const live = useLive();
@@ -797,7 +871,7 @@ const useFlow = (api: ConnectionsApi, onDone: () => void | Promise<void>) => {
             break;
           case "connected":
             setStarted(null);
-            await done.current();
+            await done.current(at.account);
             return;
           case "cancelled":
             setStarted(null);
@@ -852,7 +926,7 @@ function DeviceSignIn({
   at: At;
   name?: string;
   blocked?: boolean;
-  onDone: () => void | Promise<void>;
+  onDone: (account?: string) => void | Promise<void>;
   onProblem: (p: string | null) => void;
   onToken: () => void;
   onCancel?: () => void;
@@ -936,7 +1010,7 @@ function GoogleSignIn({
   at: At;
   name?: string;
   blocked?: boolean;
-  onDone: () => void | Promise<void>;
+  onDone: (account?: string) => void | Promise<void>;
   onCancel?: () => void;
 }) {
   const [ready, setReady] = useState(c.signInReady);

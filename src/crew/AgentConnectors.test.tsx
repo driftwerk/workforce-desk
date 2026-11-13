@@ -339,3 +339,90 @@ it("has its saving line there before the first save, so the first is read out", 
   await show(api([EMAIL]));
   expect(screen.getByRole("status").textContent).toBe("");
 });
+
+it("takes two quick clicks on the same control as two: on then off, writes then not", async () => {
+  const off = svc({
+    id: "jira",
+    name: "Jira",
+    connections: [pick({ id: "all~~acme", name: "Acme" }), pick({ id: "all~~globex", name: "Globex", picked: true, default: true })],
+  });
+  const hub = slowHub([off]);
+  const a = api([off], { setPicks: hub.setPicks });
+  await show(a);
+  const acme = () => within(box("Jira")).getByRole("checkbox", { name: /Acme/ }) as HTMLInputElement;
+  await act(async () => {
+    fireEvent.click(acme());
+  });
+  // Shown as made while it saves, so the next click turns it off.
+  expect(acme().checked).toBe(true);
+  await act(async () => {
+    fireEvent.click(acme());
+  });
+  expect(acme().checked).toBe(false);
+  const globex = () => within(box("Jira")).getByRole("button", { name: /Globex: / });
+  await act(async () => {
+    fireEvent.click(globex());
+  });
+  await act(async () => {
+    fireEvent.click(globex());
+  });
+  expect(globex().textContent).toBe("read and write");
+  for (let i = 0; i < 4; i++) await act(async () => hub.answer());
+  const sent = hub.setPicks.mock.calls.map((c) => c[1].connections);
+  expect(sent).toEqual([
+    [
+      { id: "all~~globex", write: true },
+      { id: "all~~acme", write: true },
+    ],
+    [{ id: "all~~globex", write: true }],
+    [{ id: "all~~globex", write: false }],
+    [{ id: "all~~globex", write: true }],
+  ]);
+  expect(acme().checked).toBe(false);
+  expect(globex().textContent).toBe("read and write");
+  expect(screen.getByRole("status").textContent).toBe("Saved.");
+});
+
+it("says Saved only once every save is in and none failed since", async () => {
+  const off = svc({
+    id: "jira",
+    name: "Jira",
+    connections: [pick({ id: "all~~acme", name: "Acme" }), pick({ id: "all~~globex", name: "Globex" })],
+  });
+  const hub = slowHub([off]);
+  let failAcme = true;
+  const answers: (() => void)[] = [];
+  const a = api([off], {
+    setPicks: vi.fn(
+      (agent: string, change: PicksChange) =>
+        new Promise<ServicePicks[]>((done, fail) => {
+          answers.push(() => {
+            if (failAcme && change.connections.some((c) => c.id === "all~~acme")) return fail(new Error("Desk couldn’t save Acme."));
+            const p = hub.setPicks(agent, change);
+            hub.answer();
+            void p.then(done);
+          });
+        }),
+    ),
+  });
+  await show(a);
+  await act(async () => {
+    fireEvent.click(within(box("Jira")).getByRole("checkbox", { name: /Acme/ }));
+  });
+  await act(async () => {
+    fireEvent.click(within(box("Jira")).getByRole("checkbox", { name: /Globex/ }));
+  });
+  await act(async () => answers.shift()!());
+  // Acme failed; Globex still saving.
+  expect(screen.getByRole("status").textContent).toBe("Saving…");
+  await act(async () => answers.shift()!());
+  // Globex is in, but Acme isn't: not "Saved."
+  expect(screen.getByRole("status").textContent).toMatch(/couldn’t save Acme/);
+  failAcme = false;
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+  });
+  await act(async () => answers.shift()!());
+  expect(screen.getByRole("status").textContent).toBe("Saved.");
+  expect(within(box("Jira")).getByText("2 of 2 on")).toBeTruthy();
+});

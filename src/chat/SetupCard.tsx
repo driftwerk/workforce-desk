@@ -167,9 +167,10 @@ export function SetupCard({
   /** Tells the agent, trying again while its chat reconnects. */
   const tell = async (): Promise<boolean> => {
     for (let n = 0; n < SEND_TRIES; n++) {
+      // Gone from the screen while it waited: nothing is sent unseen.
+      if (n > 0 && !live.current) return false;
       if (useChat.getState().send(`${origin.hub}/${origin.agent}`, SIGNED_IN)) return true;
       await new Promise((r) => setTimeout(r, SEND_EVERY_MS));
-      if (!live.current) return false;
     }
     return false;
   };
@@ -180,6 +181,18 @@ export function SetupCard({
     try {
       onChange(await api.signedIn(s.id));
     } catch (e) {
+      // The hub may have taken it though its answer was lost: it says.
+      const now = await api
+        .setups(origin.agent)
+        .then((all) => all.find((x) => x.id === s.id))
+        .catch(() => undefined);
+      if (!live.current) return;
+      if (now?.steps.some((x) => x.id === "sign_in" && x.state === "done")) {
+        onChange(now);
+        setUntold(!(await tell()));
+        setBusy(false);
+        return;
+      }
       setProblem(
         e instanceof HubError && (e.status === 404 || e.status === 409)
           ? "That setup has ended. Ask again to start over."

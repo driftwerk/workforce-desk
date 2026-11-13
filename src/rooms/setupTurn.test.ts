@@ -34,3 +34,12 @@ it("finds a setup's turn from the message it answers, past a delivery that came 
 it("gives a message that set nothing up no turn, so it isn't rendered again as others come", () => {
   expect(turnOf([asked, update, next], update, 1)).toEqual({});
 });
+
+it("starts a second answer's setups after the first's, in a turn that set up two", () => {
+  const first = { ...answer, id: "a0", at: "2026-11-11T11:20:00Z" };
+  const second = { ...answer, id: "a1", at: "2026-11-11T11:40:00Z" };
+  const shown = [asked, first, update, second, next];
+  // The delivery between them came mid-turn: no bound.
+  expect(turnOf(shown, first, 1)).toEqual({ turnSince: "2026-11-11T11:04:00Z", turnUntil: "2026-11-11T11:40:00Z" });
+  expect(turnOf(shown, second, 3)).toEqual({ turnSince: "2026-11-11T11:20:00Z", turnUntil: "2026-11-11T11:31:00Z" });
+});

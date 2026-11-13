@@ -63,6 +63,31 @@ export const applied = (s: ServicePicks, change: Change): { picked: Pick[]; def:
   }
 };
 
+/** `s` as it will be once `changes` are saved: what it shows meanwhile,
+ *  so a second click works from the first. */
+export const pending = (s: ServicePicks, changes: readonly Change[]): ServicePicks =>
+  changes.reduce((s, c) => {
+    if (!s.several) {
+      return {
+        ...s,
+        connections: s.connections.map((p) =>
+          p.id !== c.id ? p : c.kind === "use" ? { ...p, picked: c.on } : c.kind === "write" ? { ...p, write: c.write } : p,
+        ),
+      };
+    }
+    const { picked, def } = applied(s, c);
+    const first = def ?? picked[0]?.id ?? null;
+    return {
+      ...s,
+      connections: s.connections.map((p) => {
+        const q = picked.find((x) => x.id === p.id);
+        return { ...p, picked: !!q, write: q?.write ?? p.write, default: !!q && first === p.id };
+      }),
+    };
+  }, s);
+
+const same = (a: Change, b: Change): boolean => JSON.stringify(a) === JSON.stringify(b);
+
 type Saving = { state: "idle" } | { state: "saving" } | { state: "saved" } | { state: "failed"; problem: string; retry: () => void };
 
 /** Asks `agent` to set `service` up for itself, in its chat. */
@@ -99,12 +124,31 @@ export function AgentConnectors({
    *  a queued save works from these, never from what was on screen when
    *  it was clicked. */
   const latest = useRef<ServicePicks[] | null>(null);
+  /** Changes clicked and not yet saved, in order: shown as made. */
+  const [queued, setQueued] = useState<{ n: number; service: string; change: Change }[]>([]);
+  const queue = useRef<{ n: number; service: string; change: Change }[]>([]);
+  const counter = useRef(0);
+  const inFlight = useRef(0);
+  /** The first save that failed and isn't saved since. */
+  const failure = useRef<{ service: string; change: Change; problem: string } | null>(null);
+  /** The agent whose connections these are: a save for another one, still
+   *  running after a switch, shows nothing here. */
+  const shownFor = useRef(agent.id);
+  if (shownFor.current !== agent.id) {
+    shownFor.current = agent.id;
+    latest.current = null;
+    writes.current = Promise.resolve();
+    queue.current = [];
+    inFlight.current = 0;
+    failure.current = null;
+  }
 
   const load = useCallback(async () => {
     if (!api) return;
     setProblem(null);
     try {
       const got = await api.picks(agent.id);
+      if (shownFor.current !== agent.id) return;
       latest.current = got;
       setServices(got);
     } catch (e) {
@@ -132,55 +176,99 @@ export function AgentConnectors({
 
   const writeMode: Writes = config === undefined ? "sends_ask" : writesOf(config);
 
-  const said = (next: ServicePicks[]) => {
+  const said = (next: ServicePicks[], forAgent: string) => {
+    if (shownFor.current !== forAgent) return;
     latest.current = next;
     setServices(next);
   };
 
-  /** Writes one change at a time, in order. */
-  const save = (work: () => Promise<void>) => {
-    setSaving({ state: "saving" });
-    const write = writes.current.then(work);
-    writes.current = write.catch(() => {});
-    write.then(
-      () => setSaving({ state: "saved" }),
-      (e: unknown) => setSaving({ state: "failed", problem: plain(e), retry: () => save(work) }),
+  /** What the status says once a save ends: saving while any is left,
+   *  else the first failure not saved since, else saved. */
+  const settle = () => {
+    const f = failure.current;
+    setSaving(
+      inFlight.current > 0
+        ? { state: "saving" }
+        : f
+          ? { state: "failed", problem: f.problem, retry: () => make(f.service, f.change) }
+          : { state: "saved" },
     );
   };
 
-  /** Makes `change` to service `id`, from the services as they are when
-   *  its turn comes. */
-  const make = (id: string, change: Change) =>
-    save(async () => {
-      if (!api) return;
-      const s = (latest.current ?? []).find((x) => x.id === id);
-      if (!s) return;
-      if (!s.several) {
-        // Slack's one connection: on or off for the agent, and whether it
-        // takes changes, in its own settings.
-        if (!desk) return;
-        const today = todayOf(await api.list(), agent.id);
-        const p = s.connections.find((x) => x.id === change.id);
-        const toml = await setAgentConnectors(desk, agent.id, (b) =>
-          change.kind === "use"
-            ? choose(b, s.id, change.on ? (p?.level === "agent" ? "own" : "mine") : "off", today)
-            : change.kind === "write"
-              ? allowWrites(b, s.id, change.write, today)
-              : b,
-        );
-        put(key, toml);
-        said(await api.picks(agent.id));
-        return;
+  /** Makes `change` to service `id`, one save at a time, in order, each
+   *  from the services as they are when its turn comes. */
+  const make = (id: string, change: Change) => {
+    const n = ++counter.current;
+    const forAgent = agent.id;
+    queue.current = [...queue.current, { n, service: id, change }];
+    setQueued(queue.current);
+    inFlight.current += 1;
+    setSaving({ state: "saving" });
+    const work = async () => {
+      try {
+        await write(id, change, forAgent);
+      } finally {
+        if (shownFor.current === forAgent) {
+          queue.current = queue.current.filter((q) => q.n !== n);
+          setQueued(queue.current);
+        }
       }
-      const { picked, def } = applied(s, change);
-      said(
-        await api.setPicks(agent.id, {
-          service: s.id,
-          connections: picked.map((p) => ({ id: p.id, write: p.write })),
-          default: picked.length === 0 ? null : (def ?? picked[0]!.id),
-        }),
+    };
+    const run = writes.current.then(work);
+    writes.current = run.catch(() => {});
+    run.then(
+      () => {
+        if (shownFor.current !== forAgent) return;
+        // Saved since: the same change, tried again or clicked again.
+        if (failure.current && failure.current.service === id && same(failure.current.change, change)) failure.current = null;
+        inFlight.current -= 1;
+        settle();
+      },
+      (e: unknown) => {
+        if (shownFor.current !== forAgent) return;
+        failure.current ??= { service: id, change, problem: plain(e) };
+        inFlight.current -= 1;
+        settle();
+      },
+    );
+  };
+
+  const write = async (id: string, change: Change, forAgent: string) => {
+    if (!api) return;
+    const s = (latest.current ?? []).find((x) => x.id === id);
+    if (!s) return;
+    if (!s.several) {
+      // Slack's one connection: on or off for the agent, and whether it
+      // takes changes, in its own settings.
+      if (!desk) return;
+      const today = todayOf(await api.list(), forAgent);
+      const p = s.connections.find((x) => x.id === change.id);
+      const toml = await setAgentConnectors(desk, forAgent, (b) =>
+        change.kind === "use"
+          ? choose(b, s.id, change.on ? (p?.level === "agent" ? "own" : "mine") : "off", today)
+          : change.kind === "write"
+            ? allowWrites(b, s.id, change.write, today)
+            : b,
       );
-    });
+      if (shownFor.current === forAgent) put(key, toml);
+      said(await api.picks(forAgent), forAgent);
+      return;
+    }
+    const { picked, def } = applied(s, change);
+    said(
+      await api.setPicks(forAgent, {
+        service: s.id,
+        connections: picked.map((p) => ({ id: p.id, write: p.write })),
+        default: picked.length === 0 ? null : (def ?? picked[0]!.id),
+      }),
+      forAgent,
+    );
+  };
+
+  const shown = services?.map((s) => {
+    const mine = queued.filter((q) => q.service === s.id).map((q) => q.change);
+    return mine.length ? pending(s, mine) : s;
+  });
 
   return (
     <div className="agent-page">
@@ -203,9 +291,9 @@ export function AgentConnectors({
             </p>
           )}
 
-          {services && (
+          {shown && (
             <div className="conn-picks" role="list" aria-label={`${agent.name}’s connectors`}>
-              {services.map((s) => (
+              {shown.map((s) => (
                 <ServiceChoice
                   key={s.id}
                   agent={agent}

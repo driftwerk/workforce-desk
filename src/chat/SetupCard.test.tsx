@@ -244,3 +244,24 @@ it("doesn't lose \"I'm signed in\" while the chat reconnects: tries again, then 
   expect(sent).toEqual(["I’m signed in."]);
   expect(screen.queryByRole("alert")).toBeNull();
 });
+
+it("tells the agent when the hub took the sign-in though its answer was lost", async () => {
+  const sent: string[] = [];
+  useChat.setState({ send: (_key: string, content: string) => (sent.push(content), true) } as never);
+  let taken = false;
+  const signedInNow = setup({ steps: setup().steps.map((x) => (x.id === "sign_in" ? { ...x, state: "done" as const } : x)) });
+  const a = api([], {
+    setups: vi.fn(async () => [taken ? signedInNow : setup()]),
+    signedIn: vi.fn(async () => {
+      taken = true;
+      throw new TypeError("Failed to fetch");
+    }),
+  });
+  await show(a);
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Already signed in" }));
+  });
+  expect(sent).toEqual(["I’m signed in."]);
+  expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Already signed in" })).toBeNull();
+});
