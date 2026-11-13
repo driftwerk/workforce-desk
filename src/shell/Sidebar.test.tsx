@@ -580,6 +580,13 @@ describe("grid rows", () => {
     expect(gridRow("Main").getAttribute("aria-current")).toBe("true");
   });
 
+  it("unfolds Grids to show a grid made from its + while folded", () => {
+    sidebar();
+    fireEvent.click(within(screen.getByRole("region", { name: "Grids" })).getByRole("button", { name: /^Grids/ }));
+    fireEvent.click(screen.getByRole("button", { name: "New grid" }));
+    expect(gridRow("Grid 2").getAttribute("aria-current")).toBe("true");
+  });
+
   it("stays folded when Desk starts on a grid, as it was left", () => {
     localStorage.setItem(SECTIONS_KEY, JSON.stringify({ grids: true }));
     reloadSections();

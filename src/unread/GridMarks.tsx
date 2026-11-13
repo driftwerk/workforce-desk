@@ -74,7 +74,7 @@ export const useGridSummaries = (): Record<string, GridSummary> => {
     const items = ((fromSessions[i * 3] as string) || "").split("\n").filter(Boolean) as ItemKey[];
     const waiting = new Set(((fromSessions[i * 3 + 1] as string) || "").split("\n").filter(Boolean));
     for (const key of items) if (needs.has(key)) waiting.add(key);
-    const rooms = shown(g).flatMap((p) => (p.content?.kind === "room" ? [p.content.room] : []));
+    const rooms = [...new Set(shown(g).flatMap((p) => (p.content?.kind === "room" ? [p.content.room] : [])))];
     // A room's needs and failed answers wait on you, as its row counts them.
     const roomNeeds = rooms.reduce((n, r) => n + roomWaits(r), 0);
     const unread =

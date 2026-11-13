@@ -42,7 +42,14 @@ export function GridsMain() {
     return (
       <main className={`grids grids-none ${over ? "drop-in" : ""}`} aria-label="Grids" data-drop-new-grid="">
         <p className="muted">{dragging ? "Drop it here for a new grid." : none ? "No grids yet" : "Every grid is in a window of its own."}</p>
-        <button type="button" className="btn btn-signal" onClick={() => createGrid()}>
+        <button
+          type="button"
+          className="btn btn-signal"
+          onClick={() => {
+            createGrid();
+            setSectionOpen("grids", true);
+          }}
+        >
           New grid
         </button>
       </main>

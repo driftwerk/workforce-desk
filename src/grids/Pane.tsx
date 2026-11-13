@@ -50,6 +50,7 @@ import { withAccount } from "../engines/accounts";
 import { ENGINE_TITLE } from "../engines/engines";
 
 import { STATE_LABEL } from "../session/words";
+import { setSectionOpen } from "../shell/SideSection";
 
 const ENGINE = ENGINE_TITLE;
 
@@ -711,6 +712,7 @@ function usePaneMenu(gridId: string, pane: PaneData, onClose: () => void): { ent
               const id = createGrid();
               movePane(gridId, pane.id, id);
               useGrids.setState({ active: was === gridId ? id : was });
+              setSectionOpen("grids", true);
             },
           },
         ]
