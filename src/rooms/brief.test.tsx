@@ -130,20 +130,20 @@ describe("a brief update", () => {
     expect(within(creds).getByRole("img", { name: "Done" }).textContent).toBe("✓");
   });
 
-  it("shows answers only for what the boss couldn't decide", () => {
+  it("lays out what only you can decide above it: with its answers, or to answer by typing", () => {
     const undecided: DeskExtras = {
       update: {
         ...BRIEF.update,
         needsYou: [
           { itemId: "n1", question: "Ship #571 in daytime tomorrow?", items: [], recommendation: null, options: [{ label: "Yes", recommended: false }, { label: "Not yet", recommended: false }], notBlocking: null, age: "5 min" },
-          // The brief says it as for you: not twice.
-          { itemId: "i1", question: "Rotate the tokens?", items: [], recommendation: null, options: [], notBlocking: null, age: "5 min" },
+          { itemId: "n2", question: "Which tokens first?", items: [], recommendation: null, options: [], notBlocking: null, age: "5 min" },
         ],
       },
     };
     const { container } = show(said("Update.", undecided, "update"));
-    expect(container.querySelectorAll(".needs")).toHaveLength(1);
+    expect(container.querySelectorAll(".needs")).toHaveLength(2);
     expect(screen.getByRole("button", { name: "Not yet" })).toBeTruthy();
+    expect(container.textContent).toContain("Which tokens first");
   });
 
   it("still says what waits on you that the brief leaves out", () => {

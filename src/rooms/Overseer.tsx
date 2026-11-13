@@ -365,7 +365,7 @@ function CatchUp({ away, update }: { away: MentionedAway; update: MentionedUpdat
       <Head update={brief ? { kept: update.kept } : update} headline={away.headline} handled={away.handled} />
       {brief ? (
         <>
-          <Undecided update={update} />
+          <WaitingAll update={update} />
           <Brief groups={brief} />
           <More n={update.moreItems} />
         </>
@@ -441,34 +441,6 @@ function Parked({ id, text }: { id: string; text: string }) {
   );
 }
 
-/** What only you can decide, beside a brief update: laid out with its
- *  answers, which the hub sends only when the boss couldn't decide. What
- *  still waits and the brief doesn't say as "for you" shows as it would
- *  without a brief, so nothing waiting goes unsaid. */
-function Undecided({ update }: { update: MentionedUpdate }) {
-  const told = new Set((update.brief ?? []).flatMap((g) => g.items.filter((i) => i.kind === "forYou").map((i) => i.id)));
-  const needs = update.needsYou ?? [];
-  const laid = new Map(needs.map((n) => [n.itemId, n]));
-  const waiting = update.waiting ?? [];
-  const known = new Set(waiting.map((w) => w.itemId));
-  const shown = (id: string, n?: NeedsYou) => (n?.options.length ?? 0) > 0 || !told.has(id);
-  return (
-    <>
-      {waiting
-        .filter((w) => shown(w.itemId, laid.get(w.itemId)))
-        .map((w) => {
-          const n = laid.get(w.itemId);
-          return n ? <Laid key={w.itemId} n={n} holdingUp={w.holdingUp} /> : <Waiting key={w.itemId} w={w} />;
-        })}
-      {needs
-        .filter((n) => !known.has(n.itemId) && shown(n.itemId, n))
-        .map((n) => (
-          <Laid key={n.itemId} n={n} />
-        ))}
-    </>
-  );
-}
-
 /** "N more: ask “what else?”", when the brief left some out. */
 function More({ n }: { n?: number }) {
   if (!n) return null;
@@ -480,7 +452,7 @@ function Update({ update }: { update: MentionedUpdate }) {
     return (
       <div className="msg-text overseer is-brief">
         {update.headline && <p className="upd-line">{update.headline}</p>}
-        <Undecided update={update} />
+        <WaitingAll update={update} />
         <Brief groups={update.brief} />
         <More n={update.moreItems} />
         {update.footer && <p className="faint small">{update.footer}</p>}
@@ -839,7 +811,6 @@ function Always({ id, when, then }: { id: string; when: string; then: string }) 
 }
 
 // ── 3. What I did ─────────────────────────────────────────────────────────
-
 
 /** The boss's decisions, one line each; the times it did nothing folded
  *  into one line that opens on a click. `labelled`: under "What I did",
