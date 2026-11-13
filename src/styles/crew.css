@@ -1158,7 +1158,6 @@ button.card-icon:hover:not(:disabled) {
 /* ── Settings → Providers ───────────────────────────────────────────────── */
 
 .providers-pane {
-  max-width: 780px;
   gap: 26px;
   align-items: stretch;
 }
