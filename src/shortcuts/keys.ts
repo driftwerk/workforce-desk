@@ -552,7 +552,8 @@ export const resolve = (
     const seen = new Map<string, ShortcutId>();
     let drop: ShortcutId | null = null;
     for (const id of SHORTCUT_IDS) {
-      const places = Object.entries(keysByPlace(id, keys[id], platform)).flatMap(([place, k]) => (k === null ? [] : [`${place} ${k}`]));
+      // Go to as all nine of its keys.
+      const places = variants(id, keys[id]).flatMap((v) => Object.entries(keysByPlace(id, v, platform)).flatMap(([place, k]) => (k === null ? [] : [`${place} ${k}`])));
       const first = places.map((p) => seen.get(p)).find((o) => o !== undefined);
       if (first === undefined) {
         for (const p of places) seen.set(p, id);
