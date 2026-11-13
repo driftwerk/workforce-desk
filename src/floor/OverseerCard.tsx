@@ -104,8 +104,8 @@ export function OverseerCard({ inSetup = false }: { inSetup?: boolean } = {}) {
   const budget = blank ? null : parseBudget(pick.budget);
   const budgetUsd = budget && "value" in budget ? budget.value : null;
   const budgetProblem = budget && "problem" in budget ? budget.problem : null;
-  // Act fully needs nothing else: it saves while the suggestion is found.
-  const ready = !wantsFull || !budgetProblem;
+  // Act fully waits for its suggested budget, so a quick click never saves none.
+  const ready = !wantsFull || (pick !== null && !budgetProblem);
 
   const dismiss = () => {
     try {

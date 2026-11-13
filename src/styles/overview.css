@@ -920,52 +920,6 @@ button.fsec-tile-head {
 .oversee-levels-4 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-/* A row holding a list (Act fully's repos, its workflows) and Add. */
-.oversee-list {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
-}
-.oversee-items {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.oversee-items[aria-disabled] {
-  opacity: 0.5;
-}
-.oversee-add:has(input:disabled) {
-  opacity: 0.5;
-}
-.oversee-items li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 4px 4px 4px 10px;
-  border-radius: 8px;
-  background: var(--sunken);
-  min-width: 0;
-}
-.oversee-items .mono {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-.oversee-add .field-row input {
-  min-width: 0;
-  padding: 7px 10px;
-  border-radius: 8px;
-  font-size: 14px;
-  color: var(--text);
-}
-.oversee-add .oversee-problem {
-  text-align: left;
-}
 /* What always stays with the person, Act fully or not. */
 .oversee-never {
   border: 1px solid var(--border);

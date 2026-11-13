@@ -670,8 +670,8 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
               {unbound && inForce !== false && (
                 <p className="small state-blocked" role="status">
                   {inForce && <b>Act fully is in force. </b>}
-                  No limits: it acts on everything itself, including publishing, deploys and secrets. Only your budget, Stop and the
-                  activity log remain.
+                  No limits: it acts on everything itself, including publishing, deploys and secrets. Only your budget, Stop, its own
+                  settings and the activity log remain.
                   {o.full.budgetUsdPerDay === null && " No budget set: only the check-in ceilings and Stop bound what it spends."}{" "}
                   It decides every request its sessions ask the moment they ask; its messages to a session it runs wait while you type, for{" "}
                   {o.wake.holdMinutes} minutes after your last keystroke.

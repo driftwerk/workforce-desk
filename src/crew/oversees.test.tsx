@@ -234,7 +234,7 @@ describe("Oversees the crew", () => {
 
   it("says there are no limits at Act fully, whatever its switches and Anywhere say", async () => {
     useOverview.setState({ manager: { agentId: "ledger", level: "full" } });
-    const line = /^No limits: it acts on everything itself, including publishing, deploys and secrets\. Only your budget, Stop and the activity log remain\./;
+    const line = /^No limits: it acts on everything itself, including publishing, deploys and secrets\. Only your budget, Stop, its own settings and the activity log remain\./;
     for (const toml of [
       `[oversight.act]\nset_mode = true\nhand_off = true\n[oversight.full]\nanywhere = true\n`,
       `[oversight.act]\nset_mode = false\n[oversight.full]\nanywhere = false\nrepos = ["acme/acme-web"]\n`,
@@ -270,7 +270,7 @@ describe("Oversees the crew", () => {
     expect(screen.getByText(/wait while you type, for 2 minutes/)).toBeTruthy();
   });
 
-  it("says Unbound now only when the hub says it is, and otherwise that it is set but not in force", async () => {
+  it("says Act fully is in force only when the hub says it is, and otherwise that it is set but not in force", async () => {
     useOverview.setState({ manager: { agentId: "ledger", level: "full" } });
     boss(true);
     show(fakeHub(), `${START}\n${UNBOUND}`);
