@@ -44,7 +44,14 @@ export function GridsMain() {
     return (
       <main className={`grids grids-none ${over ? "drop-in" : ""}`} aria-label="Grids" data-drop-new-grid="">
         <p className="muted">{dragging ? "Drop it here for a new grid." : none ? "No grids yet" : "Every grid is in a window of its own."}</p>
-        <button type="button" className="btn btn-signal" onClick={() => createGrid()}>
+        <button
+          type="button"
+          className="btn btn-signal"
+          onClick={() => {
+            createGrid();
+            setSectionOpen("grids", true);
+          }}
+        >
           New grid
         </button>
       </main>
@@ -170,7 +177,6 @@ const GridRow = memo(function GridRow({ id, needs, working, unread, lineBefore, 
  *  for the rest. A pane dragged onto a row goes to that grid. */
 export function GridsSection() {
   const ids = useGrids(useShallow((s) => s.order.filter((id) => s.grids[id])));
-  const active = useGrids((s) => s.active);
   const ready = useGrids((s) => s.ready);
   const summaries = useGridSummaries();
   const [menu, setMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
@@ -180,23 +186,10 @@ export function GridsSection() {
   const justDragged = useRef(false);
   const rows = useRef(new Map<string, HTMLElement>());
   const hint = useId();
-  // A grid shown from elsewhere (a pane revealed, a new terminal) opens
-  // Grids, so its row shows; once each time, so it can be closed again.
-  const shownBefore = useRef<string | null>(null);
-  const shown = useDesk((s) => s.view === "grids");
-  useEffect(() => {
-    if (!shown) {
-      shownBefore.current = null;
-      return;
-    }
-    if (active === shownBefore.current) return;
-    shownBefore.current = active;
-    if (active) setSectionOpen("grids", true);
-  }, [active, shown]);
   const grid = (id: string) => useGrids.getState().grids[id];
   const choose = useCallback((g: Grid) => {
     if (justDragged.current) return;
-    if (showGrid(g.id)) shownBefore.current = g.id;
+    showGrid(g.id);
   }, []);
   // Its own window closes first, so it can't write the grid back. The
   // terminals only its sessions' panes keep open close with it.
@@ -235,6 +228,7 @@ export function GridsSection() {
           onSelect: () => {
             bringBack(g.id);
             useDesk.getState().setView("grids");
+            setSectionOpen("grids", true);
           },
         },
     { kind: "separator" },

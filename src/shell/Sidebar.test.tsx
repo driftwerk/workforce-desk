@@ -567,15 +567,51 @@ describe("grid rows", () => {
     useFloor.setState({ hubs: {} });
   });
 
-  it("opens a folded Grids when a grid is shown from elsewhere", () => {
+  it("opens a folded Grids when a grid is shown from elsewhere", async () => {
+    const { revealIn } = await import("../grids/windows");
+    useDesk.setState({ sessions: { a: s("a", "working") } });
+    show(MAIN_GRID, ["a"]);
+    useDesk.setState({ view: "floor" });
     sidebar();
     fireEvent.click(within(screen.getByRole("region", { name: "Grids" })).getByRole("button", { name: /^Grids/ }));
-    let other = "";
+    expect(screen.queryByRole("list", { name: "Grids" })).toBeNull();
+    act(() => void revealIn(MAIN_GRID, { kind: "session", sessionId: "a" }));
+    expect(useDesk.getState().view).toBe("grids");
+    expect(gridRow("Main").getAttribute("aria-current")).toBe("true");
+  });
+
+  it("unfolds Grids to show a grid made from its + while folded", () => {
+    sidebar();
+    fireEvent.click(within(screen.getByRole("region", { name: "Grids" })).getByRole("button", { name: /^Grids/ }));
+    fireEvent.click(screen.getByRole("button", { name: "New grid" }));
+    expect(gridRow("Grid 2").getAttribute("aria-current")).toBe("true");
+  });
+
+  it("stays folded when Desk starts on a grid, as it was left", () => {
+    localStorage.setItem(SECTIONS_KEY, JSON.stringify({ grids: true }));
+    reloadSections();
+    useDesk.setState({ view: "grids" });
+    sidebar();
+    act(() => useGrids.setState({ active: MAIN_GRID }));
+    expect(screen.queryByRole("list", { name: "Grids" })).toBeNull();
+  });
+
+  it("counts a session once however many panes show it, a machine's in its terminal too", () => {
+    const remote = (state: Session["state"]) =>
+      ({ ...s("t1", state), machine: "mac2", terminalId: "term1" }) as Session;
     act(() => {
-      other = createGrid();
-      useDesk.getState().setView("grids");
+      const g = useGrids.getState().grids[MAIN_GRID]!;
+      const panes = [
+        { id: "p1", content: { kind: "session" as const, sessionId: "mac2/t1" }, rect: { x: 0, y: 0, w: 1, h: 1 } },
+        { id: "p2", content: { kind: "terminal" as const, terminalId: "term1", machine: "mac2" }, rect: { x: 1, y: 0, w: 1, h: 1 } },
+      ];
+      useGrids.setState((st) => ({ grids: { ...st.grids, [MAIN_GRID]: { ...g, panes } } }));
     });
-    expect(gridRow(useGrids.getState().grids[other]!.name).getAttribute("aria-current")).toBe("true");
+    useDesk.setState({ sessions: { "mac2/t1": remote("working") } });
+    sidebar();
+    expect(gridRow("Main").querySelector(".gi-meta")!.textContent).toBe("1 working");
+    act(() => useDesk.setState({ sessions: { "mac2/t1": remote("blocked") } }));
+    expect(gridRow("Main").querySelector(".gi-meta")!.textContent).toBe("1 needs you");
   });
 });
 
