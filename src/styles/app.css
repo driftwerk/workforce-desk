@@ -607,15 +607,35 @@ body.side-resizing * {
   flex: none;
   border: 2px solid var(--idle);
 }
+/* A working dot breathes, and a ring swells out of it and fades. Only
+   opacity and transform move, which the compositor draws without painting
+   the page again each frame (an animated box-shadow repainted every frame,
+   for every dot shown: Desk's idle CPU and GPU). */
 .dot-working,
 .dot-starting,
 .dot-background {
+  position: relative;
   border-color: var(--working);
   background: var(--working);
-  animation: desk-breathe 1.8s ease-in-out infinite;
+  animation: desk-pulse 1.8s ease-in-out infinite;
+}
+.dot-working::after,
+.dot-starting::after,
+.dot-background::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--working) 55%, transparent);
+  pointer-events: none;
+  opacity: 0;
+  animation: desk-ripple 1.8s ease-in-out infinite;
 }
 .dot-background {
   background: color-mix(in srgb, var(--working) 40%, transparent);
+  animation-duration: 3.6s;
+}
+.dot-background::after {
   animation-duration: 3.6s;
 }
 .dot-blocked,
@@ -707,13 +727,28 @@ body.side-resizing * {
   border-radius: 11px;
   font-size: 14px;
 }
+/* The glow is drawn once, on a layer of its own, and only its opacity
+   moves (see the working dot). */
 .ring-working,
 .ring-background {
+  position: relative;
   border-color: var(--working);
+}
+.ring-working::before,
+.ring-background::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--working) 45%, transparent);
+  pointer-events: none;
+  opacity: 0;
   animation: desk-glow 1.8s ease-in-out infinite;
 }
 .ring-background {
   border-color: color-mix(in srgb, var(--working) 55%, transparent);
+}
+.ring-background::before {
   animation-duration: 3.6s;
 }
 .ring-blocked {
@@ -922,28 +957,48 @@ body.side-resizing * {
   position: relative;
   border-color: transparent;
 }
-.tile-working::before,
-.tile-starting::before,
-.ov-tile-working::before,
-.tile-background::before,
-.ov-tile-background::before {
-  content: "";
+/* The band of light is a conic gradient on an element turning inside the
+   ring's mask: the compositor turns it, so nothing is painted again each
+   frame (an animated gradient angle repainted the ring every frame). */
+.tile-flow {
+  display: none;
+}
+.tile-working > .tile-flow,
+.tile-starting > .tile-flow,
+.ov-tile-working > .tile-flow,
+.tile-background > .tile-flow,
+.ov-tile-background > .tile-flow {
+  display: block;
   position: absolute;
   inset: -1px;
   padding: 1px;
   border-radius: inherit;
+  overflow: hidden;
+  container-type: size;
   pointer-events: none;
-  background: conic-gradient(from var(--flow-angle), var(--border) 0 70%, var(--working) 85%, var(--border) 100%);
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
+}
+.tile-flow::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 150cqmax;
+  height: 150cqmax;
+  margin: -75cqmax 0 0 -75cqmax;
+  background: conic-gradient(var(--border) 0 70%, var(--working) 85%, var(--border) 100%);
   animation: desk-flow 3s linear infinite;
 }
-.tile-background::before,
-.ov-tile-background::before {
+.tile-background > .tile-flow,
+.ov-tile-background > .tile-flow {
   opacity: 0.5;
+}
+.tile-background > .tile-flow::before,
+.ov-tile-background > .tile-flow::before {
   animation-duration: 6s;
 }
 .tile-open {
@@ -2035,23 +2090,44 @@ button.thread-bar:hover {
     box-shadow: 0 0 0 4px color-mix(in srgb, var(--working) 0%, transparent);
   }
 }
-@property --flow-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
+@keyframes desk-pulse {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+/* desk-breathe's ring, drawn on the dot's ::after: it swells from inside
+   the dot to 4px round it, at its strongest half way. */
+@keyframes desk-ripple {
+  0%,
+  100% {
+    transform: scale(0.55);
+    opacity: 0;
+  }
+  25%,
+  75% {
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 0;
+  }
 }
 @keyframes desk-flow {
   to {
-    --flow-angle: 360deg;
+    transform: rotate(360deg);
   }
 }
 @keyframes desk-glow {
   0%,
   100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--working) 0%, transparent);
+    opacity: 0;
   }
   50% {
-    box-shadow: 0 0 12px 1px color-mix(in srgb, var(--working) 45%, transparent);
+    opacity: 1;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -2062,13 +2138,12 @@ button.thread-bar:hover {
   .dot-working,
   .dot-starting,
   .dot-background,
-  .ring-working,
-  .ring-background,
-  .tile-working::before,
-  .tile-starting::before,
-  .ov-tile-working::before,
-  .tile-background::before,
-  .ov-tile-background::before {
+  .dot-working::after,
+  .dot-starting::after,
+  .dot-background::after,
+  .ring-working::before,
+  .ring-background::before,
+  .tile-flow::before {
     animation: none;
   }
 }
