@@ -194,7 +194,8 @@ describe("the Go to keys", () => {
   it("drop a saved choice on one of the nine when Desk reads them", () => {
     expect(resolve({ board: "Primary+3" }, "macos").keys.board).toBe("Primary+B");
     const both = resolve({ board: "Primary+Shift+5", goTo: "Primary+Shift+1" }, "linux");
-    expect([both.keys.board, both.keys.goTo]).not.toEqual(["Primary+Shift+5", "Primary+Shift+1"]);
+    // The later choice (Go to) gives way.
+    expect([both.keys.board, both.keys.goTo]).toEqual(["Primary+Shift+5", "Primary+1"]);
   });
 
   it("reach Desk from a terminal pane, every digit", () => {
