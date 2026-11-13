@@ -47,7 +47,7 @@
   width: 100%;
   border: 1px solid var(--border);
   background: var(--bg);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
   outline: none;
   line-height: 1.45;
@@ -545,7 +545,7 @@ button.lineage-chip:hover {
   gap: 10px;
   width: 100%;
   padding: 9px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
   color: var(--text);
@@ -605,7 +605,7 @@ button.lineage-chip:hover {
   gap: 14px;
   width: 100%;
   padding: 13px 16px;
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
@@ -659,7 +659,7 @@ button.lineage-chip:hover {
   flex-wrap: wrap;
   gap: 4px;
   padding: 4px;
-  border-radius: 11px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--sunken);
   align-self: flex-start;
@@ -668,7 +668,7 @@ button.lineage-chip:hover {
   min-height: 32px;
   padding: 0 14px;
   border: 0;
-  border-radius: 8px;
+  border-radius: max(3px, calc(var(--radius-sm) - 3px));
   background: transparent;
   color: var(--muted);
   font-weight: 600;
@@ -961,7 +961,7 @@ button.card-icon:hover:not(:disabled) {
 .ability-select {
   height: 30px;
   padding: 0 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--sunken);
   color: var(--text);
@@ -1013,7 +1013,7 @@ button.card-icon:hover:not(:disabled) {
   gap: 4px;
   width: 100%;
   padding: 10px 12px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
   color: var(--text);

@@ -77,7 +77,7 @@
   gap: 6px;
   text-align: left;
   padding: 10px;
-  border-radius: 16px;
+  border-radius: var(--radius);
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -202,7 +202,7 @@ legend.set-label {
   align-items: center;
   gap: 6px;
   padding: 3px 10px 3px 3px;
-  border-radius: 13px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--raised);
 }
@@ -485,7 +485,7 @@ legend.set-label {
   gap: 12px;
   flex-wrap: wrap;
   padding: 10px 12px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--surface);
 }
 
@@ -638,7 +638,7 @@ legend.set-label {
 .theme-toml {
   margin: 0;
   padding: 14px 16px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--sunken);
   border: 1px solid var(--border);
   color: var(--term-text);
@@ -1316,7 +1316,7 @@ legend.set-label {
   gap: 12px;
   padding: 9px 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--text);
   text-align: left;
@@ -1651,7 +1651,7 @@ legend.set-label {
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
   outline: none;
   font: inherit;

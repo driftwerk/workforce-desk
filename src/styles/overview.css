@@ -827,7 +827,7 @@ button.fsec-tile-head {
   align-items: flex-start;
   gap: 6px;
   padding: 14px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
@@ -948,7 +948,7 @@ button.fsec-tile-head {
 /* What always stays with the person, Act fully or not. */
 .oversee-never {
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 12px 16px;
   color: var(--muted);
   font-size: 13px;
@@ -1244,7 +1244,7 @@ a.ref {
 .oversee-pref-edit .field input {
   height: 34px;
   padding: 0 10px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   font-size: 14px;
   color: var(--text);
 }
