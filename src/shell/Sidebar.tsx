@@ -16,7 +16,7 @@ import { NOTIFY_LEVELS, levelOf, setLevel } from "../unread/prefs";
 import { SidebarGroups } from "../groups/SidebarGroups";
 import { useDesk } from "../hub/store";
 import { useSettings } from "../settings/store";
-import { shortcutLabel } from "../shortcuts/keys";
+import { ariaKeys, shortcutLabel, withDigit } from "../shortcuts/keys";
 import { VoicePill } from "../voice";
 import { dragWindow } from "../ui/drag";
 import { Menu } from "../ui/Menu";
@@ -28,11 +28,11 @@ import { RoomMarks } from "../unread/RoomMarks";
 import { Marks, useRoomsBadge, useTotal } from "../unread/Marks";
 import { BoardsSection } from "../board/BoardsSection";
 import { setSectionOpen, SideSection } from "./SideSection";
-import { needsYou } from "../ui/Badge";
+import { Badge, needsYou } from "../ui/Badge";
+import { useNeeds } from "../floor/store";
 import { useSavedScroll } from "../restore/scroll";
 import { NEW_CREW_LINE, NEW_SESSION_LINE } from "./newLines";
-
-const VIEW_NAMES = { rooms: "Rooms", floor: "Floor", grids: "Grids" } as const;
+import { JumpKey } from "./JumpKey";
 
 /** The Unread page's row: everything new for you, each item once; with
  *  nothing to show it goes, but while the page is open. */
@@ -54,6 +54,37 @@ function UnreadRow() {
       <Marks badge={total} />
     </button>
   );
+}
+
+/** The Dashboard's row: it opens the Dashboard, and counts what waits on
+ *  you there. */
+function DashboardRow() {
+  const on = useDesk((s) => s.view === "floor" && !s.inbox);
+  const goTo = useSettings((s) => s.keys.goTo);
+  return (
+    <button
+      type="button"
+      className={`side-dash${on ? " on" : ""}`}
+      aria-current={on ? "page" : undefined}
+      title={`Dashboard (${shortcutLabel(withDigit(goTo, 1))})`}
+      aria-keyshortcuts={ariaKeys(withDigit(goTo, 1))}
+      onClick={() => {
+        useUi.getState().closeSettings();
+        useDesk.getState().setView("floor");
+      }}
+    >
+      <DashIcon />
+      <span className="gi-name">Dashboard</span>
+      <DashboardCount />
+    </button>
+  );
+}
+
+/** What waits on you, as the Floor counts it: on its own, as reading it
+ *  reads every hub's floor. */
+function DashboardCount() {
+  const n = useNeeds().length;
+  return n > 0 ? <Badge count={n} says={needsYou(n)} tone="needs" /> : null;
 }
 
 /** Whether a scroller has more above and below what shows. */
@@ -120,8 +151,8 @@ export function Sidebar({
   onNewCrew: () => void;
   onSettings: () => void;
 }) {
-  const { view, setView, connected, activeRoom, openRoom } = useDesk(
-    useShallow((s) => ({ view: s.view, setView: s.setView, connected: s.connected, activeRoom: s.activeRoom, openRoom: s.openRoom })),
+  const { view, connected, activeRoom, openRoom } = useDesk(
+    useShallow((s) => ({ view: s.view, connected: s.connected, activeRoom: s.activeRoom, openRoom: s.openRoom })),
   );
   const roomOrder = useRoomOrder((s) => s.order);
   const rooms = arranged(useDesk((s) => s.rooms), roomOrder);
@@ -181,18 +212,12 @@ export function Sidebar({
         <button type="button" className="ask" onClick={onAsk}>
           Ask anyone <kbd>{shortcutLabel(keys.ask)}</kbd>
         </button>
-        <div className="tabs" role="tablist" aria-label="View">
-          {(["rooms", "floor", "grids"] as const).map((v) => (
-            <button key={v} type="button" role="tab" aria-selected={view === v} onClick={() => setView(v)}>
-              {VIEW_NAMES[v]}
-            </button>
-          ))}
-        </div>
+        <DashboardRow />
         <UnreadRow />
       </div>
       <div className="side-mid">
         <div ref={middle} className="side-scroll">
-          {view === "grids" && <GridsSection />}
+          <GridsSection />
           <SideSection id="rooms" label="Rooms" newLabel="New room" onNew={onNewRoom} badge={roomsBadge}>
             <span id={roomHint} className="sr-only">
               Alt+Up and Alt+Down move it. Shift+F10 opens its menu.
@@ -232,6 +257,7 @@ export function Sidebar({
                       >
                         {mark}
                         <RoomMarks room={r} />
+                        {view === "rooms" && activeRoom === id && <JumpKey kind="room" id={id} />}
                       </SortRow>
                     )}
                   />
@@ -371,6 +397,14 @@ const MicIcon = () => (
   <svg {...icon}>
     <rect x="5" y="1.5" width="4" height="7" rx="2" />
     <path d="M2.5 7a4.5 4.5 0 0 0 9 0M7 11.5V13" />
+  </svg>
+);
+const DashIcon = () => (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true" className="side-dash-icon">
+    <rect x="2" y="2" width="5" height="6" rx="1.2" />
+    <rect x="9" y="2" width="5" height="3.5" rx="1.2" />
+    <rect x="9" y="7.5" width="5" height="6.5" rx="1.2" />
+    <rect x="2" y="10" width="5" height="4" rx="1.2" />
   </svg>
 );
 const Chevron = ({ open }: { open: boolean }) => (

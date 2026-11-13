@@ -233,6 +233,9 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/decisions/{}/undo"),
     route("POST", "/api/desk/items/{}/answer"),
     route("POST", "/api/desk/items/{}/drop"),
+    // Your typing to a boss, and whether its DM is in front of you.
+    route("POST", "/api/desk/dm/{}/typing"),
+    route("POST", "/api/desk/presence"),
     // Rooms.
     route("GET", "/api/desk/rooms"),
     route("POST", "/api/desk/rooms"),

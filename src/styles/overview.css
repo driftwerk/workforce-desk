@@ -227,7 +227,8 @@
 .crew-floor-body > .stage-dock {
   padding: 12px 10px 0 0;
 }
-.activity-head h2 {
+.activity-head h2,
+.activity-head h3 {
   margin: 0;
   font-size: 16px;
   font-weight: 650;
@@ -1053,35 +1054,166 @@ button.fsec-tile-head {
 
 /* ── The boss in your chat: updates, decisions, what needs you ─────────── */
 
-/* Plain text, as the agreed look has it: paragraphs in Desk's tokens,
-   never a box. */
+/* Laid out as the agreed "Update" board: what happened, what needs you,
+   what I did, at a reading width, in Desk's tokens. Spacing, weight and
+   one amber rule do the work; never a box. */
 .msg-text.overseer {
   white-space: normal;
+  max-width: 720px;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
 }
-.msg-text.overseer > p,
-.msg-text.overseer > .rich,
-.msg-text.overseer > .dm-waiting > p {
-  margin: 0 0 8px;
-}
-.msg-text.overseer > :last-child,
-.msg-text.overseer > .dm-waiting:last-child > :last-child {
-  margin-bottom: 0;
-}
-.msg-text.overseer > .rich p {
+.msg-text.overseer p {
   margin: 0;
 }
-/* "I decided:" in the text colour, the rest of its line muted. */
-.msg-text.overseer .dec-label {
+/* Small caps over a part: what needs you (amber), what I did (faint). */
+.msg-text.overseer .sec-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+/* 1. What happened: a line per session, its dot first; what it's for and
+   its refs small and faint under it. */
+.upd-head {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.upd-session {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.upd-line {
+  font-size: 1.1em;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.upd-line > .dot {
+  display: inline-block;
+  vertical-align: 0.05em;
+  width: 9px;
+  height: 9px;
+  margin-right: 8px;
+}
+.upd-rest,
+.upd-sub {
+  padding-left: 17px;
+}
+.upd-sub {
+  font-size: 13px;
+}
+/* 2. What needs you: one inset amber rule, not a box. */
+.needs {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-left: 16px;
+  box-shadow: inset 2px 0 0 var(--blocked);
+}
+.needs .sec-label {
+  color: var(--blocked);
+}
+.needs-q {
+  font-size: 1.1em;
+  font-weight: 600;
+  line-height: 1.4;
+}
+.needs-items {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  color: var(--muted);
+}
+.needs-lead {
   color: var(--text);
+}
+.needs-rec {
+  color: var(--signal-soft-text);
   font-weight: 600;
 }
-.msg-text.overseer .dec-undone {
+.needs .dm-inline {
+  margin: 0;
+}
+.link.needs-hold {
+  margin-left: 4px;
+  font-size: 13px;
+}
+/* 3. What I did: a mono time column, what it did in the text colour and
+   why muted, Message and Undo at the right. */
+.did {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.did-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.dec-row {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  column-gap: 12px;
+  align-items: baseline;
+  line-height: 1.5;
+}
+.did-list.untimed .dec-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.dec-time {
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--faint);
+}
+.dec-action {
+  color: var(--text);
+}
+.dec-undone {
   text-decoration: line-through;
 }
-/* What leads a needs-you or still-waiting message: semibold, in the
-   blocked colour. */
-.msg-text.needs-you > .rich:first-child p:first-of-type > strong:first-child {
-  color: var(--blocked);
+.dec-tools {
+  display: flex;
+  gap: 12px;
+}
+.dec-tools .link {
+  font-size: 12px;
+}
+.dec-msg {
+  color: var(--faint);
+}
+.link.dec-undo {
+  color: var(--signal-soft-text);
+  font-weight: 600;
+}
+.link.dec-fold {
+  grid-column: span 2;
+  justify-self: start;
+  text-align: left;
+  color: var(--faint);
+  font-size: 13px;
+}
+/* The message it sent, shown on asking: under its line, set in by a thin
+   rule, in muted text. */
+.msg-text.overseer .dec-message {
+  grid-column: 2 / -1;
+  margin-top: 6px;
+  padding-left: 12px;
+  box-shadow: inset 2px 0 0 var(--border);
+  color: var(--muted);
+  white-space: pre-wrap;
+}
+.msg-text.overseer .did-list.untimed .dec-message {
+  grid-column: 1 / -1;
 }
 /* What a session's work names (#622): its id, faint, in mono. */
 .ref {
@@ -1114,4 +1246,12 @@ a.ref {
   background: transparent;
   padding: 0;
   margin: 0;
+}
+/* "you were away 21:00 – 22:40": centred, faint, in mono. */
+.away-divider {
+  margin: -6px 0;
+  text-align: center;
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 12px;
 }

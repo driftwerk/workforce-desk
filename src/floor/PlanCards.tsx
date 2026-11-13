@@ -6,6 +6,7 @@ import { CLI_NAME, CopyInstall, PlanLoginAction, ReopenLink, usePlanLogin } from
 import { ask, usePlans } from "./store";
 import { clock, dayClock, durationOf } from "./time";
 import { fullness, nextChange, pace, projection, windowNow, type PlanCard } from "./usage";
+import { useSubHeading } from "./FloorShell";
 
 const TITLE: Record<PlanKind, string> = { claude: "Claude plan", chatgpt: "ChatGPT plan" };
 const NAME: Record<PlanKind, string> = { claude: "Claude", chatgpt: "ChatGPT" };
@@ -64,6 +65,7 @@ export function PlanCards() {
 }
 
 function Card({ card, now }: { card: PlanCard; now: number }) {
+  const H = useSubHeading();
   // One of the person's accounts: its name, and the sessions on it.
   const account = useAccounts((s) => accountOfCard(s.accounts, card.key));
   // This computer's own sign-in, not known as one of the accounts: by who
@@ -90,7 +92,7 @@ function Card({ card, now }: { card: PlanCard; now: number }) {
   return (
     <section className="floor-card plan-card" aria-label={`${title} usage`}>
       <div className="floor-card-head">
-        <h2 className="display floor-card-title">{title}</h2>
+        <H className="display floor-card-title">{title}</H>
         <span className="muted small">{sub}</span>
         {card.reading && <span className="floor-time">as of {clock(card.reading.observedAt)}</span>}
       </div>

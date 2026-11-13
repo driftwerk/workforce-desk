@@ -68,7 +68,7 @@ export function useGlobalShortcut(id: GlobalShortcutId, accel: string | null, on
 
 /** Whether a key press was made in a terminal pane (Terminal marks its
  *  host `data-terminal`): a shell reads keys there first. */
-const inTerminal = (target: EventTarget | null): boolean =>
+export const inTerminal = (target: EventTarget | null): boolean =>
   (target instanceof Element && target.closest("[data-terminal]") !== null) || inTerminalAt(target);
 
 const isField = (target: Element): boolean =>

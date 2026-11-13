@@ -676,6 +676,16 @@
   },
   {
     "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/dm/desk/typing"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/presence"
+  },
+  {
+    "kind": "http",
     "method": "GET",
     "path": "/api/desk/rooms"
   },
