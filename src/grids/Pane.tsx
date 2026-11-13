@@ -1,4 +1,4 @@
-import { useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { memo, useId, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { OnMachine } from "../machines/OnMachine";
 import { openAgentSettings } from "../rooms/AgentPanel";
 import { createPortal } from "react-dom";
@@ -7,24 +7,20 @@ import { agentKey } from "../chat/types";
 import { lookOf, shownState, statusOf, type Look } from "../floor/background";
 import { useSessionName, useSessionNames } from "../groups/names";
 import { hubFor, hubOf, localSessions, sortedSessions, useDesk } from "../hub/store";
-import { keyOf, LOCAL, machineOf, sessionKey, splitKey } from "../hub/machines";
-import { askMove, canMove, sessionSubject } from "../groups/move";
-import { canHandOff } from "../handoff/LineageChips";
-import { askHandoff } from "../handoff/store";
+import { keyOf, machineOf, sessionKey, splitKey } from "../hub/machines";
 import type { Session, SessionState } from "../hub/types";
 import { DirectMessage } from "../rooms/Rooms";
 import { MicBadge } from "../voice/DmVoice";
-import { approvalsSwitchable, lifecycleActions, sessionActions, setApprovalsInDesk, type SessionAction } from "../session/actions";
+import { MemoryPanel } from "../memory/MemoryPanel";
+import { SubjectHistory } from "../board/History";
+import { SessionChrome, panelId, tabId, type SessionTab } from "../session/SessionChrome";
 import { HubError } from "../hub/client";
 import { plainError } from "../ui/plainError";
 import { Approval } from "../session/Approval";
 import { SessionBody } from "../session/SessionCard";
 import { LinePanel } from "../line/LinePanel";
-import { useLinePanel } from "../line/panel";
 import { BreakerBanner } from "../spend/BreakerBanner";
-import { ChargeBadge, useChargeActions } from "../crew/ChargeBadge";
-import { SessionTicketChip } from "../board/TicketChip";
-import { useCharge } from "../crew/chargeStore";
+import { DriverBar } from "../crew/ChargeBadge";
 import { Terminal } from "../session/Terminal";
 import { useSettings } from "../settings/store";
 import { shortcutLabel, terminalKeys } from "../shortcuts/keys";
@@ -50,22 +46,14 @@ import { AgentMark } from "../ui/Mark";
 import { GroupChip } from "../groups/GroupChip";
 import { itemOf } from "./where";
 import { baseName, homeShort } from "../ui/paths";
-import { OWN_SIGN_IN_LABEL, accountsOf, accountsOn, hasAccounts, ownSignInWorks, withAccount } from "../engines/accounts";
+import { withAccount } from "../engines/accounts";
 import { ENGINE_TITLE } from "../engines/engines";
+
+import { STATE_LABEL } from "../session/words";
 
 const ENGINE = ENGINE_TITLE;
 
-export const STATE_LABEL: Record<SessionState, string> = {
-  starting: "starting",
-  working: "working",
-  blocked: "needs you",
-  asking: "needs you · asked",
-  done: "done",
-  idle: "idle",
-  interrupted: "interrupted",
-  stopped: "stopped",
-  closed: "closed",
-};
+export { STATE_LABEL };
 
 /** Where a pane sits: its share of the grid, with half the gap around it. */
 export const boxStyle = (rect: Rect | null): CSSProperties =>
@@ -101,7 +89,6 @@ const folder = (path: string | null | undefined): string | null => (path ? baseN
 
 /** Each pane's header, from what it holds. */
 export function usePaneLabel(content: PaneContent | null): Label {
-  const sessions = useDesk((s) => s.sessions);
   const roster = useChat((s) => s.roster);
   const hubs = useChat((s) => s.hubs);
   const working = useChat((s) => (content?.kind === "agent" ? (s.conversations[content.agent]?.working ?? null) : null));
@@ -109,8 +96,10 @@ export function usePaneLabel(content: PaneContent | null): Label {
   const info = useTerminals((s) => (terminal ? s.byId[terminal] : undefined));
   const programs = useTerminals((s) => (terminal ? s.programs[terminal] : undefined));
   const shows = sessionKeyIn(content);
-  const tracked = content?.kind === "terminal" ? trackedIn(sessions, terminal) : null;
-  const session = shows ? sessions[shows] : tracked;
+  // Only the session this pane shows: another session's event leaves it be.
+  const tracked = useDesk((s) => (content?.kind === "terminal" ? trackedIn(s.sessions, terminal) : null));
+  const shown = useDesk((s) => (shows ? s.sessions[shows] : undefined));
+  const session = shows ? shown : tracked;
   const name = useSessionName(session && sessionKey(session), session?.name ?? "");
   const view = useViewLabel(content);
   if (!content) return { name: "Empty pane", meta: "", state: null, tracked: null, asking: null, cwd: null, mono: false };
@@ -307,126 +296,146 @@ export function GridPane({
   const [menu, setMenu] = useState<{ x: number; y: number; from: HTMLElement | null } | null>(null);
   const { remove, dialog } = useRemovePane(gridId, pane, label);
   const shows = sessionKeyIn(pane.content);
+  // The session it shows, or the one tracked in its terminal: shown with
+  // the session's own chrome, as in the side panel.
   const session = useDesk((s) => (shows ? s.sessions[shows] : undefined)) ?? label.tracked;
   const paneItem = useDesk((s) => itemOf(s.sessions, pane.content));
-  const actions = session ? sessionActions(session) : [];
-  const charge = useCharge(session && sessionKey(session));
-  const chargeActions = useChargeActions(session);
-  const entries = usePaneMenu(gridId, pane, actions, session ?? null, () => remove(menu?.from), chargeActions);
+  const { entries, host, close } = usePaneMenu(gridId, pane, () => remove(menu?.from));
   const handle = usePaneDrag(gridId, pane, label.name);
   const zone = over?.kind === "pane" && over.paneId === pane.id ? over.zone : null;
   const free = over?.kind === "free";
   const [start, end] = nameParts(label.name);
   const said = useId();
+  const [tab, setTab] = useState<SessionTab>("session");
   // A tracked session's terminal is that session on screen: seen as its
   // own pane is (a session's pane and a conversation read themselves).
   const box = useRef<HTMLElement | null>(null);
   const hidden = useOutOfSight();
   useSeenSession(pane.content?.kind === "terminal" ? label.tracked?.id : null, box, { enabled: !hidden && fill !== "hidden" });
+  const filling = fill && fill !== "hidden" ? fill : null;
+  const fillButton = filling ? (
+    <>
+      <span className="gpane-waiting">
+        {filling.waiting} other {filling.waiting === 1 ? "pane" : "panes"} waiting
+      </span>
+      <button type="button" className="icon-btn-sm" aria-label="Back to the grid" title="Back to the grid (Esc)" onClick={() => unfill(gridId)}>
+        <UnfocusIcon />
+      </button>
+    </>
+  ) : (
+    pane.rect &&
+    !alone && (
+      <button type="button" className="icon-btn-sm sc-fill-btn" aria-label="Fill the grid" title={`Fill the grid (${shortcutLabel(fillKeys)})`} onClick={() => toggleFill(gridId, pane.id)}>
+        <FocusIcon />
+      </button>
+    )
+  );
+  const removeButton = !(alone && !pane.content) && (
+    <button type="button" className="icon-btn-sm gpane-remove" aria-label="Remove from grid" title="Remove from grid" onClick={(e) => remove(e.currentTarget)}>
+      <RemoveIcon />
+    </button>
+  );
+  const head = session ? (
+    <SessionChrome
+      session={session}
+      name={label.name}
+      size="pane"
+      tab={tab}
+      onTab={setTab}
+      tabIds={said}
+      lead={fillButton}
+      close={removeButton}
+      // Fill is in the menu too, for a chrome too narrow for its button.
+      hostEntries={pane.rect && !alone && !filling ? [{ kind: "item", label: "Fill the grid", kbd: shortcutLabel(fillKeys), onSelect: () => toggleFill(gridId, pane.id) }, ...host] : host}
+      closeEntries={close}
+      menuLabel="Pane options"
+      headProps={{ className: "gpane-handle", title: headTitle(label, true), onPointerDown: handle.onPointerDown }}
+      place={label.tracked && <span className="gpane-badge">Tracked — on the Floor</span>}
+    />
+  ) : (
+    <header className={`gpane-head ${pane.content ? "gpane-handle" : ""}`} title={headTitle(label, !!pane.content)} onPointerDown={handle.onPointerDown}>
+      {label.view ? <KindIcon kind={label.view.kind} /> : <span className={`dot ${label.state ? `dot-${label.state}` : "dot-none"}`} aria-hidden="true" />}
+      {pane.content?.kind === "agent" && <AgentMark agent={pane.content.agent} name={label.name} size="xs" />}
+      {pane.content?.kind === "agent" && <MicBadge agent={pane.content.agent} />}
+      <span className={`gpane-name ${label.mono ? "mono" : ""}`}>
+        <span className="gpane-name-start">{start}</span>
+        {end && <span className="gpane-name-end">{end}</span>}
+      </span>
+      <OnMachine machine={machineOf(pane.content?.kind === "session" || pane.content?.kind === "terminal" ? pane.content : null)} />
+      {paneItem && <GroupChip item={paneItem} />}
+      {label.meta && (
+        <span id={`${said}-meta`} className={`gpane-meta ${label.state === "blocked" ? "state-blocked" : ""}`}>
+          {label.meta}
+        </span>
+      )}
+      {pane.content?.kind === "floor" && !label.view?.gone && <FloorMeta id={`${said}-meta`} />}
+      <span className="gpane-fill" />
+      {pane.content?.kind === "room" && <RoomPaneMarks room={pane.content.room} />}
+      {pane.content?.kind === "board" && !label.view?.gone && <BoardChips gridId={gridId} paneId={pane.id} />}
+      {label.cwd && (
+        <span id={`${said}-cwd`} className="gpane-cwd mono">
+          {label.cwd}
+        </span>
+      )}
+      {fillButton}
+      <button
+        type="button"
+        className="icon-btn-sm"
+        aria-label="Pane options"
+        title="Pane options"
+        aria-haspopup="menu"
+        onClick={(e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          setMenu({ x: r.left, y: r.bottom + 2, from: e.currentTarget });
+        }}
+      >
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
+          <circle cx="3" cy="7" r="1.3" />
+          <circle cx="7" cy="7" r="1.3" />
+          <circle cx="11" cy="7" r="1.3" />
+        </svg>
+      </button>
+      {removeButton}
+    </header>
+  );
+  const body = (
+    // Behind a pane filling the grid: mounted, but nothing in it is read.
+    <OutOfSight hidden={fill === "hidden"}>
+      <PaneBody gridId={gridId} pane={pane} />
+    </OutOfSight>
+  );
   const shown = (
     <section
       ref={box}
-      className={`gpane ${pane.content ? `gpane-k-${pane.content.kind}` : ""} ${focused ? "gpane-focused" : ""} ${label.asking ? "gpane-asking" : ""} ${pane.content ? "" : "gpane-vacant"} ${lifted ? "gpane-lifted" : ""} ${fill && fill !== "hidden" ? "gpane-filling" : ""}`}
+      className={`gpane ${pane.content ? `gpane-k-${pane.content.kind}` : ""} ${session ? "gpane-chrome" : ""} ${focused ? "gpane-focused" : ""} ${label.asking ? "gpane-asking" : ""} ${pane.content ? "" : "gpane-vacant"} ${lifted ? "gpane-lifted" : ""} ${filling ? "gpane-filling" : ""}`}
       style={fill === "hidden" ? { display: "none" } : fill ? WHOLE : boxStyle(pane.rect)}
       aria-label={label.name}
       // What a narrow header no longer shows, still said.
-      aria-describedby={[(label.meta || pane.content?.kind === "floor") && `${said}-meta`, label.cwd && `${said}-cwd`].filter(Boolean).join(" ") || undefined}
+      aria-describedby={session ? undefined : [(label.meta || pane.content?.kind === "floor") && `${said}-meta`, label.cwd && `${said}-cwd`].filter(Boolean).join(" ") || undefined}
       data-drop-pane={pane.id}
       data-grid={gridId}
       onPointerDownCapture={() => setFocus(gridId, pane.id)}
       onFocusCapture={() => setFocus(gridId, pane.id)}
     >
       <div className="gpane-box">
-        <header className={`gpane-head ${pane.content ? "gpane-handle" : ""}`} title={headTitle(label, !!pane.content)} onPointerDown={handle.onPointerDown}>
-          {label.view ? <KindIcon kind={label.view.kind} /> : <span className={`dot ${label.state ? `dot-${label.state}` : "dot-none"}`} aria-hidden="true" />}
-          {pane.content?.kind === "agent" && <AgentMark agent={pane.content.agent} name={label.name} size="xs" />}
-          {pane.content?.kind === "agent" && <MicBadge agent={pane.content.agent} />}
-          <span className={`gpane-name ${label.mono ? "mono" : ""}`}>
-            <span className="gpane-name-start">{start}</span>
-            {end && <span className="gpane-name-end">{end}</span>}
-          </span>
-          <OnMachine machine={session ? machineOf(session) : machineOf(pane.content?.kind === "session" || pane.content?.kind === "terminal" ? pane.content : null)} />
-          {paneItem && <GroupChip item={paneItem} />}
-          {label.meta && (
-            <span id={`${said}-meta`} className={`gpane-meta ${label.state === "blocked" ? "state-blocked" : ""}`}>
-              {label.meta}
-            </span>
-          )}
-          {pane.content?.kind === "floor" && !label.view?.gone && <FloorMeta id={`${said}-meta`} />}
-          {label.tracked && <span className="gpane-badge">Tracked — on the Floor</span>}
-          {pane.content?.kind === "session" && <SessionTicketChip session={pane.content.sessionId} className="gpane-ticket" />}
-          <ChargeBadge charge={charge} className="gpane-badge" />
-          <span className="gpane-fill" />
-          {pane.content?.kind === "room" && <RoomPaneMarks room={pane.content.room} />}
-          {pane.content?.kind === "board" && !label.view?.gone && <BoardChips gridId={gridId} paneId={pane.id} />}
-          {label.cwd && (
-            <span id={`${said}-cwd`} className="gpane-cwd mono">
-              {label.cwd}
-            </span>
-          )}
-          {fill && fill !== "hidden" ? (
+        {head}
+        <div className="gpane-body">
+          {session ? (
             <>
-              <span className="gpane-waiting">
-                {fill.waiting} other {fill.waiting === 1 ? "pane" : "panes"} waiting
-              </span>
-              <button type="button" className="icon-btn-sm" aria-label="Back to the grid" title="Back to the grid (Esc)" onClick={() => unfill(gridId)}>
-                <UnfocusIcon />
-              </button>
+              {tab === "memory" && <MemoryPanel session={session} name={label.name} hub={hubFor(session)} id={panelId(said, "memory")} labelledBy={tabId(said, "memory")} />}
+              {tab === "history" && (
+                <div className="session-history-panel" role="tabpanel" id={panelId(said, "history")} aria-labelledby={tabId(said, "history")}>
+                  <SubjectHistory subject={session.id} machine={machineOf(session)} label={`What ${label.name} did`} />
+                </div>
+              )}
+              {/* The session itself stays mounted, hidden, while another tab shows. */}
+              <div className="session-view" role="tabpanel" id={panelId(said, "session")} aria-labelledby={tabId(said, "session")} hidden={tab !== "session"}>
+                {body}
+              </div>
             </>
           ) : (
-            pane.rect &&
-            !alone && (
-              <button
-                type="button"
-                className="icon-btn-sm"
-                aria-label="Fill the grid"
-                title={`Fill the grid (${shortcutLabel(fillKeys)})`}
-                onClick={() => toggleFill(gridId, pane.id)}
-              >
-                <FocusIcon />
-              </button>
-            )
+            body
           )}
-          {actions.map((a) => (
-            <button key={a.label} type="button" className="link small gpane-act" onClick={a.run}>
-              {a.label}
-            </button>
-          ))}
-          {chargeActions
-            .filter((a) => a.verb === "handBack")
-            .map((a) => (
-              <button key={a.verb} type="button" className="link small gpane-act gpane-charge-act" disabled={a.busy} onClick={a.run}>
-                {a.busy ? `${a.label}…` : a.label}
-              </button>
-            ))}
-          <button
-            type="button"
-            className="icon-btn-sm"
-            aria-label="Pane options"
-            title="Pane options"
-            aria-haspopup="menu"
-            onClick={(e) => {
-              const r = e.currentTarget.getBoundingClientRect();
-              setMenu({ x: r.left, y: r.bottom + 2, from: e.currentTarget });
-            }}
-          >
-            <svg width="14" height="14" viewBox="0 0 14 14" fill="currentColor" aria-hidden="true">
-              <circle cx="3" cy="7" r="1.3" />
-              <circle cx="7" cy="7" r="1.3" />
-              <circle cx="11" cy="7" r="1.3" />
-            </svg>
-          </button>
-          {!(alone && !pane.content) && (
-            <button type="button" className="icon-btn-sm gpane-remove" aria-label="Remove from grid" title="Remove from grid" onClick={(e) => remove(e.currentTarget)}>
-              <RemoveIcon />
-            </button>
-          )}
-        </header>
-        <div className="gpane-body">
-          {/* Behind a pane filling the grid: mounted, but nothing in it is read. */}
-          <OutOfSight hidden={fill === "hidden"}>
-            <PaneBody gridId={gridId} pane={pane} />
-          </OutOfSight>
         </div>
         {label.asking && <Approval session={label.asking} />}
         {dragging && (zone || free) && <DropZones zone={zone} free={!!free} single={movingPane && !pane.content ? "Move here" : swapping ? "Swap in" : null} />}
@@ -527,7 +536,10 @@ function DropZones({ zone, free, single }: { zone: Zone | null; free: boolean; s
   );
 }
 
-function PaneBody({ gridId, pane }: { gridId: string; pane: PaneData }) {
+/** What a pane holds. Drawn again only when the pane does: its header
+ *  following a session's every event (or a menu's every change) leaves
+ *  a conversation, a terminal or a board as it is. */
+const PaneBody = memo(function PaneBody({ gridId, pane }: { gridId: string; pane: PaneData }) {
   const c = pane.content;
   if (!c) {
     return (
@@ -556,7 +568,7 @@ function PaneBody({ gridId, pane }: { gridId: string; pane: PaneData }) {
         </div>
       );
   }
-}
+});
 
 /** The session `id` (a key, see `keyOf`) in a pane. */
 function SessionPane({ id }: { id: string }) {
@@ -590,6 +602,7 @@ function SessionPane({ id }: { id: string }) {
   return (
     <>
       <BreakerBanner sessionId={session.id} compact />
+      <DriverBar session={session} />
       <SessionBody session={session} autoFocus={false} />
       <LinePanel session={session} />
     </>
@@ -627,19 +640,22 @@ function TerminalBody({ gridId, pane, content }: { gridId: string; pane: string;
   return <Terminal key={terminalKeyIn(content)} terminalId={content.terminalId} machine={machineOf(content)} autoFocus={false} />;
 }
 
-/** A pane's options: close, replace, move to another grid. */
-function usePaneMenu(
-  gridId: string,
-  pane: PaneData,
-  actions: SessionAction[],
-  session: Session | null,
-  onClose: () => void,
-  charge: { label: string; run: () => void }[] = [],
-): MenuEntry[] {
-  const sessions = useDesk((s) => s.sessions);
+/** A pane's options: close, replace, move to another grid. A session's
+ *  pane shows them in the session's own menu (`host`, then `close`, after
+ *  the session's), any other pane as `entries`. */
+function usePaneMenu(gridId: string, pane: PaneData, onClose: () => void): { entries: MenuEntry[]; host: MenuEntry[]; close: MenuEntry[] } {
   // What to put here: this computer's sessions (a machine's are put in a
-  // pane where they're shown with their machine).
-  const mine = useDesk((s) => localSessions(s.sessions));
+  // pane where they're shown with their machine), the first twelve, as one
+  // line each, so another session's event redraws the pane only when it
+  // changes what the menu lists.
+  const listed = useDesk((s) =>
+    JSON.stringify(
+      sortedSessions(localSessions(s.sessions))
+        .filter((x) => x.state !== "closed")
+        .slice(0, 12)
+        .map((x) => [x.id, x.name, shownState(x)]),
+    ),
+  );
   const roster = useChat((s) => s.roster);
   const rooms = arranged(
     useDesk((s) => s.rooms),
@@ -659,14 +675,14 @@ function usePaneMenu(
   const keys = useSettings((s) => s.keys.newTerminal);
   // Sessions by the names given them, as the sidebar shows them.
   const names = useSessionNames();
-  const shown = sortedSessions(mine).filter((s) => s.state !== "closed");
+  const shown = JSON.parse(listed) as [string, string, SessionState][];
   const put = (content: PaneContent) => replacePane(gridId, pane.id, content);
   // A pane showing a terminal takes the keys it takes there.
   const inShell = pane.content?.kind === "terminal" || pane.content?.kind === "session";
   const replace: MenuEntry[] = [
     { kind: "item", label: "New terminal", kbd: shortcutLabel(inShell ? terminalKeys(keys) : keys), onSelect: () => (pane.content ? put({ kind: "terminal", terminalId: null }) : newTerminal(gridId)) },
     ...(shown.length ? [{ kind: "separator" as const }] : []),
-    ...shown.slice(0, 12).map((s): MenuEntry => ({ kind: "item", label: names[s.id] ?? s.name, kbd: STATE_LABEL[shownState(s)], onSelect: () => put({ kind: "session", sessionId: s.id }) })),
+    ...shown.map(([id, name, state]): MenuEntry => ({ kind: "item", label: names[id] ?? name, kbd: STATE_LABEL[state], onSelect: () => put({ kind: "session", sessionId: id }) })),
     ...(roster.length ? [{ kind: "separator" as const }] : []),
     ...roster.slice(0, 12).map((a): MenuEntry => ({ kind: "item", label: a.name, onSelect: () => put({ kind: "agent", agent: agentKey(a) }) })),
     { kind: "separator" },
@@ -715,72 +731,30 @@ function usePaneMenu(
       : [];
   // A tracked terminal shows as its session, and back: the same terminal
   // either way, so nothing starts or stops.
-  const tracked = pane.content?.kind === "terminal" ? trackedIn(sessions, terminalKeyIn(pane.content)) : null;
+  const tracked = useDesk((s) => (pane.content?.kind === "terminal" ? trackedIn(s.sessions, terminalKeyIn(pane.content)) : null));
   const shows = sessionKeyIn(pane.content);
-  const ranInId = shows ? (sessions[shows]?.terminalId ?? null) : null;
+  const ranInId = useDesk((s) => (shows ? (s.sessions[shows]?.terminalId ?? null) : null));
   // The terminal it runs in, on its own engine.
   const ranIn = ranInId && shows ? keyOf(splitKey(shows).machine, ranInId) : null;
   const terminal = useTerminals((s) => (ranIn && s.byId[ranIn]?.live ? s.byId[ranIn] : undefined));
   // A pane of its own in another grid: one here would be a second.
   const terminalElsewhere = useGrids((s) => !!ranIn && s.order.some((g) => g !== gridId && !!findContent(s.grids[g]?.panes ?? [], terminalContent(ranIn))));
   const hosted = useGrids((s) => hostedBy(gridId, pane.id, s));
-  // The accounts of the engine the session runs on: a machine's are its own.
-  const accountStore = accountsOn(session ? machineOf(session) : undefined);
-  const allAccounts = accountStore((s) => s.accounts);
-  // Where Claude Code says it isn't logged in, its own sign-in is no choice.
-  const ownWorks = accountStore((s) => ownSignInWorks(s.claudeSignIn));
-  const fail = useDesk((s) => s.fail);
-  // Another account for a session Desk started (one in a terminal of its
-  // own is moved there).
-  const accounts = session && hasAccounts(session.caps) && !session.terminalId && session.origin === "desk" ? accountsOf(allAccounts, session.engine) : [];
-  const onAccount = (to: string | null) => {
-    if (session) hubFor(session)?.switchAccount(session.id, to).catch(fail);
-  };
-  const account: MenuEntry[] = session
-    ? [
-        // Only an account whose sign-in the hub can read is one to move to.
-        ...accounts
-          .filter((a) => a.signedIn || session.account?.id === a.id)
-          .map((a): MenuEntry => ({ kind: "item", label: a.name, checked: session.account?.id === a.id, onSelect: () => onAccount(a.id) })),
-        ...(ownWorks || session.engine !== "claude"
-          ? [{ kind: "item" as const, label: OWN_SIGN_IN_LABEL, checked: !session.account, onSelect: () => onAccount(null) }]
-          : []),
-      ]
-    : [];
   const swap: MenuEntry[] = tracked
     ? [{ kind: "item", label: "Show as session", onSelect: () => put(sessionContent(sessionKey(tracked))) }]
     : terminal && ranIn && !terminalElsewhere
       ? [{ kind: "item", label: "Show the terminal", onSelect: () => put(terminalContent(ranIn, terminal.cwd)) }]
       : [];
-  return [
+  const host: MenuEntry[] = [
     { kind: "item", label: pane.content ? "Replace" : "Put here", submenu: replace },
     ...(pane.content && move.length ? [{ kind: "item" as const, label: "Move to grid", submenu: move }] : []),
     ...show,
-    // This computer's session moves between groups as the hub previews it.
-    ...(session && machineOf(session) === LOCAL && canMove()
-      ? [{ kind: "item" as const, label: "Move to group…", onSelect: () => askMove(sessionSubject(session.id, names[session.id] ?? session.displayName ?? session.name)) }]
-      : []),
-    ...(session && canHandOff(session) ? [{ kind: "item" as const, label: "Continue in…", onSelect: () => askHandoff({ id: session.id }) }] : []),
     ...swap,
-    ...actions.map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
-    ...charge.map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
-    ...(accounts.length ? [{ kind: "item" as const, label: "Account", submenu: account }] : []),
-    ...(session && approvalsSwitchable(session)
-      ? [
-          {
-            kind: "item" as const,
-            label: "Answer approvals in Desk",
-            checked: session.approvals === "desk",
-            onSelect: () => setApprovalsInDesk(session, session.approvals !== "desk"),
-          },
-        ]
-      : []),
-    ...(session && session.view !== "desk"
-      ? [{ kind: "item" as const, label: "Messages with Desk…", onSelect: () => useLinePanel.getState().show(sessionKey(session), "history") }]
-      : []),
-    ...(agent && role.kind === "main" ? [{ kind: "item" as const, label: "Agent settings", onSelect: () => openAgentSettings(agent) }] : []),
-    ...(session ? [{ kind: "separator" as const }, ...lifecycleActions(session).map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run }))] : []),
-    { kind: "separator" },
-    { kind: "item", label: removeLabel(pane, hosted), onSelect: onClose },
   ];
+  const close: MenuEntry[] = [{ kind: "item", label: removeLabel(pane, hosted), onSelect: onClose }];
+  return {
+    host,
+    close,
+    entries: [...host, ...(agent && role.kind === "main" ? [{ kind: "item" as const, label: "Agent settings", onSelect: () => openAgentSettings(agent) }] : []), { kind: "separator" }, ...close],
+  };
 }

@@ -19,6 +19,7 @@ import { readableError } from "../chat/agentError";
 import { PlanSignIn } from "../floor/PlanCards";
 import { TicketKeys } from "../board/TicketChip";
 import { commandMarkdown, shownText } from "../chat/commands";
+import { OverseerBody, QuestionBody, overseerPost, overseerShown } from "./Overseer";
 
 /** What a delivered message is badged as, for the kinds that are shown. */
 export const DELIVERY_BADGES: Partial<Record<DeliveryKind, string>> = {
@@ -27,6 +28,12 @@ export const DELIVERY_BADGES: Partial<Record<DeliveryKind, string>> = {
   workflow: "Workflow",
   check_in: "Check-in",
   approval: "Approval",
+};
+
+/** What a boss's update is labelled, after its time: a word, not a
+ *  badge. */
+export const DELIVERY_KINDS: Partial<Record<DeliveryKind, string>> = {
+  update: "update",
 };
 
 const time = (iso: string) => {
@@ -148,6 +155,13 @@ export const Message = memo(function Message({
   const badge = message.delivery && DELIVERY_BADGES[message.delivery];
   const cardText = message.role === "assistant" && !!message.desk?.plan && isCardText(message.content);
   const command = !!message.command && !relayed;
+  const kind = message.delivery && DELIVERY_KINDS[message.delivery];
+  // The boss's updates, decisions and what it asks of you read as plain
+  // text, from their extras, and their cards go inline: never a box.
+  const boss = message.role === "assistant" && message.status !== "error";
+  const fromExtras = boss && overseerShown(message.desk);
+  const question = boss && !fromExtras && message.delivery === "question" && !!message.desk?.questions?.length;
+  const unboxed = boss && overseerPost(message.desk, message.delivery);
   return (
     <article
       className={`msg msg-${fromOverseer ? "assistant" : message.role}${relayed ? " msg-relayed" : ""}${command ? " msg-command" : ""}${message.undelivered ? " msg-undelivered" : ""}`}
@@ -176,12 +190,22 @@ export const Message = memo(function Message({
             {home ? `${home} · ` : ""}
             {time(message.at)}
           </span>
+          {kind && <span className="faint small msg-kind"> {kind}</span>}
+          {message.edited && <span className="faint small msg-edited"> (edited)</span>}
           {chips}
         </span>
         <ToolChips tools={message.tools} live={message.status === "streaming"} />
         {/* A plan card says all its own header does, and shows it while it can't;
             anything else the boss said with it (its closing summary) stays. */}
-        {!message.content.trim() || cardText ? null : message.status === "error" && message.superseded ? (
+        {fromExtras && message.desk ? (
+          <RichHostProvider host={host}>
+            <OverseerBody extras={message.desk} content={message.content} />
+          </RichHostProvider>
+        ) : question && message.content.trim() ? (
+          <RichHostProvider host={host}>
+            <QuestionBody content={message.content} />
+          </RichHostProvider>
+        ) : !message.content.trim() || cardText ? null : message.status === "error" && message.superseded ? (
           <details className="msg-steps">
             <summary className="small">Didn’t finish · answered below</summary>
             <TurnError raw={message.content} />
@@ -229,7 +253,7 @@ export const Message = memo(function Message({
             )}
           </p>
         )}
-        {message.role === "assistant" && message.desk && <DeskActions extras={message.desk} text={cardText ? message.content : undefined} />}
+        {message.role === "assistant" && message.desk && <DeskActions extras={message.desk} text={cardText ? message.content : undefined} inline={unboxed} />}
         {message.delivery === "approval" && message.requestId && origin && (
           <RoutedApproval hubId={origin.hub} requestId={message.requestId} />
         )}

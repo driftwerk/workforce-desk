@@ -3,11 +3,14 @@ import { describe, expect, it, vi } from "vitest";
 import { HubError, type DeskHub } from "../hub/client";
 import {
   agentId,
+  createLocalAgent,
   instructions,
+  nameTaken,
+  NotSetUp,
   purposeOf,
   RENAME_UNAVAILABLE,
-  renameAgentFiles,
   renameLocalAgent,
+  servingAgain,
   setAgentPurpose,
   withJob,
   withName,
@@ -82,26 +85,53 @@ describe("local crew", () => {
 });
 
 /** A hub keeping identity files in memory. */
-const filesHub = (files: Record<string, string>, rename: () => Promise<unknown> = () => Promise.resolve({})) => {
+/** A hub with an agent's files, which builds it again on a new name or new
+ *  instructions: `rebuild` reads of its agents leave it out after that,
+ *  and its files can't be read meanwhile, as the hub does. */
+const filesHub = (files: Record<string, string>, rename: () => Promise<unknown> = () => Promise.resolve({}), rebuild = 2) => {
+  const calls: string[] = [];
+  let away = 0;
   const hub = {
-    renameAgent: vi.fn(rename),
-    identityFile: vi.fn(async (_id: string, f: string) => files[f] ?? ""),
-    saveIdentityFile: vi.fn(async (_id: string, f: string, t: string) => void (files[f] = t)),
+    calls,
+    renameAgent: vi.fn(async () => {
+      calls.push("rename");
+      const out = await rename();
+      away = rebuild;
+      return out;
+    }),
+    identityFile: vi.fn(async (_id: string, f: string) => {
+      if (away > 0) throw new HubError(404, "Not Found");
+      return files[f] ?? "";
+    }),
+    saveIdentityFile: vi.fn(async (_id: string, f: string, t: string) => {
+      if (away > 0) throw new HubError(404, "Not Found");
+      calls.push(`write ${f}`);
+      files[f] = t;
+    }),
+    listed: vi.fn(async () => {
+      calls.push("list");
+      if (away > 0) {
+        away--;
+        return ["other"];
+      }
+      return ["other", "ledger"];
+    }),
   };
   return hub as typeof hub & DeskHub;
 };
 
+const LEDGER = (): Record<string, string> => ({
+  "IDENTITY.md": "# Identity\n- **Name:** Ledger\n- **Vibe:** calm\n",
+  "SOUL.md": withPurpose("# Soul\n", "Ledger", "Watch the bill."),
+  "AGENTS.md": withJob("# Guidelines\n", "Ledger", "Watch the bill."),
+  "WELCOME.md": withWelcome("Keep it short.\n", "Ledger", "Watch the bill."),
+});
+
 describe("renaming an agent", () => {
-  it("renames it, and puts the new name in its identity and the sections written from what it's for", async () => {
-    const files: Record<string, string> = {
-      "IDENTITY.md": "# Identity\n- **Name:** Ledger\n- **Vibe:** calm\n",
-      "SOUL.md": withPurpose("# Soul\n", "Ledger", "Watch the bill."),
-      "AGENTS.md": withJob("# Guidelines\n", "Ledger", "Watch the bill."),
-      "WELCOME.md": withWelcome("Keep it short.\n", "Ledger", "Watch the bill."),
-    };
+  it("puts the new name in its identity and the sections written from what it's for, and its instructions", async () => {
+    const files = LEDGER();
     const hub = filesHub(files);
-    await renameLocalAgent(hub, "ledger", "  Penny ");
-    await renameAgentFiles(hub, "ledger", "  Penny ");
+    await renameLocalAgent(hub, "ledger", "  Penny ", undefined, hub.listed);
     expect(hub.renameAgent).toHaveBeenCalledWith("ledger", "Penny", instructions("Penny", "Watch the bill."));
     expect(files["IDENTITY.md"]).toBe("# Identity\n- **Name:** Penny\n- **Vibe:** calm\n");
     expect(files["SOUL.md"]).toContain("You are Penny.");
@@ -111,18 +141,41 @@ describe("renaming an agent", () => {
     expect(purposeOf(files["SOUL.md"]!)).toBe("Watch the bill.");
   });
 
+  it("writes every file before the new name builds the agent again, while its files can still be read", async () => {
+    const files = LEDGER();
+    const hub = filesHub(files);
+    await renameLocalAgent(hub, "ledger", "Penny", undefined, hub.listed);
+    const renamed = hub.calls.indexOf("rename");
+    expect(hub.calls.slice(0, renamed).sort()).toEqual(["write AGENTS.md", "write IDENTITY.md", "write SOUL.md", "write WELCOME.md"]);
+    expect(hub.calls.slice(renamed + 1).every((c) => c === "list")).toBe(true);
+  });
+
+  it("waits until the hub serves the agent again before it's done", async () => {
+    const hub = filesHub(LEDGER(), undefined, 3);
+    await renameLocalAgent(hub, "ledger", "Penny", undefined, hub.listed);
+    // Left out three times while it was built again, then listed.
+    expect(hub.calls.filter((c) => c === "list")).toHaveLength(4);
+  });
+
   it("writes a new purpose along with the new name", async () => {
     const files: Record<string, string> = { "SOUL.md": withPurpose("", "Ledger", "Watch the bill."), "AGENTS.md": "# G\n" };
-    await renameAgentFiles(filesHub(files), "ledger", "Penny", "Watch deploys.");
+    await renameLocalAgent(filesHub(files), "ledger", "Penny", "Watch deploys.");
     expect(purposeOf(files["SOUL.md"]!)).toBe("Watch deploys.");
     expect(files["SOUL.md"]).toContain("You are Penny.");
   });
 
-  it("tells the hub the agent's new instructions along with a new purpose, and copes with a hub that can't", async () => {
+  it("keeps a missing AGENTS.md missing: the hub's own guidelines apply", async () => {
+    const files: Record<string, string> = { "SOUL.md": withPurpose("", "Ledger", "Watch the bill.") };
+    await renameLocalAgent(filesHub(files), "ledger", "Penny");
+    expect(files["AGENTS.md"]).toBeUndefined();
+  });
+
+  it("tells the hub the agent's new instructions along with a new purpose, files first, and copes with a hub that can't", async () => {
     const files: Record<string, string> = { "SOUL.md": withPurpose("", "Ledger", "Watch the bill.") };
     const hub = filesHub(files);
-    await setAgentPurpose(hub, "ledger", "Ledger", "Watch deploys.");
+    await setAgentPurpose(hub, "ledger", "Ledger", "Watch deploys.", hub.listed);
     expect(hub.renameAgent).toHaveBeenCalledWith("ledger", "Ledger", instructions("Ledger", "Watch deploys."));
+    expect(hub.calls.indexOf("write SOUL.md")).toBeLessThan(hub.calls.indexOf("rename"));
     expect(purposeOf(files["SOUL.md"]!)).toBe("Watch deploys.");
 
     const old = filesHub(files, () => Promise.reject(new HubError(405, "Method Not Allowed")));
@@ -130,14 +183,187 @@ describe("renaming an agent", () => {
     expect(purposeOf(files["SOUL.md"]!)).toBe("Watch costs.");
   });
 
-  it("leaves the files alone and says so plainly when the hub can't rename yet", async () => {
+  it("puts the files back and says so plainly when the hub can't rename yet", async () => {
     for (const status of [404, 405]) {
-      const files: Record<string, string> = { "IDENTITY.md": "- **Name:** Ledger\n" };
+      const files = LEDGER();
+      const before = { ...files };
       const hub = filesHub(files, () => Promise.reject(new HubError(status, "not found")));
       await expect(renameLocalAgent(hub, "ledger", "Penny")).rejects.toThrow(RENAME_UNAVAILABLE);
-      expect(hub.saveIdentityFile).not.toHaveBeenCalled();
-      expect(files["IDENTITY.md"]).toBe("- **Name:** Ledger\n");
+      expect(files).toEqual(before);
     }
     expect(RENAME_UNAVAILABLE).not.toMatch(/hub|api|http|40\d/i);
+  });
+
+  it("puts back the files it wrote when a later one can't be written, and doesn't ask the hub", async () => {
+    const files = LEDGER();
+    const before = { ...files };
+    const hub = filesHub(files);
+    const save = hub.saveIdentityFile.getMockImplementation()!;
+    let soulTries = 0;
+    hub.saveIdentityFile.mockImplementation(async (id: string, f: string, t: string) => {
+      if (f === "SOUL.md" && soulTries++ === 0) throw new HubError(500, "disk full");
+      return save(id, f, t);
+    });
+    await expect(renameLocalAgent(hub, "ledger", "Penny")).rejects.toThrow("disk full");
+    expect(hub.renameAgent).not.toHaveBeenCalled();
+    expect(files).toEqual(before);
+  });
+
+  it("never writes a file it didn't change when putting the others back, nor makes one that wasn't there", async () => {
+    const files = LEDGER();
+    delete files["WELCOME.md"];
+    const hub = filesHub(files, () => Promise.reject(new HubError(500, "busy")));
+    const save = hub.saveIdentityFile.getMockImplementation()!;
+    hub.saveIdentityFile.mockImplementation(async (id: string, f: string, t: string) => {
+      if (f === "SOUL.md") throw new HubError(500, "disk full");
+      return save(id, f, t);
+    });
+    await expect(renameLocalAgent(hub, "ledger", "Penny")).rejects.toThrow("disk full");
+    // IDENTITY.md went back; AGENTS.md and WELCOME.md were never written.
+    expect(hub.calls).toEqual(["write IDENTITY.md", "write IDENTITY.md"]);
+    expect(files["WELCOME.md"]).toBeUndefined();
+  });
+
+  it("says when the hub hadn't served the agent again in time", async () => {
+    vi.useFakeTimers();
+    try {
+      const done = renameLocalAgent(filesHub(LEDGER()), "ledger", "Penny", undefined, async () => ["other"]);
+      await vi.advanceTimersByTimeAsync(25_000);
+      await expect(done).resolves.toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("puts the files back when the hub refuses the name, and says why", async () => {
+    const files = LEDGER();
+    const before = { ...files };
+    const hub = filesHub(files, () => Promise.reject(new HubError(400, "an agent's name is 1 to 64 characters")));
+    await expect(renameLocalAgent(hub, "ledger", "Penny")).rejects.toThrow("an agent's name is 1 to 64 characters");
+    expect(files).toEqual(before);
+  });
+});
+
+describe("a new purpose", () => {
+  it("says a file it couldn't write, even a missing one, and puts back those it wrote", async () => {
+    const files = LEDGER();
+    const before = { ...files };
+    const hub = filesHub(files);
+    const save = hub.saveIdentityFile.getMockImplementation()!;
+    hub.saveIdentityFile.mockImplementation(async (id: string, f: string, t: string) => {
+      if (f === "AGENTS.md") throw new HubError(404, "Not Found");
+      return save(id, f, t);
+    });
+    await expect(setAgentPurpose(hub, "ledger", "Ledger", "Watch deploys.")).rejects.toThrow("Not Found");
+    expect(hub.renameAgent).not.toHaveBeenCalled();
+    expect(files).toEqual(before);
+  });
+});
+
+describe("waiting for an agent to serve again", () => {
+  it("is done at once for an agent the hub doesn't build again, after a moment", async () => {
+    vi.useFakeTimers();
+    try {
+      const done = servingAgain(async () => ["desk"], "desk");
+      await vi.advanceTimersByTimeAsync(2_000);
+      await expect(done).resolves.toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("gives up after a while, without an error", async () => {
+    vi.useFakeTimers();
+    try {
+      const done = servingAgain(async () => [], "ledger", 3_000);
+      await vi.advanceTimersByTimeAsync(4_000);
+      await expect(done).resolves.toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("a name that's taken", () => {
+  const roster = [
+    { hubId: "local", id: "scout", name: "Scout" },
+    { hubId: "acme", id: "atlas", name: "Atlas" },
+  ];
+  it("is another agent's on the same hub, its case and spaces aside", () => {
+    expect(nameTaken("  scout ", roster, "local")).toBe(true);
+    expect(nameTaken("Atlas", roster, "local")).toBe(false);
+    expect(nameTaken("Ranger", roster, "local")).toBe(false);
+    expect(nameTaken("   ", roster, "local")).toBe(false);
+    // Spaces between its words and how its letters are spelt aside too.
+    expect(nameTaken("Big  Al", [{ hubId: "local", id: "al", name: "Big Al" }], "local")).toBe(true);
+    expect(nameTaken("Zoe\u0308", [{ hubId: "local", id: "zoe", name: "Zo\u00eb" }], "local")).toBe(true);
+  });
+  it("isn't the agent's own, in another case", () => {
+    expect(nameTaken("SCOUT", roster, "local", "scout")).toBe(false);
+  });
+});
+
+describe("making a crew member", () => {
+  const brain = { provider: "claude-code", model: "sonnet" };
+  const fakeHub = (failOn?: string) => {
+    const files: Record<string, string> = { "SOUL.md": "# Soul\n", "AGENTS.md": "# Agents\n\n## Rules\n", "IDENTITY.md": "- **Name:** x\n", "WELCOME.md": "Say hello.\n" };
+    let config = "";
+    const calls: string[] = [];
+    const hub = {
+      createAgent: vi.fn(async () => void calls.push("create")),
+      agentConfig: vi.fn(async () => config),
+      saveAgentConfig: vi.fn(async (_id: string, toml: string) => {
+        calls.push("config");
+        config = toml;
+      }),
+      identityFile: vi.fn(async (_id: string, f: string) => files[f] ?? ""),
+      saveIdentityFile: vi.fn(async (_id: string, f: string, text: string) => {
+        if (f === failOn) throw new HubError(500, "disk full");
+        calls.push(f);
+        files[f] = text;
+      }),
+      deleteAgent: vi.fn(async () => void calls.push("delete")),
+    } as unknown as DeskHub;
+    return { hub, calls, files, config: () => config };
+  };
+
+  it("writes how they think and sound in one go, then their files", async () => {
+    const h = fakeHub();
+    const id = await createLocalAgent(h.hub, "Scout", "Watch CI.", brain, [], { provider: "fish_audio", voice: "v1" });
+    expect(id).toBe("scout");
+    expect(h.calls).toEqual(["create", "config", "SOUL.md", "AGENTS.md", "IDENTITY.md", "WELCOME.md"]);
+    const config = parse(h.config()) as Record<string, unknown>;
+    expect(JSON.stringify(config)).toContain("v1");
+    expect(JSON.stringify(config)).toContain("sonnet");
+    expect(h.files["SOUL.md"]).toContain("Watch CI.");
+  });
+
+  it("leaves nothing half-made: a step that fails removes them again", async () => {
+    const h = fakeHub("AGENTS.md");
+    const made = createLocalAgent(h.hub, "Scout", "Watch CI.", brain, []);
+    await expect(made).rejects.toBeInstanceOf(NotSetUp);
+    await expect(made).rejects.toThrow("Desk couldn’t finish setting up Scout, so nothing of them was kept.");
+    expect(h.calls).toEqual(["create", "config", "SOUL.md", "delete"]);
+    // Not made at all: nothing to remove.
+    const g = fakeHub();
+    (g.hub.createAgent as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new HubError(500, "disk full"));
+    await expect(createLocalAgent(g.hub, "Scout", "Watch CI.", brain, [])).rejects.toBeInstanceOf(HubError);
+    expect(g.hub.deleteAgent).not.toHaveBeenCalled();
+  });
+
+  it("takes the next free id when the hub has one the roster didn't know of", async () => {
+    const h = fakeHub();
+    (h.hub.createAgent as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new HubError(409, "agent 'scout' already exists"));
+    const id = await createLocalAgent(h.hub, "Scout", "Watch CI.", brain, []);
+    expect(id).toBe("scout-2");
+    expect((h.hub.createAgent as ReturnType<typeof vi.fn>).mock.calls.map((c) => (c[0] as { id: string }).id)).toEqual(["scout", "scout-2"]);
+  });
+
+  it("says what was left when it couldn't remove a half-made one, and never that nothing was kept", async () => {
+    const h = fakeHub("SOUL.md");
+    (h.hub.deleteAgent as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new HubError(500, "busy"));
+    const made = createLocalAgent(h.hub, "Scout", "Watch CI.", brain, []);
+    await expect(made).rejects.toMatchObject({ left: "scout" });
+    await expect(made).rejects.toThrow("nor remove what it had made: “scout” is still on this computer");
   });
 });

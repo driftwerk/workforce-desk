@@ -167,6 +167,8 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/memory/index/rebuild"),
     route("GET", "/api/desk/memory/settings"),
     route("PATCH", "/api/desk/memory/settings"),
+    // How many conversations keeping them for less would remove.
+    with_query("GET", "/api/desk/memory/retain-preview", &["days"]),
     route("PATCH", "/api/desk/memory/groups/{}"),
     // Continuing a session in another engine: the preview (its brief, what
     // it holds and who receives it), the handoff or hand back, and where a
@@ -226,6 +228,11 @@ const HTTP: &[Route] = &[
     route("GET", "/api/desk/suggestions"),
     route("POST", "/api/desk/suggestions/{}/accept"),
     route("POST", "/api/desk/suggestions/{}/dismiss"),
+    // The boss's decisions undone, and what it asked you answered or
+    // dropped.
+    route("POST", "/api/desk/decisions/{}/undo"),
+    route("POST", "/api/desk/items/{}/answer"),
+    route("POST", "/api/desk/items/{}/drop"),
     // Rooms.
     route("GET", "/api/desk/rooms"),
     route("POST", "/api/desk/rooms"),
@@ -754,6 +761,7 @@ mod tests {
             ("POST", "/api/desk/memory/index/rebuild"),
             ("GET", "/api/desk/memory/settings"),
             ("PATCH", "/api/desk/memory/settings"),
+            ("GET", "/api/desk/memory/retain-preview?days=30"),
             ("PATCH", "/api/desk/memory/groups/g-acme"),
         ] {
             assert!(

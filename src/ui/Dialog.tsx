@@ -21,12 +21,17 @@ const keepTabIn = (e: KeyboardEvent, root: HTMLElement) => {
 /** What makes `ref` modal from the keyboard: focus moves in (to its
  *  `[data-autofocus]`, else itself) and comes back after, Tab stays in it,
  *  and Escape closes it (only it, when modals are stacked). Returns the
- *  key handler for its outermost element. */
-export function useModal(ref: RefObject<HTMLElement | null>, onClose: () => void): (e: KeyboardEvent) => void {
+ *  key handler for its outermost element. Focus comes back to what had it,
+ *  or, when that was redrawn meanwhile, to what `refocus` finds. */
+export function useModal(ref: RefObject<HTMLElement | null>, onClose: () => void, refocus?: () => HTMLElement | null): (e: KeyboardEvent) => void {
+  const again = useRef(refocus);
+  again.current = refocus;
   useEffect(() => {
     const before = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     (ref.current?.querySelector<HTMLElement>("[data-autofocus]") ?? ref.current)?.focus();
-    return () => before?.focus();
+    // A click leaves focus on the page itself in WebKit (a button isn't
+    // focused by it): that's as good as lost.
+    return () => (before && before !== document.body && before.isConnected ? before : (again.current?.() ?? before))?.focus();
   }, [ref]);
   return (e) => {
     if (e.key === "Escape") {

@@ -28,10 +28,13 @@ import { jumpers } from "../rooms/unread";
 import { placeKey } from "../rooms/window";
 import { NewCrew } from "../crew/NewCrew";
 import { adoptDeskWelcome } from "../crew/welcome";
+import { rememberFormerNames } from "../rooms/formerNames";
 import { resumePairing } from "../hubs/PairHub";
 import { NewRoom } from "../rooms/NewRoom";
 import { Rooms } from "../rooms/Rooms";
 import { ThreadPanel, useOpenThread } from "../rooms/RoomView";
+import { DmThreadPanel, useOpenDmThread } from "../rooms/DmThread";
+import { agentKey } from "../chat/types";
 import { SearchPanel } from "../rooms/SearchPanel";
 import { OpenRoomDetails } from "../rooms/RoomDetails";
 import { MoveDialog } from "../groups/MoveDialog";
@@ -67,6 +70,9 @@ import { WindowsSetup } from "../setup/WindowsSetup";
 import { useHost } from "./host";
 import { resumeAfterUpdate } from "../updates/store";
 import { UpdateNotice, useRestartWhenIdle, useUpdateChecks } from "../updates/UpdateNotice";
+
+// An `@` by an agent's name before a rename still reaches them.
+rememberFormerNames();
 
 /** Stops the answer nearest: in the open room, the open thread's when focus
  *  is in it, else the room's newest live one; else the open DM's turn. */
@@ -109,7 +115,14 @@ const ROSTER_EVERY_MS = 60_000;
 const LOCAL_HUB_RETRY_MS = 5_000;
 
 export function App() {
-  const { connect, sessions, openId, view, error, clearError, fail } = useDesk();
+  // Each piece on its own: the whole store would draw everything again on
+  // every event any engine sends.
+  const connect = useDesk((s) => s.connect);
+  const view = useDesk((s) => s.view);
+  const error = useDesk((s) => s.error);
+  const clearError = useDesk((s) => s.clearError);
+  const fail = useDesk((s) => s.fail);
+  const open = useDesk((s) => (s.openId ? s.sessions[s.openId] : undefined));
   const theme = useTheme();
   const { setCustom, setSystemDark } = useThemeStore();
   // New session's sheet, with the group it was started from, if any.
@@ -303,9 +316,9 @@ export function App() {
     useDesk.getState().setView("board");
   }, true, { fromFields: false });
 
-  const open = openId ? sessions[openId] : undefined;
   const sessionName = useSessionName(open?.id, open?.name ?? "");
   const thread = useOpenThread();
+  const dmThread = useOpenDmThread();
   const beside = useAgentPanel();
   const mainName = useMainName();
   const mainKey = useMainKey();
@@ -320,6 +333,17 @@ export function App() {
       element: (
         <ErrorBoundary name="thread">
           <ThreadPanel key={`${thread.room.id}/${thread.thread}`} room={thread.room} thread={thread.thread} />
+        </ErrorBoundary>
+      ),
+    });
+  }
+  if (dmThread && !thread) {
+    panels.push({
+      kind: "thread",
+      label: "Thread",
+      element: (
+        <ErrorBoundary name="thread">
+          <DmThreadPanel key={`${agentKey(dmThread.agent)}#${dmThread.parent}`} agent={dmThread.agent} hub={dmThread.hub} parent={dmThread.parent} />
         </ErrorBoundary>
       ),
     });

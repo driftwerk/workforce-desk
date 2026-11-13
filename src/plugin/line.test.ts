@@ -95,7 +95,8 @@ describe("Desk's line in a Claude Code session", () => {
     });
     const r = await h.call!({ tool: `${PREFIX}ask`, tool_use_id: "tu1", to: "desk", text: "Which port?" });
     expect(posted).toEqual([{ url: `${LINE}/call`, body: { name: "ask", input: { to: "desk", text: "Which port?" } } }]);
-    expect(r).toEqual({ result: { answer: "5433", from: "Sarah" } });
+    // As text: Claude Code refuses an object result since 2.1.323.
+    expect(r).toEqual({ result: JSON.stringify({ answer: "5433", from: "Sarah" }) });
   });
 
   it("gives the session the hub's refusal, or says Desk can't be reached", async () => {

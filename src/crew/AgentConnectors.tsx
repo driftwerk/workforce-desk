@@ -25,6 +25,7 @@ import {
   choose,
   setAgentConnectors,
   throughOf,
+  todayOf,
   type Binding,
   type Through,
   type Today,
@@ -129,14 +130,7 @@ export function AgentConnectors({
 
   /** Every connector reaching the agent today, as a first choice must keep
    *  them: the catalog's, and every other adapter the hub has. */
-  const today = (): Today => {
-    if (!list) return { reaching: [], own: [] };
-    const used = list.flatMap((c) => c.usedBy.filter((u) => u.agent === agent.id).map((u) => ({ id: c.id, own: u.connection === "own" })));
-    return {
-      reaching: [...new Set([...list.map((c) => c.id), ...(listing?.adapters ?? [])])],
-      own: used.filter((u) => u.own).map((u) => u.id),
-    };
-  };
+  const today = (): Today => todayOf(listing, agent.id);
 
   const update = (change: (b: Binding) => Binding) => {
     if (!desk) return;

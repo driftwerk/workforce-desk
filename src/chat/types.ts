@@ -131,6 +131,11 @@ export interface ChatMessage {
   /** Desk's own id for a message you sent, which the hub keeps it under: on
    *  a hub with client ids, the kept copy is known by it alone. */
   clientId?: string;
+  /** Changed after it was sent: a newer version replaced it, and the turn
+   *  that answered the old one was set aside. */
+  edited?: boolean;
+  /** An answer to a message you deleted since. */
+  answeredDeleted?: boolean;
   /** Where a kept message is in the hub's archive: higher was kept later. */
   seq?: number;
   /** The client id of the message whose turn said this: an answer, the
@@ -181,16 +186,43 @@ export const FEATURES = {
    *  each kept row's place in the archive: a live message is known by its
    *  id alone. A hub without it is matched by words (./legacy.ts). */
   clientIds: "desk.client_ids",
+  /** A DM turn may replace your latest message (`edit`): the hub sets the
+   *  old one and everything after it aside, and tells the agent what the
+   *  set-aside reply did. */
+  edit: "desk.edit",
+  /** Your own DM messages can be deleted, with the memories saved from
+   *  them (./remove.ts); the replies to one are marked `answered_deleted`. */
+  delete: "desk.delete",
+  /** A DM's whole history can be searched on the hub, and read around a
+   *  match (./search.ts). */
+  search: "desk.search",
+  /** A DM has threads: a conversation of its own on a message, listed by the
+   *  hub, a reply in one optionally also sent to the DM (./thread.ts). */
+  dmThreads: "desk.dm_threads",
   /** A room turn may name the room's members (`members`), which the hub
    *  tells the agent in its own words. A hub without it is told them as a
    *  line of the room's, from Desk. */
   roster: "desk.roster",
 } as const;
 
-export type DeliveryKind = "reminder" | "job" | "workflow" | "check_in" | "approval" | "file" | "resumed" | "notice" | "plan" | "other";
+export type DeliveryKind =
+  | "reminder"
+  | "job"
+  | "workflow"
+  | "check_in"
+  | "approval"
+  | "file"
+  | "resumed"
+  | "notice"
+  /** What a boss asks of you: a session's question, or its own. */
+  | "question"
+  | "plan"
+  /** A boss's update on its crew. */
+  | "update"
+  | "other";
 
 export type DeskPlace =
-  | { kind: "dm" }
+  | { kind: "dm"; thread?: string }
   | { kind: "room"; room: string; name: string; thread?: string }
   | { kind: "call" }
   | { kind: "legacy_room"; slug: string };
@@ -217,6 +249,9 @@ export interface DeskTurn {
   voice?: DeskVoice;
   /** Who is in the room, for a hub that takes them (`desk.roster`). */
   members?: DeskMember[];
+  /** In a DM, on a hub with `desk.edit`: this replaces your latest message,
+   *  `replaces` (the id the hub keeps it under). */
+  edit?: { replaces: string };
 }
 
 /** A room's member, as a room turn names them. */
@@ -253,6 +288,10 @@ export interface DeskMark {
   /** What the turn asked with `in_reply_to` failed with, said instead of an
    *  answer. */
   failed?: boolean;
+  /** A newer version of the message, which replaced it. */
+  edited?: boolean;
+  /** An answer to a message the person deleted since. */
+  answered_deleted?: boolean;
 }
 
 /** What a live turn is doing, as a snapshot says. */

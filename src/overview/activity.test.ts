@@ -159,4 +159,10 @@ describe("an event about a room message", () => {
     expect(lineOf(ev({}), {}, named).lead).toEqual({ name: "Atlas", session: false });
     expect(lineOf(ev({ subject: { kind: "agent", id: "allan", name: "allan" } }), {}, named).lead?.name).toBe("Allan");
   });
+
+  it("call the overseer by the name it has now, though the event kept the one it had", () => {
+    const named = agentNamer([{ hubId: "local", id: "desk", name: "Boss" }], "local");
+    const paused = ev({ actor: { kind: "manager", id: "desk", name: "Desk" }, subject: null, text: "paused check-ins until 15:02" });
+    expect(lineOf(paused, {}, named).lead).toEqual({ name: "Boss", session: false });
+  });
 });
