@@ -1655,6 +1655,69 @@ export interface TicketDetails {
   due?: string;
   readAt?: string;
   commentsAt?: string;
+  /** Its priority as bars: 1 the most urgent, 4 the least. */
+  priorityRank?: number;
+  /** Its type there (Story, Bug, Epic …) and the type's level: 1 an epic,
+   *  0 a standard issue, -1 a sub-task. Jira only. */
+  kind?: string;
+  kindLevel?: number;
+  /** Its state's name there, and on Linear the state's type (`started`). */
+  remoteState?: string;
+  stateKind?: string;
+  /** Its parent there, and (Jira) the epic it belongs to. */
+  parent?: IssueRef;
+  epic?: IssueRef;
+  /** Story points or estimate. */
+  points?: number;
+  /** The sprint (Jira) or cycle (Linear) it is in. */
+  sprint?: SprintRef;
+  /** How many of its sub-tasks or sub-issues are done. */
+  subItems?: { done: number; total: number };
+  links?: IssueLink[];
+  components?: string[];
+  fixVersions?: string[];
+  reporter?: string;
+  created?: string;
+  /** `2026-11-14`. */
+  start?: string;
+  /** How many comments it has there, when the listing says. */
+  comments?: number;
+  prs?: PrSummary;
+}
+
+/** Another issue a ticket's issue points at. */
+export interface IssueRef {
+  key: string;
+  title: string;
+  kind?: string;
+  state?: string;
+  done?: boolean;
+}
+
+/** How a linked issue stands to a ticket's: it blocks it, is blocked by it,
+ *  or is linked some other way (`words`: "relates to", "duplicates"). */
+export interface IssueLink {
+  rel: "blockedBy" | "blocks" | "other";
+  words?: string;
+  issue: IssueRef;
+}
+
+/** A sprint (Jira) or cycle (Linear, which may have only a number). */
+export interface SprintRef {
+  name?: string;
+  number?: number;
+  /** `2026-11-14`. */
+  starts?: string;
+  ends?: string;
+}
+
+/** An issue's pull requests: how many, their overall state there, and the
+ *  one PR's number and address when known. */
+export interface PrSummary {
+  count: number;
+  state: "open" | "review" | "changes" | "merged" | "declined" | "draft";
+  number?: number;
+  url?: string;
 }
 
 /** Where a ticket's file comes from: dropped on a ticket of your own, a
