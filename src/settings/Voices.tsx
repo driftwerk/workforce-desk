@@ -33,7 +33,7 @@ const GEMINI_KEY = "speech/gemini/api_key";
 export function Voices() {
   const { hub, fail } = useDesk();
   const { defaultVoice, customVoices, set } = useSettings();
-  // Talking to agents first; then each provider, for how they sound.
+  // Voice (talking to agents) first; then each provider, for how they sound.
   const [selected, setSelected] = useState<string>(TALK);
   const [have, setHave] = useState<string[]>([]);
   const [geminiProvider, setGeminiProvider] = useState(false);
@@ -55,7 +55,7 @@ export function Voices() {
     <div className="voices">
       <nav className="voices-providers" aria-label="Voice">
         <button type="button" className={`side-row ${selected === TALK ? "on" : ""}`} onClick={() => setSelected(TALK)}>
-          <span className="side-name">Talking to agents</span>
+          <span className="side-name">Voice</span>
         </button>
         <span className="voices-nav-label faint small">How agents sound</span>
         {VOICE_PROVIDERS.map((p) => (

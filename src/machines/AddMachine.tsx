@@ -369,7 +369,7 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
         }}
         onKeyDown={(e) => e.key === "Escape" && flow.at !== "setup" && onClose()}
       >
-        <h2 className="display-md">Add a machine</h2>
+        <h2 className="display-lg">Add a machine</h2>
         {pickable && (
           <div className="field">
             <span className="ov-label muted">From your SSH config</span>

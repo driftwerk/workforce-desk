@@ -77,7 +77,7 @@
   gap: 6px;
   text-align: left;
   padding: 10px;
-  border-radius: 16px;
+  border-radius: var(--radius);
   color: var(--text);
   background: var(--surface);
   border: 1px solid var(--border);
@@ -202,7 +202,7 @@ legend.set-label {
   align-items: center;
   gap: 6px;
   padding: 3px 10px 3px 3px;
-  border-radius: 13px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--raised);
 }
@@ -485,7 +485,7 @@ legend.set-label {
   gap: 12px;
   flex-wrap: wrap;
   padding: 10px 12px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--surface);
 }
 
@@ -638,7 +638,7 @@ legend.set-label {
 .theme-toml {
   margin: 0;
   padding: 14px 16px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--sunken);
   border: 1px solid var(--border);
   color: var(--term-text);
@@ -1316,7 +1316,7 @@ legend.set-label {
   gap: 12px;
   padding: 9px 10px;
   border: 0;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   background: none;
   color: var(--text);
   text-align: left;
@@ -1651,7 +1651,7 @@ legend.set-label {
   border: 1px solid var(--border);
   background: var(--bg);
   color: var(--text);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
   outline: none;
   font: inherit;
@@ -1725,6 +1725,26 @@ legend.set-label {
   padding-left: 0;
   padding-right: 0;
 }
+/* Which account this computer's sign-in is: a row of the list like the
+   others, its Change at the right where the rows' actions are. */
+.account-share-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+/* "Add account…" closes the list: after a hairline, its words in line with
+   the rows' names (a ghost button's own padding pulled back). */
+.accounts > .account-actions-start {
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.accounts > .account-actions-start > .btn-ghost {
+  margin-left: -12px;
+}
 /* Within an engine's card, under its accounts: a row of the card's own. */
 .accounts .switch-row {
   padding: 8px 0 4px;
@@ -1744,4 +1764,37 @@ legend.set-label {
 .settings-pane .prov-section > .seg button {
   padding-inline: 14px;
   white-space: nowrap;
+}
+
+/* Lists of things in Settings (workspaces, sessions, budgets, memory's
+   totals, voices, engines) are one framed list with hairlines between
+   rows, as Providers' and Help's are: not a stack of cards. */
+.hub-list,
+.voice-list,
+.engine-list {
+  gap: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-fill);
+  box-shadow: 0 1px 2px var(--lift);
+  overflow: hidden;
+}
+.hub-list > .hub-row,
+.voice-list > .hub-row,
+.engine-list > .engine-row {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.hub-list > * + *,
+.voice-list > * + *,
+.engine-list > * + *,
+.hub-list > * + .hub-row,
+.voice-list > * + .hub-row,
+.engine-list > * + .engine-row {
+  border-top: 1px solid var(--border);
+}
+.engine-list > li:not(.engine-row) {
+  padding: 12px 14px;
 }

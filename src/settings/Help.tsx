@@ -166,6 +166,7 @@ export function Help() {
   return (
     <section className="settings-pane" aria-label="Help">
       <h1 className="display-lg">Help</h1>
+      <p className="muted">Setting up, updates, Desk’s helper, where your keys are kept, and sending a report when something’s wrong.</p>
 
       <div className="prov-list">
         <div className="setting-card">
