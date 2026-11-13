@@ -25,6 +25,10 @@ export const browserOf = (hub: HubRef) => ({
   live: async (): Promise<BrowserLive[]> => (await deskCall<{ live: BrowserLive[] }>(hub, "GET", "/api/desk/browser")).live,
   /** Stop: the turns using the browser end, it closes, and its session allowances go. */
   stop: (agent?: string): Promise<BrowserStopped> => deskCall(hub, "POST", "/api/desk/browser/stop", agent ? { agent } : {}),
+  /** Brings `agent`'s tab in the person's Chrome to the front of its
+   *  window; false when Chrome isn't connected or the agent has no tab open. */
+  show: async (agent: string): Promise<boolean> =>
+    (await deskCall<{ shown?: boolean }>(hub, "POST", "/api/desk/browser/show", { agent })).shown === true,
   /** A screenshot a browser's activity row names. */
   shot: async (file: string): Promise<Blob> => {
     const res = await pairedHub(hub).fetch("GET", `/api/desk/browser/shots/${encodeURIComponent(file)}`);
