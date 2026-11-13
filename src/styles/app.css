@@ -4344,7 +4344,6 @@ body.line-resizing * {
 /* Badges that wrapped under the name sit at the row's right edge. */
 .gi > .badge,
 .gi > .side-dot,
-.gi > .gi-grid,
 .gi > .gi-ticket,
 .gi > .gi-charge,
 .gi > .gi-meta,
