@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useId, useState } from "react";
 import { useDesk } from "../hub/store";
 import { HubError } from "../hub/client";
 import type {
@@ -169,7 +169,11 @@ const sentence = (s: string): string => {
 /** A quoted message long enough to be the one sent ("told it: “…”"). */
 const QUOTED = /\s*[:—–-]?\s*[“"]([^”"]{60,})[”"]\s*\.?/;
 
-const NOTHING = /^(let\b.*\bwait|left\b.*\balone|sent nothing|did nothing|held off|waited)\b/i;
+/** The hub's words for choosing to do nothing: "let it wait", "let the
+ *  deploy wait", "left it alone", "sent nothing". Only these, so an action
+ *  that merely mentions waiting ("let it go ahead, then wait") is not
+ *  folded away. */
+const NOTHING = /^(let (it|them|this|that|(the )?[\w.-]+( [\w.-]+)?) wait|left (it|them|\S+) alone|sent nothing|did nothing|held off)\.?$/i;
 
 /** A decision's parts: what it did, why, the message it sent, and whether
  *  it chose to do nothing. The hub's own fields when it gives them; read
@@ -189,11 +193,32 @@ export function decisionParts(line: DecisionLine): { action: string; why: string
 export function answerOptions(options: readonly AnswerOption[], recommendation?: string | null): { label: string; recommended: boolean }[] {
   const said = options.map((o) => (typeof o === "string" ? { label: o, recommended: false } : { label: o.label, recommended: !!o.recommended }));
   if (said.some((o) => o.recommended)) return said;
-  const best = recommended(
-    said.map((o) => o.label),
-    recommendation,
-  );
+  const labels = said.map((o) => o.label);
+  const best = recommended(labels, recommendation) ?? closest(labels, recommendation);
   return said.map((o) => ({ ...o, recommended: o.label === best }));
+}
+
+const words = (s: string): string[] =>
+  plain(s)
+    .split(" ")
+    .filter((w) => w.length > 2);
+
+/** The option most of whose words the recommendation says, when it clearly
+ *  leads every other: most of its words said, and a third more of them
+ *  than the next. None when it's close: a wrong button lit is worse than
+ *  none. */
+export function closest(options: readonly string[], recommendation?: string | null): string | null {
+  const said = new Set(words(recommendation ?? ""));
+  if (!said.size) return null;
+  const scored = options
+    .map((o) => {
+      const w = words(o);
+      return { o, score: w.length ? w.filter((x) => said.has(x)).length / w.length : 0 };
+    })
+    .sort((a, b) => b.score - a.score);
+  const [first, second] = scored;
+  if (!first || first.score < 0.6) return null;
+  return !second || first.score - second.score >= 0.34 ? first.o : null;
 }
 
 const plain = (s: string): string =>
@@ -220,7 +245,7 @@ export function recommended(options: readonly string[], recommendation?: string 
 const clock = (iso?: string | null): string => {
   if (!iso) return "";
   const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
 };
 
 // ── 1. What happened ──────────────────────────────────────────────────────
@@ -418,6 +443,7 @@ function NeedsYouPost({ item, content }: { item: MentionedItem; content: string 
 // hub would when asked again.
 const undoneHere = new Map<string, string>();
 const settledHere = new Map<string, string>();
+const heldHere = new Set<string>();
 
 /** The answers to what the boss asked: settled on the hub when pressed,
  *  the recommended one filled amber, the rest outlined, and Hold, which
@@ -438,14 +464,20 @@ function Answers({
 }) {
   const connected = useDesk((s) => !!s.hub);
   const [busy, setBusy] = useState<string | null>(null);
-  const [held, setHeld] = useState(false);
+  const [held, setHeldHere] = useState(heldHere.has(id));
+  const setHeld = (on: boolean) => {
+    if (on) heldHere.add(id);
+    else heldHere.delete(id);
+    setHeldHere(on);
+  };
   const [settled, setSettledHere] = useState<string | null>(settledHere.get(id) ?? null);
   const setSettled = (said: string) => {
     settledHere.set(id, said);
     setSettledHere(said);
   };
   const [problem, setProblem] = useState<string | null>(null);
-  if (!options.length && !parked) return null;
+  // Asked with nothing to press: answered in your own words.
+  if (!options.length && !parked) return <p className="faint small">Answer in this chat.</p>;
   if (settled)
     return (
       <p className="faint small" role="status">
@@ -455,7 +487,7 @@ function Answers({
   if (held)
     return (
       <p className="faint small" role="status">
-        Held: it stays open until you answer.{" "}
+        Left open. Nothing was sent.{" "}
         <button type="button" className="link small" onClick={() => setHeld(false)}>
           Answer now
         </button>
@@ -490,7 +522,7 @@ function Answers({
           </button>
         ))}
         {answers.length > 0 && (
-          <button type="button" className="link small needs-hold" disabled={busy !== null} onClick={() => setHeld(true)}>
+          <button type="button" className="link needs-hold" disabled={busy !== null} onClick={() => setHeld(true)}>
             Hold, I'll look
           </button>
         )}
@@ -533,7 +565,10 @@ function WhatIDid({ decisions, labelled = true }: { decisions: readonly Decision
   const acted = parts.filter((p) => !p.leftAlone);
   const alone = parts.filter((p) => p.leftAlone);
   const timed = decisions.some((d) => !!clock(d.at));
-  const since = alone[0]?.why ? `, since ${alone[0].why[0]!.toLowerCase()}${alone[0].why.slice(1).replace(/\.$/, "")}` : "";
+  // Why, when every one of them was for the same reason.
+  const whys = new Set(alone.map((p) => p.why.toLowerCase()));
+  const one = whys.size === 1 ? alone[0]!.why : "";
+  const since = one ? `, since ${one[0]!.toLowerCase()}${one.slice(1).replace(/\.$/, "")}` : "";
   return (
     <section className="did" aria-label="What I did">
       {labelled && <span className="sec-label">What I did</span>}
@@ -562,6 +597,7 @@ function DecisionRow({ line, action, why, message, timed }: { line: DecisionLine
   // A decision that can't be undone after all: no button to press again.
   const [fixed, setFixed] = useState(false);
   const [shown, setShown] = useState(false);
+  const panel = useId();
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const done = (said: string) => {
@@ -610,7 +646,7 @@ function DecisionRow({ line, action, why, message, timed }: { line: DecisionLine
       </span>
       <span className="dec-tools">
         {message && (
-          <button type="button" className="link dec-msg" aria-expanded={shown} aria-label={`The message: ${what}`} onClick={() => setShown((s) => !s)}>
+          <button type="button" className="link dec-msg" aria-expanded={shown} aria-controls={panel} aria-label={`The message: ${what}`} onClick={() => setShown((s) => !s)}>
             Message
           </button>
         )}
@@ -626,7 +662,11 @@ function DecisionRow({ line, action, why, message, timed }: { line: DecisionLine
           </button>
         )}
       </span>
-      {shown && message && <p className="dec-message">{message}</p>}
+      {shown && message && (
+        <p className="dec-message" id={panel}>
+          {message}
+        </p>
+      )}
     </li>
   );
 }

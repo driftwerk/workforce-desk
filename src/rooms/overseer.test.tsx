@@ -7,7 +7,7 @@ import { useDesk } from "../hub/store";
 import type { DeskSocket, DeskTransport } from "../hub/transport";
 import type { DeskExtras } from "../hub/types";
 import { Message } from "./Message";
-import { answerOptions, decisionParts, firstSentence, readNeed, readNeedsPost, recommended } from "./Overseer";
+import { answerOptions, closest, decisionParts, firstSentence, readNeed, readNeedsPost, recommended } from "./Overseer";
 
 vi.mock("@workforce/rich", () => ({
   RichMarkdown: ({ text }: { text: string }) => text,
@@ -68,7 +68,7 @@ const UPDATE: DeskExtras = {
     decisions: [
       { id: "d1", text: "told it to wait for green CI", why: "red main blocks everyone's deploys", undo: "undo" },
       { id: "d2", text: "let it wait", why: "it was working and nothing waited on you", undo: null },
-      { id: "d3", text: "let it wait", why: "its turn was still running", undo: null },
+      { id: "d3", text: "let it wait", why: "It was working and nothing waited on you.", undo: null },
     ],
     waiting: [
       {
@@ -125,10 +125,20 @@ describe("a boss's update, laid out", () => {
   it("holds what needs you without asking the hub, and offers it again", () => {
     show(said("…", UPDATE, "update"));
     fireEvent.click(screen.getByRole("button", { name: "Hold, I'll look" }));
-    expect(screen.getByText(/Held: it stays open/)).toBeTruthy();
+    expect(screen.getByText(/Left open\. Nothing was sent\./)).toBeTruthy();
     expect(asked).toHaveLength(0);
     fireEvent.click(screen.getByRole("button", { name: "Answer now" }));
     expect(screen.getByRole("button", { name: "Only new ones" })).toBeTruthy();
+  });
+
+  it("keeps what you held held when drawn again", () => {
+    const m = said("…", { update: { waiting: [{ itemId: "held1", text: "Ship it?", options: ["Yes", "No"] }] } }, "update");
+    const r = show(m);
+    fireEvent.click(screen.getByRole("button", { name: "Hold, I'll look" }));
+    r.unmount();
+    show(m);
+    expect(screen.getByText(/Left open/)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
   });
 
   it("answers what waits through the hub, which settles it", async () => {
@@ -205,6 +215,24 @@ describe("what I did", () => {
     fireEvent.click(fold);
     expect(fold.getAttribute("aria-expanded")).toBe("true");
     expect([...container.querySelectorAll(".dec-action")].map((e) => e.textContent)).toEqual(["Told it to wait for green CI.", "Let it wait.", "Let it wait."]);
+  });
+
+  it("says why it left it alone only when every time was for the same reason", () => {
+    show(
+      said(
+        "…",
+        {
+          update: {
+            decisions: [
+              { id: "f1", text: "let it wait", why: "it was working" },
+              { id: "f2", text: "sent nothing", why: "CI was still running" },
+            ],
+          },
+        },
+        "update",
+      ),
+    );
+    expect(screen.getByRole("button", { name: /I left it alone/ }).textContent).toBe("+ 2 times I left it alone");
   });
 
   it("keeps the message it sent behind Message, and shows its time when the hub says it", () => {
@@ -307,6 +335,7 @@ describe("a needs-you message", () => {
   it("has nothing to press when it asked nothing with answers", () => {
     show(said("**Needs you.** Tell me which repo the export lives in.", { item: { itemId: "i3" } }, "question"));
     expect(screen.queryAllByRole("button")).toHaveLength(0);
+    expect(screen.getByText("Answer in this chat.")).toBeTruthy();
   });
 
   it("says how long a still-waiting one has waited, and drops one set aside", async () => {
@@ -381,6 +410,16 @@ describe("reading the parts out of the words", () => {
     expect(recommended(["Yes", "No"], "Yes, no question")).toBeNull();
     expect(recommended(["No"], "Nothing to add")).toBeNull();
     expect(recommended(opts, null)).toBeNull();
+    // Most of one option's words, clearly ahead of the rest.
+    expect(closest(["Rewrite saved copies", "Only new ones"], "I'd rewrite the saved copies first")).toBe("Rewrite saved copies");
+    // Close between two: none lit rather than the wrong one.
+    expect(
+      closest(
+        ["Deactivate · leave the user empty", "Deactivate · I'll name the organisation", "Leave both as they are"],
+        "deactivate the roles in (2). For (1), name the organisation if you know it, or leave it empty on staging for now.",
+      ),
+    ).toBeNull();
+    expect(closest(["Yes", "No"], "")).toBeNull();
     expect(answerOptions(["A", { label: "B", recommended: true }], "A")).toEqual([
       { label: "A", recommended: false },
       { label: "B", recommended: true },
@@ -409,5 +448,10 @@ describe("reading the parts out of the words", () => {
     expect(decisionParts({ id: "1", text: "sent nothing", why: "" })).toMatchObject({ leftAlone: true, why: "" });
     expect(decisionParts({ id: "1", text: "let it wait", why: "x", kind: "acted" }).leftAlone).toBe(false);
     expect(decisionParts({ id: "1", text: "told it: “short”", why: "x" }).message).toBeNull();
+    expect(decisionParts({ id: "1", text: "let the deploy wait", why: "x" }).leftAlone).toBe(true);
+    expect(decisionParts({ id: "1", text: "left acme-web alone", why: "x" }).leftAlone).toBe(true);
+    // Mentions waiting, but did something.
+    expect(decisionParts({ id: "1", text: "Let it go ahead, then wait for review", why: "x" }).leftAlone).toBe(false);
+    expect(decisionParts({ id: "1", text: "told it to wait for green CI", why: "x" }).leftAlone).toBe(false);
   });
 });
