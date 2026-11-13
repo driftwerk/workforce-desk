@@ -789,6 +789,8 @@ export class DeskHub {
    *  session. */
   alwaysItem = (id: string, then?: string): Promise<{ done: string }> =>
     this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/always`, then ? { then } : {});
+  /** Something the boss left for you, done by you. */
+  doneItem = (id: string): Promise<{ message: string }> => this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/done`);
   /** Drops what the boss asked you, unanswered. */
   dropItem = (id: string): Promise<{ done: string }> => this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/drop`);
   /** You're typing to the boss `agent`: its posts wait for a pause. Quiet
