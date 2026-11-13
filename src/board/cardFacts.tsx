@@ -286,6 +286,50 @@ export const CycleIcon = ({ size = 11 }: { size?: number }) => (
   </Svg>
 );
 
+export const BranchIcon = ({ size = 11 }: { size?: number }) => (
+  <Svg size={size}>
+    <circle cx="4.5" cy="3.6" r="1.6" />
+    <circle cx="4.5" cy="12.4" r="1.6" />
+    <circle cx="11.5" cy="5" r="1.6" />
+    <path d="M4.5 5.2v5.6M11.5 6.6c0 3-7 2-7 4.2" />
+  </Svg>
+);
+
+export const CommitIcon = ({ size = 12 }: { size?: number }) => (
+  <Svg size={size}>
+    <circle cx="8" cy="8" r="2.4" />
+    <path d="M1.5 8h4.1M10.4 8h4.1" />
+  </Svg>
+);
+
+/** Opens somewhere else: Jira, Linear, a page. */
+export const ExtIcon = ({ size = 11 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M6 3H3v10h10v-3M9 2.5h4.5V7M13.5 2.5 7.5 8.5" />
+  </Svg>
+);
+
+export const CalendarIcon = ({ size = 12 }: { size?: number }) => (
+  <Svg size={size}>
+    <rect x="2.5" y="3.2" width="11" height="10.3" rx="2" />
+    <path d="M2.5 6.6h11M5.6 1.8v2.6M10.4 1.8v2.6" />
+  </Svg>
+);
+
+export const ProjectIcon = ({ size = 12 }: { size?: number }) => (
+  <Svg size={size}>
+    <path d="M3 3.2h10v9.6H3zM3 6.4h10" />
+    <path d="M5.4 9.2h3" />
+  </Svg>
+);
+
+/** Checks passed. */
+export const CheckIcon = ({ size = 11 }: { size?: number }) => (
+  <Svg size={size} color="var(--done)">
+    <path d="M3.5 8.4l2.8 2.8L12.6 5" />
+  </Svg>
+);
+
 /** A PR chip's state: Desk's chip-live, by where the PR stands. */
 export type PrLook = "open" | "review" | "changes" | "merged" | "draft";
 

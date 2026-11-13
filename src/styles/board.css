@@ -648,107 +648,10 @@ button.ticket-chip:hover {
   font: inherit;
   font-size: 13px;
 }
-.ticket-needs,
-.ticket-links,
-.ticket-need-add {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.ticket-needed-by {
-  padding-top: 6px;
-}
-.ticket-need {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-width: 0;
-}
-.ticket-need-open,
-.ticket-need-pick {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 10px;
-  border: 0;
-  border-radius: var(--radius-sm);
-  background: none;
-  color: var(--text);
-  text-align: left;
-}
-.ticket-need-open:hover,
-.ticket-need-pick:hover {
-  background: var(--raised);
-}
-.ticket-need-title {
-  flex: 1;
-  min-width: 0;
-  font-size: 13px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ticket-need-more {
-  align-self: flex-start;
-}
-.ticket-link {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.ticket-link > .chip,
 .board-card-meta > .chip {
   flex: none;
   white-space: nowrap;
 }
-.ticket-link > .link {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 13px;
-  color: var(--signal-soft-text);
-}
-.ticket-link > .link:hover {
-  color: var(--signal);
-}
-.ticket-history {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-  padding-top: 12px;
-  border-top: 1px solid var(--border);
-}
-.ticket-history-head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-}
-.ticket-history-head h3 {
-  flex: 1;
-}
-.ticket-history-rows {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.ticket-history-row {
-  display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  gap: 10px;
-  font-size: 12.5px;
-  overflow-wrap: anywhere;
-}
-.ticket-history-row .mono {
-  font-size: 12px;
-}
-
 /* A session's or an agent's history, under its goal or above its DM. */
 .subject-history {
   flex: none;
@@ -1025,43 +928,160 @@ button.ticket-chip:hover {
 }
 
 /* ── The ticket's view: a reading column and a details column ─────────────
-   Two columns where the panel is wide (full screen, a wide side panel);
-   one where it's narrow, with what to do with it just under its title. */
+   Measured by its own width (TicketDetail's useLayout): two columns where
+   the panel is wide; under 760px one column, what to do with it and its
+   facts in a band under its title; under 600px (a popup over a grid) as
+   short as it goes. */
 
 .ticket-panel {
   container: ticket / inline-size;
 }
+.ticket-panel .rpanel-head {
+  padding: 14px 14px 14px 22px;
+  border-bottom: 1px solid var(--border);
+}
+.ticket-head-btn {
+  font-weight: 500;
+}
+.ticket-head-btn[aria-pressed="true"] {
+  border-color: var(--signal);
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+}
 .ticket-body.ticket-view {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
   gap: 0;
   padding: 0;
-  overflow: hidden;
+  border-top: 0;
   background: var(--bg);
+}
+.ticket-view.ticket-wide {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  overflow: hidden;
+}
+.ticket-view.ticket-stacked,
+.ticket-view.ticket-compact {
+  display: block;
+  overflow-y: auto;
 }
 .ticket-read {
   min-width: 0;
   min-height: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 22px;
-  padding: 28px 40px 32px;
+  gap: 24px;
+  padding: 24px 40px 36px;
+}
+.ticket-wide .ticket-read {
+  overflow-y: auto;
+}
+.ticket-stacked .ticket-read {
+  gap: 20px;
+  padding: 18px 22px 28px;
+}
+.ticket-compact .ticket-read {
+  gap: 14px;
+  padding: 16px 20px 24px;
 }
 .ticket-read.is-dropping {
   outline: 2px dashed var(--signal);
   outline-offset: -10px;
 }
-.ticket-read .ticket-title {
-  font: 700 28px/1.2 var(--font-display);
+.ticket-top,
+.ticket-reading {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  min-width: 0;
 }
+.ticket-stacked .ticket-top,
+.ticket-stacked .ticket-reading {
+  gap: 20px;
+}
+.ticket-compact .ticket-top {
+  gap: 14px;
+}
+.ticket-compact .ticket-reading {
+  gap: 20px;
+  padding-top: 4px;
+}
+
+/* Where it sits: team, epic or project, parent. */
+.ticket-crumbs {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--faint);
+}
+.ticket-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: 100%;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  white-space: nowrap;
+}
+button.ticket-crumb:hover {
+  color: var(--text);
+}
+.ticket-crumb-key {
+  font-size: 11.5px;
+}
+.ticket-crumb-self .ticket-crumb-key {
+  color: var(--muted);
+}
+.ticket-crumb-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ticket-crumb-sep {
+  color: var(--faint);
+}
+.ticket-read .ticket-title,
 .ticket-read .ticket-title-edit {
+  margin: 0;
   font: 700 28px/1.2 var(--font-display);
+  letter-spacing: -0.02em;
 }
+.ticket-stacked .ticket-title,
+.ticket-stacked .ticket-title-edit,
+.ticket-compact .ticket-title,
+.ticket-compact .ticket-title-edit {
+  font-size: 22px;
+}
+.ticket-byline {
+  margin: -14px 0 0;
+  font-size: 12.5px;
+  color: var(--faint);
+}
+.ticket-stacked .ticket-byline {
+  margin-top: -12px;
+}
+.ticket-compact .ticket-byline {
+  margin-top: -8px;
+}
+.ticket-top > .ticket-by {
+  margin: -14px 0 0;
+}
+
+/* Its description: markdown, folded when it's long. */
 .ticket-description {
   max-width: 760px;
   font-size: 14.5px;
   line-height: 1.6;
+}
+.ticket-stacked .ticket-description,
+.ticket-compact .ticket-description {
+  font-size: 14px;
 }
 .ticket-description .ticket-md h1,
 .ticket-description .ticket-md h2,
@@ -1071,7 +1091,19 @@ button.ticket-chip:hover {
   font-size: 15px;
 }
 .ticket-description .ticket-md p {
-  margin: 0 0 14px;
+  margin: 0 0 12px;
+}
+.ticket-description .ticket-md ol,
+.ticket-description .ticket-md ul {
+  margin: 0 0 12px;
+  padding-left: 22px;
+}
+.ticket-description .ticket-md li {
+  margin: 0 0 4px;
+}
+/* A loose list's items read as tight as a tight one's. */
+.ticket-description .ticket-md li > p {
+  margin: 0;
 }
 .ticket-description .ticket-md code {
   padding: 1px 5px;
@@ -1088,24 +1120,203 @@ button.ticket-chip:hover {
 .ticket-description .ticket-md input[type="checkbox"] {
   accent-color: var(--done);
 }
-.ticket-section-head {
+/* Folded: its edit link waits until all of it shows. */
+.ticket-clamp .ticket-md,
+.ticket-description:has(.ticket-whole) .ticket-md {
+  margin-bottom: 0;
+}
+.ticket-description:has(.ticket-whole) .ticket-md-edit {
+  display: none;
+}
+.ticket-clamp .ticket-md > :first-child {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+.ticket-whole {
+  display: block;
+  margin-top: 4px;
+  color: var(--faint);
+}
+.ticket-compact .ticket-whole {
+  margin-top: 12px;
+}
+
+/* A section's head: its name, a note, what sits at its right. */
+.ticket-sec-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  min-width: 0;
   margin: 0 0 10px;
+}
+.ticket-section-head {
+  margin: 0;
   font-size: 11.5px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--muted);
 }
+.ticket-sec-head .ticket-section-head {
+  margin: 0;
+}
+.ticket-sec-note,
 .ticket-section-note {
-  font-weight: 400;
-  letter-spacing: 0;
-  text-transform: none;
+  font-size: 12.5px;
+  color: var(--faint);
+}
+.ticket-sec-gap {
+  flex: 1;
+}
+.ticket-filters {
+  display: flex;
+  gap: 6px;
 }
 .ticket-open-issue {
-  margin-left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 13px;
 }
 .ticket-key {
   font-family: var(--font-mono);
+}
+/* A bar of how many are done, and under way. */
+.ticket-bar {
+  display: flex;
+  gap: 2px;
+  width: 180px;
+  height: 8px;
+  overflow: hidden;
+  align-self: center;
+  border-radius: 4px;
+  background: var(--sunken);
+}
+.ticket-bar > i {
+  display: block;
+  height: 100%;
+}
+
+/* Rows: sub-items, pull requests, branches, linked work. */
+.ticket-rows {
+  display: flex;
+  flex-direction: column;
+}
+.ticket-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-width: 0;
+  min-height: 36px;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+button.ticket-row:not(:disabled) {
+  cursor: pointer;
+}
+button.ticket-row:not(:disabled):hover {
+  background: var(--raised);
+}
+.ticket-row-key {
+  flex: none;
+  min-width: 64px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.ticket-dev .ticket-row-key {
+  min-width: 0;
+}
+.ticket-row-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ticket-branch {
+  font-size: 12.5px;
+}
+.ticket-row-state {
+  flex: none;
+  width: 76px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+.ticket-linked .ticket-row-state {
+  width: auto;
+}
+.ticket-compact .ticket-row-state {
+  width: auto;
+}
+.ticket-tone-working {
+  color: var(--working);
+}
+.ticket-row-rel {
+  flex: none;
+  width: 84px;
+  font-size: 12px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.ticket-row-faint {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.ticket-checks-run {
+  color: var(--blocked);
+}
+.ticket-checks-fail {
+  color: var(--ansi-red);
+}
+.ticket-checks-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.ticket-row-who {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+}
+.ticket-row-who.board-upstream-ring {
+  width: 16px;
+  height: 16px;
+  margin: 0 3px;
+}
+.ticket-rows-more {
+  align-self: flex-start;
+  padding: 4px 8px;
+  color: var(--faint);
+}
+.ticket-session,
+.ticket-person {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+.ticket-session .mono {
+  font-size: 12.5px;
+}
+.ticket-dotted {
+  font-size: 12px;
 }
 
 /* Files: cards, a picture's small picture or a badge. */
@@ -1217,17 +1428,22 @@ button.ticket-chip:hover {
   border-radius: 999px;
 }
 
-/* Comments, and a box to add yours. */
-.ticket-comments {
-  max-width: 760px;
+/* Activity: comments and history, one timeline. */
+.ticket-activity {
+  max-width: 1040px;
 }
-.ticket-comment-list {
-  margin: 0 0 12px;
+.ticket-timeline {
+  margin: 0 0 14px;
   padding: 0;
   list-style: none;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
+}
+.ticket-earlier {
+  display: block;
+  margin: 0 0 10px;
+  color: var(--faint);
 }
 .ticket-comment {
   display: flex;
@@ -1253,6 +1469,11 @@ button.ticket-chip:hover {
   background: var(--sunken);
   color: var(--muted);
 }
+.ticket-comment.is-reply .ticket-comment-mark {
+  width: 22px;
+  height: 22px;
+  font-size: 10.5px;
+}
 .ticket-comment-main {
   min-width: 0;
   flex: 1;
@@ -1275,6 +1496,9 @@ button.ticket-chip:hover {
   line-height: 1.55;
   overflow-wrap: anywhere;
 }
+.ticket-comment-body p {
+  margin: 0 0 8px;
+}
 .ticket-comment-body > :first-child {
   margin-top: 0;
 }
@@ -1290,6 +1514,55 @@ button.ticket-chip:hover {
 }
 .ticket-comments-problem {
   margin: 0 0 8px;
+}
+/* Linear's replies, a level in, the rule on their left. */
+.ticket-replies {
+  margin: 10px 0 0;
+  padding: 0 0 0 14px;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  box-shadow: inset 2px 0 0 var(--border);
+}
+.ticket-ev {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-left: 9px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.ticket-ev-tick {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  box-sizing: border-box;
+  border: 2px solid var(--idle);
+  border-radius: 50%;
+  transform: translateY(1px);
+}
+.ticket-ev-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.ticket-ev-text b {
+  color: var(--text);
+  font-weight: 600;
+}
+.ticket-ev-text .mono {
+  font-size: 12px;
+  color: var(--text);
+}
+.ticket-ev-text .board-glyph {
+  margin: 0 3px 0 1px;
+  vertical-align: -1px;
+}
+.ticket-ev-at {
+  flex: none;
+  margin-left: auto;
+  color: var(--faint);
+  white-space: nowrap;
 }
 .ticket-composer {
   display: flex;
@@ -1340,32 +1613,90 @@ button.ticket-chip:hover {
   border-left: 1px solid var(--border);
   background: var(--surface);
 }
-.ticket-side-acts {
+/* Narrow: what to do with it and its facts, in a band under its title. */
+.ticket-band {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  margin: 0 -22px;
+  padding: 16px 22px;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+.ticket-compact .ticket-band {
+  gap: 12px;
+  margin: 0 -20px;
+  padding: 14px 20px;
+}
+.ticket-acts {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
-.ticket-take {
+.ticket-acts .ticket-start {
   min-height: 40px;
-  border-radius: 20px;
-  font-size: 14px;
 }
-.ticket-side-pair {
+.ticket-acts-row {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr 1fr auto;
+  align-items: center;
   gap: 8px;
 }
-.ticket-side-pair .btn {
+.ticket-acts-row-two {
+  grid-template-columns: 1fr auto;
+}
+.ticket-act {
   min-height: 34px;
-  border-radius: 17px;
+}
+.ticket-hand,
+.ticket-take-it {
   font-weight: 600;
+}
+.ticket-take-it {
+  border: 1px solid var(--signal);
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+}
+/* That it's the person's on its issue already: said, not a button. */
+.ticket-yours {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--faint);
+  cursor: default;
+}
+/* The shortest view keeps a need's row to its words. */
+.ticket-compact .ticket-needs .ticket-there {
+  display: none;
+}
+.ticket-drop {
+  padding: 0 6px;
+  font-size: 14px;
+}
+.ticket-acts-band {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+}
+.ticket-acts-band .ticket-act {
+  min-height: 34px;
+}
+.ticket-acts-band .ticket-hand {
+  font-weight: 500;
+}
+.ticket-acts-band .ticket-drop {
+  padding: 0 8px;
+}
+.ticket-compact .ticket-acts-band .ticket-drop {
+  padding: 0 6px;
 }
 .ticket-facts {
   margin: 0;
   display: grid;
   grid-template-columns: 96px minmax(0, 1fr);
   align-items: center;
-  gap: 12px 10px;
+  gap: 11px 10px;
   font-size: 13px;
 }
 .ticket-facts dt {
@@ -1374,109 +1705,208 @@ button.ticket-chip:hover {
 .ticket-facts dd {
   margin: 0;
   min-width: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 6px;
 }
-.ticket-facts .board-select {
+/* The state's select: its word as wide as it is and a ▾, the system's
+   select laid over it unseen (a select is as wide as its longest
+   choice). */
+.ticket-select {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--sunken);
+  color: var(--text);
+  font-size: 13px;
 }
-.ticket-labels {
+.ticket-select::after {
+  content: "▾";
+  font-size: 10px;
+}
+.ticket-select:focus-within {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.ticket-select select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.ticket-facts .board-upstream {
+  font-size: 13px;
+  color: var(--text);
+}
+.ticket-facts .board-label {
+  font-size: 11.5px;
+}
+.ticket-there {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--faint);
+}
+.ticket-version {
+  font-size: 12.5px;
+}
+.ticket-fact-who {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+.ticket-fact-who:not(:disabled) {
+  cursor: pointer;
+}
+.ticket-fact-who .board-who-name.mono {
+  font-size: 13px;
+}
+.ticket-facts-cols {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 28px;
+}
+.ticket-compact .ticket-facts-cols {
+  gap: 0 18px;
+}
+.ticket-compact .ticket-facts {
+  grid-template-columns: 76px minmax(0, 1fr);
+}
+.ticket-all-facts {
+  align-self: flex-start;
+  font-size: 12.5px;
+  color: var(--faint);
+}
+.ticket-needs,
+.ticket-need-add {
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   gap: 4px;
 }
-.ticket-label {
-  padding: 1px 8px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+.ticket-needs > .ticket-sec-head {
+  margin: 0 0 4px;
+}
+.ticket-needs > .ticket-sec-head ~ .ticket-sec-head {
+  margin-top: 8px;
+}
+.ticket-need {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.ticket-need-open,
+.ticket-need-pick {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+.ticket-need-open:hover,
+.ticket-need-pick:hover {
+  background: var(--raised);
+}
+.ticket-need-open .board-key {
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.ticket-need-open .state-done {
   font-size: 12px;
 }
-.ticket-side .ticket-needs h3,
-.ticket-side .ticket-links h3 {
+.ticket-need-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* Taking a need off shows on its row's hover or focus. */
+.ticket-need-off {
+  opacity: 0;
+}
+.ticket-need:hover .ticket-need-off,
+.ticket-need-off:focus-visible {
+  opacity: 1;
+}
+.ticket-need-more {
+  align-self: flex-start;
+  padding: 6px 8px;
+  color: var(--faint);
+}
+.ticket-needs-band .ticket-need-more {
+  margin-left: auto;
+  padding: 0;
+}
+.ticket-needs-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: 13px;
+}
+.ticket-band-label {
+  flex: none;
+  width: 96px;
+  margin: 0;
   font-size: 13px;
   font-weight: 400;
   color: var(--faint);
 }
-details.ticket-history {
-  font-size: 13px;
-  color: var(--muted);
+.ticket-compact .ticket-band-label {
+  width: 76px;
 }
-details.ticket-history > summary {
+.ticket-needs-rows {
+  flex: 1;
+  min-width: 0;
+}
+.ticket-needs-band .ticket-need-open {
+  padding: 0;
+  min-height: 0;
+}
+.ticket-needs-band .ticket-need-open:hover {
+  background: none;
+}
+.ticket-foot {
   display: flex;
-  align-items: baseline;
-  gap: 8px;
-  cursor: pointer;
-  list-style: none;
-}
-details.ticket-history > summary::before {
-  content: "▸";
-  color: var(--faint);
-}
-details.ticket-history[open] > summary::before {
-  content: "▾";
-}
-details.ticket-history > summary .floor-time {
-  margin-left: auto;
-}
-.ticket-side .ticket-foot {
-  margin-top: auto;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 14px;
   font-size: 12.5px;
 }
-.ticket-side .ticket-foot .link {
+.ticket-side .ticket-foot {
+  margin-top: auto;
+  padding-top: 8px;
+}
+.ticket-foot .link {
   color: var(--muted);
 }
 
-/* Narrow: one column, what to do with it under its title. */
-@container ticket (max-width: 760px) {
-  .ticket-body.ticket-view {
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;
-  }
-  .ticket-read {
-    display: contents;
-  }
-  /* Each part keeps its own height: the column scrolls, nothing overlaps. */
-  .ticket-body.ticket-view > *,
-  .ticket-read > * {
-    flex-shrink: 0;
-  }
-  .ticket-read > * {
-    order: 2;
-    margin: 0 18px;
-  }
-  .ticket-read > .ticket-title,
-  .ticket-read > .ticket-title-edit,
-  .ticket-read > .ticket-by,
-  .ticket-read > .ticket-issue,
-  .ticket-read > .ticket-push-problem,
-  .ticket-read > .ticket-conflict,
-  .ticket-read > [role="alert"] {
-    order: 0;
-  }
-  .ticket-read > .ticket-title,
-  .ticket-read > .ticket-title-edit {
-    margin-top: 18px;
-    font-size: 22px;
-  }
-  .ticket-read > :last-child {
-    margin-bottom: 24px;
-  }
-  .ticket-side {
-    order: 1;
-    overflow: visible;
-    margin: 4px 0 8px;
-    padding: 16px 18px;
-    border-left: 0;
-    border-top: 1px solid var(--border);
-    border-bottom: 1px solid var(--border);
-  }
-  .ticket-body.ticket-view {
-    gap: 16px;
-  }
-  .ticket-side .ticket-foot {
-    margin-top: 0;
-  }
+/* Over a grid: the view fills the popup's body. */
+.ticket-popup .ticket-body.ticket-view {
+  padding: 0;
 }
 
 /* ── A ticket's files, one at a time, over everything ───────────────────── */

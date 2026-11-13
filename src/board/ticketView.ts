@@ -6,7 +6,7 @@
 
 import { deskCall, HubError, refusal } from "../hub/client";
 import { pairedHub, type HubRef } from "../hub/net";
-import type { Ticket, TicketComment, TicketFile } from "../hub/types";
+import type { HistoryEvent, Ticket, TicketComment, TicketFile } from "../hub/types";
 import { localHubRef } from "./syncStore";
 
 /** The largest file Desk drops on a ticket: what one request to a hub may
@@ -30,19 +30,21 @@ export const sizeText = (n: number | null | undefined): string | null => {
   return `${(n / (1024 * 1024)).toFixed(1).replace(/\.0$/, "")} MB`;
 };
 
-/** What a file's card says under its name. */
+/** What a file's card says under its name: a picture's kind, its size and
+ *  who added it ("PNG · 214 KB · Dana Kim"); a PDF's or a file's size and
+ *  who (its badge says what it is); a link's site. */
 export const fileLine = (f: TicketFile): string => {
   if (f.source === "linear_link") {
     try {
-      return new URL(f.url ?? "").host.replace(/^www\./, "");
+      return `${new URL(f.url ?? "").host.replace(/^www\./, "")} · web link`;
     } catch {
       return "Link";
     }
   }
-  const kind = fileKind(f);
-  const what = kind === "image" ? "Picture" : kind === "pdf" ? "PDF" : "File";
-  const size = sizeText(f.size);
-  return size ? `${what} · ${size}` : what;
+  const ext = f.name.includes(".") ? f.name.split(".").pop()!.toUpperCase() : null;
+  const who = f.addedBy.kind === "you" ? "You" : f.addedBy.name;
+  const parts = [fileKind(f) === "image" ? (ext ?? "Picture") : null, sizeText(f.size), who];
+  return parts.filter(Boolean).join(" · ") || "File";
 };
 
 /** What posting a comment did: posted, or held on the hub for your approval. */
@@ -75,8 +77,10 @@ export const ticketViewOf = (hub: HubRef) => ({
    *  in the last few minutes (or `force`): the ticket as it now is. */
   readIssue: (ticket: string, force = false): Promise<Ticket> => deskCall(hub, "POST", `${path(ticket)}/read${force ? "?force=1" : ""}`),
   /** Its comments, oldest first, read from its issue first when stale; a
-   *  read that failed says why in `problem`. */
-  comments: (ticket: string): Promise<{ comments: TicketComment[]; problem: string | null }> => deskCall(hub, "GET", `${path(ticket)}/comments`),
+   *  read that failed says why in `problem`. Beside them, what happened to
+   *  its issue there (`history`), from a hub that reads it. */
+  comments: (ticket: string): Promise<{ comments: TicketComment[]; problem: string | null; history?: HistoryEvent[] }> =>
+    deskCall(hub, "GET", `${path(ticket)}/comments`),
   /** Your comment: to its issue as you, or kept here on a ticket of your own. */
   comment: async (ticket: string, body: string): Promise<Posted> => {
     const res = await pairedHub(hub).fetch("POST", `${path(ticket)}/comments`, { type: "application/json", data: JSON.stringify({ body }) });

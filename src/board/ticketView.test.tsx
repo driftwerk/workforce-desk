@@ -32,7 +32,7 @@ import { useOverview } from "../overview/store";
 import { askDeskAbout, FileViewer } from "./FileViewer";
 import { useBoard } from "./store";
 import { ACME } from "./testing";
-import { onBehalfOf, TicketComments, whereSaid } from "./TicketComments";
+import { onBehalfOf, TicketActivity, whereSaid } from "./TicketComments";
 import { forgetFetchedFiles, KEPT, TicketFiles, useFileUrl, useUploads } from "./TicketFiles";
 import { useFileDrop } from "../attachments/Compose";
 import { fileKind, fileLine } from "./ticketView";
@@ -78,10 +78,15 @@ beforeEach(() => {
   sent.uploads.length = 0;
   sent.messages.length = 0;
   sent.opened.length = 0;
+  // No Desk hub: a ticket's own history isn't read here.
+  useDesk.setState({ hub: null } as never);
   globalThis.URL.createObjectURL = vi.fn(() => `blob:${Math.random()}`);
   globalThis.URL.revokeObjectURL = vi.fn();
 });
 afterEach(cleanup);
+
+// The count by the Files section's name.
+const filesCount = () => screen.getByRole("region", { name: "Files" }).querySelector(".ticket-sec-note")?.textContent;
 
 function Files({ t, local = false }: { t: Ticket; local?: boolean }) {
   const uploads = useUploads(t, () => {});
@@ -94,14 +99,15 @@ describe("a ticket's files", () => {
     expect(fileKind(file("b", { mediaType: "application/pdf" }))).toBe("pdf");
     expect(fileKind(file("c", { mediaType: "image/svg+xml" }))).toBe("file");
     expect(fileKind(file("d", { source: "linear_link" }))).toBe("link");
-    expect(fileLine(file("a"))).toBe("Picture · 240 KB");
-    expect(fileLine(file("d", { source: "linear_link", url: "https://www.figma.com/file/x" }))).toBe("figma.com");
+    expect(fileLine(file("a"))).toBe("PNG · 240 KB · You");
+    expect(fileLine(file("b", { mediaType: "application/pdf", name: "b.pdf", addedBy: { kind: "person", id: "p", name: "Dana Kim" } as never }))).toBe("240 KB · Dana Kim");
+    expect(fileLine(file("d", { source: "linear_link", url: "https://www.figma.com/file/x" }))).toBe("figma.com · web link");
   });
 
   it("shows cards, opens a picture in the viewer, and steps through the rest", async () => {
     const t = synced({ files: [file("one"), file("two"), file("spec", { mediaType: "application/pdf", name: "spec.pdf" }), file("fig", { source: "linear_link", name: "Layout", url: "https://www.figma.com/f" })] });
     render(<Files t={t} />);
-    expect(screen.getByText(/Attachments · 4/)).toBeTruthy();
+    expect(filesCount()).toBe("4");
     fireEvent.click(screen.getByRole("button", { name: "Open picture: one.png" }));
     const viewer = await screen.findByRole("dialog", { name: "one.png" });
     expect(viewer.textContent).toContain("1 of 3 · ACME-1 · 240 KB");
@@ -198,16 +204,16 @@ describe("a ticket's files", () => {
       );
     }
     render(<Dropping />);
-    expect(screen.getByText(/Attachments · 1/)).toBeTruthy();
+    expect(filesCount()).toBe("1");
     fireEvent.drop(screen.getByTestId("read"), { dataTransfer: { types: ["Files"], files: [shot] } });
     await waitFor(() => expect(hub.upload).toHaveBeenCalledWith("t2", shot));
     expect(await screen.findByRole("button", { name: "Open picture: shot.png" })).toBeTruthy();
-    expect(screen.getByText(/Attachments · 2/)).toBeTruthy();
+    expect(filesCount()).toBe("2");
     expect(screen.getByRole("button", { name: /Add a file/ })).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Take mine.png off" }));
     expect(hub.removeFile).toHaveBeenCalledWith("t2", "mine");
     await waitFor(() => expect(screen.queryByRole("button", { name: "Open picture: mine.png" })).toBeNull());
-    expect(screen.getByText(/Attachments · 1/)).toBeTruthy();
+    expect(filesCount()).toBe("1");
   });
 
   it("says what went wrong with each of several files, not only the last", async () => {
@@ -275,7 +281,7 @@ describe("a ticket's comments", () => {
     expect(whereSaid(comment("a"))).toBeNull();
     expect(whereSaid(comment("b", { author: { kind: "agent", name: "Bot", on: "Linear" } }))).toBe("agent on Linear");
     expect(whereSaid(comment("c", { author: { kind: "desk", name: "Sam", on: "Jira" } }))).toBe("Desk's note");
-    expect(whereSaid(comment("d", { author: { kind: "agent", name: "acme-web", on: "Desk" }, onlyHere: true }))).toBe("agent · only in Desk");
+    expect(whereSaid(comment("d", { author: { kind: "agent", name: "acme-web", on: "Desk" }, onlyHere: true }))).toBe("only in Desk");
   });
 
   it("renders them as markdown, flags one that reads as instructions, and posts yours", async () => {
@@ -284,9 +290,8 @@ describe("a ticket's comments", () => {
       problem: null,
     });
     hub.comment.mockResolvedValue({ kind: "posted", comment: comment("c", { author: { kind: "person", name: "You", on: "Desk" }, body: "On it." }) });
-    const { container } = render(<TicketComments ticket={synced()} />);
+    const { container } = render(<TicketActivity ticket={synced()} />);
     expect(await screen.findByText(/Comments · 2/)).toBeTruthy();
-    expect(screen.getByText(/synced with Jira/)).toBeTruthy();
     expect(container.querySelector(".ticket-comment strong")?.textContent).toBe("short");
     expect(screen.getByText(/Reads as instructions to an AI/)).toBeTruthy();
     const box = screen.getByRole("textbox", { name: "Comment on ACME-1" });
@@ -300,7 +305,7 @@ describe("a ticket's comments", () => {
   it("says when the hub holds a comment for your approval, and when it couldn't read them", async () => {
     hub.comments.mockResolvedValue({ comments: [], problem: "Waiting for your approval on Atlas to read its comments." });
     hub.comment.mockResolvedValue({ kind: "pending", message: "Waiting for your approval on Atlas to post it." });
-    render(<TicketComments ticket={synced()} />);
+    render(<TicketActivity ticket={synced()} />);
     expect(await screen.findByText(/to read its comments/)).toBeTruthy();
     fireEvent.change(screen.getByRole("textbox"), { target: { value: "Hi" } });
     fireEvent.click(screen.getByRole("button", { name: "Comment" }));
@@ -321,7 +326,7 @@ describe("a ticket's comments", () => {
 
     useBoard.setState({ boards: { [ACME.id]: { ...ACME, sync: { meName: "Dana Kim" } as never } } });
     hub.comments.mockResolvedValue({ comments: [comment("a", { author: { kind: "agent", name: "acme-web", on: "Desk" }, postedBy: session, body: "Fixed in #12." })], problem: null });
-    const { container } = render(<TicketComments ticket={t} />);
+    const { container } = render(<TicketActivity ticket={t} />);
     await screen.findByText("Fixed in #12.");
     expect(container.querySelector(".ticket-comment-behalf")?.textContent).toContain("Desk on behalf of Dana Kim");
     useBoard.setState({ boards: {} });
@@ -330,7 +335,7 @@ describe("a ticket's comments", () => {
   it("says when this computer's hub isn't known yet, then reads them once it is", async () => {
     local.known = false;
     useChat.setState({ hubs: [] });
-    render(<TicketComments ticket={synced()} />);
+    render(<TicketActivity ticket={synced()} />);
     expect(await screen.findByText("This computer's hub isn't there yet.")).toBeTruthy();
     expect(screen.queryByText(/Comments · …/)).toBeNull();
     local.known = true;
@@ -343,7 +348,7 @@ describe("a ticket's comments", () => {
   it("offers no box on a ticket kept after leaving its filter", async () => {
     const kept = synced();
     kept.external = { ...kept.external!, kept: true };
-    render(<TicketComments ticket={kept} />);
+    render(<TicketActivity ticket={kept} />);
     await screen.findByText(/Comments · 0/);
     expect(screen.queryByRole("textbox")).toBeNull();
   });
