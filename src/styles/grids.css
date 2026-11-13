@@ -317,8 +317,8 @@
 body.gpane-moving,
 body.gpane-moving * {
   cursor: grabbing !important;
-  -webkit-user-select: none;
-  user-select: none;
+  -webkit-user-select: none !important;
+  user-select: none !important;
 }
 .gpane-chip {
   position: fixed;
@@ -536,14 +536,14 @@ body.gpane-moving * {
 body.gsplitting-v,
 body.gsplitting-v * {
   cursor: col-resize !important;
-  -webkit-user-select: none;
-  user-select: none;
+  -webkit-user-select: none !important;
+  user-select: none !important;
 }
 body.gsplitting-h,
 body.gsplitting-h * {
   cursor: row-resize !important;
-  -webkit-user-select: none;
-  user-select: none;
+  -webkit-user-select: none !important;
+  user-select: none !important;
 }
 
 /* A pane given the whole grid for now; the others wait, hidden. */

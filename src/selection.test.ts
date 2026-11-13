@@ -17,21 +17,25 @@ const OURS = [app, crew, grids, panels, problem, settings];
 const SHEETS = [xterm, ...OURS];
 const strip = (css: string) => css.replace(/\/\*[\s\S]*?\*\//g, "");
 
-type Rule = { selector: string; value: string };
+type Rule = { selector: string; value: string; important: boolean };
 
 /** Every top-level rule that sets user-select, in file order. */
 const rules: Rule[] = SHEETS.flatMap((css) =>
   [...strip(css).matchAll(/(?<=^|\})\s*([^{}@]+)\{([^{}]*)\}/g)].flatMap((m) => {
-    const value = /(?:^|;|\s)user-select:\s*(\w+)/.exec(m[2]!)?.[1];
-    return value ? m[1]!.split(",").map((s) => ({ selector: s.trim(), value })) : [];
+    const d = /(?:^|;|\s)user-select:\s*(\w+)(\s*!important)?/.exec(m[2]!);
+    return d ? m[1]!.split(",").map((s) => ({ selector: s.trim(), value: d[1]!, important: !!d[2] })) : [];
   }),
 );
 
 const own = (el: Element): string | undefined => {
   let value: string | undefined;
+  let important = false;
   for (const r of rules) {
     try {
-      if (el.matches(r.selector)) value = r.value;
+      if (el.matches(r.selector) && (r.important || !important)) {
+        value = r.value;
+        important = r.important;
+      }
     } catch {
       // A selector jsdom can't parse never sets user-select for these cases.
     }
@@ -101,6 +105,28 @@ describe("what a person can select", () => {
     for (const sel of ["input", "textarea", "select", "[contenteditable]", "[contenteditable] span"]) {
       expect(selectable(q(sel)), sel).toBe(true);
     }
+  });
+
+  it("selects an inline error, however its row is classed", () => {
+    mount(`<div class="settings-main"><p class="small state-blocked" role="alert">Could not connect</p><div class="move-callout">Refused</div></div>`);
+    for (const sel of ["[role=alert]", ".move-callout"]) expect(selectable(q(sel)), sel).toBe(true);
+  });
+
+  it("selects nothing while a resize or move is under way, even in content", () => {
+    mount(`<div class="room"><p class="msg-text">text</p><div class="settings-main"><span class="mono">id</span></div></div>`);
+    for (const cls of ["side-resizing", "rpanel-resizing", "line-resizing", "gpane-moving", "gsplitting-v", "gsplitting-h"]) {
+      document.body.classList.add(cls);
+      expect(selectable(q(".msg-text")), cls).toBe(false);
+      expect(selectable(q(".settings-main .mono")), cls).toBe(false);
+      document.body.classList.remove(cls);
+    }
+  });
+
+  it("names only classes that some component draws", () => {
+    const tsx = Object.values(import.meta.glob<string>(["./**/*.tsx", "!./**/*.test.tsx"], { query: "?raw", import: "default", eager: true })).join("\n");
+    const opted = rules.filter((r) => r.value === "text").flatMap((r) => [...r.selector.matchAll(/\.([a-z][\w-]*)/g)].map((m) => m[1]!));
+    const missing = [...new Set(opted)].filter((c) => c !== "selectable" && c !== "xterm-helper-textarea" && !tsx.includes(c));
+    expect(missing).toEqual([]);
   });
 
   it("leaves the terminal to xterm, which sets its own selection", () => {

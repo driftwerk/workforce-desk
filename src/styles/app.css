@@ -163,8 +163,8 @@ body.side-resizing .side-resize::after {
 body.side-resizing,
 body.side-resizing * {
   cursor: col-resize !important;
-  -webkit-user-select: none;
-  user-select: none;
+  -webkit-user-select: none !important;
+  user-select: none !important;
 }
 /* Always on screen: the wordmark, Ask anyone and the views. */
 .side-top {
@@ -2709,9 +2709,10 @@ button.thread-bar:hover {
 /* ── Text a person reads or copies ─────────────────────────────────────────
    The body (above) makes everything else unselectable. These are chrome-free
    text: messages and what the boss says, code, answers and transcripts,
-   tickets, copyable values and errors. Each is selected within itself, so a
-   drag that starts in one never runs on into the chrome around it. The
-   terminal (xterm) draws and selects for itself. */
+   tickets, copyable values and errors. A drag across several of them skips
+   the chrome between (names, times), so it copies their text alone. The
+   terminal (xterm) draws and selects for itself. A resize or move in
+   progress (body.*-resizing, gpane-moving) still wins: its none is !important. */
 input,
 textarea,
 select,
@@ -2722,6 +2723,33 @@ select,
 pre,
 code,
 samp,
+[role="alert"],
+.move-callout,
+.machine-box,
+.ticket-conflict,
+.hub-row-warning,
+.breaker-why,
+.budget-refused,
+.board-sync-failed,
+.dm-result-text,
+.memory-hit-text,
+.memory-result-text,
+.memory-result-line,
+.machine-log-line,
+.ticket-title,
+.ticket-need-title,
+.ticket-link-url,
+.dec-text,
+.approval-text,
+.ov-ask-text,
+.ov-detail,
+.line-question-text,
+.msg-undelivered-note,
+.hub-down-text,
+.ev-reason,
+.ns-recent-path,
+.computer-paths,
+.ability-text,
 .msg-text,
 .msg-command-text,
 .msg-note,
@@ -4125,8 +4153,8 @@ button.urow-open {
 body.line-resizing,
 body.line-resizing * {
   cursor: row-resize !important;
-  -webkit-user-select: none;
-  user-select: none;
+  -webkit-user-select: none !important;
+  user-select: none !important;
 }
 .line-panel-head {
   flex: none;

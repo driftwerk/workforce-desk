@@ -37,8 +37,6 @@
   white-space: pre-wrap;
   word-break: break-word;
   color: var(--muted);
-  -webkit-user-select: text;
-  user-select: text;
 }
 .toast-problem {
   flex-direction: column;
