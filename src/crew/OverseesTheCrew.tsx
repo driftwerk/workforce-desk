@@ -767,7 +767,8 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                   No limits: Desk acts on everything itself, including publishing, deploys and secrets. Only your budget, Stop and the
                   activity log remain.
                   {o.full.budgetUsdPerDay === null && " No budget set: only the check-in ceilings and Stop bound what it spends."}{" "}
-                  It waits while you type into a session it runs, for {o.wake.holdMinutes} minutes after your last keystroke.
+                  Every request its sessions ask is allowed at once; its messages to a session it runs wait while you type, for{" "}
+                  {o.wake.holdMinutes} minutes after your last keystroke.
                 </p>
               )}
               <span className="oversee-sub">

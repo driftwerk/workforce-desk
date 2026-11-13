@@ -109,13 +109,8 @@ export function OverseerCard({ inSetup = false }: { inSetup?: boolean } = {}) {
   const budgetUsd = budget && "value" in budget ? budget.value : null;
   const budgetProblem =
     pick && budget && "problem" in budget ? budget.problem : null;
-  // Act fully needs a repo and a budget the hub takes.
-  const ready =
-    !wantsFull ||
-    (pick !== null &&
-      !budgetProblem &&
-      pick.repos.length > 0 &&
-      budgetUsd !== null);
+  // Act fully needs no repo; a budget, when given, is one the hub takes.
+  const ready = !wantsFull || (pick !== null && !budgetProblem);
 
   const dismiss = () => {
     try {
@@ -286,10 +281,10 @@ export function OverseerCard({ inSetup = false }: { inSetup?: boolean } = {}) {
           )}
         </div>
       )}
-      {preset === "unbound" && (
+      {preset === "full" && (
         <p className="small state-blocked">
           No limits: it does everything itself, including publishing, deploys
-          and secrets. Give it a daily budget in its settings if you want one.
+          and secrets. Give it a daily budget if you want one.
         </p>
       )}
       {state.kind === "failed" && (

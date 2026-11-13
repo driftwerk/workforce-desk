@@ -1,7 +1,7 @@
 import { radioKeys } from "../ui/Dialog";
 import { PRESETS, PRESET_NAME, presetDesc, type Preset } from "./presets";
 
-/** How much an overseer does on its own, as five presets, each with the
+/** How much an overseer does on its own, as four presets, each with the
  *  switches it implies: the same choice on the Floor's card and in its
  *  Settings. */
 export function LevelPicker({
@@ -16,7 +16,7 @@ export function LevelPicker({
   const at = PRESETS.indexOf(value);
   return (
     <div
-      className="oversee-levels oversee-levels-5"
+      className="oversee-levels oversee-levels-4"
       role="radiogroup"
       aria-label={label}
     >

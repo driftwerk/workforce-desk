@@ -999,14 +999,6 @@ button.fsec-tile-head {
 }
 
 /* Five levels, Unbound the fifth: three, then two. */
-.oversee-levels-5 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-@media (max-width: 760px) {
-  .oversee-levels-5 {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
 /* Why the level chosen isn't in force, and its fix. */
 .oversee-why {
   display: flex;

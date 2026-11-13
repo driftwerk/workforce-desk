@@ -50,7 +50,7 @@ describe("Who oversees the crew, on the Floor", () => {
     expect(screen.getByRole("heading", { name: "No one oversees your crew" })).toBeTruthy();
     expect((screen.getByRole("combobox") as HTMLSelectElement).value).toBe("desk");
     const levels = within(screen.getByRole("radiogroup")).getAllByRole("radio").map((r) => r.querySelector("b")?.textContent);
-    expect(levels).toEqual(["Watch", "Suggest", "Act", "Act fully", "Unbound"]);
+    expect(levels).toEqual(["Watch", "Suggest", "Act", "Act fully"]);
     expect(screen.getByRole("radio", { name: /^Act ?Does/ }).getAttribute("aria-checked")).toBe("true");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Desk oversees at Act" })));
     await waitFor(() => expect(hub.saveAgentConfig).toHaveBeenCalledTimes(1));
@@ -104,12 +104,12 @@ describe("Who oversees the crew, on the Floor", () => {
     await waitFor(() => expect(hub.saveAgentConfig).toHaveBeenCalledTimes(1));
     expect(oversight("ledger")).toMatchObject({
       level: "full",
-      act: { hand_out_work: true, set_mode: false },
-      full: { anywhere: false, repos: ["acme/acme-web", "acme/acme-api"], workflows: [], budget_usd_per_day: 10 },
+      act: { hand_out_work: true, set_mode: true },
+      full: { anywhere: true, repos: ["acme/acme-web", "acme/acme-api"], workflows: [], budget_usd_per_day: 10 },
     });
   });
 
-  it("won't set Act fully without a repo or with a wrong budget, and Unbound turns every switch on", async () => {
+  it("sets Act fully with no repo, every switch on, anywhere, but never with a wrong budget", async () => {
     const platform = await import("../platform");
     (platform.repoFacts as ReturnType<typeof vi.fn>).mockImplementationOnce(() => Promise.resolve([]));
     const hub = fakeHub();
@@ -117,22 +117,22 @@ describe("Who oversees the crew, on the Floor", () => {
     render(<OverseerCard />);
     await act(async () => fireEvent.click(screen.getByRole("radio", { name: /^Act fully/ })));
     expect(await screen.findByText("Desk found no repos in your sessions’ folders.")).toBeTruthy();
+    expect(screen.getByText(/No limits: it does everything itself/)).toBeTruthy();
     const go = screen.getByRole("button", { name: "Desk oversees at Act fully" }) as HTMLButtonElement;
-    expect(go.disabled).toBe(true);
+    expect(go.disabled).toBe(false);
     fireEvent.change(screen.getByRole("textbox", { name: "Add a repo" }), { target: { value: "acme" } });
     fireEvent.click(screen.getByRole("button", { name: "Add" }));
     expect(screen.getByText("Name a repo as owner/name, its address, or a folder like ~/dev/acme-web.")).toBeTruthy();
-    fireEvent.change(screen.getByRole("textbox", { name: /Daily budget/ }), { target: { value: "0" } });
+    const budget = screen.getByRole("textbox", { name: /Daily budget/ });
+    fireEvent.change(budget, { target: { value: "0" } });
     expect(screen.getByText(/Its daily budget must be an amount in dollars above 0/)).toBeTruthy();
-    // Unbound: every switch on, anywhere; no repos, workflows or budget asked or written.
-    await act(async () => fireEvent.click(screen.getByRole("radio", { name: /^Unbound/ })));
-    expect(screen.queryByRole("textbox", { name: /Daily budget/ })).toBeNull();
-    expect(screen.getByText(/No limits: it does everything itself/)).toBeTruthy();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Desk oversees at Unbound" })));
+    expect(go.disabled).toBe(true);
+    fireEvent.change(budget, { target: { value: "20" } });
+    expect(go.disabled).toBe(false);
+    await act(async () => fireEvent.click(go));
     await waitFor(() => expect(hub.saveAgentConfig).toHaveBeenCalledTimes(1));
     const o = oversight("desk")!;
-    expect(o).toMatchObject({ level: "full", full: { anywhere: true } });
+    expect(o).toMatchObject({ level: "full", full: { anywhere: true, repos: [], budget_usd_per_day: 20 } });
     expect(Object.values(o.act as Record<string, boolean>).every(Boolean)).toBe(true);
-    expect(o.full).toEqual({ anywhere: true, repos: [], workflows: [] });
   });
 });
