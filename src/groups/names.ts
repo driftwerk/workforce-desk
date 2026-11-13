@@ -30,18 +30,17 @@ export const useSessionName = (id: string | null | undefined, hubName: string): 
 export const useSessionNames = (): Record<string, string> => {
   const hub = useHubLayout((s) => s.layout !== null);
   const local = useSettings((s) => s.sessionNames);
-  const sessions = useDesk((s) => s.sessions);
-  const restore = useDesk((s) => s.restore);
-  const theirs = useMemo(
-    () =>
-      Object.fromEntries(
-        [...restore, ...Object.values(sessions)].flatMap((s) => {
-          const name = given(s);
-          return name ? [[sessionKey(s), name]] : [];
-        }),
-      ),
-    [sessions, restore],
+  // The names given, as one key: a session's every other change (its state,
+  // its last reply) leaves every list that names sessions as it is.
+  const given_ = useDesk((s) =>
+    JSON.stringify(
+      [...s.restore, ...Object.values(s.sessions)].flatMap((x) => {
+        const name = given(x);
+        return name ? [[sessionKey(x), name]] : [];
+      }),
+    ),
   );
+  const theirs = useMemo(() => Object.fromEntries(JSON.parse(given_) as [string, string][]), [given_]);
   // A machine's engine keeps the names given its sessions whichever this
   // computer's hub is.
   const machines = useMemo(() => Object.fromEntries(Object.entries(theirs).filter(([k]) => splitKey(k).machine !== LOCAL)), [theirs]);
