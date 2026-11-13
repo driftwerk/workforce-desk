@@ -65,7 +65,7 @@ export function BossPreferences({ name, group }: { name: string; group: string |
         if (n !== asking.current) return;
         // An older hub keeps none.
         if (e instanceof HubError && e.status === 404) setLoaded({ state: "none" });
-        else setLoaded({ state: "failed", problem: plainError(e) });
+        else setLoaded((was) => (was.state === "ok" ? was : { state: "failed", problem: plainError(e) }));
       },
     );
   }, [hub]);
