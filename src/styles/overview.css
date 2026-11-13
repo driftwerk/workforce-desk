@@ -1255,3 +1255,51 @@ a.ref {
   font-family: var(--font-mono);
   font-size: 12px;
 }
+/* A boss's preferences: a rule a row, its tools on the right as links. */
+.oversee-prefs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.oversee-pref {
+  align-items: flex-start;
+}
+.oversee-pref.is-paused .oversee-check-text > b,
+.oversee-pref.is-paused .oversee-check-text > span:not(.oversee-sub) {
+  color: var(--muted);
+}
+.oversee-pref-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+.oversee-pref-tools .link {
+  font-size: 13px;
+}
+.oversee-pref-edit {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.oversee-pref-edit .field input {
+  height: 34px;
+  padding: 0 10px;
+  border-radius: 8px;
+  font-size: 14px;
+  color: var(--text);
+}
+.oversee-pref-where {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+.oversee-pref-where .ability-select {
+  height: 34px;
+}
+.oversee-pref-where .field:last-child:not(:first-child) {
+  flex: 1 1 200px;
+}
