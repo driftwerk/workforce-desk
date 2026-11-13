@@ -1842,6 +1842,83 @@ button.thread-bar:hover {
 .thread-panel .composer {
   margin: 0 12px 12px;
 }
+
+/* A DM's thread, as the mockup draws it: a chip under the message that
+   names who replied, the message it is on as a card, a rule that counts
+   the replies, and a reply box with its choice and button below. */
+.thread-chip .thread-count {
+  color: var(--working);
+  font-weight: 600;
+}
+.thread-chip .thread-last {
+  color: var(--faint);
+}
+.thread-chip .thread-marks {
+  gap: 0;
+}
+.thread-chip .thread-marks > * + * {
+  margin-left: -8px;
+}
+.room-msg.thread-open {
+  background: var(--signal-soft);
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 6px var(--signal-soft);
+}
+.thread-first {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--raised);
+  border: 1px solid var(--border);
+}
+.thread-count-rule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.thread-count-rule::after {
+  content: "";
+  order: 1;
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.thread-count-rule .thread-live {
+  order: 0;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.thread-composer {
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+}
+.thread-composer textarea {
+  flex: 1 0 100%;
+  padding: 2px 0;
+}
+.thread-composer .also-in-room input {
+  accent-color: var(--signal);
+}
+.thread-composer .also-in-room {
+  order: 1;
+  flex: 1;
+  min-width: 0;
+}
+.thread-composer .btn {
+  order: 2;
+}
+.thread-composer .composer-note,
+.thread-composer > :not(textarea):not(label):not(.btn) {
+  order: 3;
+  flex-basis: 100%;
+}
 .dm-panel {
   background: var(--surface);
 }
