@@ -601,6 +601,7 @@ body.side-resizing * {
 }
 
 .dot {
+  --ripple-from: 0.5556;
   width: 10px;
   height: 10px;
   border-radius: 50%;
@@ -610,13 +611,35 @@ body.side-resizing * {
 .dot-working,
 .dot-starting,
 .dot-background {
+  position: relative;
   border-color: var(--working);
   background: var(--working);
-  animation: desk-breathe 1.8s ease-in-out infinite;
+  animation: desk-breathe-dot 1.8s ease-in-out infinite;
+}
+/* The breath's ripple: a ring that spreads 4px past the dot as it fades.
+ * Only its transform and opacity move, so the compositor runs it without
+ * painting the page again each frame (a moving box-shadow repaints it). It
+ * starts the dot's size (--ripple-from: the dot's width over its width and
+ * 8px), its hole within the dot's 2px edge, unseen on it. */
+.dot-working::after,
+.dot-starting::after,
+.dot-background::after {
+  content: "";
+  position: absolute;
+  /* The dot's edge (2px) and 4px past it, from its padding box. */
+  inset: -6px;
+  border-radius: 50%;
+  pointer-events: none;
+  background: radial-gradient(circle closest-side, transparent calc(100% - 4px), color-mix(in srgb, var(--working) 55%, transparent) calc(100% - 4px));
+  transform: scale(var(--ripple-from));
+  animation: desk-ripple 1.8s ease-in-out infinite;
+}
+.dot-background,
+.dot-background::after {
+  animation-duration: 3.6s;
 }
 .dot-background {
   background: color-mix(in srgb, var(--working) 40%, transparent);
-  animation-duration: 3.6s;
 }
 .dot-blocked,
 .dot-interrupted {
@@ -709,11 +732,31 @@ body.side-resizing * {
 }
 .ring-working,
 .ring-background {
+  position: relative;
   border-color: var(--working);
+}
+/* The glow is drawn once and only faded in and out, on the compositor. */
+.ring-working::before,
+.ring-background::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--working) 45%, transparent);
+  opacity: 0;
   animation: desk-glow 1.8s ease-in-out infinite;
+}
+.mark-lg.ring-working::before,
+.mark-lg.ring-background::before,
+.mark-xl.ring-working::before,
+.mark-xl.ring-background::before {
+  inset: -3px;
 }
 .ring-background {
   border-color: color-mix(in srgb, var(--working) 55%, transparent);
+}
+.ring-background::before {
   animation-duration: 3.6s;
 }
 .ring-blocked {
@@ -2045,13 +2088,30 @@ button.thread-bar:hover {
     --flow-angle: 360deg;
   }
 }
+@keyframes desk-breathe-dot {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+/* From and back to the ripple's own size (its transform), so the
+ * keyframes hold no var() and the compositor can run them. */
+@keyframes desk-ripple {
+  50% {
+    opacity: 0;
+    transform: scale(1);
+  }
+}
 @keyframes desk-glow {
   0%,
   100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--working) 0%, transparent);
+    opacity: 0;
   }
   50% {
-    box-shadow: 0 0 12px 1px color-mix(in srgb, var(--working) 45%, transparent);
+    opacity: 1;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -2062,14 +2122,19 @@ button.thread-bar:hover {
   .dot-working,
   .dot-starting,
   .dot-background,
-  .ring-working,
-  .ring-background,
+  .ring-working::before,
+  .ring-background::before,
   .tile-working::before,
   .tile-starting::before,
   .ov-tile-working::before,
   .tile-background::before,
   .ov-tile-background::before {
     animation: none;
+  }
+  .dot-working::after,
+  .dot-starting::after,
+  .dot-background::after {
+    display: none;
   }
 }
 
@@ -2390,6 +2455,7 @@ button.thread-bar:hover {
   opacity: 1;
 }
 .gi .dot {
+  --ripple-from: 0.5;
   width: 8px;
   height: 8px;
   margin: 0 3px;

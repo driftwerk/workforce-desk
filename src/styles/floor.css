@@ -117,6 +117,9 @@
   background: transparent;
   animation: none;
 }
+.floor-stale .dot::after {
+  display: none;
+}
 .dot-failed {
   border-color: var(--ansi-red);
 }
