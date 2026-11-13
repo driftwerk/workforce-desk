@@ -1111,16 +1111,6 @@ export interface Preference {
   state: "active" | "paused" | "retired";
 }
 
-/** A preference you make: from an "Always" to what the boss asked. */
-export interface NewPreference {
-  whenText: string;
-  thenText: string;
-  scope?: PreferenceScope;
-  /** The item the "Always" was said to. */
-  fromItem?: string;
-  bossScope?: string;
-}
-
 export interface PreferencePatch {
   whenText?: string;
   thenText?: string;

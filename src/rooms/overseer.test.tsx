@@ -630,18 +630,19 @@ describe("always, or just this time (H10)", () => {
     expect(screen.queryByRole("button", { name: "Always" })).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "Make it wait for green" }));
     expect(await screen.findByText("Always do this when a session wants to merge with CI red?")).toBeTruthy();
-    answer = () => ok({ id: "p1", state: "active" });
+    answer = () => ok({ done: "From now on: when a session wants to merge with CI red, make it wait for green (for repo acme/web)." });
     fireEvent.click(screen.getByRole("button", { name: "Always" }));
-    expect(await screen.findByText(/^Kept: when a session wants to merge with CI red, “Make it wait for green”\./)).toBeTruthy();
+    expect(
+      await screen.findByText("From now on: when a session wants to merge with CI red, make it wait for green (for repo acme/web). It’s in the boss’s settings, to change or forget."),
+    ).toBeTruthy();
     // Drawn again (scrolled away and back), it still says so.
     cleanup();
     show(said("**Needs you.** web wants to merge with CI red. Let it?", ask("g1", "When a session wants to merge with CI red"), "question"));
-    expect(screen.getByText(/^Kept: when a session wants/)).toBeTruthy();
-    expect(asked.at(-1)).toEqual({
-      method: "POST",
-      path: "/api/desk/preferences",
-      body: { whenText: "a session wants to merge with CI red", thenText: "Make it wait for green", scope: "repo:acme/web", fromItem: "g1" },
-    });
+    expect(screen.getByText(/^From now on: when a session wants/)).toBeTruthy();
+    // Kept by the hub from the item, with the answer given: never a rule
+    // Desk writes itself.
+    expect(asked.at(-1)).toEqual({ method: "POST", path: "/api/desk/items/g1/always", body: { then: "Make it wait for green" } });
+    expect(asked.some((a) => a.path === "/api/desk/preferences")).toBe(false);
   });
 
   it("keeps nothing for just this time, and offers nothing for an ask that settles no kind of case", async () => {
@@ -649,7 +650,7 @@ describe("always, or just this time (H10)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Let it merge" }));
     fireEvent.click(await screen.findByRole("button", { name: "Just this time" }));
     expect(screen.getByText("Just this time.")).toBeTruthy();
-    expect(asked.filter((a) => a.path === "/api/desk/preferences")).toHaveLength(0);
+    expect(asked.filter((a) => a.path.endsWith("/always"))).toHaveLength(0);
     cleanup();
 
     show(said("**Needs you.** web wants to merge with CI red. Let it?", ask("g3"), "question"));
@@ -663,5 +664,18 @@ describe("the answer it recommends", () => {
   it("is guessed from its words only when the hub didn't lay the answers out", () => {
     expect(answerOptions([{ label: "Yes" }, { label: "No" }], "Yes").map((o) => o.recommended)).toEqual([true, false]);
     expect(answerOptions([{ label: "Yes", recommended: false }, { label: "No", recommended: false }], "Yes", true).map((o) => o.recommended)).toEqual([false, false]);
+  });
+});
+
+describe("always, refused", () => {
+  it("says the hub's reason in place, and the buttons stay", async () => {
+    const extras: DeskExtras = { item: { itemId: "g9", question: "Merge with CI red?", options: ["Wait", "Merge"], generalizes: "a session wants to merge with CI red" } };
+    show(said("**Needs you.** Merge with CI red?", extras, "question"));
+    fireEvent.click(screen.getByRole("button", { name: "Wait" }));
+    await screen.findByText("Always do this when a session wants to merge with CI red?");
+    answer = () => new Response(JSON.stringify({ error: "Answer it first." }), { status: 400, headers: { "content-type": "application/json" } });
+    fireEvent.click(screen.getByRole("button", { name: "Always" }));
+    expect((await screen.findByRole("alert")).textContent).toContain("Answer it first.");
+    expect(screen.getByRole("button", { name: "Always" })).toBeTruthy();
   });
 });

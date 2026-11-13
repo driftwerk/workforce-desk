@@ -73,7 +73,6 @@ import type {
   SessionMemory,
   Preference,
   PreferencePatch,
-  NewPreference,
 } from "./types";
 import { pairedHub, type HubRef } from "./net";
 import type { Body, DeskSocket, DeskTransport } from "./transport";
@@ -772,8 +771,6 @@ export class DeskHub {
   /** Your preferences for the bosses, active and paused, by boss then
    *  oldest first. */
   preferences = (): Promise<Preference[]> => this.desk("GET", "/api/desk/preferences");
-  /** Keeps a new preference: an "Always" to what the boss asked. */
-  prefer = (p: NewPreference): Promise<Preference> => this.desk("POST", "/api/desk/preferences", p);
   /** Changes a preference's case, what to do, or where it holds. */
   changePreference = (id: string, patch: PreferencePatch): Promise<Preference> =>
     this.desk("PATCH", `/api/desk/preferences/${encodeURIComponent(id)}`, patch);
@@ -786,6 +783,12 @@ export class DeskHub {
    *  in this request, and sent on to whoever asked. */
   answerItem = (id: string, answer: string): Promise<{ done: string }> =>
     this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/answer`, { answer });
+  /** "Always", once you've answered: your answer is kept as a preference
+   *  for the kind of case the item settles, said back in the hub's words.
+   *  `then`: the answer given, for a question whose answer went on to its
+   *  session. */
+  alwaysItem = (id: string, then?: string): Promise<{ done: string }> =>
+    this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/always`, then ? { then } : {});
   /** Drops what the boss asked you, unanswered. */
   dropItem = (id: string): Promise<{ done: string }> => this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/drop`);
   /** You're typing to the boss `agent`: its posts wait for a pause. Quiet

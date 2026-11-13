@@ -12,7 +12,6 @@ import type {
   SessionState,
   UpdateSession,
   NeedsYou,
-  PreferenceScope,
   WaitingItem,
   WorkRef,
 } from "../hub/types";
@@ -469,7 +468,6 @@ function Needs({
   parked,
   notes,
   generalizes,
-  preferScope,
   told,
 }: {
   id: string;
@@ -481,7 +479,6 @@ function Needs({
   options: readonly AnswerOption[];
   parked?: boolean;
   generalizes?: string | null;
-  preferScope?: PreferenceScope | null;
   told?: boolean;
   /** Faint lines last: what isn't held up, what it holds up, the boss's
    *  notes. */
@@ -507,7 +504,6 @@ function Needs({
         recommendation={recommendation}
         parked={parked}
         generalizes={generalizes}
-        preferScope={preferScope}
         told={told}
       />
       {notes
@@ -591,7 +587,6 @@ function NeedsYouPost({ item, content }: { item: MentionedItem; content: string 
         options={item.options ?? []}
         parked={item.parked}
         generalizes={item.generalizes}
-        preferScope={item.preferScope}
         notes={[item.notBlocking, post.holdingUp, ...post.notes]}
       />
     </div>
@@ -619,7 +614,6 @@ function Answers({
   recommendation,
   parked,
   generalizes,
-  preferScope,
   told,
 }: {
   id: string;
@@ -631,7 +625,6 @@ function Answers({
   /** The kind of case an answer would settle from then on: offered as
    *  "Always" once it's answered. */
   generalizes?: string | null;
-  preferScope?: PreferenceScope | null;
   told?: boolean;
 }) {
   const connected = useDesk((s) => !!s.hub);
@@ -657,7 +650,7 @@ function Answers({
         <p className="faint small" role="status">
           {settled}
         </p>
-        {offer && generalizes && <Always id={id} when={generalizes} then={offer} scope={preferScope} />}
+        {offer && generalizes && <Always id={id} when={generalizes} then={offer} />}
       </>
     );
   if (held)
@@ -732,7 +725,7 @@ const lowerFirst = (s: string): string => (/^[A-Z](?![A-Z])/.test(s) ? s.charAt(
 
 /** After an answer: "Always do this when …? Always · Just this time".
  *  Always keeps it as a preference, listed in the boss's settings. */
-function Always({ id, when, then, scope }: { id: string; when: string; then: string; scope?: PreferenceScope | null }) {
+function Always({ id, when, then }: { id: string; when: string; then: string }) {
   const connected = useDesk((s) => !!s.hub);
   const [said, setSaidHere] = useState<string | null>(alwaysHere.get(id) ?? null);
   const [busy, setBusy] = useState(false);
@@ -749,8 +742,10 @@ function Always({ id, when, then, scope }: { id: string; when: string; then: str
     setBusy(true);
     setProblem(null);
     try {
-      await hub.prefer({ whenText: plainWhen, thenText: then, scope: scope ?? undefined, fromItem: id });
-      setSaid(`Kept: when ${plainWhen}, “${then.trim().replace(/\.$/, "")}”. It’s in the boss’s settings, to change or forget.`);
+      // The hub keeps it from the item (its boss, where it holds, the rule
+      // in words) and says it back.
+      const r = await hub.alwaysItem(id, then);
+      setSaid(`${r.done} It’s in the boss’s settings, to change or forget.`);
     } catch (e) {
       setProblem(plainError(e));
     }
