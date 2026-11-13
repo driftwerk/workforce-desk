@@ -5,7 +5,7 @@ import { useDesk } from "../hub/store";
 import { useOverview } from "../overview/store";
 import { useAgentConfigs } from "../crew/agentBrain";
 import { LevelPicker } from "../crew/LevelPicker";
-import { parseBudget, parseRepo, setAgentOversight } from "../crew/oversight";
+import { parseBudget, setAgentOversight } from "../crew/oversight";
 import { PRESET_NAME, withPreset, type Preset } from "../crew/presets";
 import { suggestFull, type FullSuggestion } from "../crew/suggest";
 import { plainError } from "../ui/plainError";
@@ -41,17 +41,17 @@ export const candidatesOf = (
     .filter((a) => a.hubId === localHub && !bosses.includes(a.id))
     .sort((a, b) => Number(b.isDefault) - Number(a.isDefault));
 
-/** What's chosen for Act fully before it's applied. */
+/** What's chosen for Act fully before it's applied: a daily budget,
+ *  blank for none, and whether this week's spend was billed (what the
+ *  suggested one is based on). */
 interface FullPick {
-  suggestion: FullSuggestion;
-  repos: string[];
-  workflows: string[];
+  metered: boolean;
   budget: string;
 }
 
 /** The Floor's card while no one oversees the crew: pick who, and how
- *  much it does on its own, in one step; Act fully is set up from what
- *  Desk finds before anything is written. Overseeing is the person's to
+ *  much it does on its own, in one step; Act fully's budget is suggested
+ *  from this week's spend before anything is written. Overseeing is the person's to
  *  set, so this is Desk's own card, never an agent's. */
 export function OverseerCard({ inSetup = false }: { inSetup?: boolean } = {}) {
   const H = useSubHeading();
@@ -75,8 +75,7 @@ export function OverseerCard({ inSetup = false }: { inSetup?: boolean } = {}) {
   >({ kind: "idle" });
   const ids = useId();
   const agent = candidates.find((a) => a.id === who) ?? candidates[0];
-  // Only Act fully is limited to repos, workflows and a budget: they are
-  // asked, and written, for it alone.
+  // Only Act fully takes a budget: it is asked, and written, for it alone.
   const wantsFull = preset === "full";
 
   useEffect(() => {
@@ -89,14 +88,7 @@ export function OverseerCard({ inSetup = false }: { inSetup?: boolean } = {}) {
         budgetUsd: 10,
         metered: false,
       }))
-      .then((s) =>
-        setFull({
-          suggestion: s,
-          repos: s.repos,
-          workflows: s.workflows,
-          budget: String(s.budgetUsd),
-        }),
-      );
+      .then((s) => setFull({ metered: s.metered, budget: String(s.budgetUsd) }));
   }, [hub, wantsFull, full, sessions]);
 
   if (
@@ -107,17 +99,13 @@ export function OverseerCard({ inSetup = false }: { inSetup?: boolean } = {}) {
     return null;
 
   const pick = full && full !== "finding" ? full : null;
-  const budget = pick ? parseBudget(pick.budget) : null;
+  // Blank is no budget; one given is one the hub takes.
+  const blank = !pick || pick.budget.trim() === "";
+  const budget = blank ? null : parseBudget(pick.budget);
   const budgetUsd = budget && "value" in budget ? budget.value : null;
-  const budgetProblem =
-    pick && budget && "problem" in budget ? budget.problem : null;
-  // Act fully needs a repo and a budget the hub takes.
-  const ready =
-    !wantsFull ||
-    (pick !== null &&
-      !budgetProblem &&
-      pick.repos.length > 0 &&
-      budgetUsd !== null);
+  const budgetProblem = budget && "problem" in budget ? budget.problem : null;
+  // Act fully waits for its suggested budget, so a quick click never saves none.
+  const ready = !wantsFull || (pick !== null && !budgetProblem);
 
   const dismiss = () => {
     try {
@@ -134,16 +122,8 @@ export function OverseerCard({ inSetup = false }: { inSetup?: boolean } = {}) {
     try {
       const toml = await setAgentOversight(hub, agent.id, (o) => {
         const next = withPreset({ ...o, group: null }, preset);
-        return preset === "full" && pick
-          ? {
-              ...next,
-              full: {
-                ...next.full,
-                repos: pick.repos,
-                workflows: pick.workflows,
-                budgetUsdPerDay: budgetUsd,
-              },
-            }
+        return preset === "full"
+          ? { ...next, full: { ...next.full, budgetUsdPerDay: budgetUsd } }
           : next;
       });
       useAgentConfigs.getState().put(agentKey(agent), toml);
@@ -155,16 +135,6 @@ export function OverseerCard({ inSetup = false }: { inSetup?: boolean } = {}) {
       setState({ kind: "failed", problem: plainError(e) });
     }
   };
-
-  const toggle = (list: "repos" | "workflows", item: string, on: boolean) =>
-    setFull((f) =>
-      f && f !== "finding"
-        ? {
-            ...f,
-            [list]: on ? [...f[list], item] : f[list].filter((i) => i !== item),
-          }
-        : f,
-    );
 
   return (
     <section
@@ -222,46 +192,17 @@ export function OverseerCard({ inSetup = false }: { inSetup?: boolean } = {}) {
         >
           {!pick ? (
             <p className="small faint oversee-row">
-              Looking at your sessions’ repos and spend…
+              Looking at this week’s spend…
             </p>
           ) : (
             <>
-              <Picks
-                title="Repos it acts fully in"
-                none="Desk found no repos in your sessions’ folders."
-                all={pick.suggestion.repos}
-                chosen={pick.repos}
-                onToggle={(r, on) => toggle("repos", r, on)}
-                onAdd={(typed) => {
-                  const r = parseRepo(typed, pick.suggestion.repos);
-                  if ("problem" in r) return r.problem;
-                  setFull({
-                    ...pick,
-                    suggestion: {
-                      ...pick.suggestion,
-                      repos: [...pick.suggestion.repos, r.value],
-                    },
-                    repos: [...pick.repos, r.value],
-                  });
-                  return null;
-                }}
-              />
-              {pick.suggestion.workflows.length > 0 && (
-                <Picks
-                  title="Workflows it may run"
-                  none=""
-                  all={pick.suggestion.workflows}
-                  chosen={pick.workflows}
-                  onToggle={(w, on) => toggle("workflows", w, on)}
-                />
-              )}
               <div className="oversee-row">
                 <label className="oversee-check-text" htmlFor={`${ids}-budget`}>
                   <b>Daily budget</b>
                   <span className="oversee-sub">
-                    {pick.suggestion.metered
-                      ? `About twice a day’s spend billed to your API keys this week.`
-                      : "Nothing this week was billed to an API key or a cloud account, so this caps only such spend."}
+                    {pick.metered
+                      ? "About twice a day’s spend billed to your API keys this week. Leave it blank for none."
+                      : "Nothing this week was billed to an API key or a cloud account, so this caps only such spend. Leave it blank for none."}
                   </span>
                 </label>
                 <span className="oversee-num">
@@ -288,10 +229,10 @@ export function OverseerCard({ inSetup = false }: { inSetup?: boolean } = {}) {
           )}
         </div>
       )}
-      {preset === "unbound" && (
+      {preset === "full" && (
         <p className="small state-blocked">
           No limits: it does everything itself, including publishing, deploys
-          and secrets. Give it a daily budget in its settings if you want one.
+          and secrets. Give it a daily budget if you want one.
         </p>
       )}
       {state.kind === "failed" && (
@@ -310,84 +251,5 @@ export function OverseerCard({ inSetup = false }: { inSetup?: boolean } = {}) {
         </button>
       </div>
     </section>
-  );
-}
-
-function Picks({
-  title,
-  none,
-  all,
-  chosen,
-  onToggle,
-  onAdd,
-}: {
-  title: string;
-  none: string;
-  all: string[];
-  chosen: string[];
-  onToggle: (item: string, on: boolean) => void;
-  /** Adds what's typed; what's wrong with it, else null. */
-  onAdd?: (typed: string) => string | null;
-}) {
-  const [typed, setTyped] = useState("");
-  const [problem, setProblem] = useState<string | null>(null);
-  const add = () => {
-    const why = onAdd?.(typed) ?? null;
-    setProblem(why);
-    if (!why) setTyped("");
-  };
-  return (
-    <div className="oversee-row oversee-list">
-      <span className="oversee-check-text">
-        <b>{title}</b>
-      </span>
-      {all.length === 0 ? (
-        <span className="small faint">{none}</span>
-      ) : (
-        <ul className="oversee-items" aria-label={title}>
-          {all.map((r) => (
-            <li key={r}>
-              <label className="oversee-check">
-                <input
-                  type="checkbox"
-                  checked={chosen.includes(r)}
-                  onChange={(e) => onToggle(r, e.target.checked)}
-                />
-                <span className="mono">{r}</span>
-              </label>
-            </li>
-          ))}
-        </ul>
-      )}
-      {onAdd && (
-        <div className="field oversee-add">
-          <span className="field-row">
-            <input
-              className="mono"
-              aria-label="Add a repo"
-              placeholder="acme/acme-web"
-              value={typed}
-              aria-invalid={problem ? true : undefined}
-              onChange={(e) => {
-                setTyped(e.target.value);
-                setProblem(null);
-              }}
-              onKeyDown={(e) =>
-                e.key === "Enter" && (e.preventDefault(), add())
-              }
-            />
-            <button
-              type="button"
-              className="btn btn-ghost btn-sm"
-              disabled={!typed.trim()}
-              onClick={add}
-            >
-              Add
-            </button>
-          </span>
-        </div>
-      )}
-      {problem && <span className="small state-blocked">{problem}</span>}
-    </div>
   );
 }
