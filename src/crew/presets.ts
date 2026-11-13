@@ -1,9 +1,9 @@
 import type { Oversight } from "./oversight";
 
 /** The levels the person picks from, each with the switches it implies.
- *  Act fully is unbound: every switch on, anywhere, and Desk allows every
- *  request its sessions ask at once (the hub holds it to that whatever
- *  its switches say). */
+ *  Act fully is unbound: every switch on, anywhere, and the boss decides
+ *  every request its sessions ask the moment they ask, allowing or denying
+ *  with its reason (the hub holds it to that whatever its switches say). */
 export type Preset = "watch" | "suggest" | "act" | "full";
 
 export const PRESETS: readonly Preset[] = ["watch", "suggest", "act", "full"];

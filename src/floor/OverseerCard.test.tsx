@@ -84,55 +84,42 @@ describe("Who oversees the crew, on the Floor", () => {
     expect(screen.queryByRole("heading", { name: "No one oversees your crew" })).toBeNull();
   });
 
-  it("sets Act fully up from what Desk finds, before writing anything, and leaves nothing missing", async () => {
+  it("sets Act fully with a suggested budget, before writing anything, and no repos to pick", async () => {
     const hub = fakeHub();
     useDesk.setState({ hub });
     render(<OverseerCard />);
     fireEvent.change(screen.getByRole("combobox"), { target: { value: "ledger" } });
     await act(async () => fireEvent.click(screen.getByRole("radio", { name: /^Act fully/ })));
-    const repos = await screen.findByRole("list", { name: "Repos it acts fully in" });
-    expect((within(repos).getByRole("checkbox", { name: "acme/acme-web" }) as HTMLInputElement).checked).toBe(true);
-    expect((screen.getByRole("checkbox", { name: "deploy.yml" }) as HTMLInputElement).checked).toBe(true);
-    expect((screen.getByRole("textbox", { name: /Daily budget/ }) as HTMLInputElement).value).toBe("10");
+    const budget = (await screen.findByRole("textbox", { name: /Daily budget/ })) as HTMLInputElement;
+    expect(budget.value).toBe("10");
     expect(screen.getByText(/Nothing this week was billed to an API key or a cloud account/)).toBeTruthy();
+    expect(screen.queryByRole("list", { name: "Repos it acts fully in" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Add a repo" })).toBeNull();
     expect(hub.saveAgentConfig).not.toHaveBeenCalled();
-    // Another typed in, the suggested workflow left out.
-    fireEvent.change(screen.getByRole("textbox", { name: "Add a repo" }), { target: { value: "acme/acme-api" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
-    fireEvent.click(screen.getByRole("checkbox", { name: "deploy.yml" }));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Ledger oversees at Act fully" })));
     await waitFor(() => expect(hub.saveAgentConfig).toHaveBeenCalledTimes(1));
-    expect(oversight("ledger")).toMatchObject({
-      level: "full",
-      act: { hand_out_work: true, set_mode: true },
-      full: { anywhere: true, repos: ["acme/acme-web", "acme/acme-api"], workflows: [], budget_usd_per_day: 10 },
-    });
+    const o = oversight("ledger")!;
+    expect(o).toMatchObject({ level: "full", full: { budget_usd_per_day: 10 } });
+    expect(Object.values(o.act as Record<string, boolean>).every(Boolean)).toBe(true);
   });
 
-  it("sets Act fully with no repo, every switch on, anywhere, but never with a wrong budget", async () => {
-    const platform = await import("../platform");
-    (platform.repoFacts as ReturnType<typeof vi.fn>).mockImplementationOnce(() => Promise.resolve([]));
+  it("sets Act fully with no budget when it's left blank, but never with a wrong one", async () => {
     const hub = fakeHub();
     useDesk.setState({ hub });
     render(<OverseerCard />);
     await act(async () => fireEvent.click(screen.getByRole("radio", { name: /^Act fully/ })));
-    expect(await screen.findByText("Desk found no repos in your sessions’ folders.")).toBeTruthy();
     expect(screen.getByText(/No limits: it does everything itself/)).toBeTruthy();
     const go = screen.getByRole("button", { name: "Desk oversees at Act fully" }) as HTMLButtonElement;
-    expect(go.disabled).toBe(false);
-    fireEvent.change(screen.getByRole("textbox", { name: "Add a repo" }), { target: { value: "acme" } });
-    fireEvent.click(screen.getByRole("button", { name: "Add" }));
-    expect(screen.getByText("Name a repo as owner/name, its address, or a folder like ~/dev/acme-web.")).toBeTruthy();
-    const budget = screen.getByRole("textbox", { name: /Daily budget/ });
+    const budget = await screen.findByRole("textbox", { name: /Daily budget/ });
     fireEvent.change(budget, { target: { value: "0" } });
     expect(screen.getByText(/Its daily budget must be an amount in dollars above 0/)).toBeTruthy();
     expect(go.disabled).toBe(true);
-    fireEvent.change(budget, { target: { value: "20" } });
+    fireEvent.change(budget, { target: { value: "  " } });
     expect(go.disabled).toBe(false);
     await act(async () => fireEvent.click(go));
     await waitFor(() => expect(hub.saveAgentConfig).toHaveBeenCalledTimes(1));
     const o = oversight("desk")!;
-    expect(o).toMatchObject({ level: "full", full: { anywhere: true, repos: [], budget_usd_per_day: 20 } });
-    expect(Object.values(o.act as Record<string, boolean>).every(Boolean)).toBe(true);
+    expect(o.level).toBe("full");
+    expect("budget_usd_per_day" in ((o.full as Record<string, unknown>) ?? {})).toBe(false);
   });
 });

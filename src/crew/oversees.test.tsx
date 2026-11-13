@@ -139,7 +139,7 @@ describe("Oversees the crew", () => {
     await waitFor(() => expect(oversight()).toMatchObject({ level: "act", act: { hand_out_work: false }, track: { workspaces: true } }));
   });
 
-  it("offers Act fully after Act, unbound with every switch on, and keeps its lists for when Anywhere is off", async () => {
+  it("offers Act fully after Act, unbound with every switch on, and asks only for a budget", async () => {
     useOverview.setState({ manager: { agentId: "ledger", level: "act" } });
     const hub = fakeHub();
     // The hub runs it at Act until Act fully is in force.
@@ -150,29 +150,17 @@ describe("Oversees the crew", () => {
       .map((r) => r.querySelector("b")?.textContent);
     expect(levels).toEqual(["Watch", "Suggest", "Act", "Act fully"]);
     expect(screen.getByText("Does everything itself, in any repo: it decides every request its sessions ask the moment they ask, with its reason in the activity log. Only your budget and Stop hold it.")).toBeTruthy();
-    expect(screen.queryByRole("heading", { name: "Where Ledger acts fully" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "Ledger’s budget" })).toBeNull();
+    expect(screen.getByRole("heading", { name: "What Ledger may do without asking" })).toBeTruthy();
     await act(async () => fireEvent.click(screen.getByRole("radio", { name: /^Act fully/ })));
     await waitFor(() => expect(oversight()).toMatchObject({ level: "full", act: { set_mode: true, hand_off: true }, full: { anywhere: true } }));
-    expect(screen.getByRole("heading", { name: "Where Ledger acts fully" })).toBeTruthy();
-    // It needs no repo: it is unbound.
+    expect(screen.getByRole("heading", { name: "Ledger’s budget" })).toBeTruthy();
+    // Unbound: no repos, workflows, Anywhere, or switches to set.
     expect(screen.queryByText(/Act fully needs/)).toBeNull();
-    expect(screen.getByRole("heading", { name: "What Ledger may do without asking" })).toBeTruthy();
-    // Its lists, kept for when Anywhere is off.
-    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Anywhere/ })));
-    await waitFor(() => expect(oversight()).toMatchObject({ full: { anywhere: false } }));
-
-    // Repos: checked as the hub takes them, added and removed.
-    const repo = screen.getByRole("textbox", { name: "Add a repo" });
-    fireEvent.change(repo, { target: { value: "acme" } });
-    fireEvent.keyDown(repo, { key: "Enter" });
-    expect(screen.getByRole("alert").textContent).toBe("Name a repo as owner/name, its address, or a folder like ~/dev/acme-web.");
-    // Saved for Act fully and for Anywhere off, never for what was refused.
-    expect(hub.saveAgentConfig).toHaveBeenCalledTimes(2);
-    fireEvent.change(repo, { target: { value: "acme/acme-web" } });
-    await act(async () => fireEvent.click(screen.getAllByRole("button", { name: "Add" })[0]!));
-    await waitFor(() => expect(oversight()).toMatchObject({ full: { repos: ["acme/acme-web"] } }));
-    // A repo is all it needs: the budget is optional.
-    expect(screen.queryByText(/Act fully needs/)).toBeNull();
+    expect(screen.queryByRole("checkbox", { name: /Anywhere/ })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Add a repo" })).toBeNull();
+    expect(screen.queryByRole("textbox", { name: "Add a workflow" })).toBeNull();
+    expect(screen.queryByRole("heading", { name: "What Ledger may do without asking" })).toBeNull();
     expect(screen.getByText(/^Optional \(blank: no budget, so only the check-in ceilings and Stop bound it\)/)).toBeTruthy();
 
     // The budget, in the hub's words when it's wrong.
@@ -182,28 +170,15 @@ describe("Oversees the crew", () => {
     expect(screen.getByRole("alert").textContent).toBe("Its daily budget must be an amount in dollars above 0 and up to 10000.");
     fireEvent.change(budget, { target: { value: "25" } });
     await act(async () => fireEvent.keyDown(budget, { key: "Enter" }));
-    await waitFor(() => expect(oversight()).toMatchObject({ full: { repos: ["acme/acme-web"], budget_usd_per_day: 25 } }));
-    expect(screen.queryByText(/Act fully needs/)).toBeNull();
+    await waitFor(() => expect(oversight()).toMatchObject({ full: { budget_usd_per_day: 25 } }));
     // Set, but the hub still runs it at Act: it says why, as far as Desk can tell.
     expect(screen.getByText(/Acting as Act until the hub has read today’s spend/)).toBeTruthy();
     // Blank is no budget.
     fireEvent.change(budget, { target: { value: "" } });
     await act(async () => fireEvent.keyDown(budget, { key: "Enter" }));
     await waitFor(() => expect("budget_usd_per_day" in (oversight()!.full as object)).toBe(false));
-
-    // Workflows: plain file names only.
-    const workflow = screen.getByRole("textbox", { name: "Add a workflow" });
-    for (const bad of [".github/workflows/deploy.yml", "123.yml", "deploy"]) {
-      fireEvent.change(workflow, { target: { value: bad } });
-      fireEvent.keyDown(workflow, { key: "Enter" });
-      expect(screen.getByRole("alert").textContent).toBe("The workflows it may run must be a list of up to 20 file names like deploy.yml.");
-    }
-    fireEvent.change(workflow, { target: { value: "deploy.yml" } });
-    await act(async () => fireEvent.keyDown(workflow, { key: "Enter" }));
-    await waitFor(() => expect(oversight()).toMatchObject({ full: { workflows: ["deploy.yml"] } }));
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Remove acme/acme-web" })));
-    await waitFor(() => expect(oversight()).toMatchObject({ full: { repos: [] } }));
-    expect(screen.queryByText(/Act fully needs/)).toBeNull();
+    expect(screen.getByText("Always yours at Act fully")).toBeTruthy();
+    expect(screen.getByText("Changing any agent’s own settings, level or budget")).toBeTruthy();
   });
 
   it("shows the real money Act fully has spent today, and once it's spent says what stopped and offers Raise or Clear", async () => {
@@ -252,54 +227,27 @@ describe("Oversees the crew", () => {
       hub,
       `${START}\n[oversight]\nenabled = true\nlevel = "full"\n[oversight.full]\nrepos = ["acme/acme-web"]\nbudget_usd_per_day = 25\nworkflows = ["deploy.yml"]\n`,
     );
-    expect(screen.getByRole("heading", { name: "Where Ledger acts fully" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Ledger’s budget" })).toBeTruthy();
     expect(screen.queryByText(/Acting as Act/)).toBeNull();
-    expect(screen.getByRole("list", { name: "Repos" }).textContent).toContain("acme/acme-web");
-    expect(screen.getByRole("list", { name: "Workflows" }).textContent).toContain("deploy.yml");
     expect((screen.getByRole("textbox", { name: "Daily budget in US dollars" }) as HTMLInputElement).value).toBe("25");
-  });
-
-  it("offers Anywhere: lists greyed, budget optional, and saves it with the permission-mode switch", async () => {
-    useOverview.setState({ manager: { agentId: "ledger", level: "full" } });
-    const hub = fakeHub();
-    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "full"\n[oversight.full]\nrepos = ["acme/acme-web"]\nworkflows = ["deploy.yml"]\n`);
-    const anywhere = screen.getByRole("checkbox", { name: /Anywhere/ }) as HTMLInputElement;
-    expect(anywhere.checked).toBe(false);
-    expect(screen.getByText("Not limited to the repos, folders and workflows listed")).toBeTruthy();
-    expect((screen.getByRole("textbox", { name: "Add a repo" }) as HTMLInputElement).disabled).toBe(false);
-    expect(screen.getByText(/^Optional \(blank: no budget/)).toBeTruthy();
-    expect(screen.queryByText(/Acting as Act until/)).toBeNull();
-    await act(async () => fireEvent.click(anywhere));
-    await waitFor(() => expect(oversight()).toMatchObject({ full: { anywhere: true } }));
-    expect((screen.getByRole("textbox", { name: "Add a repo" }) as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByRole("textbox", { name: "Add a workflow" }) as HTMLInputElement).disabled).toBe(true);
-    expect((screen.getByRole("button", { name: "Remove acme/acme-web" }) as HTMLButtonElement).disabled).toBe(true);
-    expect(screen.getByText("The repos and workflows below don’t apply while Anywhere is on.")).toBeTruthy();
-    expect(screen.getByText(/^Optional \(blank: no budget, so/)).toBeTruthy();
-    expect(screen.queryByText(/Acting as Act until/)).toBeNull();
-    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Change sessions’ permission mode/ })));
-    await waitFor(() => expect(oversight()).toMatchObject({ act: { set_mode: true }, full: { anywhere: true } }));
   });
 
   it("says there are no limits at Act fully, whatever its switches and Anywhere say", async () => {
     useOverview.setState({ manager: { agentId: "ledger", level: "full" } });
-    const hub = fakeHub();
-    const acts = `nudge = true\nresume_restart = true\nread_only_approvals = true\nhand_out_work = true\ninterrupt = true\nmessage_agents = true\nmessage_terminal_sessions = true\nanswer_sessions = true\nhand_off = true\nset_mode = true\n`;
-    const line = /^No limits: Desk acts on everything itself, including publishing, deploys and secrets\. Only your budget, Stop and the activity log remain\./;
-    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "full"\n[oversight.act]\n${acts}[oversight.full]\nanywhere = true\n`);
-    expect(screen.getByText(line)).toBeTruthy();
-    expect(screen.getByText(/It decides every request its sessions ask the moment they ask/)).toBeTruthy();
-    // A switch off, or Anywhere off: still no limits.
-    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Change sessions’ permission mode/ })));
-    await waitFor(() => expect(oversight()).toMatchObject({ act: { set_mode: false } }));
-    expect(screen.getByText(line)).toBeTruthy();
-    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Anywhere/ })));
-    await waitFor(() => expect(oversight()).toMatchObject({ full: { anywhere: false } }));
-    expect(screen.getByText(line)).toBeTruthy();
-    expect(screen.getByText(/No budget set: only the check-in ceilings and Stop bound what it spends\./)).toBeTruthy();
-    expect(screen.getByText(/Desk can switch a session it runs to auto or bypass/)).toBeTruthy();
-    expect(screen.queryByText(/always asks you first before pushing code/)).toBeNull();
-    expect(screen.getByText(/Everything it does shows in Activity/)).toBeTruthy();
+    const line = /^No limits: it acts on everything itself, including publishing, deploys and secrets\. Only your budget, Stop and the activity log remain\./;
+    for (const toml of [
+      `[oversight.act]\nset_mode = true\nhand_off = true\n[oversight.full]\nanywhere = true\n`,
+      `[oversight.act]\nset_mode = false\n[oversight.full]\nanywhere = false\nrepos = ["acme/acme-web"]\n`,
+    ]) {
+      show(fakeHub(), `${START}\n[oversight]\nenabled = true\nlevel = "full"\n${toml}`);
+      expect(screen.getByText(line)).toBeTruthy();
+      expect(screen.getByText(/It decides every request its sessions ask the moment they ask/)).toBeTruthy();
+      expect(screen.getByText(/No budget set: only the check-in ceilings and Stop bound what it spends\./)).toBeTruthy();
+      expect(screen.queryByRole("checkbox", { name: /Change sessions’ permission mode/ })).toBeNull();
+      expect(screen.queryByText(/always asks you first before pushing code/)).toBeNull();
+      expect(screen.getByText(/Everything it does shows in Activity/)).toBeTruthy();
+      cleanup();
+    }
   });
 
   it("keeps the no-limits line as it is when a budget is set", async () => {
@@ -310,15 +258,10 @@ describe("Oversees the crew", () => {
     expect(screen.queryByText(/No budget set/)).toBeNull();
   });
 
-  it("says the typing hold, and the full mode-switch words, while unbound", async () => {
+  it("says the typing hold while unbound", async () => {
     useOverview.setState({ manager: { agentId: "ledger", level: "full" } });
     show(fakeHub(), `${START}\n${UNBOUND}`);
     expect(screen.getByText(/its messages to a session it runs wait while you type, for 7 minutes after your last keystroke\./)).toBeTruthy();
-    expect(
-      screen.getByText(
-        "Desk can switch a session it runs to auto or bypass. It goes back to its own mode, started again in place between turns, as soon as unbound ends, the session is released or handed to another boss, or you resume it",
-      ),
-    ).toBeTruthy();
   });
 
   it("uses 2 minutes for the hold when the config says none", async () => {
@@ -331,12 +274,12 @@ describe("Oversees the crew", () => {
     useOverview.setState({ manager: { agentId: "ledger", level: "full" } });
     boss(true);
     show(fakeHub(), `${START}\n${UNBOUND}`);
-    expect(screen.getByText("Unbound now.")).toBeTruthy();
+    expect(screen.getByText("Act fully is in force.")).toBeTruthy();
     expect(screen.queryByText(/not in force now/)).toBeNull();
     cleanup();
     boss(false);
     show(fakeHub(), `${START}\n${UNBOUND}`);
-    expect(screen.queryByText("Unbound now.")).toBeNull();
+    expect(screen.queryByText("Act fully is in force.")).toBeNull();
     expect(screen.queryByText(/^No limits: /)).toBeNull();
     expect(screen.getByText(/Acting as Act until the hub has read today’s spend/)).toBeTruthy();
     cleanup();
@@ -344,7 +287,7 @@ describe("Oversees the crew", () => {
     useFloor.setState({ hubs: {} });
     show(fakeHub(), `${START}\n${UNBOUND}`);
     expect(screen.getByText(/^No limits: /)).toBeTruthy();
-    expect(screen.queryByText("Unbound now.")).toBeNull();
+    expect(screen.queryByText("Act fully is in force.")).toBeNull();
   });
 
   it("says when a level sets switches changed by hand again, and Undo puts them back", async () => {

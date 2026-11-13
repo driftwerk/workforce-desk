@@ -29,8 +29,8 @@ export const spentToday = (
 };
 
 /** Why `o`, chosen at Act fully, isn't in force: when the hub says it
- *  runs below what was chosen, today's spend against its budget (Act fully
- *  needs no repos or switches: it is unbound). `budget`: the hub's own
+ *  runs below what was chosen, or today's spend is over its budget (Act
+ *  fully needs no repos or switches). `budget`: the hub's own
  *  count of the real money spent against it, which a newer hub gives and
  *  which wins over what Desk reckons from the ledger. Null while it's in
  *  force. */
