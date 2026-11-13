@@ -91,18 +91,22 @@ export const useRoomMarker = (room: string): RoomMarker => {
 /** The rooms' badges together, each as its row's (`useRoomMarker`): what
  *  the Rooms header shows while it's closed. */
 export const useRoomsBadge = (rooms: readonly string[]): Marked => {
+  const of = useRoomBadgeOf();
+  return badgeOfGroup(rooms.map(of));
+};
+
+/** Each room's badge, as `useRoomsBadge` reads it, to ask of any room. */
+export const useRoomBadgeOf = (): ((room: string) => Marked) => {
   const counted = useUnread((s) => s.local?.rooms);
   const points = useReads((s) => s.local);
   const here = useHere();
   const drafts = useDesk((s) => s.roomDrafts);
   const needs = useNeeds();
   const hasFloor = useHasFloor();
-  return badgeOfGroup(
-    rooms.map((room) => {
-      const c = counted?.find((r) => r.roomId === room);
-      return badgeOfRoom(c && roomNotHere(c, points, here), drafts[room] ?? NO_DRAFTS, inRoom(needs, room), hasFloor);
-    }),
-  );
+  return (room: string) => {
+    const c = counted?.find((r) => r.roomId === room);
+    return badgeOfRoom(c && roomNotHere(c, points, here), drafts[room] ?? NO_DRAFTS, inRoom(needs, room), hasFloor);
+  };
 };
 
 /** The version of Desk ready to restart into while it's unread: its
