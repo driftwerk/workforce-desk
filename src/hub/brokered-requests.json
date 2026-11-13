@@ -677,6 +677,11 @@
   {
     "kind": "http",
     "method": "POST",
+    "path": "/api/desk/items/i1/always"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
     "path": "/api/desk/dm/desk/typing"
   },
   {

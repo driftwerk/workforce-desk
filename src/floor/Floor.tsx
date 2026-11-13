@@ -43,7 +43,9 @@ const startReads = (hub: object | null): (() => void) => {
   const t = setInterval(() => {
     const s = useOverview.getState();
     void s.loadOverview();
-    if (s.managerSupport === "no") void s.loadManager();
+    // Who oversees what, and how much each boss handled today: it counts
+    // up as they decide.
+    void s.loadManager();
     if (s.activitySupport === "no") void s.loadActivity("all");
   }, REFRESH_MS);
   return () => {
