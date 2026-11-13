@@ -3,6 +3,7 @@ import { deskListeners, useDesk } from "../hub/store";
 import type { DeskEvent, MemoryChoice, MemoryIndexStatus, MemorySettings } from "../hub/types";
 import { clock, count, providerName, thousands } from "../memory/words";
 import { plainError } from "../ui/plainError";
+import { SwitchRow } from "../ui/SwitchRow";
 
 /** What the index says of itself, in plain words. */
 export const indexLines = (i: MemoryIndexStatus): string[] => {
@@ -24,7 +25,6 @@ export function Memory() {
   const [problem, setProblem] = useState<string | null>(null);
   const [rebuilt, setRebuilt] = useState<string | null>(null);
   const [rebuilding, setRebuilding] = useState(false);
-  const pauseId = useId();
 
   // Each part on its own: one that fails says why, and the other still shows.
   const load = useCallback(async () => {
@@ -126,19 +126,16 @@ export function Memory() {
         !problem && <p className="muted small">This version of Desk doesn't keep Desk Memory's settings yet. Update Desk to change them.</p>
       ) : (
         <>
-          <div className="ability-row">
-            <span className="ability-text">
-              <b id={pauseId}>Pause remembering</b>
-              <span className="ability-sub">
-                {settings.paused
-                  ? "Paused: nothing any session says now is kept, and it isn't read later either."
-                  : "Desk is remembering your sessions. Paused, nothing they say meanwhile is kept."}
-              </span>
-            </span>
-            <button type="button" role="switch" className="switch" aria-checked={settings.paused} aria-labelledby={pauseId} onClick={() => void pause(!settings.paused)}>
-              <span className="switch-knob" />
-            </button>
-          </div>
+          <SwitchRow
+            label="Pause remembering"
+            sub={
+              settings.paused
+                ? "Paused: nothing any session says now is kept, and it isn't read later either."
+                : "Desk is remembering your sessions. Paused, nothing they say meanwhile is kept."
+            }
+            on={settings.paused}
+            onChange={(paused) => void pause(paused)}
+          />
 
           <section className="prov-section" aria-label="What Desk keeps">
             <h2 className="field-label">What Desk keeps</h2>
@@ -196,7 +193,7 @@ export function Memory() {
       {limits && (
         <section className="prov-section" aria-label="What Desk remembers">
           <h2 className="field-label">What Desk remembers</h2>
-          <Switch
+          <SwitchRow
             label="Remember conversations"
             sub={
               limits.enabled
@@ -207,7 +204,7 @@ export function Memory() {
             saving={saving === "enabled"}
             onChange={(enabled) => void choose({ enabled })}
           />
-          <Switch
+          <SwitchRow
             label="Note decisions, facts and to-dos"
             sub={
               !limits.enabled
@@ -276,45 +273,6 @@ export function Memory() {
         </section>
       )}
     </section>
-  );
-}
-
-/** One of memory's switches, as the pause is drawn. */
-function Switch({
-  label,
-  sub,
-  on,
-  disabled,
-  saving,
-  onChange,
-}: {
-  label: string;
-  sub: string;
-  on: boolean;
-  disabled?: boolean;
-  saving?: boolean;
-  onChange: (on: boolean) => void;
-}) {
-  const id = useId();
-  return (
-    <div className="ability-row">
-      <span className="ability-text">
-        <b id={id}>{label}</b>
-        <span className="ability-sub">{sub}</span>
-      </span>
-      <button
-        type="button"
-        role="switch"
-        className="switch"
-        aria-checked={on}
-        aria-labelledby={id}
-        aria-busy={saving || undefined}
-        disabled={disabled || saving}
-        onClick={() => onChange(!on)}
-      >
-        <span className="switch-knob" />
-      </button>
-    </div>
   );
 }
 

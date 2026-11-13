@@ -17,20 +17,18 @@ export function Profile() {
     for (const hub of hubs) void useChat.getState().refreshMe(hub.id);
   }, [hubs]);
   return (
-    <main className="settings-main">
-      <div className="settings-head">
-        <h1 className="display-xl">Profile</h1>
-        <span className="muted">
-          Each workspace keeps your picture on your account there: its Slack and web app show it too. Without one chosen, it’s your Slack picture there, if
-          you have one.
-        </span>
-      </div>
+    <section className="settings-pane" aria-label="Profile">
+      <h1 className="display-lg">Profile</h1>
+      <p className="muted">
+        Each workspace keeps your picture on your account there: its Slack and web app show it too. Without one chosen, it’s your Slack picture there, if you
+        have one.
+      </p>
       <section className="profile-hubs" aria-label="Your picture on each workspace">
         {hubs.map((hub) => (
           <HubPicture key={hub.id} hub={hub} me={me[hub.id]} others={hubs.filter((h) => h.id !== hub.id && me[h.id])} />
         ))}
       </section>
-    </main>
+    </section>
   );
 }
 

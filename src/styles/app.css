@@ -43,6 +43,13 @@ button {
   cursor: pointer;
 }
 
+/* A native tick, radio or slider in the theme's signal, wherever it is. */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  accent-color: var(--signal);
+}
+
 :focus-visible {
   outline: 2px solid var(--signal);
   outline-offset: 2px;

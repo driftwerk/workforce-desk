@@ -9,6 +9,7 @@ import { useHost } from "../shell/host";
 import { Confirm } from "../ui/Confirm";
 import { plainError } from "../ui/plainError";
 import { ProblemNote } from "../ui/ProblemNote";
+import { SwitchRow } from "../ui/SwitchRow";
 import { useProviders } from "../providers/store";
 import { CopyInstall, PlanLoginAction, ReopenLink, usePlanLogin } from "./PlanLogin";
 
@@ -307,13 +308,12 @@ function AutoSwitch({ machine, store }: { machine: MachineId; store: AccountsSto
     }
   };
   return (
-    <label className="toggle-row">
-      <input type="checkbox" checked={on} onChange={(e) => void set(e.target.checked)} />
-      <span>
-        <b className="small">Switch automatically when an account hits its limit</b>
-        <span className="muted small">Desk moves its sessions to an account with room and says so on the Floor. It asks before switching back.</span>
-      </span>
-    </label>
+    <SwitchRow
+      label="Switch automatically when an account hits its limit"
+      sub="Desk moves its sessions to an account with room and says so on the Floor. It asks before switching back."
+      on={on}
+      onChange={(next) => void set(next)}
+    />
   );
 }
 
