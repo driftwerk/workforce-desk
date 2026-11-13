@@ -1683,3 +1683,36 @@ button.card-icon:hover:not(:disabled) {
   border-radius: 999px;
   padding: 4px 10px;
 }
+
+/* While Desk reads the session for a handoff: a spinner that turns on the
+   compositor (transform only), so waiting is seen and costs no repaints. */
+.handoff-reading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 8px 0;
+}
+.handoff-reading-sub {
+  display: block;
+  margin-top: 2px;
+}
+.handoff-spinner {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--signal);
+  animation: handoff-spin 0.9s linear infinite;
+  will-change: transform;
+}
+@keyframes handoff-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .handoff-spinner {
+    animation-duration: 2.4s;
+  }
+}
