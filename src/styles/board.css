@@ -838,6 +838,577 @@ button.ticket-chip:hover {
   margin-top: 8px;
   font-size: 12px;
 }
+
+/* ── The ticket's view: a reading column and a details column ─────────────
+   Two columns where the panel is wide (full screen, a wide side panel);
+   one where it's narrow, with what to do with it just under its title. */
+
+.ticket-panel {
+  container: ticket / inline-size;
+}
+.ticket-body.ticket-view {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 320px;
+  gap: 0;
+  padding: 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+.ticket-read {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+  padding: 28px 40px 32px;
+}
+.ticket-read.is-dropping {
+  outline: 2px dashed var(--signal);
+  outline-offset: -10px;
+}
+.ticket-read .ticket-title {
+  font: 700 28px/1.2 var(--font-display);
+}
+.ticket-read .ticket-title-edit {
+  font: 700 28px/1.2 var(--font-display);
+}
+.ticket-description {
+  max-width: 760px;
+  font-size: 14.5px;
+  line-height: 1.6;
+}
+.ticket-description .ticket-md h1,
+.ticket-description .ticket-md h2,
+.ticket-description .ticket-md h3,
+.ticket-description .ticket-md h4 {
+  margin: 14px 0 4px;
+  font-size: 15px;
+}
+.ticket-description .ticket-md p {
+  margin: 0 0 14px;
+}
+.ticket-description .ticket-md code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--raised);
+  font: 500 13px var(--font-mono);
+}
+.ticket-description .ticket-md .task-list-item {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 6px;
+}
+.ticket-description .ticket-md input[type="checkbox"] {
+  accent-color: var(--done);
+}
+.ticket-section-head {
+  margin: 0 0 10px;
+  font-size: 11.5px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ticket-section-note {
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+}
+.ticket-open-issue {
+  margin-left: 8px;
+}
+.ticket-key {
+  font-family: var(--font-mono);
+}
+
+/* Files: cards, a picture's small picture or a badge. */
+.ticket-file-cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.ticket-file {
+  position: relative;
+  width: 180px;
+}
+.ticket-file-open,
+.ticket-file-drop {
+  width: 180px;
+  height: 168px;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  overflow: hidden;
+  cursor: pointer;
+}
+.ticket-file-open:hover,
+.ticket-file-drop:hover,
+.ticket-file-drop.is-over {
+  border-color: var(--signal);
+}
+.ticket-file-image .ticket-file-open {
+  padding: 0;
+  gap: 0;
+}
+.ticket-file-shot {
+  display: block;
+  height: 110px;
+  background: var(--raised);
+  overflow: hidden;
+}
+/* A picture's small picture on its way: its place, a shade off the card's. */
+.ticket-file-shot-wait {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: color-mix(in srgb, var(--border) 45%, var(--raised));
+}
+.ticket-file-shot img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.ticket-file-image .ticket-file-name {
+  padding: 8px 10px;
+}
+.ticket-file-name {
+  display: block;
+  min-width: 0;
+  font-size: 12.5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ticket-file-line {
+  display: block;
+  color: var(--faint);
+  font-size: 11.5px;
+}
+.ticket-file-badge,
+.ticket-file-drop-plus {
+  width: 40px;
+  height: 48px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--raised);
+  color: var(--muted);
+  font: 600 11px var(--font-mono);
+}
+.ticket-file-badge-pdf {
+  background: var(--blocked-soft);
+  color: var(--blocked);
+}
+.ticket-file-badge-link {
+  color: var(--working);
+}
+.ticket-file-drop {
+  border-style: dashed;
+  background: none;
+}
+.ticket-file-drop-plus {
+  font-size: 20px;
+  color: var(--signal-soft-text);
+  background: var(--signal-soft);
+}
+.ticket-file-remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+}
+
+/* Comments, and a box to add yours. */
+.ticket-comments {
+  max-width: 760px;
+}
+.ticket-comment-list {
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.ticket-comment {
+  display: flex;
+  gap: 10px;
+}
+.ticket-comment-mark {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 14px;
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+  font-size: 12px;
+  font-weight: 700;
+}
+.ticket-comment-agent .ticket-comment-mark {
+  background: var(--raised);
+  color: var(--working);
+}
+.ticket-comment-desk .ticket-comment-mark {
+  background: var(--sunken);
+  color: var(--muted);
+}
+.ticket-comment-main {
+  min-width: 0;
+  flex: 1;
+}
+.ticket-comment-by {
+  font-size: 12.5px;
+  color: var(--faint);
+}
+.ticket-comment-by b {
+  color: var(--text);
+}
+/* Posted to its issue by Desk on the person's behalf: said plainly. */
+.ticket-comment-behalf {
+  color: var(--muted);
+  font-weight: 600;
+}
+.ticket-comment-body {
+  margin-top: 2px;
+  font-size: 14px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+.ticket-comment-body > :first-child {
+  margin-top: 0;
+}
+.ticket-comment-body > :last-child {
+  margin-bottom: 0;
+}
+.ticket-comment.is-flagged .ticket-comment-body {
+  color: var(--muted);
+}
+.ticket-comment-flag {
+  margin: 2px 0;
+  color: var(--blocked);
+}
+.ticket-comments-problem {
+  margin: 0 0 8px;
+}
+.ticket-composer {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  min-height: 40px;
+  box-sizing: border-box;
+  padding: 5px 6px 5px 14px;
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  background: var(--surface);
+}
+.ticket-composer:focus-within {
+  border-color: var(--signal);
+}
+.ticket-composer-field {
+  flex: 1;
+  min-height: 28px;
+  max-height: 160px;
+  padding: 5px 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+  resize: none;
+  field-sizing: content;
+  outline: none;
+}
+.ticket-composer-field::placeholder {
+  color: var(--faint);
+}
+.ticket-composer-send {
+  flex: none;
+  border-radius: 14px;
+}
+
+/* The details column. */
+.ticket-side {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px 20px;
+  border-left: 1px solid var(--border);
+  background: var(--surface);
+}
+.ticket-side-acts {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.ticket-take {
+  min-height: 40px;
+  border-radius: 20px;
+  font-size: 14px;
+}
+.ticket-side-pair {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+.ticket-side-pair .btn {
+  min-height: 34px;
+  border-radius: 17px;
+  font-weight: 600;
+}
+.ticket-facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px 10px;
+  font-size: 13px;
+}
+.ticket-facts dt {
+  color: var(--faint);
+}
+.ticket-facts dd {
+  margin: 0;
+  min-width: 0;
+}
+.ticket-facts .board-select {
+  border-radius: 8px;
+  background: var(--sunken);
+}
+.ticket-labels {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.ticket-label {
+  padding: 1px 8px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 12px;
+}
+.ticket-side .ticket-needs h3,
+.ticket-side .ticket-links h3 {
+  font-size: 13px;
+  font-weight: 400;
+  color: var(--faint);
+}
+details.ticket-history {
+  font-size: 13px;
+  color: var(--muted);
+}
+details.ticket-history > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+}
+details.ticket-history > summary::before {
+  content: "▸";
+  color: var(--faint);
+}
+details.ticket-history[open] > summary::before {
+  content: "▾";
+}
+details.ticket-history > summary .floor-time {
+  margin-left: auto;
+}
+.ticket-side .ticket-foot {
+  margin-top: auto;
+  gap: 14px;
+  font-size: 12.5px;
+}
+.ticket-side .ticket-foot .link {
+  color: var(--muted);
+}
+
+/* Narrow: one column, what to do with it under its title. */
+@container ticket (max-width: 760px) {
+  .ticket-body.ticket-view {
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .ticket-read {
+    display: contents;
+  }
+  /* Each part keeps its own height: the column scrolls, nothing overlaps. */
+  .ticket-body.ticket-view > *,
+  .ticket-read > * {
+    flex-shrink: 0;
+  }
+  .ticket-read > * {
+    order: 2;
+    margin: 0 18px;
+  }
+  .ticket-read > .ticket-title,
+  .ticket-read > .ticket-title-edit,
+  .ticket-read > .ticket-by,
+  .ticket-read > .ticket-issue,
+  .ticket-read > .ticket-push-problem,
+  .ticket-read > .ticket-conflict,
+  .ticket-read > [role="alert"] {
+    order: 0;
+  }
+  .ticket-read > .ticket-title,
+  .ticket-read > .ticket-title-edit {
+    margin-top: 18px;
+    font-size: 22px;
+  }
+  .ticket-read > :last-child {
+    margin-bottom: 24px;
+  }
+  .ticket-side {
+    order: 1;
+    overflow: visible;
+    margin: 4px 0 8px;
+    padding: 16px 18px;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+  }
+  .ticket-body.ticket-view {
+    gap: 16px;
+  }
+  .ticket-side .ticket-foot {
+    margin-top: 0;
+  }
+}
+
+/* ── A ticket's files, one at a time, over everything ───────────────────── */
+
+.file-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  background: var(--sunken);
+  color: var(--text);
+  outline: none;
+}
+.file-viewer-head {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  height: 56px;
+  padding: 0 24px;
+  border-bottom: 1px solid var(--border);
+}
+.file-viewer-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-viewer-where {
+  flex: none;
+  color: var(--faint);
+  font-size: 13px;
+}
+.file-viewer-gap {
+  flex: 1;
+}
+.file-viewer-head .chip-btn {
+  height: 30px;
+  padding: 0 12px;
+  color: var(--text);
+  font-size: 13px;
+}
+.file-viewer-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 24px;
+}
+.file-viewer-step {
+  flex: none;
+  width: 44px;
+  height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 22px;
+  background: none;
+  color: var(--text);
+  font-size: 18px;
+}
+.file-viewer-step:disabled {
+  visibility: hidden;
+}
+.file-viewer-frame {
+  flex: 1;
+  min-width: 0;
+  max-width: 1060px;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  overflow: hidden;
+}
+.file-viewer-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+.file-viewer-strip {
+  flex: none;
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  padding: 0 24px 20px;
+  overflow-x: auto;
+}
+.file-viewer-thumb {
+  flex: none;
+  width: 72px;
+  height: 48px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--muted);
+  font: 600 10px var(--font-mono);
+  overflow: hidden;
+}
+.file-viewer-thumb img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.file-viewer-thumb-pdf {
+  background: var(--blocked-soft);
+  color: var(--blocked);
+}
+.file-viewer-thumb[aria-current="true"] {
+  border: 2px solid var(--signal);
+}
+
 /* Choosing who you are on a shared key: a name to type, the members whose
    names have it, and a choice that's yours. */
 .choose-me {
