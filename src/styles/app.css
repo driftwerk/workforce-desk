@@ -2141,6 +2141,9 @@ button.thread-bar:hover {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .urow-bar {
+    animation: none;
+  }
   .dots i {
     animation: none;
     opacity: 0.8;
@@ -2690,7 +2693,7 @@ button.thread-bar:hover {
   width: 72px;
   border: 1px solid var(--border);
   background: var(--bg);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 6px 10px;
   outline: none;
   font: inherit;
@@ -4340,6 +4343,8 @@ body.line-resizing * {
 }
 /* Badges that wrapped under the name sit at the row's right edge. */
 .gi > .badge,
+.gi > .side-dot,
+.gi > .gi-grid,
 .gi > .gi-ticket,
 .gi > .gi-charge,
 .gi > .gi-meta,

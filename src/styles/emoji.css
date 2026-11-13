@@ -45,6 +45,7 @@
   outline: none;
 }
 .emoji-search:focus-visible {
+  outline: none;
   border-color: var(--signal);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }

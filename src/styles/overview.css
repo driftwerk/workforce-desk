@@ -884,7 +884,7 @@ button.fsec-tile-head {
 .num {
   width: 64px;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--sunken);
   color: var(--text);

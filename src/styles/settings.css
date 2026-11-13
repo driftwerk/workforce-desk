@@ -324,6 +324,7 @@ legend.set-label {
   outline: none;
 }
 .font-search:focus-visible {
+  outline: none;
   border-color: var(--signal);
   box-shadow: 0 0 0 3px var(--focus-ring);
 }
@@ -497,7 +498,7 @@ legend.set-label {
   font-size: 13px;
 }
 /* A contrast check's Pass or Low: its own class, since .badge is the app's
-   count badge. */
+   count badge (whose colours win over these). */
 .contrast-badge {
   padding: 2px 8px;
   border-radius: 999px;
@@ -1386,7 +1387,7 @@ legend.set-label {
   border-radius: 50%;
   background: var(--signal);
 }
-.pick-row .pick-text {
+.pick-text {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -1395,11 +1396,11 @@ legend.set-label {
   flex-wrap: wrap;
   gap: 1px 10px;
 }
-.pick-row .pick-text b {
+.pick-text b {
   font-weight: 500;
   font-size: 13px;
 }
-.pick-row .pick-text .muted {
+.pick-text .muted {
   font-size: 12px;
 }
 .config-grid {
