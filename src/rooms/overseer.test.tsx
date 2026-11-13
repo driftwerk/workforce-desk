@@ -107,12 +107,50 @@ describe("a boss's update in your chat", () => {
     expect(screen.getByText(/told it to wait for green CI/).className).toBe("dec-undone");
   });
 
-  it("shows a decision undone elsewhere as undone", async () => {
+  it("shows a decision undone elsewhere, or gone, as undone; one that can't be has no button left", async () => {
+    const one = (id: string, extra: object = {}) =>
+      said("…", { decisions: [{ id, text: `chose ${id}`, why: "a reason", undo: "undo", ...extra }] }, "notice");
     answer = () => new Response(JSON.stringify({ error: "That decision was already undone." }), { status: 409 });
-    show(said("…", UPDATE, "update"));
-    fireEvent.click(screen.getByRole("button", { name: "Undo: told it to wait for green CI" }));
+    let r = show(one("e409"));
+    fireEvent.click(screen.getByRole("button", { name: "Undo: chose e409" }));
     await waitFor(() => expect(screen.getByText("undone")).toBeTruthy());
     expect(screen.queryByRole("alert")).toBeNull();
+    r.unmount();
+    answer = () => new Response(JSON.stringify({ error: "That decision isn’t there." }), { status: 404 });
+    r = show(one("e404"));
+    fireEvent.click(screen.getByRole("button", { name: "Undo: chose e404" }));
+    await waitFor(() => expect(screen.getByText("undone")).toBeTruthy());
+    r.unmount();
+    answer = () => new Response(JSON.stringify({ error: "What ran is fixed forward." }), { status: 400 });
+    r = show(one("e400"));
+    fireEvent.click(screen.getByRole("button", { name: "Undo: chose e400" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("fixed forward"));
+    expect(screen.queryByRole("button", { name: "Undo: chose e400" })).toBeNull();
+    r.unmount();
+    // The hub says it's undone: no button.
+    show(one("gone", { undone: true }));
+    expect(screen.queryByRole("button")).toBeNull();
+    expect(screen.getByText("undone")).toBeTruthy();
+  });
+
+  it("remembers what you settled when the row is drawn again", async () => {
+    const m = said("…", { update: { waiting: [{ itemId: "again", text: "Ship it?", options: ["Yes", "No"] }] } }, "update");
+    const r = show(m);
+    expect(screen.getByRole("group", { name: "Your answer: Ship it?" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Yes" }));
+    await waitFor(() => expect(screen.getByText("You answered: Yes")).toBeTruthy());
+    r.unmount();
+    show(m);
+    expect(screen.getByText("You answered: Yes")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Yes" })).toBeNull();
+  });
+
+  it("links only a web address", () => {
+    const { container } = show(
+      said("…", { update: { sessions: [{ sessionId: "x", name: "X", text: "did it", refs: [{ kind: "pr", id: "#1", url: "javascript:alert(1)" }] }] } }, "update"),
+    );
+    expect(container.querySelector("a.ref")).toBeNull();
+    expect(container.querySelector("span.ref")?.textContent).toBe("#1");
   });
 
   it("answers what waits through the hub, which settles it", async () => {
@@ -125,7 +163,7 @@ describe("a boss's update in your chat", () => {
 
   it("says one settled elsewhere is settled, and a failure in plain words", async () => {
     answer = () => new Response(JSON.stringify({ error: "That was already settled." }), { status: 409 });
-    show(said("…", UPDATE, "update"));
+    show(said("…", { update: { waiting: [{ ...UPDATE.update!.waiting![0]!, itemId: "i1b" }] } }, "update"));
     fireEvent.click(screen.getByRole("button", { name: "Only new ones" }));
     await waitFor(() => expect(screen.getByText("Already settled.")).toBeTruthy());
   });

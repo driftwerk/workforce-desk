@@ -1,5 +1,5 @@
 import { RichMarkdown } from "@workforce/rich";
-import { useState, type ReactNode } from "react";
+import { useState } from "react";
 import { useDesk } from "../hub/store";
 import { HubError } from "../hub/client";
 import type { DecisionLine, DeskExtras, MentionedItem, MentionedUpdate, WaitingItem, WorkRef } from "../hub/types";
@@ -64,7 +64,10 @@ export function led(text: string): string {
 }
 
 /** The boss's paragraphs as markdown, its recommendation muted and its
- *  notes (what it holds up, what more is open) faint. */
+ *  notes (what it holds up, what more is open) faint. The prefixes are the
+ *  hub's own words (`crates/hub/src/desk_crew/items.rs`, `needs_you` and
+ *  the restatements; `open_item.rs` `still_waiting`): changed there, only
+ *  their shade here goes. */
 function Paragraphs({ text }: { text: string }) {
   const paras = text
     .split(/\n{2,}/)
@@ -85,7 +88,7 @@ function Paragraphs({ text }: { text: string }) {
 }
 
 function Ref({ r }: { r: WorkRef }) {
-  if (!r.url) return <span className="ref">{r.id}</span>;
+  if (!r.url || !/^https?:\/\//i.test(r.url)) return <span className="ref">{r.id}</span>;
   const url = r.url;
   return (
     <a
@@ -137,6 +140,12 @@ function Decision({ line }: { line: DecisionLine }) {
   );
 }
 
+// What you settled here, by decision and by item, for as long as Desk
+// runs: a row drawn again (scrolled away and back) says so at once, as the
+// hub would when asked again.
+const undoneHere = new Map<string, string>();
+const settledHere = new Map<string, string>();
+
 export const UNDO_LABEL: Record<NonNullable<DecisionLine["undo"]>, string> = {
   undo: "Undo",
   correct: "Correct",
@@ -146,7 +155,15 @@ export const UNDO_LABEL: Record<NonNullable<DecisionLine["undo"]>, string> = {
 
 function DecisionText({ line }: { line: DecisionLine }) {
   const connected = useDesk((s) => !!s.hub);
-  const [undone, setUndone] = useState<string | null>(line.undone ? "" : null);
+  const [undone, setUndone] = useState<string | null>(undoneHere.get(line.id) ?? null);
+  // A decision that can't be undone after all: no button to press again.
+  const [fixed, setFixed] = useState(false);
+  const done = (said: string) => {
+    undoneHere.set(line.id, said);
+    setUndone(said);
+  };
+  // Undone here, or elsewhere as the message now says.
+  const isUndone = undone !== null || !!line.undone;
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const what = line.text.trim().replace(/\.$/, "");
@@ -158,24 +175,28 @@ function DecisionText({ line }: { line: DecisionLine }) {
     setProblem(null);
     try {
       const r = await hub.undoDecision(line.id);
-      setUndone(r?.done ?? "");
+      done(r?.done ?? "");
     } catch (e) {
-      // Undone already, elsewhere: it shows so.
-      if (e instanceof HubError && e.status === 409) setUndone("");
-      else setProblem(plainError(e));
+      // Undone already elsewhere, or gone with its session: it shows so.
+      if (e instanceof HubError && (e.status === 409 || e.status === 404)) done("");
+      else {
+        if (e instanceof HubError && e.status === 400) setFixed(true);
+        setProblem(plainError(e));
+      }
     }
     setBusy(false);
   };
   return (
     <>
-      <span className={undone !== null ? "dec-undone" : undefined}>{said}</span>
-      {undone !== null ? (
+      <span className={isUndone ? "dec-undone" : undefined}>{said}</span>
+      {isUndone ? (
         <span className="faint small" role="status">
           {" "}
           {undone ? `Undone: ${undone}.` : "undone"}
         </span>
       ) : (
-        line.undo && (
+        line.undo &&
+        !fixed && (
           <>
             {" "}
             <button
@@ -213,7 +234,7 @@ function Waiting({ items }: { items: WaitingItem[] }) {
             {w.holdingUp ? <span className="faint"> · {w.holdingUp}</span> : null}
           </p>
           {w.recommendation && <p className="muted">I'd say: {w.recommendation}</p>}
-          <Answers id={w.itemId} options={w.options ?? []} recommendation={w.recommendation} />
+          <Answers id={w.itemId} label={w.text} options={w.options ?? []} recommendation={w.recommendation} />
         </div>
       ))}
     </>
@@ -258,18 +279,25 @@ export function recommended(options: readonly string[], recommendation?: string 
  *  aside. */
 function Answers({
   id,
+  label,
   options,
   recommendation,
   parked,
 }: {
   id: string;
+  /** What it answers, for a screen reader: an update may hold several. */
+  label?: string;
   options: string[];
   recommendation?: string | null;
   parked?: boolean;
 }) {
   const connected = useDesk((s) => !!s.hub);
   const [busy, setBusy] = useState<string | null>(null);
-  const [settled, setSettled] = useState<ReactNode>(null);
+  const [settled, setSettledHere] = useState<string | null>(settledHere.get(id) ?? null);
+  const setSettled = (said: string) => {
+    settledHere.set(id, said);
+    setSettledHere(said);
+  };
   const [problem, setProblem] = useState<string | null>(null);
   if (!options.length && !parked) return null;
   if (settled)
@@ -278,7 +306,7 @@ function Answers({
         {settled}
       </p>
     );
-  const act = async (what: string, run: () => Promise<unknown>, said: ReactNode) => {
+  const act = async (what: string, run: () => Promise<unknown>, said: string) => {
     setBusy(what);
     setProblem(null);
     try {
@@ -294,14 +322,14 @@ function Answers({
   const best = recommended(options, recommendation);
   return (
     <>
-      <div className="dm-inline" role="group" aria-label="Your answer">
+      <div className="dm-inline" role="group" aria-label={label ? `Your answer: ${label}` : "Your answer"}>
         {options.map((o) => (
           <button
             key={o}
             type="button"
             className={`btn btn-sm${o === best ? " btn-signal" : ""}`}
             disabled={busy !== null || !connected}
-            onClick={() => void act(o, () => hub()!.answerItem(id, o), <>You answered: {o}</>)}
+            onClick={() => void act(o, () => hub()!.answerItem(id, o), `You answered: ${o}`)}
           >
             {o}
           </button>
@@ -310,7 +338,7 @@ function Answers({
           <button
             type="button"
             className="link small"
-            aria-label="Drop it"
+            aria-label={label ? `Drop: ${label}` : "Drop it"}
             disabled={busy !== null || !connected}
             onClick={() => void act("drop", () => hub()!.dropItem(id), "Dropped.")}
           >
