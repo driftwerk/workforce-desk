@@ -168,7 +168,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   presence: (h) => h.presence(true, "desk"),
   preferences: (h) => h.preferences(),
   changePreference: (h) => h.changePreference("p1", { thenText: "Wait for green" }),
-  setPreference: (h) => h.setPreference("p1", "pause"),
+  setPreference: (h) => Promise.all([h.setPreference("p1", "pause"), h.setPreference("p1", "resume"), h.setPreference("p1", "retire")]),
   rooms: (h) => h.rooms(),
   createRoom: (h) => h.createRoom("R", []),
   updateRoom: (h) => h.updateRoom("r1", { name: "R2" } as never),

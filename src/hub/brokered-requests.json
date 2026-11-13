@@ -701,6 +701,16 @@
   },
   {
     "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/preferences/p1/resume"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/preferences/p1/retire"
+  },
+  {
+    "kind": "http",
     "method": "GET",
     "path": "/api/desk/rooms"
   },
