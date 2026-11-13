@@ -373,7 +373,7 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
         {pickable && (
           <div className="field">
             <span className="ov-label muted">From your SSH config</span>
-            <div className="pick-list" role="radiogroup" aria-label="From your SSH config">
+            <div className="ssh-picks" role="radiogroup" aria-label="From your SSH config">
               {hosts.map((h) => {
                 const there = machines.some((m) => m.target === h.host);
                 return (
