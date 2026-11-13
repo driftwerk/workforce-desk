@@ -46,6 +46,7 @@
   flex: 1;
   min-width: 0;
   overflow-y: auto;
+  /* As a pane's, so Appearance's title sits where every page's does. */
   padding: 34px 32px 40px;
   display: flex;
   flex-direction: column;
@@ -56,7 +57,7 @@
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-width: 696px;
+  max-width: 760px;
 }
 .settings-head p {
   margin: 0;
@@ -1010,8 +1011,9 @@ legend.set-label {
   flex-direction: column;
   padding: 6px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
-  background: var(--surface);
+  border-radius: var(--radius);
+  background: var(--card-fill);
+  box-shadow: 0 1px 2px var(--lift);
 }
 .machine-row {
   display: flex;
@@ -1706,9 +1708,6 @@ legend.set-label {
   gap: 8px;
   margin: 2px 0 0 28px;
 }
-.remove-option input {
-  accent-color: var(--signal);
-}
 
 /* A switch or number row on a pane, not in a card: its words line up with
    the headings and text around it. */
@@ -1724,4 +1723,16 @@ legend.set-label {
 }
 .accounts .switch-row b {
   font-size: inherit;
+}
+.accounts .switch-row .ability-sub {
+  font-size: 12px;
+}
+
+/* A segmented choice in a pane keeps its own width. */
+.settings-pane .prov-section > .seg {
+  align-self: flex-start;
+}
+.settings-pane .prov-section > .seg button {
+  padding-inline: 14px;
+  white-space: nowrap;
 }

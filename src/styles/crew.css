@@ -937,7 +937,11 @@ button.card-icon:hover:not(:disabled) {
   background: none;
 }
 .ability-card .pick:hover:not(:disabled) {
-  background: var(--raised);
+  background: color-mix(in srgb, var(--text) 5%, var(--card-fill));
+}
+/* What it asks about first, under Full access: its own group, set in. */
+.ability-card > .pick-list + .pick-list {
+  padding-left: 32px;
 }
 .ability-card > .ability-note {
   padding: 10px 16px 12px;
@@ -1232,6 +1236,7 @@ button.card-icon:hover:not(:disabled) {
   gap: 10px;
   border: 0;
   background: transparent;
+  box-shadow: none;
 }
 .voice-option .pick {
   flex: 1;

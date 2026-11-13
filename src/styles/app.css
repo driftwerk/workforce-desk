@@ -285,6 +285,15 @@ body.side-resizing * {
   border-radius: 999px;
   background: var(--raised);
 }
+/* On a card (cardFill, often the raised colour) the track is sunk, so it
+   still shows. */
+.setting-card .seg,
+.prov-list .seg,
+.ability-card .seg,
+.think-rows .seg,
+.engine-row .seg {
+  background: var(--sunken);
+}
 .tabs button,
 .seg button {
   flex: 1;

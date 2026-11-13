@@ -28,8 +28,8 @@ export function Calls() {
         onChange={(on) => set({ voice: on })}
       />
       {voice && (
-        <div className="set-group">
-          <span className="set-label">Voice</span>
+        <section className="prov-section" aria-label="Voice">
+          <h2 className="field-label">Voice</h2>
           <div className="seg" role="radiogroup" aria-label="Voice engine">
             {VOICE_ENGINES.map((e) => (
               <button key={e.id} type="button" role="radio" aria-checked={engine.id === e.id} onClick={() => set({ voiceEngine: e.id })}>
@@ -37,7 +37,7 @@ export function Calls() {
               </button>
             ))}
           </div>
-        </div>
+        </section>
       )}
       {hasTuple && (
         <SwitchRow

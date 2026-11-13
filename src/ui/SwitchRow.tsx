@@ -24,17 +24,24 @@ export function SwitchRow({
   const id = useId();
   return (
     <div className="ability-row switch-row">
-      <span className="ability-text">
-        <b id={id}>{label}</b>
-        {sub && <span className="ability-sub">{sub}</span>}
-      </span>
+      {/* The words are the switch's label: clicking them flips it too. */}
+      <label className="ability-text" htmlFor={`${id}-switch`}>
+        <b id={`${id}-label`}>{label}</b>
+        {sub && (
+          <span className="ability-sub" id={`${id}-sub`}>
+            {sub}
+          </span>
+        )}
+      </label>
       {children}
       <button
         type="button"
         role="switch"
+        id={`${id}-switch`}
         className="switch"
         aria-checked={on}
-        aria-labelledby={id}
+        aria-labelledby={`${id}-label`}
+        aria-describedby={sub ? `${id}-sub` : undefined}
         aria-busy={saving || undefined}
         disabled={disabled || saving}
         onClick={() => onChange(!on)}
