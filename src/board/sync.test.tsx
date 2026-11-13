@@ -62,7 +62,7 @@ vi.mock("@workforce/rich", () => ({
 import { useChat } from "../chat/store";
 import { boardSyncOf, fixOf, issueUrl, linkedTo, looksLikeToken, pausedWords, syncHubId, syncStatus, targetOk } from "../hub/boardSync";
 import { useDesk } from "../hub/store";
-import type { Board as BoardT, SyncHub, Ticket } from "../hub/types";
+import type { ActivityParty, Board as BoardT, SyncHub, Ticket } from "../hub/types";
 import { Board } from "./BoardView";
 import { BOARD_CHROME } from "./chrome";
 import { OpenTicket } from "./TicketDetail";
@@ -861,12 +861,31 @@ describe("the board, synced", () => {
     expect(plain.querySelector(".board-card-facts")).toBeNull();
     // The column adds its points up.
     expect(within(screen.getByRole("region", { name: "To do" })).getByText(/1 · 5 pts/)).toBeTruthy();
+    // A screen reader hears what the glyphs and chips say.
+    expect(document.getElementById(card.getAttribute("aria-describedby")!)!.textContent).toBe(
+      "Story. Epic Permissions. Priority Now. 5 points. 1 of 4 sub-items done. 2 pull requests, in review. Blocked by ACME-77",
+    );
+    // Done's points aren't added up: they would only grow.
+    expect(within(screen.getByRole("region", { name: "Done" })).getByLabelText("1 ticket")).toBeTruthy();
     // A settled card keeps only its PR.
     fireEvent.click(screen.getByRole("button", { name: /settled after 3 days/ }));
     const done = screen.getByRole("button", { name: "ACME-43: Shipped" });
     expect(within(done).getByText("#58")).toBeTruthy();
     expect(within(done).queryByText("2 pts")).toBeNull();
     expect(within(done).queryByRole("img", { name: /^Priority/ })).toBeNull();
+  });
+
+  it("puts who has an issue there beside the session that has it here, and leaves a local card's head as it was", () => {
+    const run: ActivityParty = { kind: "session", id: "s-run", name: "brisk-otter", engine: "claude" };
+    show(synced({ me: "acct-sam", meName: "Sam" }), [
+      ticket(71, { key: "ACME-71", title: "Run it", state: "doing", assignee: run, external: ext("ACME-71", { assignee: { id: "acct-sam", name: "Sam Lee" }, details: { kind: "Task" } }) }),
+      ticket(72, { key: null, title: "Local one", pinned: true }),
+    ]);
+    const who = screen.getByRole("button", { name: "ACME-71: Run it" }).querySelector(".board-who")!;
+    expect(who.querySelector(".board-who-name")!.nextElementSibling!.getAttribute("title")).toBe("You have it on Jira");
+    const local = screen.getByRole("button", { name: /Local one/ });
+    expect(local.querySelector(".board-card-head")!.className).toBe("board-card-head");
+    expect(local.querySelector(".board-card-facts")).toBeNull();
   });
 
   it("filters a Jira board by epic and type, and a Linear one by project and label", () => {

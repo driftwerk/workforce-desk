@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from "react";
+import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
 import { ChargeBadge } from "../crew/ChargeBadge";
 import { useCharge } from "../crew/chargeStore";
 import { lookOf } from "../floor/background";
@@ -31,7 +31,7 @@ import type { TicketState } from "../hub/types";
 
 /** Who has a ticket, as a card or the ticket's panel says it: their dot,
  *  their name, and that a boss runs them or that they wait on you. */
-export function Assignee({ who, waiting }: { who: ActivityParty; waiting: boolean }) {
+export function Assignee({ who, waiting, mark }: { who: ActivityParty; waiting: boolean; mark?: ReactNode }) {
   const session = useDesk((s) => (who.kind === "session" ? s.sessions[who.id] : undefined));
   const sessionName = useSessionName(who.kind === "session" ? who.id : null, who.name);
   const agent = useLocalAgent(who.kind === "agent" ? who.id : null);
@@ -42,6 +42,7 @@ export function Assignee({ who, waiting }: { who: ActivityParty; waiting: boolea
     <span className="board-who">
       <span className={`dot dot-${look}`} aria-hidden="true" />
       <span className={who.kind === "session" ? "mono board-who-name" : "board-who-name"}>{name}</span>
+      {mark}
       {waiting && session && (session.state === "blocked" || session.state === "asking") ? (
         <span className="state-blocked">{session.state === "asking" ? "asked you something" : "needs you"}</span>
       ) : (
@@ -169,7 +170,8 @@ export function TicketCard({
       : remoteBlockers.length && !settled && t.state !== "done" && t.state !== "dropped"
         ? `Blocked by ${remoteBlockers.join(", ")}`
         : null;
-  const blockedLook = blocked || (!needs && remoteBlockers.length > 0);
+  // Drawn blocked as a need is: only while it is to do or being done.
+  const blockedLook = blocked || (!needs && remoteBlockers.length > 0 && (t.state === "todo" || t.state === "doing"));
   // Being worked on: in Doing, its session working.
   const working = useDesk((s) => {
     const who = t.assignee;
@@ -273,14 +275,28 @@ export function TicketCard({
   ) : null;
   const who =
     t.assignee && !settled ? (
-      <>
-        <Assignee who={t.assignee} waiting={waiting} />
-        {there}
-      </>
+      <Assignee who={t.assignee} waiting={waiting} mark={there} />
     ) : upstream !== undefined && system ? (
       <Upstream who={upstream} me={board?.sync?.me} system={system} />
     ) : null;
   const foot = who || more || when;
+  // What its glyphs and chips say, for a screen reader: the button's label
+  // is its key and title only.
+  const descId = useId();
+  const said = facts
+    ? [
+        facts.kind ?? facts.remoteState,
+        facts.epic ? `Epic ${facts.epic.title || facts.epic.key}` : facts.project ? `Project ${facts.project}` : null,
+        !settled && facts.priorityRank ? `Priority ${facts.priority ?? ["Urgent", "High", "Medium", "Low"][facts.priorityRank - 1] ?? ""}` : null,
+        !settled && labels.length ? `Labels ${labels.join(", ")}` : null,
+        !settled && points !== undefined ? `${points} point${points === 1 ? "" : "s"}` : null,
+        !settled && sub && sub.total > 0 ? `${sub.done} of ${sub.total} sub-items done` : null,
+        pr?.title ?? null,
+        blockedLine,
+      ]
+        .filter(Boolean)
+        .join(". ")
+    : "";
   return (
     <div className={canTake ? "board-card-wrap board-card-wrap-take" : "board-card-wrap"}>
     <button
@@ -298,18 +314,19 @@ export function TicketCard({
       }
       aria-label={`${t.key ?? "Ticket"}: ${t.title}`}
       aria-roledescription="ticket"
+      aria-describedby={said ? descId : undefined}
       aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
       title={t.state === "dropped" ? "Dropped" : undefined}
       onClick={onOpen}
       onKeyDown={onKeyDown}
     >
-      <span className="board-card-head">
+      <span className={ext ? "board-card-head board-card-head-synced" : "board-card-head"}>
         <IssueGlyph details={facts} />
         <span className={t.key ? "mono board-key" : "board-key"} title={ext ? `${SYSTEM_TITLE[ext.system]} issue ${ext.key}${ext.synced ? "" : ", no longer synced"}` : undefined}>
           {keyShown}
         </span>
         {t.pinned && <span className="board-pinned">Pinned</span>}
-        {t.state === "dropped" && <span className="faint small">Dropped</span>}
+        {t.state === "dropped" && !facts?.stateKind && <span className="faint small board-dropped">Dropped</span>}
         {written && !theirs && <By who={t.createdBy} />}
         {plan !== undefined && (
           <span className="chip board-plan-chip" title={plan ? `In the plan “${plan}”` : "In a plan"}>
@@ -319,6 +336,11 @@ export function TicketCard({
         {group && <GroupChip name={group.name} title={group.title} />}
       </span>
       <b className="board-title">{t.title}</b>
+      {said && (
+        <span id={descId} className="sr-only">
+          {said}
+        </span>
+      )}
       {meta.length > 0 && <span className="board-card-meta board-card-facts">{meta}</span>}
       {blockedLine && <span className={blockedLook ? "floor-item-what state-blocked" : "floor-item-what"}>{blockedLine}</span>}
       {theirs && <Maker who={t.createdBy} />}

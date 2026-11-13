@@ -174,7 +174,9 @@ export function PriorityBars({ rank, name }: { rank: number; name?: string }) {
         !
       </span>
     );
-  const level = 5 - rank;
+  // A site with more than four priorities is spread over four by the hub;
+  // anything past them reads as the lowest.
+  const level = 5 - Math.min(rank, 4);
   return (
     <svg width={14} height={14} viewBox="0 0 16 16" className="board-glyph" role="img" aria-label={`Priority ${title}`}>
       <title>{title}</title>
@@ -225,6 +227,7 @@ export function Ring({ done, total, size = 12 }: { done: number; total: number; 
   return (
     <svg width={size} height={size} viewBox="0 0 14 14" aria-hidden="true" className="board-glyph">
       <circle cx="7" cy="7" r={r} fill="none" stroke="var(--border)" strokeWidth={2.2} />
+      {done > 0 && (
       <circle
         cx="7"
         cy="7"
@@ -236,6 +239,7 @@ export function Ring({ done, total, size = 12 }: { done: number; total: number; 
         transform="rotate(-90 7 7)"
         strokeLinecap="round"
       />
+      )}
     </svg>
   );
 }
@@ -288,7 +292,7 @@ export type PrLook = "open" | "review" | "changes" | "merged" | "draft";
 /** What a PR's checks say, when anyone has said. */
 export type Checks = "pass" | "run" | "fail";
 
-const CHECK_TOKEN: Record<Checks, string> = { pass: "done", run: "blocked", fail: "red" };
+const CHECK_TOKEN: Record<Checks, string> = { pass: "done", run: "blocked", fail: "ansi-red" };
 const CHECK_WORDS: Record<Checks, string> = { pass: "Checks pass", run: "Checks running", fail: "Checks failing" };
 
 /** A PR chip: its icon, what it says (`#5897`, `2 PRs`), and its checks'

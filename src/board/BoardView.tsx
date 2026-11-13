@@ -307,6 +307,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
             register={(id, el) => (el ? cards.current.set(id, el) : cards.current.delete(id))}
             ids={uid}
             tabs={!!pane && narrow}
+            system={board.sync?.system ?? null}
           />
         </TicketOpener.Provider>
       </Plans.Provider>
@@ -429,9 +430,12 @@ function Columns({
   register,
   ids,
   tabs = false,
+  system,
 }: {
   /** What its element ids start with. */
   ids: string;
+  /** The board's Jira or Linear, when it is synced. */
+  system: SyncSystem | null;
   /** Column tabs, for a pane too narrow for every column (which then
    *  shows the one picked): each takes a card dropped on it. */
   tabs?: boolean;
@@ -510,6 +514,7 @@ function Columns({
           <ColumnView
             key={c.state}
             ids={ids}
+            system={system}
             on={on === c.state}
             col={c}
             count={counts[i]!.cards.length + counts[i]!.shelf.length}
@@ -610,8 +615,10 @@ function ColumnView({
   dragged,
   onCardKey,
   register,
+  system,
 }: {
   ids: string;
+  system: SyncSystem | null;
   /** The column a narrow pane shows. */
   on: boolean;
   col: Column;
@@ -632,16 +639,16 @@ function ColumnView({
   const area = useRef<HTMLElement | null>(null);
   useDroppable({ id: `col:${col.state}`, type: "column", accept: "ticket", element: area, collisionPriority: 0 });
   const titleId = `${ids}-col-${col.state}-title`;
-  // A synced column adds up its cards' points (Linear's estimates).
-  const system = col.cards.find((t) => t.external)?.external?.system;
-  const points = pointsOf(col.cards);
+  // A synced column adds up its open cards' points (Linear's estimates):
+  // Done's would only grow.
+  const points = system && col.state !== "done" ? pointsOf(col.cards) : 0;
   return (
     <section ref={area} id={`${ids}-col-${col.state}`} className={`floor-card board-col ${on ? "board-col-on" : ""}`} aria-labelledby={titleId}>
       <div className="board-col-head">
         <h2 id={titleId} className="ov-label muted">
           {col.title}
         </h2>
-        <span className="floor-time" aria-label={`${count} ticket${count === 1 ? "" : "s"}${points ? `, ${points} points` : ""}`}>
+        <span className={system ? "board-col-sum" : "floor-time"} aria-label={`${count} ticket${count === 1 ? "" : "s"}${points ? `, ${points} points` : ""}`}>
           {count}
           {points ? (system === "linear" ? ` · ${points}` : ` · ${points} pts`) : ""}
         </span>
@@ -752,6 +759,8 @@ function FacetChips({
             <span aria-hidden="true">{on ? said(on) : `${f.word}: all`}</span>
             <select aria-label={f.word} value={on ?? ""} onChange={(e) => onChange(f.id, e.target.value || undefined)}>
               <option value="">{f.word}: all</option>
+              {/* A choice no card on the board has any more stays chosen. */}
+              {on && !f.choices.includes(on) && <option value={on}>{said(on)}</option>}
               {f.choices.map((c) => (
                 <option key={c} value={c}>
                   {said(c)}

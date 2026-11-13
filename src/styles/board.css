@@ -162,8 +162,24 @@
 .board-card-head {
   display: flex;
   align-items: center;
-  gap: 6px;
+  justify-content: space-between;
+  gap: 8px;
   min-width: 0;
+}
+/* A synced card's head: its glyph, key and epic or project, the chip at
+   the far end by its own margin. */
+.board-card-head-synced {
+  justify-content: flex-start;
+  gap: 6px;
+}
+.board-card-head-synced > .board-pinned,
+.board-card-head-synced > .board-plan-chip,
+.board-card-head-synced > .board-dropped {
+  margin-left: auto;
+}
+.board-card-head-synced > .board-pinned ~ .board-group,
+.board-card-head-synced > .board-plan-chip ~ .board-group {
+  margin-left: 0;
 }
 .board-key {
   font-size: 11.5px;
@@ -1660,11 +1676,23 @@ details.ticket-history > summary .floor-time {
   font: inherit;
   cursor: pointer;
 }
-.board-facet:focus-within {
+.board-facet:has(select:focus-visible) {
   outline: 2px solid var(--signal);
   outline-offset: 1px;
 }
 .board-facet-caret {
   flex: none;
   pointer-events: none;
+}
+
+/* A session's name at a card's foot keeps the text colour, the foot's
+   other words muted. */
+.board-card-foot .board-who-name {
+  color: var(--text);
+}
+/* A synced column's count and points, as its head says them. */
+.board-col-sum {
+  font-size: 12px;
+  color: var(--faint);
+  white-space: nowrap;
 }
