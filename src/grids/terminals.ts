@@ -241,7 +241,13 @@ export function useTerminalPane(gridId: string, pane: string, content: Extract<P
     const look = () =>
       void programsUnder(pid)
         .catch(() => [])
-        .then((programs) => !stopped && useTerminals.setState((s) => ({ programs: { ...s.programs, [key]: programs } })));
+        .then(
+          (programs) =>
+            !stopped &&
+            // The same programs as last time (nearly always) leave the store
+            // as it is: a new list every look redrew the terminal's pane.
+            useTerminals.setState((s) => (sameList(s.programs[key], programs) ? s : { programs: { ...s.programs, [key]: programs } })),
+        );
     look();
     const t = setInterval(look, WATCH_MS);
     return () => {
@@ -252,6 +258,8 @@ export function useTerminalPane(gridId: string, pane: string, content: Extract<P
 
   return { info, known };
 }
+
+const sameList = (a: readonly string[] | undefined, b: readonly string[]): boolean => !!a && a.length === b.length && a.every((x, i) => x === b[i]);
 
 const useGridsWriter = (gridId: string): boolean => useGrids((s) => writes(gridId, s));
 

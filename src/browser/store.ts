@@ -8,6 +8,8 @@ import { plainError } from "../ui/plainError";
 /** How often Desk asks the hub which browsers are open. */
 export const POLL_MS = 3000;
 
+/** What of the open browsers Desk shows, to tell whether that changed. */
+const shownOf = (live: readonly BrowserLive[]): string => JSON.stringify(live.map(({ idle_secs: _idle, ...shown }) => shown));
 
 interface BrowserState {
   /** The browsers open now, most recently used first. */
@@ -29,7 +31,11 @@ export const useBrowser = create<BrowserState>((set, get) => ({
   problem: null,
   read: async (browser) => {
     try {
-      set({ live: await browser.live() });
+      const live = await browser.live();
+      // Asked every few seconds: the same answer leaves the store as it is.
+      // How long each has been idle ticks up every time and nothing shows
+      // it, so it doesn't count as a change.
+      if (shownOf(live) !== shownOf(get().live)) set({ live });
     } catch (e) {
       if (e instanceof HubError && e.status === 404) set({ supported: false, live: [] });
     }
