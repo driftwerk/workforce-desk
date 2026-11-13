@@ -1072,7 +1072,8 @@ export interface MentionedAway {
   since: string;
   until: string;
   headline?: string;
-  /** The sessions that finished while you were away. */
+  /** The sessions that finished while you were away. Their lines come in
+   *  the catch-up's `update.sessions`; this says which they are. */
   finished?: string[];
   /** "I handled 23 of 25 myself, 4 by your preferences." */
   handled?: string | null;

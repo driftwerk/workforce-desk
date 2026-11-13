@@ -352,6 +352,9 @@ export const deskCall = <T>(hub: HubRef, method: string, path: string, body?: un
 /** The most messages one read of a room or thread returns. */
 export const ROOM_PAGE = 100;
 
+/** The hub's answer to a typing ping for an agent that isn't a boss. */
+const NO_BOSS = "There is no boss by that name here.";
+
 /** The local hub's admin surface: sessions, terminals, rooms, the crew and
  *  its agents. In the app `t` is `brokered`, which holds no token. */
 export class DeskHub {
@@ -781,7 +784,7 @@ export class DeskHub {
     } catch (e) {
       // Its posts come as they did. A hub without the route isn't asked
       // again; one that says the agent is no boss still is, for others.
-      if (e instanceof HubError && e.status === 404 && !(e.message || "").includes("boss")) this.#unheard.add("typing");
+      if (e instanceof HubError && e.status === 404 && e.message !== NO_BOSS) this.#unheard.add("typing");
     }
   };
   /** Whether Desk is in front of you, and which boss's DM is on screen:

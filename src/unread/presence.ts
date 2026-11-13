@@ -49,6 +49,10 @@ export function sharePresence(every = PRESENCE_EVERY_MS): () => void {
     useDesk.subscribe((s, before) => {
       if (s.hub !== before.hub) tell(true);
     }),
+    // Which hub is this computer's is known a moment after start.
+    useChat.subscribe((s, before) => {
+      if (s.hubs !== before.hubs) changed();
+    }),
   ];
   window.addEventListener("focus", changed);
   window.addEventListener("blur", changed);

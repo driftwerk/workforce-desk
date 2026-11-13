@@ -1248,6 +1248,7 @@ a.ref {
 }
 /* "you were away 21:00 – 22:40": centred, faint, in mono. */
 .away-divider {
+  margin: -6px 0;
   text-align: center;
   color: var(--faint);
   font-family: var(--font-mono);
