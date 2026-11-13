@@ -198,10 +198,14 @@ export function decisionParts(line: DecisionLine): { action: string; why: string
 
 /** The answers, each with whether it is the one recommended: as the hub
  *  says, or the only one the recommendation's words name. */
-export function answerOptions(options: readonly AnswerOption[], recommendation?: string | null): { label: string; recommended: boolean }[] {
+export function answerOptions(
+  options: readonly AnswerOption[],
+  recommendation?: string | null,
+  /** The hub laid them out (`needsYou`): it says of each, so no guess
+   *  over its "none". */
+  told = false,
+): { label: string; recommended: boolean }[] {
   const said = options.map((o) => (typeof o === "string" ? { label: o, recommended: false } : { label: o.label, recommended: !!o.recommended }));
-  // A hub that lays them out says of each: no guess over its "none".
-  const told = options.length > 0 && options.every((o) => typeof o !== "string" && typeof o.recommended === "boolean");
   if (told || said.some((o) => o.recommended)) return said;
   const labels = said.map((o) => o.label);
   const best = recommended(labels, recommendation) ?? closest(labels, recommendation);
@@ -466,6 +470,7 @@ function Needs({
   notes,
   generalizes,
   preferScope,
+  told,
 }: {
   id: string;
   age?: string | null;
@@ -477,6 +482,7 @@ function Needs({
   parked?: boolean;
   generalizes?: string | null;
   preferScope?: PreferenceScope | null;
+  told?: boolean;
   /** Faint lines last: what isn't held up, what it holds up, the boss's
    *  notes. */
   notes: readonly (string | null | undefined)[];
@@ -502,6 +508,7 @@ function Needs({
         parked={parked}
         generalizes={generalizes}
         preferScope={preferScope}
+        told={told}
       />
       {notes
         .filter((n): n is string => !!n?.trim())
@@ -545,6 +552,7 @@ function Laid({ n, holdingUp }: { n: NeedsYou; holdingUp?: string | null }) {
       items={n.items}
       recommendation={n.recommendation}
       options={n.options}
+      told
       notes={[n.notBlocking, holdingUp]}
     />
   );
@@ -612,6 +620,7 @@ function Answers({
   parked,
   generalizes,
   preferScope,
+  told,
 }: {
   id: string;
   /** What it answers, for a screen reader: an update may hold several. */
@@ -623,6 +632,7 @@ function Answers({
    *  "Always" once it's answered. */
   generalizes?: string | null;
   preferScope?: PreferenceScope | null;
+  told?: boolean;
 }) {
   const connected = useDesk((s) => !!s.hub);
   const [offer, setOfferHere] = useState<string | null>(offerHere.get(id) ?? null);
@@ -676,7 +686,7 @@ function Answers({
     setBusy(null);
   };
   const hub = () => useDesk.getState().hub;
-  const answers = answerOptions(options, recommendation);
+  const answers = answerOptions(options, recommendation, told);
   return (
     <>
       <div className="dm-inline" role="group" aria-label={`Your answer: ${label}`}>
@@ -717,6 +727,9 @@ function Answers({
   );
 }
 
+/** Its first letter small, unless it starts a word in capitals ("CI"). */
+const lowerFirst = (s: string): string => (/^[A-Z][a-z]/.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s);
+
 /** After an answer: "Always do this when …? Always · Just this time".
  *  Always keeps it as a preference, listed in the boss's settings. */
 function Always({ id, when, then, scope }: { id: string; when: string; then: string; scope?: PreferenceScope | null }) {
@@ -726,10 +739,9 @@ function Always({ id, when, then, scope }: { id: string; when: string; then: str
   const [problem, setProblem] = useState<string | null>(null);
   const setSaid = (s: string) => {
     alwaysHere.set(id, s);
-    offerHere.delete(id);
     setSaidHere(s);
   };
-  const plainWhen = when.trim().replace(/^(when(ever)?|if)\s+/i, "").replace(/[.?:,]+$/, "");
+  const plainWhen = lowerFirst(when.trim().replace(/^(when(ever)?|if)\s+/i, "").replace(/[.?:,]+$/, ""));
   if (said) return <p className="faint small">{said}</p>;
   const always = async () => {
     const hub = useDesk.getState().hub;
@@ -738,7 +750,7 @@ function Always({ id, when, then, scope }: { id: string; when: string; then: str
     setProblem(null);
     try {
       await hub.prefer({ whenText: plainWhen, thenText: then, scope: scope ?? undefined, fromItem: id });
-      setSaid(`Kept: when ${plainWhen}, ${then.charAt(0).toLowerCase()}${then.slice(1)}. It’s in the boss’s settings, to change or forget.`);
+      setSaid(`Kept: when ${plainWhen}, “${then.trim().replace(/\.$/, "")}”. It’s in the boss’s settings, to change or forget.`);
     } catch (e) {
       setProblem(plainError(e));
     }

@@ -632,7 +632,11 @@ describe("always, or just this time (H10)", () => {
     expect(await screen.findByText("Always do this when a session wants to merge with CI red?")).toBeTruthy();
     answer = () => ok({ id: "p1", state: "active" });
     fireEvent.click(screen.getByRole("button", { name: "Always" }));
-    expect(await screen.findByText(/^Kept: when a session wants to merge with CI red, make it wait for green\./)).toBeTruthy();
+    expect(await screen.findByText(/^Kept: when a session wants to merge with CI red, “Make it wait for green”\./)).toBeTruthy();
+    // Drawn again (scrolled away and back), it still says so.
+    cleanup();
+    show(said("**Needs you.** web wants to merge with CI red. Let it?", ask("g1", "When a session wants to merge with CI red"), "question"));
+    expect(screen.getByText(/^Kept: when a session wants/)).toBeTruthy();
     expect(asked.at(-1)).toEqual({
       method: "POST",
       path: "/api/desk/preferences",
@@ -652,5 +656,12 @@ describe("always, or just this time (H10)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Let it merge" }));
     await screen.findByText("You answered: Let it merge");
     expect(screen.queryByRole("button", { name: "Always" })).toBeNull();
+  });
+});
+
+describe("the answer it recommends", () => {
+  it("is guessed from its words only when the hub didn't lay the answers out", () => {
+    expect(answerOptions([{ label: "Yes" }, { label: "No" }], "Yes").map((o) => o.recommended)).toEqual([true, false]);
+    expect(answerOptions([{ label: "Yes", recommended: false }, { label: "No", recommended: false }], "Yes", true).map((o) => o.recommended)).toEqual([false, false]);
   });
 });
