@@ -7,6 +7,7 @@ import { useDesk } from "../hub/store";
 import type { DeskSocket, DeskTransport } from "../hub/transport";
 import type { DeskExtras } from "../hub/types";
 import { Message } from "./Message";
+import { dmOnScreen } from "../unread/presence";
 import { answerOptions, closest, decisionParts, firstSentence, readNeed, readNeedsPost, recommended } from "./Overseer";
 
 vi.mock("@workforce/rich", () => ({
@@ -453,5 +454,91 @@ describe("reading the parts out of the words", () => {
     // Mentions waiting, but did something.
     expect(decisionParts({ id: "1", text: "Let it go ahead, then wait for review", why: "x" }).leftAlone).toBe(false);
     expect(decisionParts({ id: "1", text: "told it to wait for green CI", why: "x" }).leftAlone).toBe(false);
+  });
+});
+
+describe("the catch-up", () => {
+  const CATCH_UP: DeskExtras = {
+    away: {
+      since: "2026-11-12T21:00:00Z",
+      until: "2026-11-12T22:40:00Z",
+      headline: "Welcome back. One thing needs you. Billing migration finished.",
+      finished: ["s1"],
+      handled: "I handled 23 of 25 myself, 4 by your preferences.",
+      parked: [{ itemId: "p1", text: "Rename the export?" }],
+    },
+    update: {
+      sessions: [{ sessionId: "s1", name: "Billing migration", text: "finished: both fixes are in production." }],
+      decisions: [
+        { id: "cd1", text: "retried the deploy", why: "nothing had changed", at: "2026-11-12T21:12:00Z" },
+        { id: "cd2", text: "said not yet to a second webhook", why: "you only asked for new leads", undo: "undo", at: "2026-11-12T21:40:00Z" },
+      ],
+      waiting: [{ itemId: "cw1", text: "Should it also handle deleted leads?", options: ["Yes, add it", "Not now"] }],
+    },
+  };
+
+  it("follows the away line, opens with its headline and what was handled, then needs-you and what I did; no box", () => {
+    const { container } = show(said("Welcome back. …", CATCH_UP, "away"));
+    const divider = container.querySelector(".away-divider");
+    expect(divider?.getAttribute("role")).toBe("separator");
+    expect(divider?.textContent).toMatch(/^you were away \d\d:\d\d – \d\d:\d\d$/);
+    expect(container.querySelector(".msg-kind")?.textContent?.trim()).toBe("while you were away");
+    expect(screen.getByText(CATCH_UP.away!.headline!)).toBeTruthy();
+    expect(screen.getByText("I handled 23 of 25 myself, 4 by your preferences.")).toBeTruthy();
+    expect(container.querySelector(".needs")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Yes, add it" })).toBeTruthy();
+    expect(container.querySelectorAll(".did .dec-time").length).toBeGreaterThanOrEqual(2);
+    expect(screen.getAllByRole("button", { name: /^Undo/ })).toHaveLength(1);
+    // Order: head, needs you, what I did, set aside.
+    const order = [".upd-head", ".needs", "[aria-label='What I did']", "[aria-label='Set aside']"].map((q) => container.querySelector(q));
+    order.forEach((el) => expect(el).toBeTruthy());
+    for (let i = 1; i < order.length; i++) expect(order[i - 1]!.compareDocumentPosition(order[i]!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(container.querySelector(".dm-action")).toBeNull();
+  });
+
+  it("drops a parked item through the hub", async () => {
+    show(said("Welcome back. …", CATCH_UP, "away"));
+    fireEvent.click(screen.getByRole("button", { name: "Drop: Rename the export?" }));
+    await waitFor(() => expect(screen.getByText("Dropped.")).toBeTruthy());
+    expect(asked).toContainEqual({ method: "POST", path: "/api/desk/items/p1/drop", body: undefined });
+  });
+
+  it("has no away line on an ordinary message", () => {
+    const { container } = show(said("Hello.", {}));
+    expect(container.querySelector(".away-divider")).toBeNull();
+  });
+});
+
+describe("pings to the hub", () => {
+  it("say typing and presence as the hub reads them", async () => {
+    const hub = useDesk.getState().hub!;
+    answer = () => new Response(null, { status: 204 });
+    await hub.dmTyping("desk");
+    await hub.presence(true, "desk");
+    expect(asked).toContainEqual({ method: "POST", path: "/api/desk/dm/desk/typing", body: undefined });
+    expect(asked).toContainEqual({ method: "POST", path: "/api/desk/presence", body: { attending: true, dmOnScreen: "desk" } });
+  });
+
+  it("stop once an older hub says it hasn't the route; a non-boss's 404 doesn't stop them", async () => {
+    answer = (path) =>
+      path.endsWith("/presence")
+        ? new Response("", { status: 404 })
+        : new Response(JSON.stringify({ error: "There is no boss by that name here." }), { status: 404 });
+    const hub = new DeskHub(transport);
+    await hub.presence(true, null);
+    await hub.presence(true, null);
+    await hub.dmTyping("scout");
+    await hub.dmTyping("scout");
+    expect(asked.filter((a) => a.path === "/api/desk/presence")).toHaveLength(1);
+    expect(asked.filter((a) => a.path === "/api/desk/dm/scout/typing")).toHaveLength(2);
+  });
+});
+
+describe("presence", () => {
+  it("names the DM of this computer's hub on screen, and nothing else", () => {
+    expect(dmOnScreen({ "dm:h1/desk": 1, "session:s1": 1 }, "h1")).toBe("desk");
+    expect(dmOnScreen({ "dm:h2/scout": 1 }, "h1")).toBeNull();
+    expect(dmOnScreen({ "dm:h1/desk": 0 }, "h1")).toBeNull();
+    expect(dmOnScreen({ "dm:h1/desk": 1 }, undefined)).toBeNull();
   });
 });

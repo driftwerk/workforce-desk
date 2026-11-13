@@ -352,6 +352,9 @@ export const deskCall = <T>(hub: HubRef, method: string, path: string, body?: un
 /** The most messages one read of a room or thread returns. */
 export const ROOM_PAGE = 100;
 
+/** The hub's answer to a typing ping for an agent that isn't a boss. */
+const NO_BOSS = "There is no boss by that name here.";
+
 /** The local hub's admin surface: sessions, terminals, rooms, the crew and
  *  its agents. In the app `t` is `brokered`, which holds no token. */
 export class DeskHub {
@@ -771,6 +774,33 @@ export class DeskHub {
     this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/answer`, { answer });
   /** Drops what the boss asked you, unanswered. */
   dropItem = (id: string): Promise<{ done: string }> => this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/drop`);
+  /** You're typing to the boss `agent`: its posts wait for a pause. Quiet
+   *  on a hub without the route (an older one), or for an agent that
+   *  isn't a boss. */
+  dmTyping = async (agent: string): Promise<void> => {
+    if (this.#unheard.has("typing")) return;
+    try {
+      await this.desk("POST", `/api/desk/dm/${encodeURIComponent(agent)}/typing`);
+    } catch (e) {
+      // Its posts come as they did. A hub without the route isn't asked
+      // again; one that says the agent is no boss still is, for others.
+      if (e instanceof HubError && e.status === 404 && e.message !== NO_BOSS) this.#unheard.add("typing");
+    }
+  };
+  /** Whether Desk is in front of you, and which boss's DM is on screen:
+   *  the hub tells you're away from the DM by it. Quiet on an older hub. */
+  presence = async (attending: boolean, dmOnScreen: string | null): Promise<void> => {
+    if (this.#unheard.has("presence")) return;
+    try {
+      await this.desk("POST", "/api/desk/presence", { attending, dmOnScreen });
+    } catch (e) {
+      // The hub judges from how far you've read the DM alone; one without
+      // the route (an older one) isn't asked again.
+      if (e instanceof HubError && e.status === 404) this.#unheard.add("presence");
+    }
+  };
+  /** The routes this hub said it hasn't: not asked again. */
+  readonly #unheard = new Set<"typing" | "presence">();
 
   rooms = (): Promise<Room[]> => this.call("GET", "/api/desk/rooms");
   /** `shareWith`: the hubs the person said its conversation may go to,
