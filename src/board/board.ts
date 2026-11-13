@@ -5,6 +5,7 @@
 // same of the tickets as they stand now (a need done since, three days gone
 // by) without asking it again.
 
+import { shownByFacets, type Facets } from "./facets";
 import type { ActivityEvent, LedgerRow, Session, Ticket, TicketMove, TicketState } from "../hub/types";
 import { totalTokens } from "../spend/spend";
 
@@ -146,10 +147,24 @@ export const waitingOnYou = (t: Ticket, needsYou: (t: Ticket) => boolean): boole
  *  whether a ticket's session or agent waits on the person. */
 export const columns = (
   tickets: readonly Ticket[],
-  opts: { filter: BoardFilter; q: string; now: number; waiting: (t: Ticket) => boolean; plan?: ReadonlySet<string> | null; me?: string | null },
+  opts: {
+    filter: BoardFilter;
+    q: string;
+    now: number;
+    waiting: (t: Ticket) => boolean;
+    plan?: ReadonlySet<string> | null;
+    me?: string | null;
+    /** A synced board's own filters: epic, type, sprint, project, label. */
+    facets?: Facets;
+  },
 ): Column[] => {
   const shown = tickets.filter(
-    (t) => !snoozed(t, opts.now) && (!opts.plan || opts.plan.has(t.id)) && matches(t, opts.q) && shownBy(t, opts.filter, opts.waiting, opts.me),
+    (t) =>
+      !snoozed(t, opts.now) &&
+      (!opts.plan || opts.plan.has(t.id)) &&
+      matches(t, opts.q) &&
+      shownBy(t, opts.filter, opts.waiting, opts.me) &&
+      shownByFacets(t, opts.facets),
   );
   // One pass into the columns, each then ordered by rank.
   const by = new Map<TicketState, Ticket[]>(COLUMNS.map(({ state }) => [state, []]));

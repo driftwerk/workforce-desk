@@ -62,7 +62,7 @@ vi.mock("@workforce/rich", () => ({
 import { useChat } from "../chat/store";
 import { boardSyncOf, fixOf, issueUrl, linkedTo, looksLikeToken, pausedWords, syncHubId, syncStatus, targetOk } from "../hub/boardSync";
 import { useDesk } from "../hub/store";
-import type { Board as BoardT, SyncHub, Ticket } from "../hub/types";
+import type { ActivityParty, Board as BoardT, SyncHub, Ticket } from "../hub/types";
 import { Board } from "./BoardView";
 import { BOARD_CHROME } from "./chrome";
 import { OpenTicket } from "./TicketDetail";
@@ -813,6 +813,102 @@ describe("the board, synced", () => {
     fireEvent.click(backlog.getByRole("button", { name: "Show 80 more of 120" }));
     expect(backlog.getAllByRole("button", { name: /^ACME-\d+:/ })).toHaveLength(160);
     expect(backlog.getByRole("button", { name: "Show 40 more of 40" })).toBeTruthy();
+  });
+
+  it("draws what each issue says of itself: type, epic, priority, points, PRs, and what blocks it there", () => {
+    const epic = { key: "ACME-9", title: "Permissions", kind: "Epic" };
+    const story = ticket(41, {
+      key: "ACME-41",
+      title: "Map hub roles",
+      state: "todo",
+      external: ext("ACME-41", {
+        assignee: null,
+        details: {
+          kind: "Story",
+          epic,
+          priority: "Now",
+          priorityRank: 1,
+          points: 5,
+          subItems: { done: 1, total: 4 },
+          prs: { count: 2, state: "review" },
+          comments: 3,
+          links: [
+            { rel: "blockedBy", issue: { key: "ACME-77", title: "Shared roles", done: false } },
+            { rel: "blockedBy", issue: { key: "ACME-78", done: true } },
+            { rel: "blocks", issue: { key: "ACME-80" } },
+          ],
+        },
+      }),
+    });
+    const bare = ticket(42, { key: "ACME-42", title: "Plain task", state: "backlog", external: ext("ACME-42", { details: { kind: "Task" } }) });
+    const old = ticket(43, { key: "ACME-43", title: "Shipped", state: "done", stateAt: "2026-01-01T00:00:00Z", external: ext("ACME-43", { details: { kind: "Bug", points: 2, priorityRank: 2, prs: { count: 1, state: "merged", number: 58 } } }) });
+    show(synced(), [story, bare, old]);
+    const card = screen.getByRole("button", { name: "ACME-41: Map hub roles" });
+    expect(within(card).getByRole("img", { name: "Story" })).toBeTruthy();
+    expect(within(card).getByTitle("Epic ACME-9 · Permissions").textContent).toBe("Permissions");
+    expect(within(card).getByRole("img", { name: "Priority Now" }).textContent).toBe("!");
+    expect(within(card).getByText("5 pts")).toBeTruthy();
+    expect(within(card).getByTitle("1 of 4 sub-items done")).toBeTruthy();
+    expect(within(card).getByText("2 PRs")).toBeTruthy();
+    // Blocked there by what isn't done, though it isn't on the board.
+    expect(within(card).getByText("Blocked by ACME-77").className).toContain("state-blocked");
+    // Synced cards never say Jira wrote them: every one would.
+    expect(within(card).queryByText(/by Jira|added this/)).toBeNull();
+    expect(within(card).getByTitle("Blocks ACME-80")).toBeTruthy();
+    expect(within(card).getByTitle("3 comments")).toBeTruthy();
+    // A plain task stays as short as a card ever was.
+    const plain = screen.getByRole("button", { name: "ACME-42: Plain task" });
+    expect(plain.querySelector(".board-card-facts")).toBeNull();
+    // The column adds its points up.
+    expect(within(screen.getByRole("region", { name: "To do" })).getByText(/1 · 5 pts/)).toBeTruthy();
+    // A screen reader hears what the glyphs and chips say.
+    expect(document.getElementById(card.getAttribute("aria-describedby")!)!.textContent).toBe(
+      "Story. Epic Permissions. Priority Now. 5 points. 1 of 4 sub-items done. 2 pull requests, in review. Blocked by ACME-77",
+    );
+    // Done's points aren't added up: they would only grow.
+    expect(within(screen.getByRole("region", { name: "Done" })).getByLabelText("1 ticket")).toBeTruthy();
+    // A settled card keeps only its PR.
+    fireEvent.click(screen.getByRole("button", { name: /settled after 3 days/ }));
+    const done = screen.getByRole("button", { name: "ACME-43: Shipped" });
+    expect(within(done).getByText("#58")).toBeTruthy();
+    expect(within(done).queryByText("2 pts")).toBeNull();
+    expect(within(done).queryByRole("img", { name: /^Priority/ })).toBeNull();
+  });
+
+  it("puts who has an issue there beside the session that has it here, and leaves a local card's head as it was", () => {
+    const run: ActivityParty = { kind: "session", id: "s-run", name: "brisk-otter", engine: "claude" };
+    show(synced({ me: "acct-sam", meName: "Sam" }), [
+      ticket(71, { key: "ACME-71", title: "Run it", state: "doing", assignee: run, external: ext("ACME-71", { assignee: { id: "acct-sam", name: "Sam Lee" }, details: { kind: "Task" } }) }),
+      ticket(72, { key: null, title: "Local one", pinned: true }),
+    ]);
+    const who = screen.getByRole("button", { name: "ACME-71: Run it" }).querySelector(".board-who")!;
+    expect(who.querySelector(".board-who-name")!.nextElementSibling!.getAttribute("title")).toBe("You have it on Jira");
+    const local = screen.getByRole("button", { name: /Local one/ });
+    expect(local.querySelector(".board-card-head")!.className).toBe("board-card-head");
+    expect(local.querySelector(".board-card-facts")).toBeNull();
+  });
+
+  it("filters a Jira board by epic and type, and a Linear one by project and label", () => {
+    const a = ticket(51, { key: "ACME-51", title: "Alpha", state: "todo", external: ext("ACME-51", { details: { kind: "Story", epic: { key: "ACME-1", title: "Permissions" } } }) });
+    const b = ticket(52, { key: "ACME-52", title: "Beta", state: "todo", external: ext("ACME-52", { details: { kind: "Bug", epic: { key: "ACME-2", title: "Insights" } } }) });
+    const { unmount } = show(synced(), [a, b]);
+    const epic = screen.getByRole("combobox", { name: "Epic" }) as HTMLSelectElement;
+    expect([...epic.options].map((o) => o.textContent)).toEqual(["Epic: all", "Epic: Insights", "Epic: Permissions"]);
+    fireEvent.change(epic, { target: { value: "Insights" } });
+    expect(screen.queryByRole("button", { name: "ACME-51: Alpha" })).toBeNull();
+    expect(screen.getByRole("button", { name: "ACME-52: Beta" })).toBeTruthy();
+    expect(epic.closest(".board-facet")!.textContent).toContain("Epic: Insights");
+    fireEvent.change(epic, { target: { value: "" } });
+    expect(screen.getByRole("button", { name: "ACME-51: Alpha" })).toBeTruthy();
+    unmount();
+    const lin = (n: number, title: string, project: string, labels: string[]) =>
+      ticket(n, { key: `MAN-${n}`, title, state: "todo", external: { ...ext(`MAN-${n}`), system: "linear" as const, details: { project, labels, stateKind: "unstarted", remoteState: "Todo" } } });
+    show(synced({ system: "linear", target: "MAN" }), [lin(61, "Gamma", "Edge cloud", ["Bug"]), lin(62, "Delta", "Voice box", ["Feature"])]);
+    expect(screen.queryByRole("combobox", { name: "Epic" })).toBeNull();
+    fireEvent.change(screen.getByRole("combobox", { name: "Label" }), { target: { value: "Feature" } });
+    expect(screen.queryByRole("button", { name: "MAN-61: Gamma" })).toBeNull();
+    expect(screen.getByRole("button", { name: "MAN-62: Delta" })).toBeTruthy();
+    expect(screen.getByRole("img", { name: "Todo" })).toBeTruthy();
   });
 
   it("says why it is paused, and pauses and resumes", async () => {
