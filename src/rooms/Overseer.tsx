@@ -728,7 +728,7 @@ function Answers({
 }
 
 /** Its first letter small, unless it starts a word in capitals ("CI"). */
-const lowerFirst = (s: string): string => (/^[A-Z][a-z]/.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s);
+const lowerFirst = (s: string): string => (/^[A-Z](?![A-Z])/.test(s) ? s.charAt(0).toLowerCase() + s.slice(1) : s);
 
 /** After an answer: "Always do this when …? Always · Just this time".
  *  Always keeps it as a preference, listed in the boss's settings. */
