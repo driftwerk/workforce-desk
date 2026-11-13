@@ -8,7 +8,7 @@ import { useNeedCounts } from "../floor/store";
 import { agentItem, sessionItem } from "../groups/model";
 import { PLUGINS, SENSORS, DragChip, MoreIcon, below, type Operation } from "../groups/rows";
 import { useDesk, localSessions } from "../hub/store";
-import type { Board as BoardT, Ticket, TicketState } from "../hub/types";
+import type { Board as BoardT, SyncSystem, Ticket, TicketState } from "../hub/types";
 import { useMinute } from "../floor/RightNow";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { leftFilterOf, syncStatus } from "../hub/boardSync";
@@ -20,6 +20,7 @@ import { NewTicket } from "./NewTicket";
 import { TicketOpener } from "./opener";
 import { shownBoard, useBoard } from "./store";
 import { TicketCard } from "./TicketCard";
+import { FACETS, facetChoices, pointsOf, type FacetId, type Facets } from "./facets";
 
 /** Whether a ticket's session or agent waits on the person, by the Floor's
  *  own rule (its needs, else the session's state). */
@@ -183,7 +184,12 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   const planChips = useMemo(() => new Map([...ticketPlans].map(([t, p]) => [t, planNames.get(p) ?? ""])), [ticketPlans, planNames]);
   // Who the person is on the board's Jira or Linear, for Mine.
   const me = board?.sync?.me ?? null;
-  const cols = useMemo(() => columns(onBoard, { filter, q, now, waiting, plan: planTickets, me }), [onBoard, filter, q, now, waiting, planTickets, me]);
+  // A synced board's own filters (epic, type, sprint; cycle, project,
+  // label), kept per board while it is shown.
+  const [facetsOf, setFacetsOf] = useState<{ board: string; facets: Facets } | null>(null);
+  const facets = board && facetsOf?.board === board.id ? facetsOf.facets : undefined;
+  const setFacet = (id: FacetId, v: string | undefined) => board && setFacetsOf({ board: board.id, facets: { ...facets, [id]: v } });
+  const cols = useMemo(() => columns(onBoard, { filter, q, now, waiting, plan: planTickets, me, facets }), [onBoard, filter, q, now, waiting, planTickets, me, facets]);
   const counts = useMemo(() => columns(onBoard, { filter: "all", q: "", now, waiting }), [onBoard, now, waiting]);
   // Each chip counts the cards it would show, as the search and plan
   // leave them.
@@ -191,9 +197,9 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   // pane's count.
   const waitingCount = mine.filter((t) => !snoozed(t, now) && waitingOnYou(t, waiting)).length;
   const chipCounts = useMemo(() => {
-    const shown = (f: BoardFilter) => columns(onBoard, { filter: f, q, now, waiting, plan: planTickets, me }).reduce((n, c) => n + c.cards.length, 0);
+    const shown = (f: BoardFilter) => columns(onBoard, { filter: f, q, now, waiting, plan: planTickets, me, facets }).reduce((n, c) => n + c.cards.length, 0);
     return { mine: shown("mine"), unassigned: shown("unassigned"), waiting: shown("waiting") } as Partial<Record<BoardFilter, number>>;
-  }, [onBoard, q, now, waiting, planTickets, me]);
+  }, [onBoard, q, now, waiting, planTickets, me, facets]);
 
   const states = useMemo(() => statesOf(all), [all]);
   const move = (id: string, shown: Parameters<ReturnType<typeof useBoard.getState>["move"]>[1]) => {
@@ -350,6 +356,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
             </button>
           ))}
         </div>
+        {board.sync && <FacetChips system={board.sync.system} tickets={onBoard} facets={facets} onChange={setFacet} />}
         {plans.length > 0 && (
           <select className="pc-engine board-plan" aria-label="Plan" value={plan ?? ""} onChange={(e) => setPlan(e.target.value || null)}>
             <option value="">Every plan</option>
@@ -625,14 +632,18 @@ function ColumnView({
   const area = useRef<HTMLElement | null>(null);
   useDroppable({ id: `col:${col.state}`, type: "column", accept: "ticket", element: area, collisionPriority: 0 });
   const titleId = `${ids}-col-${col.state}-title`;
+  // A synced column adds up its cards' points (Linear's estimates).
+  const system = col.cards.find((t) => t.external)?.external?.system;
+  const points = pointsOf(col.cards);
   return (
     <section ref={area} id={`${ids}-col-${col.state}`} className={`floor-card board-col ${on ? "board-col-on" : ""}`} aria-labelledby={titleId}>
       <div className="board-col-head">
         <h2 id={titleId} className="ov-label muted">
           {col.title}
         </h2>
-        <span className="floor-time" aria-label={`${count} ticket${count === 1 ? "" : "s"}`}>
+        <span className="floor-time" aria-label={`${count} ticket${count === 1 ? "" : "s"}${points ? `, ${points} points` : ""}`}>
           {count}
+          {points ? (system === "linear" ? ` · ${points}` : ` · ${points} pts`) : ""}
         </span>
       </div>
       <ul className="board-cards" aria-labelledby={titleId}>
@@ -712,3 +723,47 @@ function DraggableCard({
   );
 }
 
+/** A synced board's own filter chips: its issues' epic, type and sprint on
+ *  Jira, their cycle, project and label on Linear, each a menu of what is
+ *  on the board ("Epic: all"); one with nothing to choose isn't shown. */
+function FacetChips({
+  system,
+  tickets,
+  facets,
+  onChange,
+}: {
+  system: SyncSystem;
+  tickets: readonly Ticket[];
+  facets: Facets | undefined;
+  onChange: (id: FacetId, v: string | undefined) => void;
+}) {
+  const shown = FACETS[system]
+    .map((f) => ({ ...f, choices: facetChoices(tickets, f.id) }))
+    .filter((f) => f.choices.length > 0 || facets?.[f.id]);
+  if (!shown.length) return null;
+  return (
+    <div className="search-filters board-facets" role="group" aria-label={`Filter by ${shown.map((f) => f.word.toLowerCase()).join(", ")}`}>
+      {shown.map((f) => {
+        const on = facets?.[f.id];
+        // A sprint or cycle says its own name; the rest say what they are.
+        const said = (v: string) => (f.id === "sprint" ? v : `${f.word}: ${v}`);
+        return (
+          <label key={f.id} className="chip-btn board-facet" data-on={on ? "true" : undefined}>
+            <span aria-hidden="true">{on ? said(on) : `${f.word}: all`}</span>
+            <select aria-label={f.word} value={on ?? ""} onChange={(e) => onChange(f.id, e.target.value || undefined)}>
+              <option value="">{f.word}: all</option>
+              {f.choices.map((c) => (
+                <option key={c} value={c}>
+                  {said(c)}
+                </option>
+              ))}
+            </select>
+            <svg width="8" height="8" viewBox="0 0 8 8" aria-hidden="true" className="board-facet-caret">
+              <path d="M1 2.5 4 5.5 7 2.5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </label>
+        );
+      })}
+    </div>
+  );
+}

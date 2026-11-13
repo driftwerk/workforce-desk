@@ -162,8 +162,7 @@
 .board-card-head {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 8px;
+  gap: 6px;
   min-width: 0;
 }
 .board-key {
@@ -178,6 +177,7 @@
 .board-title {
   font-size: 13px;
   font-weight: 600;
+  line-height: 1.35;
   overflow-wrap: anywhere;
 }
 .board-card-meta {
@@ -230,6 +230,171 @@
 .board-card-settled .board-title {
   color: var(--faint);
 }
+/* What a synced card's issue says of itself. Its type or state glyph leads
+   its head; its epic or project sits at the head's right end. */
+.board-glyph {
+  flex: none;
+  display: inline-block;
+  vertical-align: middle;
+}
+.board-group {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  max-width: calc(100% - 84px);
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.board-group > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.board-group-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+/* One meta row: priority, labels, points, sub-items, the PR. */
+.board-card-facts {
+  gap: 4px 10px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.board-card-facts > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.board-prio-urgent,
+.board-card-facts > .board-prio-urgent {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+  background: var(--blocked);
+  color: var(--on-blocked);
+  font-size: 10.5px;
+  font-weight: 800;
+  line-height: 1;
+}
+.board-pts {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--faint);
+}
+.board-subs {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.board-card-facts > .board-label {
+  gap: 5px;
+}
+.board-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.board-label > i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+/* A PR chip: Desk's chip-live, by where the PR stands; its dot is its
+   checks, when they are known. */
+.board-pr {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  font: 11.5px var(--font-mono);
+  white-space: nowrap;
+}
+.board-card-facts > .board-pr {
+  display: inline-flex;
+}
+.board-pr-open {
+  border-style: dashed;
+  border-color: var(--working);
+  color: var(--working);
+}
+.board-pr-review {
+  border-color: var(--working);
+  color: var(--working);
+}
+.board-pr-changes {
+  border-color: var(--blocked);
+  color: var(--blocked);
+}
+.board-pr-merged {
+  border-color: var(--done);
+  color: var(--done);
+}
+.board-pr-draft {
+  border-style: dashed;
+  color: var(--faint);
+}
+.board-pr-checks {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  display: inline-block;
+}
+/* At a synced card's foot: whom its issue's assignee is beside its
+   session, and on hover or focus its comments, files, what it blocks and
+   its cycle, in place of Linear's created date. */
+.board-upstream-also {
+  display: inline-flex;
+  align-items: center;
+}
+.board-upstream-also .mark-xs {
+  width: 18px;
+  height: 18px;
+  border-width: 1px;
+}
+.board-upstream-also .mark-xs .mark-face {
+  width: 16px;
+  height: 16px;
+}
+.board-counts {
+  margin-left: auto;
+  display: none;
+  align-items: center;
+  gap: 9px;
+  color: var(--faint);
+  font-size: 11.5px;
+}
+.board-counts > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.board-card:is(:hover, :focus-visible) .board-counts {
+  display: inline-flex;
+}
+.board-card:is(:hover, :focus-visible) .board-counts ~ .board-when {
+  display: none;
+}
+.board-when {
+  margin-left: auto;
+  color: var(--faint);
+  font-size: 11.5px;
+  white-space: nowrap;
+}
+
 /* A card and what sits on it outside its button (Take it). */
 .board-card-wrap {
   position: relative;
@@ -240,9 +405,13 @@
 .board-card-foot {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   min-height: 22px;
   margin-top: 4px;
   min-width: 0;
+  font-size: 12px;
+  color: var(--muted);
 }
 /* Room for Take it, which sits over the foot's right end. */
 .board-card-wrap-take .board-card-foot {
@@ -1454,4 +1623,48 @@ details.ticket-history > summary .floor-time {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
+}
+
+/* A synced board's own filters: a chip whose menu is the native one. */
+.board-facets {
+  margin-left: 4px;
+}
+/* A blocked line on a card is drawn in the blocked colour, over the
+   floor's muted one. */
+.board-card .floor-item-what.state-blocked {
+  color: var(--blocked);
+}
+.board-facet {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+.board-facet[data-on="true"] {
+  border-color: var(--signal);
+  color: var(--text);
+  background: var(--signal-soft);
+}
+/* The chip says the choice; the select, laid over it unseen, takes the
+   click and the keys, so the chip is as wide as what it says. */
+.board-facet select {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  appearance: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  opacity: 0;
+  font: inherit;
+  cursor: pointer;
+}
+.board-facet:focus-within {
+  outline: 2px solid var(--signal);
+  outline-offset: 1px;
+}
+.board-facet-caret {
+  flex: none;
+  pointer-events: none;
 }
