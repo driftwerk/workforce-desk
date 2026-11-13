@@ -3252,6 +3252,61 @@ button.thread-bar:hover {
   font-weight: 650;
   color: var(--text);
 }
+/* The Dashboard's row, above the sections: lit as a room's row is while
+   the Dashboard shows. */
+.side-dash {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text);
+  font-weight: 600;
+  text-align: left;
+}
+.side-dash > .gi-name {
+  flex: 1;
+}
+.side-dash-icon {
+  flex: none;
+  color: var(--muted);
+}
+.side-dash:hover,
+.side-dash.on {
+  background: var(--raised);
+}
+.side-dash.on {
+  box-shadow:
+    0 0 0 1px var(--edge),
+    0 1px 2px var(--lift);
+}
+.side-dash.on .side-dash-icon {
+  color: var(--signal);
+}
+/* A count of what waits on you, in the colour waiting on you is. */
+.badge.badge-needs {
+  background: var(--blocked);
+  color: var(--on-blocked);
+}
+/* A grid row's dot says what its panes are doing: filled, as the mock-up
+   draws it, where a session's row draws a ring. */
+.gi .dot-state {
+  background: var(--idle);
+  border-color: var(--idle);
+}
+.gi .dot-state.dot-blocked {
+  background: var(--blocked);
+  border-color: var(--blocked);
+}
+.gi .dot-state.dot-working {
+  background: var(--working);
+  border-color: var(--working);
+}
 /* ── The Unread page: the Floor's cards, with two-line rows ─────────────── */
 
 .unread-page {
