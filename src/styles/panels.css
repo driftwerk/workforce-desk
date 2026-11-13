@@ -161,7 +161,8 @@
 body.rpanel-resizing,
 body.rpanel-resizing * {
   cursor: col-resize !important;
-  user-select: none;
+  -webkit-user-select: none !important;
+  user-select: none !important;
 }
 
 /* ── Focused: the way back, and the other panels as tabs ───────────────── */

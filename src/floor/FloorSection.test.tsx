@@ -7,7 +7,8 @@ import type { Layout } from "../groups/model";
 import { useDesk } from "../hub/store";
 import type { BossView, ChargeView, Need, PlanProgress, Session, Work } from "../hub/types";
 import { useSettings } from "../settings/store";
-import { DeskTile, FloorSection, PlanProgressCard, SealedNotes, useFolded } from "./FloorSection";
+import { DeskTile, FloorSection, PlanProgressCard, SealedNotes, handledOf, handledSaid, useFolded } from "./FloorSection";
+import { useOverview } from "../overview/store";
 import type { FloorNeed, FloorWork } from "./merge";
 import { NeedsJump } from "./NeedsJump";
 import { MAIN, floorSections, sealedSection, sectionDomId, type Section } from "./sections";
@@ -335,5 +336,34 @@ describe("a piece of work handed to another engine", () => {
     expect(within(tile).getByText("Codex")).toBeTruthy();
     fireEvent.click(within(tile).getByRole("button", { name: "acme-api options" }));
     expect(screen.getByRole("menuitem", { name: "Continue in…" })).toBeTruthy();
+  });
+});
+
+describe("how much a boss handled today", () => {
+  afterEach(() => useOverview.setState({ manager: null }));
+
+  it("is said beside who runs it, as this computer's hub counts it", () => {
+    useOverview.setState({
+      manager: {
+        agentId: "desk",
+        level: "act",
+        handled: { own: 0, preference: 0, escalated: 0, personFirst: 0 },
+        bosses: [{ agentId: SARAH.agent, name: "Sarah", group: "acme", level: "act", handled: { own: 19, preference: 4, escalated: 1, personFirst: 1 } }],
+      },
+    });
+    render(<FloorSection section={of("acme")} now={NOW} />);
+    expect(screen.getByText(/^Sarah runs it/).textContent).toBe(
+      "Sarah runs it · working · Act · $18.20 of $40 today · 45% · handled 23 of 25 itself today, 4 by your preferences",
+    );
+    cleanup();
+    // A day with no needs says nothing of it.
+    render(<FloorSection section={of(MAIN)} now={NOW} />);
+    expect(screen.getByText(/^Desk runs it/).textContent).not.toContain("handled");
+  });
+
+  it("reads as the hub's sentence", () => {
+    expect(handledSaid({ own: 2, preference: 0, escalated: 1, personFirst: 0 })).toBe("handled 2 of 3 itself today");
+    expect(handledSaid(null)).toBeNull();
+    expect(handledOf(null, "x")).toBeNull();
   });
 });

@@ -233,7 +233,7 @@ export function PairHub({
   return (
     <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <form className="sheet" onSubmit={start} aria-label="Connect a workspace">
-        <h2 className="display-md">{again ? `Connect to ${again.label} as you` : "Connect a workspace"}</h2>
+        <h2 className="display-lg">{again ? `Connect to ${again.label} as you` : "Connect a workspace"}</h2>
         {(step.kind === "form" || step.kind === "code") && (
           <>
             {again ? (

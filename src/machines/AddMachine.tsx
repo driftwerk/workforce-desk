@@ -369,11 +369,11 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
         }}
         onKeyDown={(e) => e.key === "Escape" && flow.at !== "setup" && onClose()}
       >
-        <h2 className="display-md">Add a machine</h2>
+        <h2 className="display-lg">Add a machine</h2>
         {pickable && (
           <div className="field">
             <span className="ov-label muted">From your SSH config</span>
-            <div className="pick-list" role="radiogroup" aria-label="From your SSH config">
+            <div className="ssh-picks" role="radiogroup" aria-label="From your SSH config">
               {hosts.map((h) => {
                 const there = machines.some((m) => m.target === h.host);
                 return (

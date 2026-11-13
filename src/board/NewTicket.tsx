@@ -31,7 +31,7 @@ export function NewTicket({ board, onClose }: { board: Board; onClose: () => voi
   return (
     <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()} onKeyDown={keys}>
       <form ref={sheet} className="sheet" onSubmit={make} aria-label="New ticket" tabIndex={-1}>
-        <h2 className="display-md">New ticket</h2>
+        <h2 className="display-lg">New ticket</h2>
         <label className="field">
           <span>Title</span>
           <input data-autofocus value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Hash every partner key at rest" required />

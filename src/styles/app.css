@@ -24,6 +24,12 @@ body {
   line-height: 1.45;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
+  /* The app's chrome is not text to select: a drag or a double-click on a row,
+     a heading or a count selects nothing, as in a native app. (Safari's engine,
+     which Tauri renders in on a Mac, still wants the prefix.) What a person
+     reads or copies opts back in, in the "Text a person reads" block below. */
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 button,
@@ -35,6 +41,13 @@ textarea {
 
 button {
   cursor: pointer;
+}
+
+/* A native tick, radio or slider in the theme's signal, wherever it is. */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  accent-color: var(--signal);
 }
 
 :focus-visible {
@@ -157,7 +170,8 @@ body.side-resizing .side-resize::after {
 body.side-resizing,
 body.side-resizing * {
   cursor: col-resize !important;
-  user-select: none;
+  -webkit-user-select: none !important;
+  user-select: none !important;
 }
 /* Always on screen: the wordmark, Ask anyone and the views. */
 .side-top {
@@ -230,6 +244,7 @@ body.side-resizing * {
   font-size: 28px;
   letter-spacing: -0.04em;
   line-height: 1;
+  -webkit-user-select: none;
   user-select: none;
 }
 .wordmark-dot {
@@ -268,6 +283,22 @@ body.side-resizing * {
   display: flex;
   padding: 3px;
   border-radius: 999px;
+  background: var(--raised);
+}
+/* On a card (cardFill, often the raised colour) the track is sunk, so it
+   still shows. */
+.setting-card .seg,
+.prov-list .seg,
+.ability-card .seg,
+.think-rows .seg,
+.engine-row .seg {
+  background: var(--sunken);
+}
+.setting-card .seg button[aria-checked="true"],
+.prov-list .seg button[aria-checked="true"],
+.ability-card .seg button[aria-checked="true"],
+.think-rows .seg button[aria-checked="true"],
+.engine-row .seg button[aria-checked="true"] {
   background: var(--raised);
 }
 .tabs button,
@@ -312,7 +343,7 @@ body.side-resizing * {
   align-items: center;
   gap: 10px;
   padding: 7px 10px;
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   border: 0;
   background: transparent;
   color: var(--text);
@@ -1184,7 +1215,7 @@ body.side-resizing * {
   align-items: flex-end;
   gap: 10px;
   padding: 10px 10px 10px 18px;
-  border-radius: 18px;
+  border-radius: var(--radius-lg);
   background: var(--surface);
   border: 1px solid var(--border);
 }
@@ -1566,7 +1597,7 @@ body.side-resizing * {
 .approval {
   margin: 0 12px 12px;
   padding: 12px 14px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--blocked-soft);
   display: flex;
   gap: 10px;
@@ -1635,7 +1666,7 @@ body.side-resizing * {
 .quick-ask input {
   border: 1px solid var(--border);
   background: var(--bg);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
   outline: none;
 }
@@ -1792,9 +1823,10 @@ body.side-resizing * {
   gap: 14px;
   align-items: center;
   padding: 12px 16px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--raised);
   border: 1px solid var(--border);
+  box-shadow: 0 12px 32px var(--shadow-soft);
   z-index: 20;
 }
 /* An error's toast is edged in the needs-you colour; any other in the border's. */
@@ -2025,7 +2057,7 @@ button.thread-bar:hover {
   min-width: 18px;
   text-align: center;
   padding: 1px 6px;
-  border-radius: 9px;
+  border-radius: 999px;
   font-size: 11px;
   font-weight: 700;
   background: var(--signal);
@@ -2132,6 +2164,9 @@ button.thread-bar:hover {
   }
 }
 @media (prefers-reduced-motion: reduce) {
+  .urow-bar {
+    animation: none;
+  }
   .dots i {
     animation: none;
     opacity: 0.8;
@@ -2152,7 +2187,7 @@ button.thread-bar:hover {
 .field-text {
   border: 1px solid var(--border);
   background: var(--bg);
-  border-radius: 12px;
+  border-radius: var(--radius-sm);
   padding: 10px 12px;
   outline: none;
   resize: vertical;
@@ -2175,7 +2210,7 @@ button.thread-bar:hover {
   gap: 8px 14px;
   align-items: center;
   padding: 10px 12px 10px 16px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--raised);
   border: 1px solid var(--border);
 }
@@ -2511,7 +2546,7 @@ button.thread-bar:hover {
   min-width: 0;
   padding: 3px 6px;
   border: 1px solid var(--signal);
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
   background: var(--sunken);
   color: var(--text);
   font-size: 13px;
@@ -2681,13 +2716,14 @@ button.thread-bar:hover {
   width: 72px;
   border: 1px solid var(--border);
   background: var(--bg);
-  border-radius: 10px;
+  border-radius: var(--radius-sm);
   padding: 6px 10px;
   outline: none;
   font: inherit;
 }
 .confirm-days input:focus {
   border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 
 /* Text people may need to copy, in a UI that otherwise isn't selectable. */
@@ -2696,6 +2732,98 @@ button.thread-bar:hover {
   user-select: text;
   cursor: text;
   word-break: break-all;
+}
+
+/* ── Text a person reads or copies ─────────────────────────────────────────
+   The body (above) makes everything else unselectable. These are chrome-free
+   text: messages and what the boss says, code, answers and transcripts,
+   tickets, copyable values and errors. A drag across several of them skips
+   the chrome between (names, times), so it copies their text alone. The
+   terminal (xterm) draws and selects for itself. A resize or move in
+   progress (body.*-resizing, gpane-moving) still wins: its none is !important. */
+input,
+textarea,
+select,
+[contenteditable],
+[contenteditable] *,
+.selectable,
+.rich,
+pre,
+code,
+samp,
+[role="alert"],
+.move-callout,
+.machine-box,
+.ticket-conflict,
+.hub-row-warning,
+.breaker-why,
+.budget-refused,
+.board-sync-failed,
+.dm-result-text,
+.memory-hit-text,
+.memory-result-text,
+.memory-result-line,
+.machine-log-line,
+.ticket-need-title,
+.ticket-link-url,
+.dec-text,
+.approval-text,
+.ov-ask-text,
+.ov-detail,
+.line-question-text,
+.msg-undelivered-note,
+.hub-down-text,
+.ev-reason,
+.ns-recent-path,
+.computer-paths,
+.ability-text,
+.msg-text,
+.msg-command-text,
+.msg-note,
+.dm-action-text,
+.pc-notice-line,
+.brief-text,
+.right-now-summary,
+.floor-entry-purpose,
+.floor-answered,
+.floor-need-why,
+.line-row-text,
+.queued-text,
+.line-answer-ask,
+.line-question-details,
+.transcript-tail,
+.search-hit-body,
+.search-snippet,
+.history-preview,
+.memory-note-text,
+.memory-read-body,
+.ticket-text,
+.ticket-history-row,
+.settings-main .mono,
+.dialog .mono,
+.pair-code,
+.conn-code,
+.browser-code,
+.signin-code,
+.problem-plain,
+.problem-raw,
+.panel-error,
+.toast-error,
+.terminal-note-error,
+.hub-down-reason,
+.oversee-problem,
+.voice-problem,
+.voice-error,
+.pending-problem,
+.account-problem,
+.att-problem,
+.board-push-problem,
+.ticket-push-problem,
+.line-composer-problem,
+.machine-status-problem,
+.rimg-problem {
+  -webkit-user-select: text;
+  user-select: text;
 }
 
 .draft-live {
@@ -3625,9 +3753,20 @@ button.urow-open {
 .urow-bar {
   height: 10px;
   width: 38%;
-  border-radius: 5px;
+  border-radius: 999px;
   background: var(--raised);
-  animation: desk-breathe 1.8s ease-in-out infinite;
+  animation: desk-loading 1.8s ease-in-out infinite;
+}
+/* A placeholder while a page reads: it fades in and out, with no ring (the
+   working dot's breathing draws one in the working colour). */
+@keyframes desk-loading {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
 }
 .urow-bar-short {
   width: 64%;
@@ -3783,7 +3922,7 @@ button.urow-open {
   gap: 14px;
   align-items: center;
   padding: 10px 12px 10px 16px;
-  border-radius: 14px;
+  border-radius: var(--radius);
   background: var(--raised);
   border: 1px solid var(--border);
   z-index: 19;
@@ -4052,7 +4191,8 @@ button.urow-open {
 body.line-resizing,
 body.line-resizing * {
   cursor: row-resize !important;
-  user-select: none;
+  -webkit-user-select: none !important;
+  user-select: none !important;
 }
 .line-panel-head {
   flex: none;
@@ -4224,7 +4364,32 @@ body.line-resizing * {
     display: none;
   }
 }
+/* A session row's marks, kept together: the ticket, charge, grid glyph and
+   unread mark. */
+.gi-trail {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 60%;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+/* The charge gives way inside the group; the rest keep their size. */
+.gi-trail > * {
+  flex: none;
+}
+.gi-trail > .gi-charge {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: none;
+}
+.gi-trail:empty {
+  display: none;
+}
 /* Badges that wrapped under the name sit at the row's right edge. */
+.gi > .gi-trail,
+.gi > .badge,
+.gi > .side-dot,
 .gi > .gi-ticket,
 .gi > .gi-charge,
 .gi > .gi-meta,

@@ -9,6 +9,7 @@
   min-width: 0;
   display: flex;
   flex-direction: column;
+  container: crew-floor / inline-size;
 }
 .crew-floor-head {
   display: flex;
@@ -204,8 +205,11 @@
 
 /* ── Activity ───────────────────────────────────────────────────────────── */
 
+/* The rail gives way before "Right now" does: it shrinks to its minimum,
+   then, when the Floor is too narrow for both side by side, sits under it. */
 .activity {
-  flex: 0 0 380px;
+  flex: 0 1 380px;
+  min-width: 300px;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -226,6 +230,32 @@
 }
 .crew-floor-body > .stage-dock {
   padding: 12px 10px 0 0;
+}
+/* Too narrow for both side by side: the rail sits under Right now, and the
+   two scroll as one. */
+@container crew-floor (max-width: 680px) {
+  .crew-floor-body {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+  .crew-floor-main {
+    overflow: visible;
+  }
+  .activity {
+    flex: none;
+    min-width: 0;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  .activity-scroll {
+    overflow: visible;
+  }
+  .crew-floor-body > .stage-dock {
+    width: auto;
+    flex-direction: row;
+    justify-content: flex-end;
+    padding: 0 10px 10px;
+  }
 }
 .activity-head h2,
 .activity-head h3 {
@@ -322,29 +352,6 @@
   color: var(--faint);
   letter-spacing: 0.03em;
   text-transform: uppercase;
-}
-
-@media (max-width: 1180px) {
-  .activity {
-    flex-basis: 300px;
-  }
-}
-@media (max-width: 920px) {
-  .crew-floor-body {
-    flex-direction: column;
-    overflow-y: auto;
-  }
-  .crew-floor-main {
-    overflow: visible;
-  }
-  .activity {
-    flex: none;
-    border-left: 0;
-    border-top: 1px solid var(--border);
-  }
-  .activity-scroll {
-    overflow: visible;
-  }
 }
 
 /* ── The Floor by group ─────────────────────────────────────────────────── */
@@ -803,7 +810,7 @@ button.fsec-tile-head {
   align-items: flex-start;
   gap: 6px;
   padding: 14px;
-  border-radius: 12px;
+  border-radius: var(--radius);
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
@@ -884,7 +891,7 @@ button.fsec-tile-head {
 .num {
   width: 64px;
   padding: 6px 8px;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   border: 1px solid var(--border);
   background: var(--sunken);
   color: var(--text);
@@ -898,6 +905,7 @@ button.fsec-tile-head {
 }
 .num:focus {
   border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .num[aria-invalid="true"] {
   border-color: var(--blocked);
@@ -920,56 +928,10 @@ button.fsec-tile-head {
 .oversee-levels-4 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
-/* A row holding a list (Act fully's repos, its workflows) and Add. */
-.oversee-list {
-  flex-direction: column;
-  align-items: stretch;
-  gap: 10px;
-}
-.oversee-items {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-.oversee-items[aria-disabled] {
-  opacity: 0.5;
-}
-.oversee-add:has(input:disabled) {
-  opacity: 0.5;
-}
-.oversee-items li {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 4px 4px 4px 10px;
-  border-radius: 8px;
-  background: var(--sunken);
-  min-width: 0;
-}
-.oversee-items .mono {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  min-width: 0;
-}
-.oversee-add .field-row input {
-  min-width: 0;
-  padding: 7px 10px;
-  border-radius: 8px;
-  font-size: 14px;
-  color: var(--text);
-}
-.oversee-add .oversee-problem {
-  text-align: left;
-}
 /* What always stays with the person, Act fully or not. */
 .oversee-never {
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius);
   padding: 12px 16px;
   color: var(--muted);
   font-size: 13px;
@@ -999,15 +961,6 @@ button.fsec-tile-head {
   align-self: flex-start;
 }
 
-/* Five levels, Unbound the fifth: three, then two. */
-.oversee-levels-5 {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-@media (max-width: 760px) {
-  .oversee-levels-5 {
-    grid-template-columns: minmax(0, 1fr);
-  }
-}
 /* Why the level chosen isn't in force, and its fix. */
 .oversee-why {
   display: flex;
@@ -1037,19 +990,6 @@ button.fsec-tile-head {
 }
 .oversee-advanced[open] > summary h3::before {
   content: "▾ ";
-}
-/* What Desk found for Act fully, said yes to before it's written. */
-.oversee-found {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-  flex-basis: 100%;
-}
-.oversee-found ul {
-  margin: 0;
-  padding-left: 18px;
-  flex-basis: 100%;
 }
 
 /* ── The boss in your chat: updates, decisions, what needs you ─────────── */
@@ -1254,4 +1194,52 @@ a.ref {
   color: var(--faint);
   font-family: var(--font-mono);
   font-size: 12px;
+}
+/* A boss's preferences: a rule a row, its tools on the right as links. */
+.oversee-prefs {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.oversee-pref {
+  align-items: flex-start;
+}
+.oversee-pref.is-paused .oversee-check-text > b,
+.oversee-pref.is-paused .oversee-check-text > span:not(.oversee-sub) {
+  color: var(--muted);
+}
+.oversee-pref-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex: none;
+}
+.oversee-pref-tools .link {
+  font-size: 13px;
+}
+.oversee-pref-edit {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.oversee-pref-edit .field input {
+  height: 34px;
+  padding: 0 10px;
+  border-radius: var(--radius-sm);
+  font-size: 14px;
+  color: var(--text);
+}
+.oversee-pref-where {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+}
+.oversee-pref-where .ability-select {
+  height: 34px;
+}
+.oversee-pref-where .field:last-child:not(:first-child) {
+  flex: 1 1 200px;
 }

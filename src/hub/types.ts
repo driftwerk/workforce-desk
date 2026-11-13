@@ -935,6 +935,17 @@ export interface Manager {
   /** Groups closed to everyone but the person: named for a boss that
    *  oversees nothing now. */
   sealed?: string[];
+  /** What the main boss handled today; none when the hub can't say. */
+  handled?: Handled | null;
+}
+
+/** Of the needs a boss met (approvals, questions, stalls): settled itself,
+ *  by your preferences, given to you, and ones you got to first. */
+export interface Handled {
+  own: number;
+  preference: number;
+  escalated: number;
+  personFirst: number;
 }
 
 /** A sidebar group's boss: an agent of this computer's hub that oversees
@@ -945,6 +956,8 @@ export interface GroupBoss {
   /** The group's id. */
   group: string;
   level: OversightLevel;
+  /** What it handled today; none when the hub can't say. */
+  handled?: Handled | null;
 }
 
 export interface Suggestion {
@@ -988,8 +1001,9 @@ export interface DecisionLine {
   why?: string;
   /** The message it sent, in full, when it sent one: shown on asking. */
   message?: string | null;
-  /** `left_alone`: it chose to do nothing ("let it wait"). */
-  kind?: "acted" | "left_alone" | null;
+  /** `left_alone`: it chose to do nothing ("let it wait"); `escalated`:
+   *  it gave it to you; `undone`: you undid one. */
+  kind?: "acted" | "left_alone" | "escalated" | "undone" | null;
   /** The button that undoes it; none when it can't be undone. */
   undo?: "undo" | "correct" | "stop" | "resume" | null;
   undone?: boolean;
@@ -1055,6 +1069,25 @@ export interface WaitingItem {
   notBlocking?: string | null;
 }
 
+/** What needs you, laid out by the hub: the same items as `waiting`. */
+export interface NeedsYou {
+  itemId: string;
+  /** One line. */
+  question: string;
+  /** Its points; none when the boss gave none. */
+  items: string[];
+  /** The boss's "I'd say". */
+  recommendation: string | null;
+  /** The answers, at most one recommended. */
+  options: { label: string; recommended: boolean }[];
+  /** What carries on meanwhile. */
+  notBlocking: string | null;
+  age: string;
+  /** The kind of case an answer would settle from then on: the chat
+   *  offers "Always" with it. */
+  generalizes?: string | null;
+}
+
 /** A boss's update: each session that moved, what it decided, what it
  *  kept for you, and what still waits. */
 export interface MentionedUpdate {
@@ -1063,8 +1096,39 @@ export interface MentionedUpdate {
   /** Your orders done and its promises kept, said as they were closed. */
   kept?: string[];
   waiting?: WaitingItem[];
+  /** `waiting`, laid out (a newer hub): used in its place when there. */
+  needsYou?: NeedsYou[];
   /** The day's cheap calls, near the ceiling. */
   footer?: string | null;
+}
+
+/** Where a preference holds: everywhere the boss looks, one sidebar
+ *  group, or one repository (`owner/name`). */
+export type PreferenceScope = "all" | `group:${string}` | `repo:${string}`;
+
+/** One of your rules for a boss: in this kind of case, do this. */
+export interface Preference {
+  id: string;
+  /** "main", or the id of the sidebar group whose boss it is for. */
+  bossScope: string;
+  whenText: string;
+  thenText: string;
+  scope: PreferenceScope;
+  /** From an "Always", said outright, or learned from an Undo. */
+  source: "asked" | "said" | "undone";
+  fromItem: string | null;
+  createdAt: string;
+  changedAt: string;
+  appliedCount: number;
+  lastAppliedAt: string | null;
+  overruledCount: number;
+  state: "active" | "paused" | "retired";
+}
+
+export interface PreferencePatch {
+  whenText?: string;
+  thenText?: string;
+  scope?: PreferenceScope;
 }
 
 /** A catch-up: the absence it covers and what it says beyond its update. */
@@ -1577,6 +1641,62 @@ export interface TicketExternal {
   /** Who has the issue there; null when no one does, absent from an older
    *  hub. */
   assignee?: SyncAssignee | null;
+  /** What the issue says of itself besides its words: shown, never pushed. */
+  details?: TicketDetails;
+}
+
+/** A synced ticket's issue's priority, labels, project and due date there,
+ *  and when it was last read whole. */
+export interface TicketDetails {
+  priority?: string;
+  labels?: string[];
+  project?: string;
+  /** `2026-11-14`. */
+  due?: string;
+  readAt?: string;
+  commentsAt?: string;
+}
+
+/** Where a ticket's file comes from: dropped on a ticket of your own, a
+ *  Jira attachment, a file uploaded to Linear, or a Linear link. */
+export type TicketFileSource = "upload" | "jira" | "linear_upload" | "linear_link";
+
+/** A ticket's file. Its bytes are at `GET /api/desk/tickets/{ticket}/files/{id}`
+ *  (`?thumb=1` for Jira's small picture, when `thumb`); a link has none. */
+export interface TicketFile {
+  id: string;
+  source: TicketFileSource;
+  name: string;
+  mediaType: string;
+  size: number | null;
+  /** A link's address, or a Linear upload's, which its description shows. */
+  url: string | null;
+  thumb: boolean;
+  addedBy: ActivityParty;
+  addedAt: string;
+}
+
+/** Who wrote a comment: a person, an agent or app, or Desk's own note. */
+export interface CommentAuthor {
+  kind: "person" | "agent" | "desk";
+  name: string;
+  /** Where: "Linear", "Jira" or "Desk". */
+  on: string;
+}
+
+export interface TicketComment {
+  id: string;
+  author: CommentAuthor;
+  /** Who in Desk posted it, when Desk did. */
+  postedBy?: ActivityParty;
+  /** Markdown, or Jira's words. */
+  body: string;
+  /** The hub warned its words read as instructions to an AI. */
+  flagged: boolean;
+  at: string;
+  editedAt?: string;
+  /** On a synced ticket, it stays in Desk: a session's or an agent's note. */
+  onlyHere: boolean;
 }
 
 /** A hub the local hub may sync boards through (`GET /api/desk/sync-hubs`). */
@@ -1688,6 +1808,9 @@ export interface Ticket {
   leftFilter?: boolean;
   /** What stops its change going out to its issue, in plain words. */
   pushProblem?: string | null;
+  /** Its files: its issue's, or what you dropped on it; absent from an
+   *  older hub. */
+  files?: TicketFile[];
 }
 
 export interface NewTicket {

@@ -21,7 +21,7 @@ export function Engines({ native, on }: { native?: MachineNative; on?: MachineId
   return (
     <section className="settings-pane" aria-label="Engines">
       <h1 className="display-lg">Engines</h1>
-      <p className="muted small">The coding CLIs on the computer Desk’s sessions run on. Desk reads each one’s version and sign-in every hour.</p>
+      <p className="muted">The coding CLIs on the computer Desk’s sessions run on. Desk reads each one’s version and sign-in every hour.</p>
       {machines.length > 0 && (
         <div className="field">
           <span className="ov-label muted">On</span>

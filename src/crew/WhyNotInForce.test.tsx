@@ -1,4 +1,4 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
@@ -6,11 +6,6 @@ import type { SpendView } from "../hub/types";
 import { DEFAULT_OVERSIGHT, type Oversight } from "./oversight";
 import { ACT_SWITCHES, withPreset } from "./presets";
 import { WhyNotInForce } from "./WhyNotInForce";
-
-vi.mock("../platform", async (real) => ({
-  ...(await real<typeof import("../platform")>()),
-  repoFacts: vi.fn(() => Promise.resolve([{ folder: "/w/a", top: "/r/a", remote: "git@github.com:acme/acme-web.git", workflows: ["deploy.yml"] }])),
-}));
 
 const day = (usd: number): SpendView =>
   ({
@@ -38,18 +33,10 @@ const shown = (o: Oversight, held: boolean, hub = hubWith(null)) => {
 afterEach(cleanup);
 
 describe("Why the level chosen isn't in force", () => {
-  it("fills what Act fully is missing from Desk's suggestions", async () => {
-    const r = shown(withPreset(DEFAULT_OVERSIGHT, "full"), true);
-    expect(screen.getByText("Acting as Act: Act fully needs a repo to work in.")).toBeTruthy();
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "See Desk’s suggestions" })));
-    // Shown first: nothing written until said yes to.
-    const found = await screen.findByRole("group", { name: "Desk’s suggestions" });
-    expect(found.textContent).toContain("acme/acme-web");
-    expect(found.textContent).toContain("deploy.yml");
-    expect(found.textContent).toContain("$10");
-    expect(r.onChange).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole("button", { name: "Add these" }));
-    expect(r.now().full).toMatchObject({ repos: ["acme/acme-web"], workflows: ["deploy.yml"], budgetUsdPerDay: 10 });
+  it("says nothing of Act fully with no repos or switches: it is unbound", () => {
+    shown({ ...withPreset(DEFAULT_OVERSIGHT, "full"), act: { ...ACT_SWITCHES } }, false);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   it("offers a higher budget when today's spend reached it, and only then", async () => {
@@ -91,11 +78,5 @@ describe("Why the level chosen isn't in force", () => {
     expect(typeof now.full.budgetClearedAt).toBe("string");
     expect(hub.spend).not.toHaveBeenCalled();
     void r;
-  });
-
-  it("turns every switch on for Unbound", () => {
-    const r = shown({ ...withPreset(DEFAULT_OVERSIGHT, "unbound"), act: { ...ACT_SWITCHES } }, false);
-    fireEvent.click(screen.getByRole("button", { name: "Turn every switch on" }));
-    expect(Object.values(r.now().act).every(Boolean)).toBe(true);
   });
 });

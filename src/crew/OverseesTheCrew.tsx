@@ -10,6 +10,7 @@ import { useAgentConfigs } from "./agentBrain";
 import { LevelPicker } from "./LevelPicker";
 import { PRESET_NAME, presetOf, shownPreset, withPreset, type Preset } from "./presets";
 import { WhyNotInForce } from "./WhyNotInForce";
+import { BossPreferences } from "./BossPreferences";
 import { useLayout } from "../groups/store";
 import { useHubLayout } from "../groups/hubLayout";
 import { askMove } from "../groups/move";
@@ -25,9 +26,7 @@ import {
   parseHold,
   parseParallel,
   parseMinutes,
-  parseRepo,
   parseTime,
-  parseWorkflow,
   readable,
   setAgentOversight,
   usd,
@@ -43,17 +42,11 @@ const TAKE_ON = (name: string): { id: TakeOn; name: string; desc: string }[] => 
 ];
 
 
-/** What always stays with you, at every level, Act fully included: the
- *  hub's never-list, by heading. */
+/** What stays with you at Act fully, where the boss decides everything
+ *  else its sessions ask. */
 const ALWAYS_YOURS = [
-  "Reading or exporting secrets and credentials",
-  "Publishing to a package registry",
-  "Force-pushing or rewriting history",
-  "Deleting branches, tags or releases on the remote",
-  "Deleting anything outside the session’s folder",
-  "Changing its own settings, level or budget",
-  "Spending or moving money",
-  "New ways out, sign-ins, and sessions that don’t ask",
+  "Changing any agent’s own settings, level or budget",
+  "Stop, and its daily budget",
 ];
 
 type Change = (o: Oversight) => Oversight;
@@ -85,8 +78,6 @@ const fieldsOf = (o: Oversight, was?: Record<Field, Typed>): Record<Field, Typed
   turns: typed(String(o.work.maxTurnsPerHour)),
   hold: typed(String(o.wake.holdMinutes)),
   budget: typed(o.full.budgetUsdPerDay === null ? (was?.budget.text ?? "") : String(o.full.budgetUsdPerDay)),
-  repo: was?.repo ?? typed(""),
-  workflow: was?.workflow ?? typed(""),
 });
 
 type Field =
@@ -99,9 +90,7 @@ type Field =
   | "parallel"
   | "turns"
   | "hold"
-  | "budget"
-  | "repo"
-  | "workflow";
+  | "budget";
 
 /** An agent's Settings section for overseeing the crew: on or off (one
  *  agent at a time), how much it does on its own, what it keeps track of,
@@ -226,17 +215,6 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
     const r = parseBudget(text);
     return "problem" in r ? r.problem : { ...o, full: { ...o.full, budgetUsdPerDay: r.value } };
   };
-  /** Adds what's typed to a list once it can be used; the field empties. */
-  const add = (f: "repo" | "workflow") => {
-    if (!o || !fields) return;
-    const list = f === "repo" ? o.full.repos : o.full.workflows;
-    const r = f === "repo" ? parseRepo(fields[f].text, list) : parseWorkflow(fields[f].text, list);
-    if ("problem" in r) return setFields({ ...fields, [f]: { ...fields[f], problem: r.problem } });
-    setFields({ ...fields, [f]: typed("") });
-    update((x) => ({ ...x, full: { ...x.full, [f === "repo" ? "repos" : "workflows"]: [...list, r.value] } }));
-  };
-  const remove = (f: "repos" | "workflows", item: string) =>
-    update((x) => ({ ...x, full: { ...x.full, [f]: x.full[f].filter((i) => i !== item) } }));
   /** Turning a row with a field on uses what's typed in it, if it can. */
   const turnOn = (f: Field, apply: (o: Oversight, text: string) => Oversight | string, off: Change) => (on: boolean) => {
     if (!o || !fields) return;
@@ -572,49 +550,9 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
 
           {o.level === "full" && (
             <div className="oversee-part">
-              <h3>Where {name} acts fully</h3>
+              <h3>{name}’s budget</h3>
               <WhyNotInForce o={o} held={running === "act" || inForce === false} budget={fullBudget} onChange={update} />
               <div className="oversee-card">
-                <Check
-                  label="Anywhere"
-                  sub="Not limited to the repos, folders and workflows listed"
-                  checked={o.full.anywhere}
-                  onChange={(v) => update((x) => ({ ...x, full: { ...x.full, anywhere: v } }))}
-                />
-                {o.full.anywhere && (
-                  <div className="oversee-row">
-                    <span className="oversee-sub" role="note">
-                      The repos and workflows below don’t apply while Anywhere is on.
-                    </span>
-                  </div>
-                )}
-                <div className="oversee-row oversee-list">
-                  <span className="oversee-check-text">
-                    <b>Repos</b>
-                    <span className="oversee-sub">owner/name on GitHub, a repo’s address, or a folder on this computer</span>
-                  </span>
-                  {o.full.repos.length > 0 && (
-                    <ul className="oversee-items" aria-label="Repos" aria-disabled={o.full.anywhere || undefined}>
-                      {o.full.repos.map((r) => (
-                        <li key={r}>
-                          <span className="mono">{r}</span>
-                          <button type="button" className="btn btn-ghost btn-sm" aria-label={`Remove ${r}`} disabled={o.full.anywhere} onClick={() => remove("repos", r)}>
-                            Remove
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <AddItem
-                    label="Add a repo"
-                    placeholder="acme/acme-web"
-                    problemId={`${ids}-repo`}
-                    value={fields.repo}
-                    onChange={(t) => setField("repo", t)}
-                    onAdd={() => add("repo")}
-                    disabled={o.full.anywhere}
-                  />
-                </div>
                 <div className="oversee-row">
                   <span className="oversee-check">
                     <span className="oversee-check-text">
@@ -642,42 +580,9 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                   />
                   {fields.budget.problem && <Problem id={`${ids}-budget`} text={fields.budget.problem} />}
                 </div>
-                <div className="oversee-row oversee-list">
-                  <span className="oversee-check-text">
-                    <b>Workflows</b>
-                    <span className="oversee-sub">
-                      Deploys and promotions run only through these GitHub workflows, by file name, on the default branch
-                    </span>
-                  </span>
-                  {o.full.workflows.length > 0 && (
-                    <ul className="oversee-items" aria-label="Workflows" aria-disabled={o.full.anywhere || undefined}>
-                      {o.full.workflows.map((w) => (
-                        <li key={w}>
-                          <span className="mono">{w}</span>
-                          <button type="button" className="btn btn-ghost btn-sm" aria-label={`Remove ${w}`} disabled={o.full.anywhere} onClick={() => remove("workflows", w)}>
-                            Remove
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  )}
-                  <AddItem
-                    label="Add a workflow"
-                    placeholder="deploy.yml"
-                    problemId={`${ids}-workflow`}
-                    value={fields.workflow}
-                    onChange={(t) => setField("workflow", t)}
-                    onAdd={() => add("workflow")}
-                    disabled={o.full.anywhere}
-                  />
-                </div>
               </div>
-              <span className="oversee-sub">
-                In those repos {name} may merge pull requests, push the default branch when it sends nothing new, tag and release
-                the default branch as GitHub has it, and run the workflows above. Deploy tools and release scripts stay yours.
-              </span>
               <div className="oversee-never">
-                <b>Always yours, at every level</b>
+                <b>Always yours at Act fully</b>
                 <ul>
                   {ALWAYS_YOURS.map((n) => (
                     <li key={n}>{n}</li>
@@ -687,8 +592,12 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
             </div>
           )}
 
+          <BossPreferences name={name} group={o.group ?? null} />
+
           {acts && (
             <div className="oversee-part">
+              {/* Act fully decides everything itself: its switches don't apply. */}
+              {!unbound && (
               <details className="oversee-advanced" open={presetOf(o) === null || undefined}>
                 <summary>
                   <h3>What {name} may do without asking</h3>
@@ -745,29 +654,27 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 />
                 <Check
                   label="Continue sessions in another engine"
-                  sub="Suggested for you to say yes to; unbound, Desk does it itself, and the session’s brief goes to that engine’s vendor"
+                  sub="Suggested for you to say yes to; at Act fully it does it itself, and the session’s brief goes to that engine’s vendor"
                   checked={o.act.handOff}
                   onChange={(v) => update((x) => ({ ...x, act: { ...x.act, handOff: v } }))}
                 />
                 <Check
                   label="Change sessions’ permission mode"
-                  sub={
-                    unbound
-                      ? "Desk can switch a session it runs to auto or bypass. It goes back to its own mode, started again in place between turns, as soon as unbound ends, the session is released or handed to another boss, or you resume it"
-                      : "Switch a running session between manual, accept edits and plan"
-                  }
+                  sub="Switch a running session between manual, accept edits and plan"
                   checked={o.act.setMode}
                   onChange={(v) => update((x) => ({ ...x, act: { ...x.act, setMode: v } }))}
                 />
               </div>
               </details>
+              )}
               {unbound && inForce !== false && (
                 <p className="small state-blocked" role="status">
-                  {inForce && <b>Unbound now. </b>}
-                  No limits: Desk acts on everything itself, including publishing, deploys and secrets. Only your budget, Stop and the
-                  activity log remain.
+                  {inForce && <b>Act fully is in force. </b>}
+                  No limits: it acts on everything itself, including publishing, deploys and secrets. Only your budget, Stop, its own
+                  settings and the activity log remain.
                   {o.full.budgetUsdPerDay === null && " No budget set: only the check-in ceilings and Stop bound what it spends."}{" "}
-                  It waits while you type into a session it runs, for {o.wake.holdMinutes} minutes after your last keystroke.
+                  It decides every request its sessions ask the moment they ask; its messages to a session it runs wait while you type, for{" "}
+                  {o.wake.holdMinutes} minutes after your last keystroke.
                 </p>
               )}
               <span className="oversee-sub">
@@ -785,7 +692,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
           title={(id) => (
             <header className="dialog-head">
               <span className="dialog-title">
-                <h1 id={id} className="display-md">
+                <h1 id={id} className="display-lg">
                   Make {name} the {o?.group ? "main boss" : "overseer"}?
                 </h1>
                 {other && (
@@ -899,53 +806,6 @@ function Check({
       </label>
       {children}
       {problem?.text && <Problem id={problem.id} text={problem.text} />}
-    </div>
-  );
-}
-
-/** A text field and Add: Enter adds too; what's wrong with what's typed is
- *  said under it. */
-function AddItem({
-  label,
-  placeholder,
-  problemId,
-  value,
-  onChange,
-  onAdd,
-  disabled = false,
-}: {
-  label: string;
-  placeholder: string;
-  problemId: string;
-  value: Typed;
-  onChange: (text: string) => void;
-  onAdd: () => void;
-  disabled?: boolean;
-}) {
-  return (
-    <div className="field oversee-add">
-      <div className="field-row">
-        <input
-          className="mono"
-          aria-label={label}
-          placeholder={placeholder}
-          value={value.text}
-          disabled={disabled}
-          aria-invalid={value.problem ? true : undefined}
-          aria-describedby={value.problem ? problemId : undefined}
-          onChange={(e) => onChange(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !disabled) {
-              e.preventDefault();
-              onAdd();
-            }
-          }}
-        />
-        <button type="button" className="btn btn-ghost btn-sm" disabled={disabled || !value.text.trim()} onClick={onAdd}>
-          Add
-        </button>
-      </div>
-      {value.problem && <Problem id={problemId} text={value.problem} />}
     </div>
   );
 }
