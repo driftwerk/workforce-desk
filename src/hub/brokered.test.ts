@@ -164,6 +164,8 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   undoDecision: (h) => h.undoDecision("d1"),
   answerItem: (h) => h.answerItem("i1", "Wait for green"),
   dropItem: (h) => h.dropItem("i1"),
+  dmTyping: (h) => h.dmTyping("desk"),
+  presence: (h) => h.presence(true, "desk"),
   rooms: (h) => h.rooms(),
   createRoom: (h) => h.createRoom("R", []),
   updateRoom: (h) => h.updateRoom("r1", { name: "R2" } as never),

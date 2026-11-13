@@ -972,6 +972,8 @@ export interface DeskExtras {
   item?: MentionedItem;
   /** A boss's update, shown in place of its text. */
   update?: MentionedUpdate;
+  /** A catch-up on your return, beside its `update`. */
+  away?: MentionedAway;
 }
 
 /** A decision of the boss's, said as its row says it. */
@@ -1063,6 +1065,19 @@ export interface MentionedUpdate {
   waiting?: WaitingItem[];
   /** The day's cheap calls, near the ceiling. */
   footer?: string | null;
+}
+
+/** A catch-up: the absence it covers and what it says beyond its update. */
+export interface MentionedAway {
+  since: string;
+  until: string;
+  headline?: string;
+  /** The sessions that finished while you were away. */
+  finished?: string[];
+  /** "I handled 23 of 25 myself, 4 by your preferences." */
+  handled?: string | null;
+  /** What was set aside, listed by its words with Drop. */
+  parked?: { itemId: string; text: string }[];
 }
 
 /** A session's question on its line, as the overseer's DM shows it. */

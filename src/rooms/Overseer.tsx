@@ -5,6 +5,7 @@ import type {
   AnswerOption,
   DecisionLine,
   DeskExtras,
+  MentionedAway,
   MentionedItem,
   MentionedUpdate,
   NeedItem,
@@ -31,6 +32,10 @@ import { plainError } from "../ui/plainError";
 //    behind "Message", and Undo. The times it chose to do nothing fold into
 //    one line.
 //
+// A catch-up on your return follows a faint "you were away" line and says
+// the same parts, opening with its headline and how much the boss handled
+// itself, with what it set aside last.
+//
 // The hub is moving to saying each part apart (a decision's action, why
 // and message; a question, its items and options). Until it does, each is
 // read out of the words it sends now.
@@ -39,17 +44,18 @@ import { plainError } from "../ui/plainError";
  *  markdown: an update, something it asks of you, or a decision of its
  *  own. */
 export const overseerShown = (extras: DeskExtras | undefined): boolean =>
-  !!extras && (!!extras.update || !!extras.item || !!extras.decisions?.length);
+  !!extras && (!!extras.update || !!extras.away || !!extras.item || !!extras.decisions?.length);
 
 /** Whether the boss's message is one of what the chat shows unboxed: an
  *  update, a decision, or something it asks of you (its own, or a
  *  session's question it gave you). Its cards go inline. */
 export const overseerPost = (extras: DeskExtras | undefined, delivery: DeliveryKind | undefined): boolean =>
-  overseerShown(extras) || delivery === "update" || delivery === "question";
+  overseerShown(extras) || delivery === "update" || delivery === "away" || delivery === "question";
 
 /** What the boss's message shows in place of its markdown, from its
  *  extras; `content` stands in for anything they don't say. */
 export function OverseerBody({ extras, content }: { extras: DeskExtras; content: string }) {
+  if (extras.away) return <CatchUp away={extras.away} update={extras.update ?? {}} />;
   if (extras.update) return <Update update={extras.update} />;
   if (extras.item) return <NeedsYouPost item={extras.item} content={content} />;
   if (extras.decisions?.length)
@@ -307,23 +313,119 @@ function SessionLine({ s }: { s: UpdateSession }) {
   );
 }
 
-function Update({ update }: { update: MentionedUpdate }) {
+/** "you were away 21:00 – 22:40", above a catch-up: centred, faint, mono. */
+export function AwayDivider({ away }: { away: MentionedAway }) {
+  const from = clock(away.since);
+  const to = clock(away.until);
+  if (!from || !to) return null;
+  return (
+    <div className="away-divider" role="separator">
+      you were away {from} – {to}
+    </div>
+  );
+}
+
+/** What happened: its headline and how much the boss handled itself
+ *  first (a catch-up), then a line per session and what it kept. */
+function Head({ update, headline, handled }: { update: MentionedUpdate; headline?: string; handled?: string | null }) {
   const sessions = update.sessions ?? [];
   const kept = update.kept ?? [];
+  if (!headline && !handled && !sessions.length && !kept.length) return null;
+  return (
+    <div className="upd-head">
+      {headline && <p className="upd-line">{headline}</p>}
+      {handled && <p className="muted">{handled}</p>}
+      {sessions.map((s) => (
+        <SessionLine key={s.sessionId} s={s} />
+      ))}
+      {kept.map((k, i) => (
+        <p key={`kept-${i}`} className="upd-kept">
+          {k}
+        </p>
+      ))}
+    </div>
+  );
+}
+
+function CatchUp({ away, update }: { away: MentionedAway; update: MentionedUpdate }) {
+  const parked = away.parked ?? [];
   return (
     <div className="msg-text overseer">
-      {(sessions.length > 0 || kept.length > 0) && (
-        <div className="upd-head">
-          {sessions.map((s) => (
-            <SessionLine key={s.sessionId} s={s} />
-          ))}
-          {kept.map((k, i) => (
-            <p key={`kept-${i}`} className="upd-kept">
-              {k}
-            </p>
-          ))}
-        </div>
+      <Head update={update} headline={away.headline} handled={away.handled} />
+      {(update.waiting ?? []).map((w) => (
+        <Waiting key={w.itemId} w={w} />
+      ))}
+      {(update.decisions ?? []).length > 0 && <WhatIDid decisions={update.decisions!} />}
+      {parked.length > 0 && (
+        <section className="did" aria-label="Set aside">
+          <span className="sec-label">Set aside until you say</span>
+          <ul className="did-list untimed">
+            {parked.map((p) => (
+              <Parked key={p.itemId} id={p.itemId} text={p.text} />
+            ))}
+          </ul>
+        </section>
       )}
+      {update.footer && <p className="faint small">{update.footer}</p>}
+    </div>
+  );
+}
+
+/** A parked item, by its words, with Drop. */
+function Parked({ id, text }: { id: string; text: string }) {
+  const connected = useDesk((s) => !!s.hub);
+  const [state, setState] = useState<"open" | "busy" | "dropped">(settledHere.has(id) ? "dropped" : "open");
+  const [problem, setProblem] = useState<string | null>(null);
+  const dropped = () => {
+    settledHere.set(id, "Dropped.");
+    setState("dropped");
+  };
+  const drop = async () => {
+    const hub = useDesk.getState().hub;
+    if (!hub) return;
+    setState("busy");
+    setProblem(null);
+    try {
+      await hub.dropItem(id);
+      dropped();
+    } catch (e) {
+      if (e instanceof HubError && (e.status === 404 || e.status === 409)) dropped();
+      else {
+        setProblem(plainError(e));
+        setState("open");
+      }
+    }
+  };
+  return (
+    <li className="dec-row">
+      <span className="dec-text muted">
+        {text}
+        {problem && (
+          <span className="small state-blocked" role="alert">
+            {" "}
+            {problem}
+          </span>
+        )}
+      </span>
+      <span className="dec-tools">
+        {state === "dropped" ? (
+          <span className="faint small" role="status">
+            Dropped.
+          </span>
+        ) : (
+          <button type="button" className="link dec-msg" aria-label={`Drop: ${text}`} disabled={state === "busy" || !connected} onClick={() => void drop()}>
+            Drop
+          </button>
+        )}
+      </span>
+    </li>
+  );
+}
+
+function Update({ update }: { update: MentionedUpdate }) {
+  return (
+    <div className="msg-text overseer">
+      <Head update={update} />
       {(update.waiting ?? []).map((w) => (
         <Waiting key={w.itemId} w={w} />
       ))}
