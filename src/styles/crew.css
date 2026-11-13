@@ -707,8 +707,9 @@ button.lineage-chip:hover {
   gap: 14px;
   padding: 14px 16px;
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
+  border-radius: var(--radius);
+  background: var(--card-fill);
+  box-shadow: 0 1px 2px var(--lift);
   color: var(--text);
   min-width: 0;
 }
@@ -767,6 +768,7 @@ button.card-icon:hover:not(:disabled) {
 }
 .agent-tabs button {
   padding: 6px 16px;
+  white-space: nowrap;
 }
 .agent-page {
   flex: 1;
@@ -799,8 +801,8 @@ button.card-icon:hover:not(:disabled) {
 }
 .think-rows {
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
+  border-radius: var(--radius);
+  background: var(--card-fill);
   display: flex;
   flex-direction: column;
 }
@@ -865,8 +867,8 @@ button.card-icon:hover:not(:disabled) {
 }
 .ability-card {
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
+  border-radius: var(--radius);
+  background: var(--card-fill);
   display: flex;
   flex-direction: column;
 }
@@ -888,7 +890,7 @@ button.card-icon:hover:not(:disabled) {
 .ability-summary {
   align-items: center;
   background: var(--sunken);
-  border-radius: 12px 12px 0 0;
+  border-radius: var(--radius) var(--radius) 0 0;
 }
 .ability-summary b {
   font-size: 14px;
@@ -911,6 +913,38 @@ button.card-icon:hover:not(:disabled) {
 }
 .ability-note {
   margin: 0;
+}
+/* Choices inside an ability's card are its rows, hairlines between them and
+   the ring saying which is chosen: no card inside the card. */
+.ability-card > .pick-list {
+  gap: 0;
+}
+.ability-card > .pick-list + .pick-list,
+.ability-card > .pick-list + .ability-note {
+  border-top: 1px solid var(--border);
+}
+.ability-card .pick {
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.ability-card .pick + .pick {
+  border-top: 1px solid var(--border);
+}
+.ability-card .pick:hover,
+.ability-card .pick[aria-checked="true"] {
+  border-color: var(--border);
+  background: none;
+}
+.ability-card .pick:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 5%, var(--card-fill));
+}
+/* What it asks about first, under Full access: its own group, set in. */
+.ability-card > .pick-list + .pick-list {
+  padding-left: 32px;
+}
+.ability-card > .ability-note {
+  padding: 10px 16px 12px;
 }
 .ability-opts {
   display: flex;
@@ -1147,9 +1181,20 @@ button.card-icon:hover:not(:disabled) {
 }
 .prov-list {
   border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface);
+  border-radius: var(--radius);
+  background: var(--card-fill);
+  box-shadow: 0 1px 2px var(--lift);
   overflow: hidden;
+}
+/* Cards listed in one: rows of it, hairlines between them. */
+.prov-list > .setting-card {
+  border: 0;
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.prov-list > * + .setting-card {
+  border-top: 1px solid var(--border);
 }
 .prov-row {
   display: flex;
@@ -1192,6 +1237,7 @@ button.card-icon:hover:not(:disabled) {
   gap: 10px;
   border: 0;
   background: transparent;
+  box-shadow: none;
 }
 .voice-option .pick {
   flex: 1;

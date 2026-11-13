@@ -10,6 +10,7 @@ import { openUrl } from "../platform";
 import { plainError } from "../ui/plainError";
 import "../styles/computer.css";
 import "../styles/browser.css";
+import { SwitchRow } from "../ui/SwitchRow";
 
 /** What Settings → Browser reads and changes. */
 export interface BrowserApi {
@@ -138,7 +139,7 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
   return (
     <section className="settings-pane" aria-label="Browser">
       <h1 className="display-lg">Browser</h1>
-      <p className="muted small">
+      <p className="muted">
         Desk works in your own Chrome, where you’re already signed in, through Desk’s Chrome extension: in a window of its own, never in your other
         tabs. Unless you let it act fully, it asks you before it clicks or types on a page.
       </p>
@@ -151,13 +152,13 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
         <p className="faint small">Reading…</p>
       ) : (
         <>
-          <div className="toggle-row">
-            <input id="browser-on" type="checkbox" checked={s.on} disabled={busy} onChange={(e) => void act(() => api.save({ ...s, on: e.target.checked }))} />
-            <span>
-              <label htmlFor="browser-on">Desk uses your Chrome</label>
-              <span className="small muted">{s.on ? "Agents can open pages, read them and, as you allow, act on them." : "Off: no agent uses a browser, and Desk’s window closes."}</span>
-            </span>
-          </div>
+          <SwitchRow
+            label="Desk uses your Chrome"
+            sub={s.on ? "Agents can open pages, read them and, as you allow, act on them." : "Off: no agent uses a browser, and Desk’s window closes."}
+            on={s.on}
+            saving={busy}
+            onChange={(on) => void act(() => api.save({ ...s, on }))}
+          />
 
           <h2 className="field-label">Desk in Chrome</h2>
           {line && <p className={`small ${line.tone === "done" ? "state-done" : line.tone === "blocked" ? "state-blocked" : "muted"}`}>{line.text}</p>}

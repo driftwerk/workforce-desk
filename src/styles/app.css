@@ -43,6 +43,13 @@ button {
   cursor: pointer;
 }
 
+/* A native tick, radio or slider in the theme's signal, wherever it is. */
+input[type="checkbox"],
+input[type="radio"],
+input[type="range"] {
+  accent-color: var(--signal);
+}
+
 :focus-visible {
   outline: 2px solid var(--signal);
   outline-offset: 2px;
@@ -276,6 +283,22 @@ body.side-resizing * {
   display: flex;
   padding: 3px;
   border-radius: 999px;
+  background: var(--raised);
+}
+/* On a card (cardFill, often the raised colour) the track is sunk, so it
+   still shows. */
+.setting-card .seg,
+.prov-list .seg,
+.ability-card .seg,
+.think-rows .seg,
+.engine-row .seg {
+  background: var(--sunken);
+}
+.setting-card .seg button[aria-checked="true"],
+.prov-list .seg button[aria-checked="true"],
+.ability-card .seg button[aria-checked="true"],
+.think-rows .seg button[aria-checked="true"],
+.engine-row .seg button[aria-checked="true"] {
   background: var(--raised);
 }
 .tabs button,

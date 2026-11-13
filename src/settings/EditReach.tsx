@@ -163,7 +163,7 @@ export function EditReach({
               </button>
             </p>
           ) : (
-            <div className="pick-list" role="radiogroup" aria-label="SSH config entries">
+            <div className="ssh-picks" role="radiogroup" aria-label="SSH config entries">
               {hosts.map((h) => (
                 <button key={h.host} type="button" role="radio" aria-checked={picked === h.host} className="pick-row" onClick={() => setPicked(h.host)}>
                   <span className="pick-ring" aria-hidden="true" />

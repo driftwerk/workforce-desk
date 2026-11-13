@@ -121,8 +121,8 @@ export function Appearance() {
   return (
     <main className="settings-main">
       <div className="settings-head">
-        <h1 className="display-xl">Appearance</h1>
-        <span className="muted">Pick three colours. Desk works out the rest, including the terminal and chart colours.</span>
+        <h1 className="display-lg">Appearance</h1>
+        <p className="muted">Pick three colours. Desk works out the rest, including the terminal and chart colours.</p>
       </div>
 
       <section className="theme-cards" aria-label="Themes">

@@ -109,7 +109,7 @@ describe("Settings → This computer", () => {
     expect(screen.getByRole("status").textContent).toContain("Stopped. No agent can read, change or run anything here.");
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Allow again" })));
     expect(hub.setComputerStopped).toHaveBeenLastCalledWith(false);
-    expect(screen.getByRole("checkbox", { name: "Agents can use this computer" })).toHaveProperty("checked", true);
+    expect(screen.getByRole("switch", { name: "Agents can use this computer" }).getAttribute("aria-checked")).toBe("true");
   });
 
   it("revokes a grant and forgets a session's", async () => {
