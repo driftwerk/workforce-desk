@@ -54,6 +54,8 @@ const { useChat } = await import("../chat/store");
 const { useDesk } = await import("../hub/store");
 const { useOverview } = await import("../overview/store");
 const { Rooms } = await import("./Rooms");
+const { deskState } = await import("../restore/boot");
+const { draftKey } = await import("../restore/drafts");
 import type { ChatMessage } from "../chat/types";
 import type { RoomDraft } from "../hub/store";
 import type { RoomMessage } from "../hub/types";
@@ -83,7 +85,13 @@ beforeEach(() => {
   drawn = 0;
   useDesk.setState({ activeRoom: null, hub: null });
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // What was typed is kept after a pause; left to fire it would write (and
+  // log its failure) after this test, or after the file is torn down.
+  deskState.remove(draftKey.room("r1"));
+  for (const agent of ["dw/desk", "local/scout"]) deskState.remove(draftKey.dm(agent));
+});
 
 describe("typing in a DM with a long history", () => {
   const show = () => {
