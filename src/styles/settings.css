@@ -1726,6 +1726,26 @@ legend.set-label {
   padding-right: 0;
 }
 /* Within an engine's card, under its accounts: a row of the card's own. */
+/* Which account this computer's sign-in is: a row of the list like the
+   others, its Change at the right where the rows' actions are. */
+.account-share-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+}
+/* "Add account…" closes the list: after a hairline, its words in line with
+   the rows' names (a ghost button's own padding pulled back). */
+.accounts > .account-actions-start {
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.accounts > .account-actions-start > .btn-ghost {
+  margin-left: -12px;
+}
 .accounts .switch-row {
   padding: 8px 0 4px;
   border-top: 1px solid var(--border);
