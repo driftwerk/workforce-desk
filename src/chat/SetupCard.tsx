@@ -64,8 +64,9 @@ export function SetupCards({
     let timer: ReturnType<typeof setTimeout> | undefined;
     const from = Date.parse(since) - SKEW_MS;
     const to = until ? Date.parse(until) + SKEW_MS : Infinity;
-    // Past this the hub keeps none of them.
-    const gone = from + SKEW_MS + SETUP_LIFE_MS + SKEW_MS;
+    // Past this the hub keeps none of them: an hour from the turn's start,
+    // until it lists them, then from the last still under way.
+    let gone = from + SKEW_MS + SETUP_LIFE_MS + SKEW_MS;
     const began = Date.now();
     let failures = 0;
     const tick = async () => {
@@ -82,6 +83,8 @@ export function SetupCards({
           .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))
           .slice(0, count);
         setSetups(mine);
+        const running = mine.filter((s) => !settled(s)).map((s) => Date.parse(s.startedAt));
+        if (running.length > 0) gone = Math.max(gone, Math.max(...running) + SETUP_LIFE_MS + SKEW_MS);
         // Done: every one shown has settled, and the rest the turn started
         // haven't come by now (the hub refused them, or keeps them no more).
         const waited = Date.now() - began >= FIRST_SHOW_MS;

@@ -695,12 +695,16 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
 }
 
 /** Where a message's turn lies among `shown`, for one that set
- *  connections up: from the message before it to the one after. Others get
- *  none, so a message coming after them doesn't render them again. */
-const turnOf = (shown: readonly ChatMessage[], m: ChatMessage, i: number): { turnSince?: string; turnUntil?: string } =>
-  m.role === "assistant" && (setupsStarted(m.steps) > 0 || setupsStarted(m.tools) > 0)
-    ? { turnSince: shown[i - 1]?.at, turnUntil: shown[i + 1]?.at }
-    : {};
+ *  connections up: from your message it answers (else your last before it:
+ *  a delivery between them came mid-turn) to the message after it. Others
+ *  get none, so a message coming after them doesn't render them again. */
+export const turnOf = (shown: readonly ChatMessage[], m: ChatMessage, i: number): { turnSince?: string; turnUntil?: string } => {
+  if (m.role !== "assistant" || (setupsStarted(m.steps) === 0 && setupsStarted(m.tools) === 0)) return {};
+  const asked =
+    (m.replyTo ? shown.find((x) => x.role === "user" && x.clientId === m.replyTo) : undefined) ??
+    shown.slice(0, i).findLast((x) => x.role === "user");
+  return { turnSince: asked?.at, turnUntil: shown[i + 1]?.at };
+};
 
 /** A message in a DM, rendered again only when it, or how it's shown,
  *  changes: not while you type, nor as another message streams in. */
