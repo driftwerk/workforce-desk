@@ -988,8 +988,9 @@ export interface DecisionLine {
   why?: string;
   /** The message it sent, in full, when it sent one: shown on asking. */
   message?: string | null;
-  /** `left_alone`: it chose to do nothing ("let it wait"). */
-  kind?: "acted" | "left_alone" | null;
+  /** `left_alone`: it chose to do nothing ("let it wait"); `escalated`:
+   *  it gave it to you; `undone`: you undid one. */
+  kind?: "acted" | "left_alone" | "escalated" | "undone" | null;
   /** The button that undoes it; none when it can't be undone. */
   undo?: "undo" | "correct" | "stop" | "resume" | null;
   undone?: boolean;
@@ -1055,6 +1056,22 @@ export interface WaitingItem {
   notBlocking?: string | null;
 }
 
+/** What needs you, laid out by the hub: the same items as `waiting`. */
+export interface NeedsYou {
+  itemId: string;
+  /** One line. */
+  question: string;
+  /** Its points; none when the boss gave none. */
+  items: string[];
+  /** The boss's "I'd say". */
+  recommendation: string | null;
+  /** The answers, at most one recommended. */
+  options: { label: string; recommended: boolean }[];
+  /** What carries on meanwhile. */
+  notBlocking: string | null;
+  age: string;
+}
+
 /** A boss's update: each session that moved, what it decided, what it
  *  kept for you, and what still waits. */
 export interface MentionedUpdate {
@@ -1063,6 +1080,8 @@ export interface MentionedUpdate {
   /** Your orders done and its promises kept, said as they were closed. */
   kept?: string[];
   waiting?: WaitingItem[];
+  /** `waiting`, laid out (a newer hub): used in its place when there. */
+  needsYou?: NeedsYou[];
   /** The day's cheap calls, near the ceiling. */
   footer?: string | null;
 }

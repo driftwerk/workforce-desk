@@ -11,6 +11,7 @@ import type {
   NeedItem,
   SessionState,
   UpdateSession,
+  NeedsYou,
   WaitingItem,
   WorkRef,
 } from "../hub/types";
@@ -198,7 +199,9 @@ export function decisionParts(line: DecisionLine): { action: string; why: string
  *  says, or the only one the recommendation's words name. */
 export function answerOptions(options: readonly AnswerOption[], recommendation?: string | null): { label: string; recommended: boolean }[] {
   const said = options.map((o) => (typeof o === "string" ? { label: o, recommended: false } : { label: o.label, recommended: !!o.recommended }));
-  if (said.some((o) => o.recommended)) return said;
+  // A hub that lays them out says of each: no guess over its "none".
+  const told = options.length > 0 && options.every((o) => typeof o !== "string" && typeof o.recommended === "boolean");
+  if (told || said.some((o) => o.recommended)) return said;
   const labels = said.map((o) => o.label);
   const best = recommended(labels, recommendation) ?? closest(labels, recommendation);
   return said.map((o) => ({ ...o, recommended: o.label === best }));
@@ -352,9 +355,7 @@ function CatchUp({ away, update }: { away: MentionedAway; update: MentionedUpdat
   return (
     <div className="msg-text overseer">
       <Head update={update} headline={away.headline} handled={away.handled} />
-      {(update.waiting ?? []).map((w) => (
-        <Waiting key={w.itemId} w={w} />
-      ))}
+      <WaitingAll update={update} />
       {(update.decisions ?? []).length > 0 && <WhatIDid decisions={update.decisions!} />}
       {parked.length > 0 && (
         <section className="did" aria-label="Set aside">
@@ -426,9 +427,7 @@ function Update({ update }: { update: MentionedUpdate }) {
   return (
     <div className="msg-text overseer">
       <Head update={update} />
-      {(update.waiting ?? []).map((w) => (
-        <Waiting key={w.itemId} w={w} />
-      ))}
+      <WaitingAll update={update} />
       {(update.decisions ?? []).length > 0 && <WhatIDid decisions={update.decisions!} />}
       {update.footer && <p className="faint small">{update.footer}</p>}
     </div>
@@ -499,6 +498,42 @@ function Needs({
           </p>
         ))}
     </section>
+  );
+}
+
+/** What still waits on you: as the hub lays each out when it does, else
+ *  read out of its words. */
+function WaitingAll({ update }: { update: MentionedUpdate }) {
+  const laid = new Map((update.needsYou ?? []).map((n) => [n.itemId, n]));
+  const waiting = update.waiting ?? [];
+  const known = new Set(waiting.map((w) => w.itemId));
+  return (
+    <>
+      {waiting.map((w) => {
+        const n = laid.get(w.itemId);
+        return n ? <Laid key={w.itemId} n={n} holdingUp={w.holdingUp} /> : <Waiting key={w.itemId} w={w} />;
+      })}
+      {(update.needsYou ?? [])
+        .filter((n) => !known.has(n.itemId))
+        .map((n) => (
+          <Laid key={n.itemId} n={n} />
+        ))}
+    </>
+  );
+}
+
+/** Something waiting on you, as the hub laid it out. */
+function Laid({ n, holdingUp }: { n: NeedsYou; holdingUp?: string | null }) {
+  return (
+    <Needs
+      id={n.itemId}
+      age={n.age}
+      question={n.question}
+      items={n.items}
+      recommendation={n.recommendation}
+      options={n.options}
+      notes={[n.notBlocking, holdingUp]}
+    />
   );
 }
 

@@ -542,3 +542,71 @@ describe("presence", () => {
     expect(dmOnScreen({ "dm:h1/desk": 1 }, undefined)).toBeNull();
   });
 });
+
+describe("an update the hub lays out (#280)", () => {
+  const LAID: DeskExtras = {
+    update: {
+      decisions: [
+        {
+          id: "l1",
+          text: "told web: “Please rebase on main and run the full suite before asking again, the flaky test is fixed now.”",
+          action: "Sent web a message.",
+          why: "Its branch was behind main.",
+          message: "Please rebase on main and run the full suite before asking again, the flaky test is fixed now.",
+          kind: "acted",
+          undo: null,
+          at: "2026-11-13T15:02:00Z",
+        },
+        { id: "l2", text: "let it wait", action: "Let web wait.", why: "CI was running.", message: null, kind: "left_alone", at: "2026-11-13T15:10:00Z" },
+        { id: "l3", text: "let it wait", action: "Let web wait.", why: "CI was running.", message: null, kind: "left_alone", at: "2026-11-13T15:20:00Z" },
+        { id: "l4", text: "you undid: the restart", action: "You undid the restart.", why: "You said so.", message: null, kind: "undone", at: "2026-11-13T15:30:00Z" },
+      ],
+      waiting: [
+        { itemId: "n1", text: "Two staging records need a decision. 1. A user with no org. 2. An id with no user.", age: "1 h", options: ["Deactivate", "Leave both"] },
+        { itemId: "n2", text: "Ship the beta tonight?", age: "5 min", options: ["Yes", "No"] },
+      ],
+      needsYou: [
+        {
+          itemId: "n1",
+          question: "Two staging records need a decision before PR 3 can go.",
+          items: ["A user with no organisation.", "An id with roles but no user."],
+          recommendation: "Deactivate the roles; leave the user empty on staging.",
+          options: [
+            { label: "Deactivate", recommended: true },
+            { label: "Leave both", recommended: false },
+          ],
+          notBlocking: "Not blocking: #566 doesn't depend on it.",
+          age: "1 h",
+        },
+        { itemId: "n2", question: "Ship the beta tonight?", items: [], recommendation: "Yes", options: [{ label: "Yes", recommended: false }, { label: "No", recommended: false }], notBlocking: null, age: "5 min" },
+      ],
+    },
+  };
+
+  it("lays out what needs you from its fields, lighting only the answer it recommends", () => {
+    const { container } = show(said("Update.", LAID, "update"));
+    const needs = container.querySelectorAll(".needs");
+    expect(needs).toHaveLength(2);
+    expect(needs[0]!.querySelector(".needs-q")?.textContent).toBe("Two staging records need a decision before PR 3 can go.");
+    expect([...needs[0]!.querySelectorAll(".needs-items li")].map((li) => li.textContent)).toEqual([
+      "A user with no organisation.",
+      "An id with roles but no user.",
+    ]);
+    expect(needs[0]!.textContent).toContain("Not blocking: #566 doesn't depend on it.");
+    expect(screen.getByRole("button", { name: "Deactivate" }).className).toContain("btn-blocked");
+    expect(screen.getByRole("button", { name: "Leave both" }).className).not.toContain("btn-blocked");
+    // The hub said none is recommended: no button lit on a guess, though "Yes" matches its words.
+    expect(screen.getByRole("button", { name: "Yes" }).className).not.toContain("btn-blocked");
+  });
+
+  it("shows each decision's short line, its message apart, and folds the times it left it alone", () => {
+    const { container } = show(said("Update.", LAID, "update"));
+    expect(screen.getByText("Sent web a message.")).toBeTruthy();
+    expect(container.querySelector(".did")?.textContent).not.toContain("Please rebase");
+    fireEvent.click(screen.getByRole("button", { name: /^The message/ }));
+    expect(container.querySelector(".dec-message")?.textContent).toContain("Please rebase on main");
+    expect(screen.getByRole("button", { name: /2 times I left it alone/ })).toBeTruthy();
+    expect(screen.getByText("You undid the restart.")).toBeTruthy();
+    expect(screen.queryAllByRole("button", { name: /^Undo/ })).toHaveLength(0);
+  });
+});
