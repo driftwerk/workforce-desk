@@ -44,11 +44,12 @@ export const askDeskAbout = async (t: Ticket, f: TicketFile): Promise<boolean> =
  *  strip of them all, Save, and Ask Desk about a picture. It is drawn on the
  *  page itself, not inside the ticket's panel: that panel is a container
  *  (and its view clips), which would hold a fixed layer inside it. */
-/** A drag over the viewer: nothing behind it takes the drop. */
+/** A drag over the viewer: nothing behind it in React's tree takes the
+ *  drop (the browser preview's; the app's own drops find their zone in the
+ *  page, which the viewer, drawn on the page itself, is outside). */
 const noDrop = (e: DragEvent) => {
   e.stopPropagation();
   e.preventDefault();
-  e.dataTransfer.dropEffect = "none";
 };
 
 export function FileViewer({ ticket: t, files, at, onAt, onClose }: { ticket: Ticket; files: TicketFile[]; at: number; onAt: (i: number) => void; onClose: () => void }) {
