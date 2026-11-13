@@ -32,23 +32,31 @@ it("uninstalls Desk there step by step, then forgets it", async () => {
   const dialog = screen.getByRole("dialog");
   expect(within(dialog).getByRole("heading", { name: "Remove devbox?" })).toBeTruthy();
   expect(dialog.textContent).toContain(
-    "Ends its 3 sessions, stops Desk’s service there and removes ~/.local/share/Desk with its sign-ins and memory. Your files, repos, Claude Code and Codex stay, and so does Codex’s own sign-in (~/.codex): run codex logout there to end it.",
+    "Ends its 3 sessions, stops Desk’s service there and removes Desk’s folder with its memory and the Claude sign-ins Desk copied there. Your files, repos, Claude Code and Codex stay.",
   );
   // What staying there means for the copies of the person's sign-ins.
   expect(dialog.textContent).toContain("Its sessions keep running, and so do the copies of your accounts’ sign-ins there.");
+  // Leaving Desk running there: its copies stay, and revoking is the way out.
   expect(dialog.textContent).toContain("If devbox is lost, or you no longer trust it, revoke them at claude.ai.");
+  expect(dialog.textContent).not.toContain("codex logout");
   fireEvent.click(within(dialog).getByRole("radio", { name: /Also uninstall Desk from devbox/ }));
+  // Removing the copies isn't revoking them: still said.
+  expect(dialog.textContent).toContain("doesn’t revoke them");
+  // Codex signed out too, unless the person unticks it.
+  expect((within(dialog).getByRole("checkbox", { name: /Also sign Codex out on devbox/ }) as HTMLInputElement).checked).toBe(true);
   let finish: () => void = () => {};
   fake.uninstall.mockImplementationOnce(() => new Promise<boolean>((r) => (finish = () => r(true))));
   await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Remove devbox" })));
-  expect(fake.uninstall).toHaveBeenCalledWith("devbox");
+  expect(fake.uninstall).toHaveBeenCalledWith("devbox", { signOutCodex: true });
   expect(fake.remove).not.toHaveBeenCalled();
   act(() => removed({ machine: "devbox", step: "stop", state: "done" }));
+  act(() => removed({ machine: "devbox", step: "sign_out", state: "done" }));
   act(() => removed({ machine: "devbox", step: "remove", state: "running" }));
   const checks = within(dialog).getByRole("list", { name: "Uninstalling Desk from devbox" });
   expect(within(checks).getAllByRole("listitem").map((l) => l.textContent)).toEqual([
     "Stopped Desk’s service on devbox",
-    "Removing ~/.local/share/Desk…",
+    "Signed Codex out on devbox",
+    "Removing Desk’s folder and the Claude sign-ins Desk copied there…",
     "Turn linger off",
     "Forget devbox here",
   ]);
@@ -100,6 +108,8 @@ it("only forgets a machine Desk can't reach, with the lines that uninstall it la
   const uninstall = within(dialog).getByRole("radio", { name: /Also uninstall Desk from buildbox/ }) as HTMLButtonElement;
   expect(uninstall.disabled).toBe(true);
   expect(uninstall.textContent).toContain("Desk can’t reach buildbox right now, so it can only forget it here.");
+  // Only where Desk can't reach it is revoking left to the person.
+  expect(screen.getByRole("dialog").textContent).toContain("If buildbox is lost, or you no longer trust it, revoke them at claude.ai.");
   expect(dialog.textContent).toContain("To uninstall it later, run these on buildbox:");
   for (const line of BY_HAND) expect(within(dialog).getByText(line)).toBeTruthy();
   expect(within(dialog).getAllByRole("button", { name: "Copy" })).toHaveLength(2);
@@ -151,6 +161,15 @@ it("offers uninstalling again for a machine held after an uninstall stopped part
   expect(again.disabled).toBe(false);
   expect(again.getAttribute("aria-checked")).toBe("true");
   await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Try uninstalling again" })));
-  expect(fake.uninstall).toHaveBeenCalledWith("devbox");
+  expect(fake.uninstall).toHaveBeenCalledWith("devbox", { signOutCodex: true });
   expect(onRemoved).toHaveBeenCalled();
+});
+
+it("leaves Codex signed in there when the person unticks it", async () => {
+  const { fake } = open();
+  const dialog = screen.getByRole("dialog");
+  fireEvent.click(within(dialog).getByRole("radio", { name: /Also uninstall Desk from devbox/ }));
+  fireEvent.click(within(dialog).getByRole("checkbox", { name: /Also sign Codex out on devbox/ }));
+  await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Remove devbox" })));
+  expect(fake.uninstall).toHaveBeenCalledWith("devbox", { signOutCodex: false });
 });

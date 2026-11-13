@@ -59,6 +59,8 @@ export const fromHub = (m: HubMessage): ChatMessage => {
     ...(typeof m.client_id === "string" ? { clientId: m.client_id } : {}),
     ...(typeof m.seq === "number" ? { seq: m.seq } : {}),
     ...(m.mark?.in_reply_to ? { replyTo: m.mark.in_reply_to } : {}),
+    ...(m.mark?.edited ? { edited: true } : {}),
+    ...(m.mark?.answered_deleted ? { answeredDeleted: true } : {}),
     ...(m.mark?.steps?.length ? { steps: m.mark.steps } : {}),
     ...(m.desk && m.from !== "user" ? { desk: m.desk } : {}),
     ...(author ? { author } : {}),
@@ -110,10 +112,10 @@ export const absent = (res: Response): boolean =>
 /** A page of your DM with an agent, from before message `before` (the
  *  latest when not given). Null where the hub doesn't keep DMs for Desk:
  *  the conversation starts empty there, as it always has. */
-export async function fetchHistory(hub: HubAccount, agentId: string, before?: string): Promise<HistoryPage | null> {
-  const read = await readConversation(hub, agentId, { before });
+export async function fetchHistory(hub: HubAccount, agentId: string, before?: string, channel?: string): Promise<HistoryPage | null> {
+  const read = await readConversation(hub, agentId, { before, ...(channel ? { channel } : {}) });
   const page = read && { messages: read.messages.map(fromHub).filter(shown), more: read.more };
-  if (!preview || before) return page;
+  if (!preview || before || channel) return page;
   // The browser preview shows the overseer's DM of the design.
   const { devConversation } = await import("../devBridge");
   const extra = devConversation(agentId).map(fromHub);

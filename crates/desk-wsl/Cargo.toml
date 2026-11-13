@@ -17,10 +17,12 @@ path = "src/bin/fake-wsl.rs"
 test = false
 
 [dependencies]
+desk-chrome-host = { workspace = true }
 desk-core = { workspace = true }
 eyre = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+tracing = { workspace = true }
 
 [target.'cfg(windows)'.dependencies]
 windows-registry = "0.6.1"

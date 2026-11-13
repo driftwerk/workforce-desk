@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useId, useRef, useState } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { SideResize } from "./SideResize";
 import { useSideFoot, useSideWidth } from "./sideWidth";
 import { useChat } from "../chat/store";
@@ -119,7 +120,9 @@ export function Sidebar({
   onNewCrew: () => void;
   onSettings: () => void;
 }) {
-  const { view, setView, connected, activeRoom, openRoom } = useDesk();
+  const { view, setView, connected, activeRoom, openRoom } = useDesk(
+    useShallow((s) => ({ view: s.view, setView: s.setView, connected: s.connected, activeRoom: s.activeRoom, openRoom: s.openRoom })),
+  );
   const roomOrder = useRoomOrder((s) => s.order);
   const rooms = arranged(useDesk((s) => s.rooms), roomOrder);
   const [roomMenu, setRoomMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);

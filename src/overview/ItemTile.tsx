@@ -60,6 +60,7 @@ export function ItemTile({ item: listed }: { item: OverviewItem }) {
   if (item.state === "done") return <DoneTile item={item} opens={opens} />;
   return (
     <article className={`tile ov-tile ov-tile-${tone}`}>
+      <span className="tile-flow" aria-hidden="true" />
       <TileHead item={item} tone={tone} opens={opens} />
       {item.task && <span className="ov-task">{item.task}</span>}
       {item.state !== "needs_you" && item.detail && <span className="mono ov-detail">{item.detail}</span>}

@@ -164,6 +164,9 @@ export interface Session {
   mode?: "auto" | "bypassPermissions";
   /** While it is asking: what, and why Desk read it so; absent from older hubs. */
   asked?: Asked | null;
+  /** Why what it waits on is the person's though a boss runs it ("Desk
+   *  left this to you."); absent while the boss has it, and from older hubs. */
+  waitsOnYou?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -962,6 +965,79 @@ export interface DeskExtras {
   /** The boss's plan a plan card shows, as of the revision it was posted
    *  for. */
   plan?: { id: string; revision: number };
+  /** What the boss decided, each with its Undo where it has one. */
+  decisions?: DecisionLine[];
+  /** What the boss asks of you (needs you, still waiting), with its
+   *  answers. */
+  item?: MentionedItem;
+  /** A boss's update, shown in place of its text. */
+  update?: MentionedUpdate;
+}
+
+/** A decision of the boss's, said as its row says it. */
+export interface DecisionLine {
+  id: string;
+  /** What it did ("told it to wait for green CI"). */
+  text: string;
+  /** Why, as said to you. */
+  why?: string;
+  /** The button that undoes it; none when it can't be undone. */
+  undo?: "undo" | "correct" | "stop" | "resume" | null;
+  undone?: boolean;
+  /** The preference it applied, by id. */
+  preference?: string | null;
+}
+
+/** Something the boss asks of you, as its message carries it. */
+export interface MentionedItem {
+  itemId: string;
+  recommendation?: string | null;
+  options?: string[];
+  /** The kind of case your answer would settle from then on. */
+  generalizes?: string | null;
+  /** Set aside after it was said three times: still answered or dropped
+   *  from here. */
+  parked?: boolean;
+}
+
+/** A PR, ticket, commit or deploy a session's work names. */
+export interface WorkRef {
+  kind: "pr" | "ticket" | "commit" | "deploy" | (string & {});
+  id: string;
+  url?: string | null;
+}
+
+/** A session as an update tells of it. */
+export interface UpdateSession {
+  sessionId: string;
+  name: string;
+  /** What it's for. */
+  purpose?: string;
+  text: string;
+  refs?: WorkRef[];
+}
+
+/** What still waits on you, as an update lists it. */
+export interface WaitingItem {
+  itemId: string;
+  text: string;
+  /** How long it has waited, in words ("40 min"). */
+  age?: string;
+  holdingUp?: string | null;
+  recommendation?: string | null;
+  options?: string[];
+}
+
+/** A boss's update: each session that moved, what it decided, what it
+ *  kept for you, and what still waits. */
+export interface MentionedUpdate {
+  sessions?: UpdateSession[];
+  decisions?: DecisionLine[];
+  /** Your orders done and its promises kept, said as they were closed. */
+  kept?: string[];
+  waiting?: WaitingItem[];
+  /** The day's cheap calls, near the ceiling. */
+  footer?: string | null;
 }
 
 /** A session's question on its line, as the overseer's DM shows it. */
@@ -1390,6 +1466,14 @@ export interface SyncAssignee {
   name: string;
 }
 
+/** A member on a board's service the person may choose to be: never an
+ *  email. */
+export interface SyncMember {
+  id: string;
+  name: string;
+  avatar?: string | null;
+}
+
 /** Why a synced board isn't syncing; local edits wait. */
 export type SyncPaused =
   | { kind: "byYou" }
@@ -1418,8 +1502,9 @@ export interface BoardSync {
   me?: string;
   meName?: string;
   /** Where `me` came from: the hub vouched for it with the person's own
-   *  key, or they typed it. Take it needs a vouched one. */
-  meSource?: "vouched" | "vouchedByEmail" | "typed";
+   *  key; on a shared key, by the email their sign-in or Slack verified, or
+   *  as they chose there; or they typed it. Take it needs a vouched one. */
+  meSource?: "vouched" | "vouchedByEmail" | "vouchedBySlack" | "chosen" | "typed";
   /** Why the hub can't vouch for who the person is. */
   meNote?: string;
   /** The remote state each column moves an issue to. */
@@ -1474,6 +1559,9 @@ export interface LinkCheck {
   agent?: { id: string; name: string } | null;
   /** Linear: the hub's teams. */
   teams?: { id: string; key: string; name: string }[];
+  /** Jira: the projects the person can reach, when the hub lists them
+   *  (absent from an older hub: the key is then typed). */
+  projects?: { key: string; name: string }[];
   /** The states an issue in the target can be in. */
   states?: string[];
   /** The state map the dialog starts from. */
@@ -1493,8 +1581,9 @@ export interface LinkCheck {
    *  hub), when it can't. */
   meWhy?: string;
   /** How the hub knows who the person is, when not by their own key: the
-   *  one user there with the email their sign-in verified. */
-  meBy?: "email";
+   *  one user there with the email their sign-in (or Slack) verified, or
+   *  the one they chose. */
+  meBy?: "email" | "slack" | "chosen";
 }
 
 /** A link the person asks for (`PUT /api/desk/boards/{id}/link`). */

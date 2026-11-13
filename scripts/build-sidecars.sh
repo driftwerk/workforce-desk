@@ -142,7 +142,12 @@ for t in $targets; do
     cp "$POSTGRES_ARCHIVE" "$pg_cached"
     cargo clean --release --quiet -p postgresql_embedded --target "$t" --manifest-path "$root/Cargo.toml"
   fi
-  cargo build --release --locked -p desk-hubd --target "$t" --manifest-path "$root/Cargo.toml"
+  # Cargo's messages say where each build script wrote its output (the
+  # folder's layout is cargo's own, and changed in 1.100); diagnostics still
+  # go to the terminal.
+  messages=$(mktemp)
+  cargo build --release --locked -p desk-hubd --target "$t" --manifest-path "$root/Cargo.toml" \
+    --message-format=json-render-diagnostics >"$messages"
   # A release helper starts only the programs installed beside it: it must
   # refuse to be pointed at another (checked where it can run here).
   if [ "$t" = "$(rustc -vV | sed -n 's/^host: //p')" ]; then
@@ -152,13 +157,18 @@ for t in $targets; do
     case "$said" in *"only for development builds"*) ;; *) die "desk-hubd for $t didn't refuse --workforce: $said" ;; esac
   fi
   if [ -n "${POSTGRES_ARCHIVE:-}" ]; then
-    bundled=("$desk_target/$t/release/build"/postgresql_embedded-*/out/postgresql.tar.gz)
-    [ -f "${bundled[0]}" ] || die "desk-hubd for $t bundled no Postgres"
+    bundled=()
+    while IFS= read -r out_dir; do
+      [ -f "$out_dir/postgresql.tar.gz" ] && bundled+=("$out_dir/postgresql.tar.gz")
+    done < <(grep '"reason":"build-script-executed"' "$messages" | grep '#postgresql_embedded@' |
+      sed -n 's/.*"out_dir":"\([^"]*\)".*/\1/p')
+    [ ${#bundled[@]} -gt 0 ] || die "desk-hubd for $t bundled no Postgres"
     for f in "${bundled[@]}"; do
       cmp -s "$f" "$POSTGRES_ARCHIVE" || die "desk-hubd for $t bundled $f, not $POSTGRES_ARCHIVE"
     done
     say "desk-hubd for $t embeds $(basename "$POSTGRES_ARCHIVE")"
   fi
+  rm -f "$messages"
   say "hub $ref for $t"
   CARGO_TARGET_DIR="$hub_target" cargo build --release --locked -p workforce-cli --bin workforce \
     --target "$t" --manifest-path "$hub/Cargo.toml"

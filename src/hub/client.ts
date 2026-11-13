@@ -148,35 +148,43 @@ export interface ComputerActivityRow {
   arguments?: { url?: string; target?: string | null; backend?: BrowserBackend; screenshot?: string | null };
 }
 
-/** Which browser: Desk's own, or the person's Chrome. */
+/** Which browser a row was made in: older rows say Desk's own or Chrome. */
 export type BrowserBackend = "desk" | "chrome";
-
-/** Which browsers Desk uses. */
-export type BrowserUses = "off" | "desk" | "chrome" | "both";
 
 /** Desk's browser settings, as the person set them. */
 export interface BrowserSettings {
-  use: BrowserUses;
-  /** Show Desk's own browser on screen; unset, as the hub is set up. */
-  show?: boolean;
-  /** The sites the person's Chrome may (`allow`) and may never (`block`) go to. */
+  /** Whether Desk uses the person's Chrome at all. */
+  on: boolean;
+  /** The sites Desk may (`allow`) and may never (`block`) go to. */
   sites: { allow: string[]; block: string[] };
 }
 
-/** The settings and how the person's Chrome stands. */
-export interface BrowserSettingsView {
-  settings: BrowserSettings;
-  chrome: { available: boolean; connected: boolean; min_version: number; turn_on: string };
+/** A Chrome profile Desk's extension connects from. */
+export interface ChromeProfile {
+  id: string;
+  /** The code Desk's extension shows in that Chrome. */
+  label: string;
+  version: string;
+  /** Pending until the person confirms it is theirs. */
+  state: "confirmed" | "pending";
+  connected: boolean;
+  /** The one Desk uses. */
+  chosen: boolean;
 }
 
-/** A browser open now. */
+/** The settings and how Desk's extension stands. */
+export interface BrowserSettingsView {
+  settings: BrowserSettings;
+  chrome: { connected: boolean; profiles: ChromeProfile[]; store_url: string | null };
+}
+
+/** A browser tab Desk has open now. */
 export interface BrowserLive {
   agent: string;
   user: string;
   session: string | null;
   url: string;
   host: string | null;
-  backend: BrowserBackend;
   idle_secs: number;
 }
 
@@ -189,6 +197,11 @@ export type DiskAccess = "granted" | "missing" | "unknown";
 
 /** What a hub without a route is taken to have said. */
 const NO_ROUTE = "This version of Desk can’t do that yet. Update Desk to use it.";
+
+/** Whether `e` says the hub has no such route at all (an older hub), not
+ *  that it refused: a 405, or a 404 with no word of its own. */
+export const noRoute = (e: unknown): boolean =>
+  e instanceof HubError && (e.status === 405 || (e.status === 404 && !e.code && (e.message === NO_ROUTE || /^not found$/i.test(e.message.trim()))));
 
 /** One key of Desk's state on a hub. */
 export interface StateRow {
@@ -750,6 +763,14 @@ export class DeskHub {
   /** Does what the overseer suggested, as you. */
   acceptSuggestion = (id: string): Promise<unknown> => this.desk("POST", `/api/desk/suggestions/${encodeURIComponent(id)}/accept`);
   dismissSuggestion = (id: string): Promise<unknown> => this.desk("POST", `/api/desk/suggestions/${encodeURIComponent(id)}/dismiss`);
+  /** Undoes one of the boss's decisions, as you: what was done. */
+  undoDecision = (id: string): Promise<{ done: string }> => this.desk("POST", `/api/desk/decisions/${encodeURIComponent(id)}/undo`);
+  /** Answers what the boss asked you, from its buttons: settled on the hub
+   *  in this request, and sent on to whoever asked. */
+  answerItem = (id: string, answer: string): Promise<{ done: string }> =>
+    this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/answer`, { answer });
+  /** Drops what the boss asked you, unanswered. */
+  dropItem = (id: string): Promise<{ done: string }> => this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/drop`);
 
   rooms = (): Promise<Room[]> => this.call("GET", "/api/desk/rooms");
   /** `shareWith`: the hubs the person said its conversation may go to,

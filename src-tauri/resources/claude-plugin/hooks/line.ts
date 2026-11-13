@@ -147,7 +147,9 @@ const call = async ($: Engine, line: Line, e: ToolEvent): Promise<CallResult> =>
     }
     if (answer?.error) return { deny: answer.error };
     if (!answer || !("result" in answer)) return { deny: UNREACHABLE };
-    return { result: answer.result };
+    // Claude Code takes a tool's result as text (or content blocks), and
+    // refuses an object since 2.1.323; send the hub's result as JSON text.
+    return { result: typeof answer.result === "string" ? answer.result : JSON.stringify(answer.result) };
   } catch {
     return { deny: UNREACHABLE };
   }

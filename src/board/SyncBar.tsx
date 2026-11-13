@@ -1,15 +1,16 @@
 import { useId, useState } from "react";
 import { useChat } from "../chat/store";
-import { HubError } from "../hub/client";
-import { linkedTo, SYSTEM_TITLE, syncStatus, vouched } from "../hub/boardSync";
+import { fixOf, linkedTo, matchedBy, SYSTEM_TITLE, syncStatus, vouched } from "../hub/boardSync";
+import { ChooseMe } from "./ChooseMe";
 import { openSettingsAt } from "../ui/problem";
+import { plainError } from "../ui/plainError";
 import type { Board, Ticket } from "../hub/types";
 import { useDesk } from "../hub/store";
 import { Confirm } from "../ui/Confirm";
+import { useOpenTicket } from "./opener";
 import { useBoard } from "./store";
-import { hubNameOf, localSync, useSyncHubs } from "./syncStore";
-
-const saidOf = (e: unknown): string => (e instanceof HubError || e instanceof Error ? e.message : String(e));
+import { NoAgent, ThisComputerSetup } from "./syncSetup";
+import { hubNameOf, localSync, syncChoices, useSyncHubs } from "./syncStore";
 
 /** "3 min ago", from the minute it's drawn in. */
 const ago = (iso: string | null | undefined, now: number): string | null => {
@@ -25,12 +26,19 @@ const ago = (iso: string | null | undefined, now: number): string | null => {
 export function SyncBar({ board, now, onToken }: { board: Board; now: number; onToken?: () => void }) {
   const kept = useSyncHubs((s) => s.hubs);
   const paired = useChat((s) => s.hubs);
-  const fail = useDesk((s) => s.fail);
   const [busy, setBusy] = useState<"pause" | "sync" | "me" | null>(null);
   const [said, setSaid] = useState<string | null>(null);
+  // What went wrong with the last thing asked here, shown in this bar with
+  // a way to ask again, not in the window's toast.
+  const [failed, setFailed] = useState<{ words: string; op: "pause" | "sync" | "me" | "retry" } | null>(null);
+  const [asking, setAsking] = useState(false);
+  const [settingUp, setSettingUp] = useState(false);
+  const [unlinking, setUnlinking] = useState(false);
+  const [choosing, setChoosing] = useState(false);
   const sync = board.sync;
   if (!sync) return null;
   const hub = hubNameOf(sync.via, kept, paired);
+  const choice = sync.via.kind === "hub" ? (syncChoices(paired, kept).find((c) => c.id === (sync.via as { hub: string }).hub) ?? null) : null;
   const status = syncStatus(board, hub)!;
   const paused = !!sync.paused;
   const kept_ = (b: Board) => useBoard.setState((s) => ({ boards: { ...s.boards, [b.id]: b } }));
@@ -38,10 +46,11 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
     const api = localSync();
     if (!api) return;
     setBusy("pause");
+    setFailed(null);
     try {
       kept_(await api.pause(board.id, !paused));
     } catch (e) {
-      fail(new Error(saidOf(e)));
+      setFailed({ words: plainError(e), op: "pause" });
     } finally {
       setBusy(null);
     }
@@ -52,10 +61,11 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
     setBusy("sync");
     setSaid(null);
     try {
+      setFailed(null);
       await api.syncNow(board.id);
       setSaid("Syncing now");
     } catch (e) {
-      fail(new Error(saidOf(e)));
+      setFailed({ words: plainError(e), op: "sync" });
     } finally {
       setBusy(null);
     }
@@ -70,9 +80,39 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
     try {
       const b = await api.recheckMe(board.id);
       kept_(b);
+      setFailed(null);
       setSaid(vouched(b.sync?.meSource) ? `${hub} knows you as ${b.sync?.meName ?? "you"}` : (b.sync?.meNote ?? `${hub} can't say who you are`));
     } catch (e) {
-      fail(new Error(saidOf(e)));
+      setFailed({ words: plainError(e), op: "me" });
+    } finally {
+      setBusy(null);
+    }
+  };
+  // The one button that mends what the chip says is wrong.
+  const fix = fixOf(sync, hub);
+  const mend = () => {
+    if (!fix) return;
+    if (fix.kind === "token") return onToken?.();
+    if (fix.kind === "connections") return openSettingsAt("connections");
+    if (fix.kind === "unlink") return setUnlinking(true);
+    if (fix.kind === "ask") return setAsking(true);
+    if (fix.kind === "setup") return setSettingUp(true);
+    void retry();
+  };
+  // Resumes the board if paused, and syncs it now.
+  const retry = async () => {
+    const api = localSync();
+    if (!api) return;
+    setBusy("sync");
+    setFailed(null);
+    try {
+      if (paused) kept_(await api.pause(board.id, false));
+      await api.syncNow(board.id);
+      setSaid("Syncing now");
+    } catch (e) {
+      // Not paused again here: that would read "paused by you" and hide the
+      // real reason, which the hub's next pass records again itself.
+      setFailed({ words: plainError(e), op: "retry" });
     } finally {
       setBusy(null);
     }
@@ -81,8 +121,8 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
   const who =
     sync.meSource === "vouched" && sync.meName
       ? `you're ${sync.meName} there`
-      : sync.meSource === "vouchedByEmail" && sync.meName
-        ? `you're ${sync.meName} there, by your verified email`
+      : matchedBy(sync.meSource) && sync.meName
+        ? `you're ${sync.meName} there, ${matchedBy(sync.meSource)}`
       : sync.meSource === "typed"
         ? "your id as you typed it: Take it needs the hub to say who you are"
         : (sync.meNote ?? null);
@@ -102,15 +142,21 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
       </span>
       {said && <span className="sr-only" aria-live="polite">{said}</span>}
       <span className="board-sync-actions">
-        {sync.paused?.kind === "noToken" && sync.via.kind === "hub" && onToken && (
-          <button type="button" className="btn btn-sm btn-signal" onClick={onToken}>
-            New token…
+        {fix && !(fix.kind === "token" && !onToken) && (
+          <button type="button" className="btn btn-sm btn-signal" disabled={!!busy} onClick={mend}>
+            {fix.label}
           </button>
         )}
         <button type="button" className="btn btn-sm" disabled={!!busy || paused} title={`Ask ${hub} again who you are on ${SYSTEM_TITLE[sync.system]}`} onClick={() => void recheck()}>
           {busy === "me" ? "Checking…" : vouched(sync.meSource) ? "Check again" : "Check who you are"}
         </button>
-        {/* A shared key that couldn't be matched to them: their own key fixes it. */}
+        {/* A shared key: they say who they are there, or change it. */}
+        {(matchedBy(sync.meSource) || (!vouched(sync.meSource) && sync.meNote && /shared/.test(sync.meNote))) && (
+          <button type="button" className="btn btn-sm" disabled={paused} onClick={() => setChoosing(true)}>
+            {sync.meSource === "chosen" ? "Change" : matchedBy(sync.meSource) ? "That’s not me" : "Choose who you are"}
+          </button>
+        )}
+        {/* A shared key that couldn't be matched to them: their own key fixes it too. */}
         {!vouched(sync.meSource) && sync.meNote && /shared/.test(sync.meNote) && (
           <button type="button" className="btn btn-sm" onClick={() => openSettingsAt("connections")}>
             Set up your own {SYSTEM_TITLE[sync.system]} key
@@ -123,6 +169,46 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
           {busy === "sync" ? "Syncing…" : "Sync now"}
         </button>
       </span>
+      {failed && (
+        <span className="board-sync-failed" role="alert">
+          {failed.words}{" "}
+          <button type="button" className="link" onClick={() => void { pause, sync: syncNow, me: recheck, retry }[failed.op]()}>
+            Try again
+          </button>
+        </span>
+      )}
+      {asking && choice && <NoAgent choice={choice} system={sync.system} words={status.kind === "synced" ? "" : status.words} />}
+      {settingUp && (
+        <ThisComputerSetup
+          system={sync.system}
+          disabled={!!busy}
+          onReady={() => {
+            setSettingUp(false);
+            void retry();
+          }}
+          fallback={
+            <p className="move-opt-sub">
+              Desk can’t turn {SYSTEM_TITLE[sync.system]} on here by itself.{" "}
+              <button type="button" className="link" onClick={() => openSettingsAt("connections")}>
+                Open connections
+              </button>
+            </p>
+          }
+        />
+      )}
+      {unlinking && <UnlinkBoard board={board} onClose={() => setUnlinking(false)} />}
+      {choosing && (
+        <ChooseMe
+          where={{ system: sync.system, via: sync.via, ...(sync.agent ? { agent: sync.agent } : {}) }}
+          hub={hub}
+          chosen={sync.meSource === "chosen"}
+          onCancel={() => setChoosing(false)}
+          onDone={() => {
+            setChoosing(false);
+            void recheck();
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -130,20 +216,22 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
 /** The tickets whose issues left the board's import filter: kept here,
  *  unsynced for good, or dropped (the issue is never touched). */
 export function LeftFilterShelf({ board, tickets }: { board: Board; tickets: Ticket[] }) {
-  const fail = useDesk((s) => s.fail);
   const [busy, setBusy] = useState<string | null>(null);
+  const [failed, setFailed] = useState<{ words: string; again: () => void } | null>(null);
   // Its own, as a grid can show more than one board.
   const titleId = useId();
+  const openTicket = useOpenTicket();
   if (!tickets.length) return null;
   const system = board.sync ? SYSTEM_TITLE[board.sync.system] : "the remote";
   const decide = async (t: Ticket, keep: boolean) => {
     const hub = useDesk.getState().hub;
     if (!hub) return;
     setBusy(t.id);
+    setFailed(null);
     try {
       useBoard.getState().heard(await hub.leftFilter(t.id, keep));
     } catch (e) {
-      fail(new Error(saidOf(e)));
+      setFailed({ words: plainError(e), again: () => void decide(t, keep) });
     } finally {
       setBusy(null);
     }
@@ -156,10 +244,18 @@ export function LeftFilterShelf({ board, tickets }: { board: Board; tickets: Tic
         </h2>
         <span className="move-opt-sub">These issues no longer match what the board imports. Keep one here, unsynced, or drop it; {system} is never changed.</span>
       </div>
+      {failed && (
+        <p className="small state-blocked" role="alert">
+          {failed.words}{" "}
+          <button type="button" className="link" onClick={failed.again}>
+            Try again
+          </button>
+        </p>
+      )}
       <ul className="board-left-rows">
         {tickets.map((t) => (
           <li key={t.id} className="board-left-row">
-            <button type="button" className="link board-left-open" onClick={() => useBoard.getState().openTicket(t.id)}>
+            <button type="button" className="link board-left-open" onClick={() => openTicket(t.id)}>
               <span className="mono board-key">{t.key}</span>
               <span className="board-left-title">{t.title}</span>
             </button>

@@ -1,4 +1,5 @@
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/react";
+import { useShallow } from "zustand/react/shallow";
 import { useCallback, useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
@@ -147,8 +148,13 @@ export const HOVER_MS = 150;
  *  view, the one whose pane has focus is lit, and hovering one points out
  *  its panes. */
 export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string) => void } = {}) {
-  const { sessions, openId, view, activeRoom, engines } = useDesk();
-  const { roster, hubs, activeAgent, panelAgent } = useChat();
+  const { sessions, openId, view, activeRoom, engines } = useDesk(
+    useShallow((s) => ({ sessions: s.sessions, openId: s.openId, view: s.view, activeRoom: s.activeRoom, engines: s.engines })),
+  );
+  // Not the whole chat store: that changes with every word an agent streams.
+  const { roster, hubs, activeAgent, panelAgent } = useChat(
+    useShallow((s) => ({ roster: s.roster, hubs: s.hubs, activeAgent: s.activeAgent, panelAgent: s.panelAgent })),
+  );
   const layout = useLayout();
   const { groups } = layout;
   const names = useSessionNames();
@@ -1080,7 +1086,7 @@ function ItemRow({
       onHover={onHover}
     >
       {local && <SessionTicketChip session={session.id} still className="gi-ticket" name={name} />}
-      <ChargeBadge charge={charge} short className="gi-charge" />
+      <ChargeBadge charge={charge} session={local ? session.id : undefined} short className="gi-charge" />
       {says && <InGrid id={markId} says={says} />}
       <Marks badge={badge} />
     </SortRow>

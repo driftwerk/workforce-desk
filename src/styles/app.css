@@ -607,15 +607,35 @@ body.side-resizing * {
   flex: none;
   border: 2px solid var(--idle);
 }
+/* A working dot breathes, and a ring swells out of it and fades. Only
+   opacity and transform move, which the compositor draws without painting
+   the page again each frame (an animated box-shadow repainted every frame,
+   for every dot shown: Desk's idle CPU and GPU). */
 .dot-working,
 .dot-starting,
 .dot-background {
+  position: relative;
   border-color: var(--working);
   background: var(--working);
-  animation: desk-breathe 1.8s ease-in-out infinite;
+  animation: desk-pulse 1.8s ease-in-out infinite;
+}
+.dot-working::after,
+.dot-starting::after,
+.dot-background::after {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--working) 55%, transparent);
+  pointer-events: none;
+  opacity: 0;
+  animation: desk-ripple 1.8s ease-in-out infinite;
 }
 .dot-background {
   background: color-mix(in srgb, var(--working) 40%, transparent);
+  animation-duration: 3.6s;
+}
+.dot-background::after {
   animation-duration: 3.6s;
 }
 .dot-blocked,
@@ -707,13 +727,28 @@ body.side-resizing * {
   border-radius: 11px;
   font-size: 14px;
 }
+/* The glow is drawn once, on a layer of its own, and only its opacity
+   moves (see the working dot). */
 .ring-working,
 .ring-background {
+  position: relative;
   border-color: var(--working);
+}
+.ring-working::before,
+.ring-background::before {
+  content: "";
+  position: absolute;
+  inset: -2px;
+  border-radius: inherit;
+  box-shadow: 0 0 12px 1px color-mix(in srgb, var(--working) 45%, transparent);
+  pointer-events: none;
+  opacity: 0;
   animation: desk-glow 1.8s ease-in-out infinite;
 }
 .ring-background {
   border-color: color-mix(in srgb, var(--working) 55%, transparent);
+}
+.ring-background::before {
   animation-duration: 3.6s;
 }
 .ring-blocked {
@@ -832,28 +867,6 @@ body.side-resizing * {
   text-overflow: ellipsis;
   padding: 1px 7px;
 }
-/* A session card's word on who runs it, under its goal. */
-.charge-strip {
-  display: flex;
-  align-items: center;
-  gap: 8px 12px;
-  flex-wrap: wrap;
-  padding: 8px 16px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-}
-.charge-strip-quiet {
-  padding-top: 6px;
-  padding-bottom: 6px;
-}
-.charge-strip-text {
-  flex: 1 1 220px;
-  min-width: 0;
-  display: flex;
-  align-items: baseline;
-  flex-wrap: wrap;
-  gap: 4px 8px;
-}
 .charge-strip-buttons {
   display: flex;
   gap: 6px;
@@ -944,28 +957,48 @@ body.side-resizing * {
   position: relative;
   border-color: transparent;
 }
-.tile-working::before,
-.tile-starting::before,
-.ov-tile-working::before,
-.tile-background::before,
-.ov-tile-background::before {
-  content: "";
+/* The band of light is a conic gradient on an element turning inside the
+   ring's mask: the compositor turns it, so nothing is painted again each
+   frame (an animated gradient angle repainted the ring every frame). */
+.tile-flow {
+  display: none;
+}
+.tile-working > .tile-flow,
+.tile-starting > .tile-flow,
+.ov-tile-working > .tile-flow,
+.tile-background > .tile-flow,
+.ov-tile-background > .tile-flow {
+  display: block;
   position: absolute;
   inset: -1px;
   padding: 1px;
   border-radius: inherit;
+  overflow: hidden;
+  container-type: size;
   pointer-events: none;
-  background: conic-gradient(from var(--flow-angle), var(--border) 0 70%, var(--working) 85%, var(--border) 100%);
   -webkit-mask:
     linear-gradient(#000 0 0) content-box,
     linear-gradient(#000 0 0);
   -webkit-mask-composite: xor;
   mask-composite: exclude;
+}
+.tile-flow::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 150cqmax;
+  height: 150cqmax;
+  margin: -75cqmax 0 0 -75cqmax;
+  background: conic-gradient(var(--border) 0 70%, var(--working) 85%, var(--border) 100%);
   animation: desk-flow 3s linear infinite;
 }
-.tile-background::before,
-.ov-tile-background::before {
+.tile-background > .tile-flow,
+.ov-tile-background > .tile-flow {
   opacity: 0.5;
+}
+.tile-background > .tile-flow::before,
+.ov-tile-background > .tile-flow::before {
   animation-duration: 6s;
 }
 .tile-open {
@@ -1222,7 +1255,8 @@ body.side-resizing * {
    stays at the bottom, in a pane, a filled pane and the main view. (Its
    other tabs, Settings and Files, still scroll as the room.) */
 .room:has(> .room-scroll),
-.room:has(> .timeline) {
+.room:has(> .timeline),
+.room:has(> .dm-body) {
   /* Clipped, not hidden: nothing (a scrollIntoView, a focus) can shift it. */
   overflow: clip;
 }
@@ -1323,20 +1357,6 @@ body.side-resizing * {
   flex-direction: column;
   min-width: 0;
 }
-.session-goal {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 8px 16px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-}
-.session-goal > input,
-.session-goal > .goal-text,
-.session-goal > .goal-wrap {
-  flex: 1;
-  min-width: 0;
-}
 /* A long goal takes two lines, not the session's height: "more" shows the
    rest, scrolling past a third of the window. */
 .goal-wrap {
@@ -1363,11 +1383,6 @@ body.side-resizing * {
 .goal-more {
   flex: none;
   padding: 2px 0;
-}
-/* The session's whole line, read under its terminal. */
-.session-line-history {
-  flex: none;
-  white-space: nowrap;
 }
 /* Where the session already is in the grids, with a way to each. */
 .session-where {
@@ -1399,15 +1414,6 @@ body.side-resizing * {
 .session-where .link {
   flex: none;
 }
-.session-approvals {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 16px;
-  background: var(--surface);
-  border-top: 1px solid var(--border);
-}
-.session-goal input,
 .goal-text {
   width: 100%;
   border: 0;
@@ -1891,6 +1897,78 @@ button.thread-bar:hover {
 .thread-panel .composer {
   margin: 0 12px 12px;
 }
+
+/* A DM's thread, as the mockup draws it: a chip under the message that
+   names who replied, the message it is on as a card, a rule that counts
+   the replies, and a reply box with its choice and button below. */
+.thread-chip .thread-count {
+  color: var(--working);
+  font-weight: 600;
+}
+.thread-chip .thread-last {
+  color: var(--faint);
+}
+.thread-chip .thread-marks {
+  gap: 0;
+}
+.thread-chip .thread-marks > * + * {
+  margin-left: -8px;
+}
+.room-msg.thread-open {
+  background: var(--signal-soft);
+  border-radius: var(--radius);
+  box-shadow: 0 0 0 6px var(--signal-soft);
+}
+.thread-first {
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--raised);
+  border: 1px solid var(--border);
+}
+.thread-count-rule {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.thread-count-rule::after {
+  content: "";
+  order: 1;
+  flex: 1;
+  height: 1px;
+  background: var(--border);
+}
+.thread-count-rule .thread-live {
+  order: 0;
+  text-transform: none;
+  letter-spacing: 0;
+}
+.thread-composer {
+  flex-wrap: wrap;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+}
+.thread-composer textarea {
+  flex: 1 0 100%;
+  padding: 2px 0;
+}
+.thread-composer .also-in-room input {
+  accent-color: var(--signal);
+}
+.thread-composer .also-in-room {
+  flex: 1;
+  min-width: 0;
+}
+.thread-composer .composer-note,
+.thread-composer > :not(textarea):not(label):not(.btn) {
+  flex-basis: 100%;
+}
 .dm-panel {
   background: var(--surface);
 }
@@ -2012,23 +2090,44 @@ button.thread-bar:hover {
     box-shadow: 0 0 0 4px color-mix(in srgb, var(--working) 0%, transparent);
   }
 }
-@property --flow-angle {
-  syntax: "<angle>";
-  inherits: false;
-  initial-value: 0deg;
+@keyframes desk-pulse {
+  0%,
+  100% {
+    opacity: 0.7;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+/* desk-breathe's ring, drawn on the dot's ::after: it swells from inside
+   the dot to 4px round it, at its strongest half way. */
+@keyframes desk-ripple {
+  0%,
+  100% {
+    transform: scale(0.55);
+    opacity: 0;
+  }
+  25%,
+  75% {
+    opacity: 0.5;
+  }
+  50% {
+    transform: scale(1);
+    opacity: 0;
+  }
 }
 @keyframes desk-flow {
   to {
-    --flow-angle: 360deg;
+    transform: rotate(360deg);
   }
 }
 @keyframes desk-glow {
   0%,
   100% {
-    box-shadow: 0 0 0 0 color-mix(in srgb, var(--working) 0%, transparent);
+    opacity: 0;
   }
   50% {
-    box-shadow: 0 0 12px 1px color-mix(in srgb, var(--working) 45%, transparent);
+    opacity: 1;
   }
 }
 @media (prefers-reduced-motion: reduce) {
@@ -2039,13 +2138,12 @@ button.thread-bar:hover {
   .dot-working,
   .dot-starting,
   .dot-background,
-  .ring-working,
-  .ring-background,
-  .tile-working::before,
-  .tile-starting::before,
-  .ov-tile-working::before,
-  .tile-background::before,
-  .ov-tile-background::before {
+  .dot-working::after,
+  .dot-starting::after,
+  .dot-background::after,
+  .ring-working::before,
+  .ring-background::before,
+  .tile-flow::before {
     animation: none;
   }
 }
@@ -2700,6 +2798,260 @@ button.thread-bar:hover {
   content: "";
   flex: 1;
   border-top: 1px solid var(--blocked);
+}
+/* ── Searching a DM (⌘F) ─────────────────────────────────────────────── */
+
+.dm-body {
+  flex: 1 1 0px;
+  min-height: 0;
+  display: flex;
+}
+.dm-body > .timeline {
+  min-width: 0;
+}
+.dm-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 28px;
+  border-bottom: 1px solid var(--border);
+  background: var(--raised);
+}
+.dm-search-field {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--signal);
+  border-radius: var(--radius);
+  background: var(--bg);
+  color: var(--muted);
+}
+.dm-search-field input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+}
+.dm-search-count {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+.dm-results {
+  flex: 0 0 320px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+}
+.dm-results-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--border);
+}
+.dm-results-title {
+  font-weight: 600;
+  font-size: 13.5px;
+}
+.dm-results-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 8px;
+  display: grid;
+  align-content: start;
+  gap: 4px;
+}
+.dm-result {
+  display: grid;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius);
+  background: none;
+  color: inherit;
+  text-align: left;
+  font-size: 12.5px;
+}
+.dm-result:hover,
+.dm-result[aria-current="true"] {
+  background: var(--surface);
+  border-color: var(--border);
+}
+.dm-result-when {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--faint);
+}
+.dm-result-text {
+  color: var(--muted);
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.dm-result mark {
+  background: var(--signal-soft);
+  color: inherit;
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.dm-results-more {
+  justify-self: center;
+  margin: 4px 0;
+}
+::highlight(dm-search) {
+  background-color: var(--signal-soft);
+}
+::highlight(dm-search-current) {
+  background-color: var(--signal);
+  color: var(--on-signal);
+}
+@container chat (max-width: 720px) {
+  .dm-body-searching {
+    flex-direction: column;
+  }
+  .dm-results {
+    flex: 0 0 40%;
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+  .dm-search {
+    padding: 8px 14px;
+  }
+}
+
+/* ── Editing your last message ─────────────────────────────────────────── */
+
+/* The composer as the edit box: the new version, what the reply being set
+   aside already did, and Save and ask again. */
+.composer.composer-edit {
+  display: grid;
+  gap: 8px;
+  align-items: stretch;
+  padding: 10px 12px;
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--signal-soft);
+}
+.composer-edit-label {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--signal-soft-text);
+}
+.composer-edit-did {
+  display: grid;
+  gap: 4px;
+  padding: 9px 11px;
+  border-radius: var(--radius);
+  background: var(--blocked-soft);
+  color: var(--text);
+  font-size: 12.5px;
+}
+.composer-edit-did b {
+  color: var(--blocked);
+}
+.composer-edit-did ul {
+  margin: 0;
+  padding-left: 16px;
+}
+.composer-edit-row {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.composer-edit-row .composer-hint {
+  margin-right: auto;
+}
+.composer-note {
+  margin: 0 28px 6px;
+  color: var(--blocked);
+}
+/* Deleting your message, confirmed in place under it. */
+.msg-confirm {
+  display: grid;
+  gap: 9px;
+  margin-left: 48px;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--raised);
+  font-size: 13px;
+}
+.msg-confirm-forget {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  color: var(--muted);
+}
+.msg-confirm-forget input {
+  margin-top: 3px;
+  accent-color: var(--signal);
+}
+.msg-confirm-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.msg-action-danger {
+  color: var(--ansi-red);
+}
+.msg-dim {
+  opacity: 0.45;
+}
+.msg-edited {
+  margin-left: 4px;
+}
+
+.jump-pill-count {
+  margin-left: 8px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 500;
+  opacity: 0.75;
+}
+/* A DM keeps its reader in place itself (see useStayPut): the webview's own
+   anchoring, which only some engines have, would move it twice. */
+.dm-scroll {
+  overflow-anchor: none;
+}
+.dm-list {
+  display: flex;
+  flex-direction: column;
+  gap: inherit;
+}
+.composer-hint {
+  align-self: center;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--faint);
+}
+.composer-hint kbd {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 0 4px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--surface);
+  color: var(--muted);
+}
+@container chat (max-width: 560px) {
+  .composer-hint {
+    display: none;
+  }
 }
 .jump-pill {
   position: absolute;

@@ -15,8 +15,7 @@ export const SETTINGS_SECTIONS = {
   sessions: "Sessions",
   memory: "Memory",
   budgets: "Budgets",
-  voices: "Voices",
-  calls: "Calls and voice",
+  voices: "Voice",
   shortcuts: "Shortcuts",
   help: "Help",
 } as const;
@@ -53,6 +52,9 @@ interface UiState {
   agentFiles: Record<string, string>;
   /** The thread open in each room, by room id. */
   roomThreads: Record<string, string>;
+  /** The thread open beside each DM, by agent key: the id of the message it
+   *  is on. */
+  dmThreads: Record<string, string>;
   /** Conversations scrolled up from their newest message, by pane
    *  (`dm:<agent>`, `room:<id>`); one at its newest has none. */
   anchors: Record<string, Anchor>;
@@ -88,6 +90,7 @@ interface UiState {
   panelClosed: (kind: PanelKind) => void;
   setAgentFile: (agent: string, file: string) => void;
   setRoomThread: (room: string, thread: string | null) => void;
+  setDmThread: (agent: string, parent: string | null) => void;
   setAnchor: (pane: string, anchor: Anchor | null) => void;
   openSettings: (section?: SettingsSection) => void;
   closeSettings: () => void;
@@ -104,6 +107,7 @@ export const useUi = create<UiState>((set) => ({
   scroll: {},
   agentFiles: {},
   roomThreads: {},
+  dmThreads: {},
   anchors: {},
   panelWidths: {},
   panelFocus: null,
@@ -139,6 +143,11 @@ export const useUi = create<UiState>((set) => ({
     set((s) => {
       const { [room]: _was, ...rest } = s.roomThreads;
       return { roomThreads: thread ? { ...rest, [room]: thread } : rest };
+    }),
+  setDmThread: (agent, parent) =>
+    set((s) => {
+      const { [agent]: _was, ...rest } = s.dmThreads;
+      return { dmThreads: parent ? { ...rest, [agent]: parent } : rest };
     }),
   setAnchor: (pane, anchor) =>
     set((s) => {

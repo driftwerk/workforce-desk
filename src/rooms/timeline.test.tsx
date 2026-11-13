@@ -33,6 +33,8 @@ const { RoomView } = await import("./RoomView");
 const { useReads } = await import("../unread/reads");
 const { useUnread } = await import("../unread/summary");
 const { answerForm } = await import("./engine");
+const { deskState } = await import("../restore/boot");
+const { draftKey } = await import("../restore/drafts");
 
 const room = {
   id: "r1",
@@ -90,7 +92,13 @@ beforeEach(() => {
   useReads.setState({ local: {}, dms: {}, loaded: true });
   useUnread.setState({ local: null });
 });
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  // A quote put in the composer is kept after a pause. Left to fire, it
+  // would write (and log its failure) in a later test, or after this file
+  // is torn down, where the log is an EnvironmentTeardownError.
+  deskState.remove(draftKey.room(room.id));
+});
 
 describe("a room's timeline", () => {
   it("puts the day before the first message of each day", () => {

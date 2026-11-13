@@ -661,6 +661,21 @@
   },
   {
     "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/decisions/d1/undo"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/items/i1/answer"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/items/i1/drop"
+  },
+  {
+    "kind": "http",
     "method": "GET",
     "path": "/api/desk/rooms"
   },

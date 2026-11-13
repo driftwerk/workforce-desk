@@ -268,9 +268,10 @@ describe("a session Sarah runs", () => {
     act(() => hub.events!.say({ type: "line", message: later }));
     expect(screen.getAllByText(/Waiting: you're driving/)).toHaveLength(2);
 
-    // Hand back, from the pane's header: Sarah has it, and her message goes in.
-    // Clicked twice before the hub answers, it's asked once.
-    const handBack = within(pane).getByRole("button", { name: "Hand back" });
+    // Hand back, from the pane's driver chip: Sarah has it, and her message
+    // goes in. Clicked twice before the hub answers, it's asked once.
+    fireEvent.click(within(pane).getByRole("button", { name: /^Who runs it: You’re driving/ }));
+    const handBack = within(screen.getByRole("dialog", { name: "Who runs acme-web" })).getByRole("button", { name: "Hand back" });
     await act(async () => {
       fireEvent.click(handBack);
       fireEvent.click(handBack);
@@ -293,39 +294,49 @@ describe("a session Sarah runs", () => {
       </>,
     );
     const card = screen.getByRole("complementary", { name: "Session acme-web" });
-    const strip = within(card).getByRole("status", { name: "Who runs acme-web" });
-    expect(within(strip).getByText("Sarah has it")).toBeTruthy();
-    expect(within(strip).getByText(/Sarah runs this session/)).toBeTruthy();
-    expect(within(card).queryByRole("button", { name: "Hand to Sarah" })).toBeNull();
+    // Who runs it is a chip in its chrome, opening what that means.
+    const chip = () => within(card).queryByRole("button", { name: /^Who runs it: / });
+    expect(chip()!.getAttribute("aria-label")).toBe("Who runs it: Sarah has it");
+    const options = async () => {
+      await act(async () => fireEvent.click(within(card).getByRole("button", { name: "Session options" })));
+      return within(screen.getByRole("menu", { name: "acme-web options" }));
+    };
+    expect((await options()).queryByRole("menuitem", { name: "Hand to Sarah" })).toBeNull();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
 
     // What waits to go in is a slim bar under its terminal; its line is
     // read from Messages with Desk….
     expect(await within(card).findByText("1 message waiting to go in")).toBeTruthy();
-    await act(async () => fireEvent.click(within(card).getByRole("button", { name: "Messages with Desk…" })));
+    await act(async () => fireEvent.click((await options()).getByRole("menuitem", { name: "Messages with Desk…" })));
     expect(await within(card).findByText(/Waiting for it to finish its turn/)).toBeTruthy();
-    await act(async () => fireEvent.click(within(strip).getByRole("button", { name: "Release" })));
+    await act(async () => fireEvent.click(chip()!));
+    const who = screen.getByRole("dialog", { name: "Who runs acme-web" });
+    expect(within(who).getByText(/Sarah runs this session/)).toBeTruthy();
+    await act(async () => fireEvent.click(within(who).getByRole("button", { name: "Release" })));
     expect(hub.requests).toContain("DELETE /api/desk/sessions/s1/charge");
-    await waitFor(() => expect(within(card).queryByRole("status", { name: "Who runs acme-web" })).toBeNull());
+    await waitFor(() => expect(chip()).toBeNull());
     const pane = screen.getByRole("region", { name: "acme-web" });
     expect(within(pane).queryByText("Sarah has it")).toBeNull();
     expect(await within(card).findByText(/Not delivered: Sarah no longer runs it/)).toBeTruthy();
     expect(within(card).getByText(/I'm no longer running this session/)).toBeTruthy();
     expect(within(card).getAllByText(/A note here only: not typed in/).length).toBeGreaterThan(0);
 
-    // The card offers it to Sarah again; here, back to her from the pane's menu.
-    expect(within(card).getByRole("button", { name: "Hand to Sarah" })).toBeTruthy();
+    // The card's menu offers it to Sarah again; here, back to her from the pane's menu.
+    expect((await options()).getByRole("menuitem", { name: "Hand to Sarah" })).toBeTruthy();
+    fireEvent.keyDown(screen.getByRole("menu"), { key: "Escape" });
     await act(async () => fireEvent.click(within(pane).getByRole("button", { name: "Pane options" })));
     await act(async () => fireEvent.click(screen.getByRole("menuitem", { name: "Hand to Sarah" })));
     expect(hub.requests.filter((r) => r === "POST /api/desk/sessions/s1/charge")).toHaveLength(1);
     await waitFor(() => expect(within(pane).getByText("Sarah has it")).toBeTruthy());
-    expect(within(card).getByRole("status", { name: "Who runs acme-web" })).toBeTruthy();
+    expect(chip()).toBeTruthy();
   });
 
   it("says the hub's refusal in its own words", async () => {
     await connect();
     render(<SessionCard session={useDesk.getState().sessions.s1!} />);
     hub.fetch = async () => json({ error: "Sarah only watches; set them to Act to run work." }, 409);
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Hand to Sarah" })));
-    await waitFor(() => expect(screen.getByRole("alert").textContent).toBe("Sarah only watches; set them to Act to run work."));
+    fireEvent.click(screen.getByRole("button", { name: "Session options" }));
+    await act(async () => fireEvent.click(screen.getByRole("menuitem", { name: "Hand to Sarah" })));
+    await waitFor(() => expect(JSON.stringify(useDesk.getState().error)).toContain("Sarah only watches; set them to Act to run work."));
   });
 });

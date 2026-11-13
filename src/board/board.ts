@@ -5,7 +5,7 @@
 // same of the tickets as they stand now (a need done since, three days gone
 // by) without asking it again.
 
-import type { ActivityEvent, LedgerRow, Ticket, TicketMove, TicketState } from "../hub/types";
+import type { ActivityEvent, LedgerRow, Session, Ticket, TicketMove, TicketState } from "../hub/types";
 import { totalTokens } from "../spend/spend";
 
 /** The columns, left to right; Dropped has none and folds under Done. */
@@ -340,4 +340,39 @@ export const sessionNameFor = (t: Pick<Ticket, "key" | "title">, words = 3, max 
   }
   const full = [t.key, name].filter(Boolean).join(" ");
   return full.length > max + 8 ? `${full.slice(0, max + 7)}…` : full;
+};
+
+/** The folders sessions worked in, newest first, each once: what Start a
+ *  session offers before anything is typed. */
+export const recentFolders = (sessions: readonly Pick<Session, "cwd" | "updatedAt">[], max = 5): string[] => {
+  const seen = new Set<string>();
+  for (const s of [...sessions].sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))) {
+    const dir = s.cwd?.trim().replace(/\/+$/, "");
+    if (dir) seen.add(dir);
+  }
+  return [...seen].slice(0, max);
+};
+
+/** The folder and engine a session on a board starts with: those of the
+ *  newest session that worked on the ticket, else on any of the board's
+ *  tickets, else what the board's last start used, else the newest session
+ *  Desk has. Nothing is typed unless there is nothing to go by. */
+export const startDefaults = (
+  ticket: Pick<Ticket, "assignee" | "links">,
+  boardTickets: readonly Pick<Ticket, "assignee" | "links">[],
+  sessions: Readonly<Record<string, Pick<Session, "cwd" | "engine" | "updatedAt">>>,
+  stored: { cwd: string; engine: string } | null,
+): { cwd: string; engine: string | null } => {
+  const newest = (ids: readonly string[]) =>
+    ids
+      .map((id) => sessions[id])
+      .filter((s): s is NonNullable<typeof s> => !!s?.cwd)
+      .sort((a, b) => (b.updatedAt ?? "").localeCompare(a.updatedAt ?? ""))[0];
+  const own = newest(sessionsOf(ticket));
+  if (own) return { cwd: own.cwd, engine: own.engine };
+  const board = newest(boardTickets.flatMap((x) => sessionsOf(x)));
+  if (board) return { cwd: board.cwd, engine: board.engine };
+  if (stored?.cwd) return { cwd: stored.cwd, engine: stored.engine };
+  const any = newest(Object.keys(sessions));
+  return { cwd: any?.cwd ?? "", engine: any?.engine ?? null };
 };

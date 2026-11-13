@@ -228,6 +228,11 @@ const HTTP: &[Route] = &[
     route("GET", "/api/desk/suggestions"),
     route("POST", "/api/desk/suggestions/{}/accept"),
     route("POST", "/api/desk/suggestions/{}/dismiss"),
+    // The boss's decisions undone, and what it asked you answered or
+    // dropped.
+    route("POST", "/api/desk/decisions/{}/undo"),
+    route("POST", "/api/desk/items/{}/answer"),
+    route("POST", "/api/desk/items/{}/drop"),
     // Rooms.
     route("GET", "/api/desk/rooms"),
     route("POST", "/api/desk/rooms"),

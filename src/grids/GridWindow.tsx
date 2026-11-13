@@ -230,7 +230,8 @@ export function GridWindow({ gridId }: { gridId: string }) {
 }
 
 function Toast() {
-  const { error, clearError } = useDesk();
+  const error = useDesk((s) => s.error);
+  const clearError = useDesk((s) => s.clearError);
   if (!error) return null;
   return (
     <div className="toast toast-error toast-problem" role="alert">

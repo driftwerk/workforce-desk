@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useShallow } from "zustand/react/shallow";
 import { useChat } from "../chat/store";
 import { shownState } from "../floor/background";
 import { useDesk } from "../hub/store";
-import type { Session } from "../hub/types";
 import { useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { useGridDrag } from "./drag";
@@ -58,24 +58,27 @@ export function PresetPicker({ grid }: { grid: Grid }) {
   );
 }
 
-/** What a grid's panes are doing: how many are working, and need you. */
+/** What a grid's panes are doing: how many are working, and need you.
+ *  Counted inside each store's selector, so the grid draws again when a
+ *  count changes, not on every session event or streamed word. */
 export function useGridCounts(grid: Grid | undefined): { panes: number; working: number; needsYou: number } {
-  const sessions = useDesk((s) => s.sessions);
-  const conversations = useChat((s) => s.conversations);
-  let working = 0;
-  let needsYou = 0;
   const shown = grid?.panes.filter((p) => p.rect) ?? [];
-  for (const p of shown) {
-    const c = p.content;
-    let s: Session | null | undefined = null;
-    if (c?.kind === "session") s = sessions[sessionKeyIn(c)!];
-    else if (c?.kind === "terminal") s = trackedIn(sessions, terminalKeyIn(c));
-    else if (c?.kind === "agent" && conversations[c.agent]?.working) working += 1;
-    const state = s && shownState(s);
-    if (state === "blocked" || state === "asking") needsYou += 1;
-    else if (state === "working" || state === "starting") working += 1;
-  }
-  return { panes: shown.length, working, needsYou };
+  const [sessionsWorking, needsYou] = useDesk(
+    useShallow((d) => {
+      let working = 0;
+      let needs = 0;
+      for (const p of shown) {
+        const c = p.content;
+        const s = c?.kind === "session" ? d.sessions[sessionKeyIn(c)!] : c?.kind === "terminal" ? trackedIn(d.sessions, terminalKeyIn(c)) : null;
+        const state = s && shownState(s);
+        if (state === "blocked" || state === "asking") needs += 1;
+        else if (state === "working" || state === "starting") working += 1;
+      }
+      return [working, needs];
+    }),
+  );
+  const agentsWorking = useChat((s) => shown.filter((p) => p.content?.kind === "agent" && s.conversations[p.content.agent]?.working).length);
+  return { panes: shown.length, working: sessionsWorking + agentsWorking, needsYou };
 }
 
 export const countsLine = (c: { panes: number; working: number; needsYou: number }): string =>

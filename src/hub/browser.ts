@@ -15,12 +15,18 @@ export const browserOf = (hub: HubRef) => ({
   /** Desk's browser settings and the person's Chrome's standing. */
   settings: (): Promise<BrowserSettingsView> => deskCall(hub, "GET", "/api/desk/browser/settings"),
   save: (s: BrowserSettings): Promise<BrowserSettingsView> => deskCall(hub, "PUT", "/api/desk/browser/settings", s),
+  /** The person confirms a Chrome profile asking to connect is theirs. */
+  confirm: (id: string): Promise<BrowserSettingsView> => deskCall(hub, "POST", `/api/desk/browser/chrome/${encodeURIComponent(id)}/confirm`),
+  /** The profile Desk uses, of those confirmed. */
+  choose: (id: string): Promise<BrowserSettingsView> => deskCall(hub, "POST", `/api/desk/browser/chrome/${encodeURIComponent(id)}/choose`),
+  /** Forgets a profile, or refuses one asking: it reaches nothing until confirmed again. */
+  forget: (id: string): Promise<BrowserSettingsView> => deskCall(hub, "DELETE", `/api/desk/browser/chrome/${encodeURIComponent(id)}`),
   /** The browsers open now. */
   live: async (): Promise<BrowserLive[]> => (await deskCall<{ live: BrowserLive[] }>(hub, "GET", "/api/desk/browser")).live,
   /** Stop: the turns using the browser end, it closes, and its session allowances go. */
   stop: (agent?: string): Promise<BrowserStopped> => deskCall(hub, "POST", "/api/desk/browser/stop", agent ? { agent } : {}),
-  /** Brings `agent`'s page in Desk's own browser to the front of the
-   *  screen; false when Desk's browser isn't on screen or has no page. */
+  /** Brings `agent`'s tab in the person's Chrome to the front of its
+   *  window; false when Chrome isn't connected or the agent has no tab open. */
   show: async (agent: string): Promise<boolean> =>
     (await deskCall<{ shown?: boolean }>(hub, "POST", "/api/desk/browser/show", { agent })).shown === true,
   /** A screenshot a browser's activity row names. */

@@ -24,9 +24,51 @@ afterEach(cleanup);
 
 const start = () => {
   render(<StartSession ticket={t} onClose={() => {}} />);
-  fireEvent.change(screen.getByPlaceholderText("/path/to/repo"), { target: { value: "/w/repo" } });
+  fireEvent.change(screen.getByPlaceholderText("Choose a folder, or type its path"), { target: { value: "/w/repo" } });
 };
 const chosen = () => screen.getAllByRole("radio", { name: /./ }).find((r) => r.getAttribute("aria-checked") === "true" && ["Acme", "Side", "Ungrouped"].includes(r.textContent ?? ""))?.textContent;
+
+describe("Start a session on a ticket: folders", () => {
+  it("offers the folders sessions worked in, newest first and each once, and picking one fills the field", () => {
+    const s = (id: string, cwd: string, updatedAt: string) => ({ id, cwd, updatedAt, name: id, engine: "claude" }) as never;
+    useDesk.setState({ sessions: { a: s("a", "/w/api", "2026-11-12T08:00:00Z"), b: s("b", "/w/web/", "2026-11-12T09:00:00Z"), c: s("c", "/w/api", "2026-11-11T09:00:00Z") } });
+    render(<StartSession ticket={t} onClose={() => {}} />);
+    const chips = screen.getAllByRole("radio").filter((r) => r.closest("[aria-label='Recent folders']"));
+    expect(chips.map((c) => c.textContent)).toEqual(["web", "api"]);
+    fireEvent.click(chips[1]!);
+    expect((screen.getByPlaceholderText("Choose a folder, or type its path") as HTMLInputElement).value).toBe("/w/api");
+  });
+});
+
+describe("Start a session on a ticket: what it goes by", () => {
+  const sess = (id: string, cwd: string, engine: string, updatedAt: string) => ({ id, cwd, engine, updatedAt, name: id }) as never;
+  const folder = () => (screen.getByPlaceholderText("Choose a folder, or type its path") as HTMLInputElement).value;
+  it("takes the folder and engine of the board's newest session when the ticket has none", () => {
+    const other = ticket(8, { assignee: { kind: "session", id: "old", name: "old", engine: "codex" } });
+    useBoard.setState({ tickets: { [t.id]: t, [other.id]: other } });
+    useDesk.setState({ sessions: { old: sess("old", "/w/api", "codex", "2026-11-12T09:00:00Z"), z: sess("z", "/w/elsewhere", "claude", "2026-11-12T10:00:00Z") } });
+    render(<StartSession ticket={t} onClose={() => {}} />);
+    expect(folder()).toBe("/w/api");
+  });
+  it("starts an engine this computer has, when the one it went by isn't", async () => {
+    const installed = ["claude", "codex"].map((engine) => ({ engine, views: ["chat"], installed: true }));
+    useDesk.setState({ hub: { engines: async () => installed, assignTicket: assign } as never, sessions: { z: sess("z", "/w/api", "gemini", "2026-11-12T10:00:00Z") } });
+    render(<StartSession ticket={t} onClose={() => {}} />);
+    expect((await screen.findByRole("radio", { name: "Claude Code" })).getAttribute("aria-checked")).toBe("true");
+    expect(screen.queryByRole("radio", { name: "Gemini CLI" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Start session" }));
+    await waitFor(() => expect(assign).toHaveBeenCalled());
+    expect(JSON.stringify(assign.mock.calls[0])).toContain('"engine":"claude"');
+  });
+  it("falls back to what the board's last start used, then asks nothing it can know", async () => {
+    useDesk.setState({ sessions: {} });
+    localStorage.setItem(`desk.board.start.${t.board}`, JSON.stringify({ cwd: "/w/saved", engine: "claude" }));
+    render(<StartSession ticket={t} onClose={() => {}} />);
+    expect(folder()).toBe("/w/saved");
+    fireEvent.click(screen.getByRole("button", { name: "Start session" }));
+    await waitFor(() => expect(JSON.parse(localStorage.getItem(`desk.board.start.${t.board}`)!)).toEqual({ cwd: "/w/saved", engine: "claude" }));
+  });
+});
 
 describe("Start a session on a ticket", () => {
   it("offers New session's group picker, set to the board's group", () => {
