@@ -399,7 +399,7 @@ export function NewSession({
     <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <form className="sheet new-session" onSubmit={(e) => void submit(e)} aria-label="New session">
         <div className="dialog-title">
-          <h2 className="display-md">New session</h2>
+          <h2 className="display-lg">New session</h2>
           <p className="small">{NEW_SESSION_LINE}</p>
         </div>
         <RunOn

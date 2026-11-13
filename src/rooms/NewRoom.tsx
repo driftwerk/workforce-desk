@@ -75,7 +75,7 @@ export function NewRoom({ onClose }: { onClose: () => void }) {
   return (
     <div className="sheet-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <form className="sheet" onSubmit={submit} aria-label="New room">
-        <h2 className="display-md">New room</h2>
+        <h2 className="display-lg">New room</h2>
         <label className="field">
           <span>Name</span>
           <input value={name} onChange={(e) => setName(e.target.value)} placeholder="release" required />
