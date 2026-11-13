@@ -400,14 +400,9 @@ export const parseWorkflow = (typed: string, have: string[] = []): { value: stri
   return { value: t };
 };
 
-/** What Act fully still needs before it's in force: repos; nothing while
- *  it's Anywhere. Its daily budget is optional: with none, only the
- *  check-in ceilings and Stop bound it. */
-export const fullMissing = (o: Oversight): "repos"[] => (o.full.anywhere || o.full.repos.length > 0 ? [] : ["repos"]);
-
-/** Nothing limits it: Act fully, every act switch on, and Anywhere. */
-export const isUnbound = (o: Oversight): boolean =>
-  o.level === "full" && o.full.anywhere && Object.values(o.act).every((on) => on);
+/** Nothing limits it but its budget, Stop and the activity log: Act fully,
+ *  whatever its switches and lists say (the hub holds it to that). */
+export const isUnbound = (o: Oversight): boolean => o.level === "full";
 
 /** Writes `change` of the agent's oversight into its config as it is now
  *  (read fresh, so nothing else in it is lost); answers with the config as

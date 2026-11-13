@@ -29,3 +29,7 @@ export function typingPinger(send: (sessionId: string) => void, every = TYPING_E
     send(sessionId);
   };
 }
+
+/** How often, at most, Desk tells its hub you're typing to a boss in its
+ *  DM: well inside the hub's pause (20 seconds after the last). */
+export const DM_TYPING_EVERY_MS = 10_000;

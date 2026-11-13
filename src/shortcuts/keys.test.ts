@@ -14,6 +14,9 @@ import {
   terminalKeys,
   usable,
   warning,
+  withDigit,
+  refusalFor,
+  desksInTerminal,
   type KeyPress,
 } from "./keys";
 
@@ -48,11 +51,12 @@ describe("shortcut keys on macOS", () => {
       unread: "Primary+Shift+U",
       searchMemory: "Primary+K",
       board: "Primary+B",
+      goTo: "Primary+1",
     });
     expect(refusal(MAC.pushToTalk, "global", "macos")).toBeNull();
     expect(refusal(MAC.ask, "global", "macos")).toBeNull();
     expect(warning(MAC.ask, "macos")).toBeNull();
-    for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread", "searchMemory", "board"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
+    for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread", "searchMemory", "board", "goTo"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
     expect(new Set(Object.values(MAC)).size).toBe(Object.keys(MAC).length);
   });
 
@@ -167,6 +171,40 @@ describe("shortcut keys on macOS", () => {
   });
 });
 
+describe("the Go to keys", () => {
+  it("are one shortcut whose last key is the sidebar item's number", () => {
+    expect(withDigit(MAC.goTo, 3)).toBe("Primary+3");
+    expect(withDigit("Control+Alt+1", 9)).toBe("Control+Alt+9");
+    expect(shortcutLabel(withDigit(MAC.goTo, 2), "macos")).toBe("⌘2");
+    expect(shortcutLabel(withDigit(defaultShortcuts("windows").goTo, 2), "windows")).toBe("Ctrl+2");
+  });
+
+  it("are checked as all nine: another shortcut on one is a clash, and each must be free", () => {
+    expect(clash(MAC, "board", "Primary+3", "macos")).toMatch(/already Go to a sidebar item/);
+    expect(clash(MAC, "goTo", "Primary+Shift+1", "macos")).toBeNull();
+    expect(clash({ ...MAC, board: "Primary+Shift+5" }, "goTo", "Primary+Shift+1", "macos")).toMatch(/already Board/);
+    // ⇧⌘3 to ⇧⌘5 are the Mac's screenshots.
+    expect(refusalFor("goTo", "Primary+Shift+1", "macos")).toMatch(/uses/);
+    expect(refusalFor("goTo", "Primary+J", "macos")).toMatch(/1 to 9/);
+    expect(refusalFor("goTo", "Control+Alt+1", "windows")).toMatch(/types a character/);
+    expect(refusalFor("goTo", "Primary+1", "macos")).toBeNull();
+    expect(usable("Primary+J", "goTo", "macos")).toBe("Primary+1");
+  });
+
+  it("drop a saved choice on one of the nine when Desk reads them", () => {
+    expect(resolve({ board: "Primary+3" }, "macos").keys.board).toBe("Primary+B");
+    const both = resolve({ board: "Primary+Shift+5", goTo: "Primary+Shift+1" }, "linux");
+    // The later choice (Go to) gives way.
+    expect([both.keys.board, both.keys.goTo]).toEqual(["Primary+Shift+5", "Primary+1"]);
+  });
+
+  it("reach Desk from a terminal pane, every digit", () => {
+    const linux = defaultShortcuts("linux");
+    const taken = desksInTerminal(linux);
+    for (let d = 1; d <= 9; d++) expect(taken).toContain(`Primary+${d}`);
+  });
+});
+
 describe("shortcut keys on Windows and Linux", () => {
   const WIN = defaultShortcuts("windows");
 
@@ -199,6 +237,7 @@ describe("shortcut keys on Windows and Linux", () => {
       unread: "Primary+Shift+U",
       searchMemory: "Primary+K",
       board: "Primary+B",
+      goTo: "Primary+1",
     });
     expect(defaultShortcuts("linux")).toEqual(WIN);
     for (const platform of ["windows", "linux"] as const) {

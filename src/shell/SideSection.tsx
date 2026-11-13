@@ -1,4 +1,4 @@
-// A sidebar section (Rooms, Boards, Groups): its name with a chevron that
+// A sidebar section (Grids, Rooms, Boards, Groups): its name with a chevron that
 // opens and closes it, its "+", and what it lists. Closed, its header shows
 // what's for you inside, so nothing is hidden silently. Whether each is
 // closed is remembered in this browser's storage.
@@ -8,7 +8,7 @@ import { create } from "zustand";
 import type { Badge } from "../unread/badges";
 import { Marks } from "../unread/Marks";
 
-export type SectionId = "rooms" | "boards" | "groups";
+export type SectionId = "grids" | "rooms" | "boards" | "groups";
 
 export const SECTIONS_KEY = "desk.sidebar.closed";
 
@@ -56,6 +56,7 @@ export function SideSection({
   newLabel,
   onNew,
   badge,
+  marks,
   title,
   children,
 }: {
@@ -66,7 +67,10 @@ export function SideSection({
   newLabel: string;
   onNew: () => void;
   /** What's for you inside, shown on the header while it's closed. */
-  badge: Badge;
+  badge?: Badge;
+  /** In place of `badge`: what draws it, drawn only while it's closed (so
+   *  an open section doesn't read what only its closed header shows). */
+  marks?: ReactNode;
   /** The header's tooltip, as "Boards (⌘B)". */
   title?: string;
   children: ReactNode;
@@ -83,7 +87,7 @@ export function SideSection({
             </svg>
           </span>
           <span className="side-toggle-name">{label}</span>
-          {!open && <Marks badge={badge} />}
+          {!open && (marks ?? (badge && <Marks badge={badge} />))}
         </button>
         <button
           type="button"

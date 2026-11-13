@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { DEFAULT_OVERSIGHT, fullMissing, isUnbound, type Oversight } from "./oversight";
+import { DEFAULT_OVERSIGHT, isUnbound, type Oversight } from "./oversight";
 import { ACT_SWITCHES, PRESETS, presetOf, withPreset } from "./presets";
 import { budgetFrom, foldersOf, fromFacts, PLAN_ONLY_BUDGET_USD, repoName, withoutCredentials } from "./suggest";
 import { MAX_FULL_BUDGET_USD } from "./oversight";
@@ -21,21 +21,29 @@ describe("presets", () => {
     expect(act.act).toEqual(ACT_SWITCHES);
     expect(act.act).toMatchObject({ handOutWork: true, interrupt: true, readOnlyApprovals: true, answerSessions: true });
     expect(act.act).toMatchObject({ messageAgents: false, messageTerminalSessions: false, handOff: false, setMode: false });
-    expect(withPreset(DEFAULT_OVERSIGHT, "full")).toMatchObject({ level: "full", act: ACT_SWITCHES, full: { anywhere: false } });
-    expect(isUnbound(withPreset(DEFAULT_OVERSIGHT, "unbound"))).toBe(true);
-    // From Unbound back to Act fully: limited to its repos again.
-    expect(withPreset(withPreset(DEFAULT_OVERSIGHT, "unbound"), "full").full.anywhere).toBe(false);
+    // Act fully is unbound: every switch on, anywhere.
+    const full = withPreset(DEFAULT_OVERSIGHT, "full");
+    expect(full).toMatchObject({ level: "full", full: { anywhere: true } });
+    expect(Object.values(full.act).every((on) => on)).toBe(true);
+    expect(isUnbound(full)).toBe(true);
+    // Whatever its switches and lists say.
+    expect(isUnbound({ ...full, act: { ...ACT_SWITCHES }, full: { ...full.full, anywhere: false, repos: ["acme/a"] } })).toBe(true);
+    expect(isUnbound(act)).toBe(false);
+    // From Act fully back to Act: Act's switches again.
+    expect(withPreset(full, "act")).toMatchObject({ act: ACT_SWITCHES, full: { anywhere: false } });
   });
 
   it("a switch changed by hand is no preset, below Act the switches don't matter", () => {
     const act = withPreset(DEFAULT_OVERSIGHT, "act");
     expect(presetOf({ ...act, act: { ...act.act, setMode: true } })).toBeNull();
     expect(presetOf({ ...withPreset(DEFAULT_OVERSIGHT, "suggest"), act: { ...act.act, setMode: true } })).toBe("suggest");
+    expect(presetOf({ ...withPreset(DEFAULT_OVERSIGHT, "full"), act: { ...ACT_SWITCHES } })).toBe("full");
   });
 
   it("keeps repos, workflows and budget", () => {
     const o = at({ full: { anywhere: false, repos: ["acme/acme-web"], workflows: ["deploy.yml"], budgetUsdPerDay: 25 } });
-    expect(withPreset(o, "full").full).toEqual({ anywhere: false, repos: ["acme/acme-web"], workflows: ["deploy.yml"], budgetUsdPerDay: 25 });
+    expect(withPreset(o, "act").full).toEqual({ anywhere: false, repos: ["acme/acme-web"], workflows: ["deploy.yml"], budgetUsdPerDay: 25 });
+    expect(withPreset(o, "full").full).toEqual({ anywhere: true, repos: ["acme/acme-web"], workflows: ["deploy.yml"], budgetUsdPerDay: 25 });
   });
 });
 
@@ -103,17 +111,16 @@ describe("Act fully's suggestions", () => {
 
 describe("why a level isn't in force", () => {
   const full = withPreset(DEFAULT_OVERSIGHT, "full");
-  it("names what's missing first, then Unbound's switches, then today's spend", () => {
-    expect(causeOf(full, false, null)).toEqual({ kind: "needs", missing: ["repos"] });
+  it("needs no repos or switches: only today's spend holds it", () => {
+    expect(causeOf(full, false, null)).toBeNull();
     const ready = { ...full, full: { ...full.full, repos: ["acme/a"], budgetUsdPerDay: 20 } };
-    expect(fullMissing(ready)).toEqual([]);
     expect(causeOf(ready, false, null)).toBeNull();
     expect(causeOf(ready, true, null)).toEqual({ kind: "unread" });
     expect(causeOf(ready, true, view([row(25, ["key"])]))).toEqual({ kind: "spent", spentUsd: 25, budgetUsd: 20 });
     // An older hub counts plans' calls too: that reaching it is said.
     expect(causeOf(ready, true, view([row(5, ["key"]), row(30, ["plan"])]))).toEqual({ kind: "spent", spentUsd: 35, budgetUsd: 20 });
-    const anywhere = { ...withPreset(DEFAULT_OVERSIGHT, "unbound"), act: { ...ACT_SWITCHES } };
-    expect(causeOf(anywhere, false, null)).toEqual({ kind: "switches" });
+    // Its switches short of every one: still in force.
+    expect(causeOf({ ...full, act: { ...ACT_SWITCHES } }, false, null)).toBeNull();
     expect(causeOf(withPreset(DEFAULT_OVERSIGHT, "act"), true, null)).toBeNull();
     expect(spentToday(view([row(5, ["key"]), row(30, ["plan"])]))).toEqual({ metered: 5, all: 35 });
     // The hub's own count of real money wins: plans never reach it.
@@ -121,8 +128,6 @@ describe("why a level isn't in force", () => {
     expect(causeOf(ready, true, plans, { spentUsd: 5, budgetUsd: 20, spent: false })).toEqual({ kind: "unread" });
     expect(causeOf(ready, false, plans, { spentUsd: 5, budgetUsd: 20, spent: false })).toBeNull();
     expect(causeOf(ready, true, null, { spentUsd: 21, budgetUsd: 20, spent: true })).toEqual({ kind: "spent", spentUsd: 21, budgetUsd: 20 });
-    // No budget: nothing it spends holds it.
-    expect(fullMissing({ ...full, full: { ...full.full, repos: ["acme/a"], budgetUsdPerDay: null } })).toEqual([]);
   });
 
   it("raises a spent budget with room for today", () => {

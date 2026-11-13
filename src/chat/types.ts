@@ -219,6 +219,8 @@ export type DeliveryKind =
   | "plan"
   /** A boss's update on its crew. */
   | "update"
+  /** A boss's catch-up on your return. */
+  | "away"
   | "other";
 
 export type DeskPlace =

@@ -4,6 +4,7 @@
 // on its monitor (closed while that monitor is away, reopened when it's
 // back).
 
+import { setSectionOpen } from "../shell/SideSection";
 import { emit, emitTo } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useEffect } from "react";
@@ -225,6 +226,8 @@ export const revealIn = (gridId: string, content: PaneContent): boolean => {
   // A session card open on top would hide it.
   if (desk.openId) desk.open(null);
   desk.setView("grids");
+  // Its row shows in the sidebar.
+  setSectionOpen("grids", true);
   return true;
 };
 

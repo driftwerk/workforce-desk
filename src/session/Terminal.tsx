@@ -13,7 +13,7 @@ import type { DeskSocket } from "../hub/transport";
 import { openTerminalLink } from "../platform";
 import { useFocusRequest } from "../shell/focus";
 import { useSettings } from "../settings/store";
-import { matches, scopeOf, terminalKeys, type ShortcutId } from "../shortcuts/keys";
+import { desksInTerminal, matches } from "../shortcuts/keys";
 import { useTheme } from "../theme/store";
 import { monoStack } from "../theme/tokens";
 import { minimumContrast, xtermTheme } from "../theme/xterm";
@@ -211,7 +211,7 @@ export function Terminal({
     // letter stays the shell's on Windows and Linux.
     x.attachCustomKeyEventHandler((e) => {
       const keys = useSettings.getState().keys;
-      const desks = (Object.keys(keys) as ShortcutId[]).some((id) => scopeOf(id) === "app" && matches(e, terminalKeys(keys[id])));
+      const desks = desksInTerminal(keys).some((k) => matches(e, k));
       if (!desks && e.type === "keydown") viewer.claim();
       return !desks;
     });

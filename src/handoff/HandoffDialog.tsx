@@ -423,8 +423,12 @@ function HandoffDialogFor({ ask, session, onClose }: { ask: HandoffAsk; session:
           <section className="move-field" aria-label="What it gets">
             <h2 className="move-legend">{back ? `What ${backName} gets` : `What ${targetTitle} gets`}</h2>
             {loading && !preview ? (
-              <p className="faint small" role="status">
-                Desk is reading what this session did so far; this can take up to a minute…
+              <p className="handoff-reading" role="status">
+                <span className="handoff-spinner" aria-hidden="true" />
+                <span>
+                  Reading what this session did so far…
+                  <span className="faint small handoff-reading-sub">This can take up to a minute.</span>
+                </span>
               </p>
             ) : problem ? (
               <>
