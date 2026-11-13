@@ -73,6 +73,7 @@ import type {
   SessionMemory,
   Preference,
   PreferencePatch,
+  NewPreference,
 } from "./types";
 import { pairedHub, type HubRef } from "./net";
 import type { Body, DeskSocket, DeskTransport } from "./transport";
@@ -771,6 +772,8 @@ export class DeskHub {
   /** Your preferences for the bosses, active and paused, by boss then
    *  oldest first. */
   preferences = (): Promise<Preference[]> => this.desk("GET", "/api/desk/preferences");
+  /** Keeps a new preference: an "Always" to what the boss asked. */
+  prefer = (p: NewPreference): Promise<Preference> => this.desk("POST", "/api/desk/preferences", p);
   /** Changes a preference's case, what to do, or where it holds. */
   changePreference = (id: string, patch: PreferencePatch): Promise<Preference> =>
     this.desk("PATCH", `/api/desk/preferences/${encodeURIComponent(id)}`, patch);

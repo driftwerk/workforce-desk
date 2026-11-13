@@ -691,6 +691,11 @@
   },
   {
     "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/preferences"
+  },
+  {
+    "kind": "http",
     "method": "PATCH",
     "path": "/api/desk/preferences/p1"
   },

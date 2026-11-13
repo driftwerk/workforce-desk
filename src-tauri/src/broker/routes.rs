@@ -238,6 +238,7 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/presence"),
     // Your preferences for the bosses.
     route("GET", "/api/desk/preferences"),
+    route("POST", "/api/desk/preferences"),
     route("PATCH", "/api/desk/preferences/{}"),
     route("POST", "/api/desk/preferences/{}/pause"),
     route("POST", "/api/desk/preferences/{}/resume"),
