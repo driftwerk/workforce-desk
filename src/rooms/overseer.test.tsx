@@ -644,6 +644,29 @@ describe("always, or just this time (H10)", () => {
     expect(asked.some((a) => a.path === "/api/desk/preferences")).toBe(false);
   });
 
+  it("offers Always on what an update lays out too", async () => {
+    const update: DeskExtras = {
+      update: {
+        needsYou: [
+          {
+            itemId: "g4",
+            question: "web wants to merge with CI red. Let it?",
+            items: [],
+            recommendation: null,
+            options: [{ label: "Make it wait for green", recommended: true }, { label: "Let it merge", recommended: false }],
+            notBlocking: null,
+            age: "2 min",
+            generalizes: "When a session wants to merge with CI red",
+          },
+        ],
+      },
+    };
+    show(said("Update.", update, "update"));
+    fireEvent.click(screen.getByRole("button", { name: "Make it wait for green" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Always" }));
+    await waitFor(() => expect(asked.at(-1)?.path).toBe("/api/desk/items/g4/always"));
+  });
+
   it("keeps nothing for just this time, and offers nothing for an ask that settles no kind of case", async () => {
     show(said("**Needs you.** web wants to merge with CI red. Let it?", ask("g2", "a session wants to merge with CI red"), "question"));
     fireEvent.click(screen.getByRole("button", { name: "Let it merge" }));

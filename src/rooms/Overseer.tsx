@@ -548,6 +548,7 @@ function Laid({ n, holdingUp }: { n: NeedsYou; holdingUp?: string | null }) {
       items={n.items}
       recommendation={n.recommendation}
       options={n.options}
+      generalizes={n.generalizes}
       told
       notes={[n.notBlocking, holdingUp]}
     />
@@ -748,7 +749,7 @@ function Always({ id, when, then }: { id: string; when: string; then: string }) 
       setSaid(`${r.done} It’s in the boss’s settings, to change or forget.`);
     } catch (e) {
       // Dropped or gone since: nothing left to keep.
-      if (e instanceof HubError && e.status === 404) setSaid("Already settled.");
+      if (e instanceof HubError && (e.status === 404 || e.status === 409)) setSaid("Already settled.");
       else setProblem(plainError(e));
     }
     setBusy(false);

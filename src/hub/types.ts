@@ -1083,6 +1083,9 @@ export interface NeedsYou {
   /** What carries on meanwhile. */
   notBlocking: string | null;
   age: string;
+  /** The kind of case an answer would settle from then on: the chat
+   *  offers "Always" with it. */
+  generalizes?: string | null;
 }
 
 /** A boss's update: each session that moved, what it decided, what it
