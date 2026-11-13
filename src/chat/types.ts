@@ -205,7 +205,21 @@ export const FEATURES = {
   roster: "desk.roster",
 } as const;
 
-export type DeliveryKind = "reminder" | "job" | "workflow" | "check_in" | "approval" | "file" | "resumed" | "notice" | "plan" | "other";
+export type DeliveryKind =
+  | "reminder"
+  | "job"
+  | "workflow"
+  | "check_in"
+  | "approval"
+  | "file"
+  | "resumed"
+  | "notice"
+  /** What a boss asks of you: a session's question, or its own. */
+  | "question"
+  | "plan"
+  /** A boss's update on its crew. */
+  | "update"
+  | "other";
 
 export type DeskPlace =
   | { kind: "dm"; thread?: string }

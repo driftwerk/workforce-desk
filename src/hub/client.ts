@@ -763,6 +763,14 @@ export class DeskHub {
   /** Does what the overseer suggested, as you. */
   acceptSuggestion = (id: string): Promise<unknown> => this.desk("POST", `/api/desk/suggestions/${encodeURIComponent(id)}/accept`);
   dismissSuggestion = (id: string): Promise<unknown> => this.desk("POST", `/api/desk/suggestions/${encodeURIComponent(id)}/dismiss`);
+  /** Undoes one of the boss's decisions, as you: what was done. */
+  undoDecision = (id: string): Promise<{ done: string }> => this.desk("POST", `/api/desk/decisions/${encodeURIComponent(id)}/undo`);
+  /** Answers what the boss asked you, from its buttons: settled on the hub
+   *  in this request, and sent on to whoever asked. */
+  answerItem = (id: string, answer: string): Promise<{ done: string }> =>
+    this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/answer`, { answer });
+  /** Drops what the boss asked you, unanswered. */
+  dropItem = (id: string): Promise<{ done: string }> => this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/drop`);
 
   rooms = (): Promise<Room[]> => this.call("GET", "/api/desk/rooms");
   /** `shareWith`: the hubs the person said its conversation may go to,

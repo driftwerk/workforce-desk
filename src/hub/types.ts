@@ -965,6 +965,79 @@ export interface DeskExtras {
   /** The boss's plan a plan card shows, as of the revision it was posted
    *  for. */
   plan?: { id: string; revision: number };
+  /** What the boss decided, each with its Undo where it has one. */
+  decisions?: DecisionLine[];
+  /** What the boss asks of you (needs you, still waiting), with its
+   *  answers. */
+  item?: MentionedItem;
+  /** A boss's update, shown in place of its text. */
+  update?: MentionedUpdate;
+}
+
+/** A decision of the boss's, said as its row says it. */
+export interface DecisionLine {
+  id: string;
+  /** What it did ("told it to wait for green CI"). */
+  text: string;
+  /** Why, as said to you. */
+  why?: string;
+  /** The button that undoes it; none when it can't be undone. */
+  undo?: "undo" | "correct" | "stop" | "resume" | null;
+  undone?: boolean;
+  /** The preference it applied, by id. */
+  preference?: string | null;
+}
+
+/** Something the boss asks of you, as its message carries it. */
+export interface MentionedItem {
+  itemId: string;
+  recommendation?: string | null;
+  options?: string[];
+  /** The kind of case your answer would settle from then on. */
+  generalizes?: string | null;
+  /** Set aside after it was said three times: still answered or dropped
+   *  from here. */
+  parked?: boolean;
+}
+
+/** A PR, ticket, commit or deploy a session's work names. */
+export interface WorkRef {
+  kind: "pr" | "ticket" | "commit" | "deploy" | (string & {});
+  id: string;
+  url?: string | null;
+}
+
+/** A session as an update tells of it. */
+export interface UpdateSession {
+  sessionId: string;
+  name: string;
+  /** What it's for. */
+  purpose?: string;
+  text: string;
+  refs?: WorkRef[];
+}
+
+/** What still waits on you, as an update lists it. */
+export interface WaitingItem {
+  itemId: string;
+  text: string;
+  /** How long it has waited, in words ("40 min"). */
+  age?: string;
+  holdingUp?: string | null;
+  recommendation?: string | null;
+  options?: string[];
+}
+
+/** A boss's update: each session that moved, what it decided, what it
+ *  kept for you, and what still waits. */
+export interface MentionedUpdate {
+  sessions?: UpdateSession[];
+  decisions?: DecisionLine[];
+  /** Your orders done and its promises kept, said as they were closed. */
+  kept?: string[];
+  waiting?: WaitingItem[];
+  /** The day's cheap calls, near the ceiling. */
+  footer?: string | null;
 }
 
 /** A session's question on its line, as the overseer's DM shows it. */
