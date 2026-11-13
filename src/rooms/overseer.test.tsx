@@ -610,3 +610,47 @@ describe("an update the hub lays out (#280)", () => {
     expect(screen.queryAllByRole("button", { name: /^Undo/ })).toHaveLength(0);
   });
 });
+
+describe("always, or just this time (H10)", () => {
+  const ask = (itemId: string, generalizes?: string): DeskExtras => ({
+    item: {
+      itemId,
+      question: "web wants to merge with CI red. Let it?",
+      options: [
+        { label: "Make it wait for green", recommended: true },
+        { label: "Let it merge", recommended: false },
+      ],
+      generalizes,
+      preferScope: "repo:acme/web",
+    },
+  });
+
+  it("offers Always once answered, and keeps it as a preference from the item", async () => {
+    show(said("**Needs you.** web wants to merge with CI red. Let it?", ask("g1", "When a session wants to merge with CI red"), "question"));
+    expect(screen.queryByRole("button", { name: "Always" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Make it wait for green" }));
+    expect(await screen.findByText("Always do this when a session wants to merge with CI red?")).toBeTruthy();
+    answer = () => ok({ id: "p1", state: "active" });
+    fireEvent.click(screen.getByRole("button", { name: "Always" }));
+    expect(await screen.findByText(/^Kept: when a session wants to merge with CI red, make it wait for green\./)).toBeTruthy();
+    expect(asked.at(-1)).toEqual({
+      method: "POST",
+      path: "/api/desk/preferences",
+      body: { whenText: "a session wants to merge with CI red", thenText: "Make it wait for green", scope: "repo:acme/web", fromItem: "g1" },
+    });
+  });
+
+  it("keeps nothing for just this time, and offers nothing for an ask that settles no kind of case", async () => {
+    show(said("**Needs you.** web wants to merge with CI red. Let it?", ask("g2", "a session wants to merge with CI red"), "question"));
+    fireEvent.click(screen.getByRole("button", { name: "Let it merge" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Just this time" }));
+    expect(screen.getByText("Just this time.")).toBeTruthy();
+    expect(asked.filter((a) => a.path === "/api/desk/preferences")).toHaveLength(0);
+    cleanup();
+
+    show(said("**Needs you.** web wants to merge with CI red. Let it?", ask("g3"), "question"));
+    fireEvent.click(screen.getByRole("button", { name: "Let it merge" }));
+    await screen.findByText("You answered: Let it merge");
+    expect(screen.queryByRole("button", { name: "Always" })).toBeNull();
+  });
+});

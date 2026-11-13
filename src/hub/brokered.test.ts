@@ -167,6 +167,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   dmTyping: (h) => h.dmTyping("desk"),
   presence: (h) => h.presence(true, "desk"),
   preferences: (h) => h.preferences(),
+  prefer: (h) => h.prefer({ whenText: "a session wants to merge with CI red", thenText: "make it wait", fromItem: "i1" }),
   changePreference: (h) => h.changePreference("p1", { thenText: "Wait for green" }),
   setPreference: (h) => h.setPreference("p1", "pause"),
   rooms: (h) => h.rooms(),

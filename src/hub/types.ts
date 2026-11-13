@@ -1013,6 +1013,8 @@ export interface MentionedItem {
   notBlocking?: string | null;
   /** The kind of case your answer would settle from then on. */
   generalizes?: string | null;
+  /** Where an "Always" for it would hold. */
+  preferScope?: PreferenceScope | null;
   /** Set aside after it was said three times: still answered or dropped
    *  from here. */
   parked?: boolean;
@@ -1107,6 +1109,16 @@ export interface Preference {
   lastAppliedAt: string | null;
   overruledCount: number;
   state: "active" | "paused" | "retired";
+}
+
+/** A preference you make: from an "Always" to what the boss asked. */
+export interface NewPreference {
+  whenText: string;
+  thenText: string;
+  scope?: PreferenceScope;
+  /** The item the "Always" was said to. */
+  fromItem?: string;
+  bossScope?: string;
 }
 
 export interface PreferencePatch {

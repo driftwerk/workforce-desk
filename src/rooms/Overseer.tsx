@@ -12,6 +12,7 @@ import type {
   SessionState,
   UpdateSession,
   NeedsYou,
+  PreferenceScope,
   WaitingItem,
   WorkRef,
 } from "../hub/types";
@@ -463,6 +464,8 @@ function Needs({
   options,
   parked,
   notes,
+  generalizes,
+  preferScope,
 }: {
   id: string;
   age?: string | null;
@@ -472,6 +475,8 @@ function Needs({
   recommendation?: string | null;
   options: readonly AnswerOption[];
   parked?: boolean;
+  generalizes?: string | null;
+  preferScope?: PreferenceScope | null;
   /** Faint lines last: what isn't held up, what it holds up, the boss's
    *  notes. */
   notes: readonly (string | null | undefined)[];
@@ -489,7 +494,15 @@ function Needs({
           <span className="needs-rec">I'd say:</span> {recommendation}
         </p>
       )}
-      <Answers id={id} label={question} options={options} recommendation={recommendation} parked={parked} />
+      <Answers
+        id={id}
+        label={question}
+        options={options}
+        recommendation={recommendation}
+        parked={parked}
+        generalizes={generalizes}
+        preferScope={preferScope}
+      />
       {notes
         .filter((n): n is string => !!n?.trim())
         .map((n, i) => (
@@ -569,6 +582,8 @@ function NeedsYouPost({ item, content }: { item: MentionedItem; content: string 
         recommendation={item.recommendation || post.recommendation}
         options={item.options ?? []}
         parked={item.parked}
+        generalizes={item.generalizes}
+        preferScope={item.preferScope}
         notes={[item.notBlocking, post.holdingUp, ...post.notes]}
       />
     </div>
@@ -581,6 +596,10 @@ function NeedsYouPost({ item, content }: { item: MentionedItem; content: string 
 const undoneHere = new Map<string, string>();
 const settledHere = new Map<string, string>();
 const heldHere = new Set<string>();
+/** Answers that offer "Always", by item: the answer given. */
+const offerHere = new Map<string, string>();
+/** What came of an "Always" or "Just this time", by item. */
+const alwaysHere = new Map<string, string>();
 
 /** The answers to what the boss asked: settled on the hub when pressed,
  *  the recommended one filled amber, the rest outlined, and Hold, which
@@ -591,6 +610,8 @@ function Answers({
   options,
   recommendation,
   parked,
+  generalizes,
+  preferScope,
 }: {
   id: string;
   /** What it answers, for a screen reader: an update may hold several. */
@@ -598,8 +619,13 @@ function Answers({
   options: readonly AnswerOption[];
   recommendation?: string | null;
   parked?: boolean;
+  /** The kind of case an answer would settle from then on: offered as
+   *  "Always" once it's answered. */
+  generalizes?: string | null;
+  preferScope?: PreferenceScope | null;
 }) {
   const connected = useDesk((s) => !!s.hub);
+  const [offer, setOfferHere] = useState<string | null>(offerHere.get(id) ?? null);
   const [busy, setBusy] = useState<string | null>(null);
   const [held, setHeldHere] = useState(heldHere.has(id));
   const setHeld = (on: boolean) => {
@@ -617,9 +643,12 @@ function Answers({
   if (!options.length && !parked) return <p className="faint small">Answer in this chat.</p>;
   if (settled)
     return (
-      <p className="faint small" role="status">
-        {settled}
-      </p>
+      <>
+        <p className="faint small" role="status">
+          {settled}
+        </p>
+        {offer && generalizes && <Always id={id} when={generalizes} then={offer} scope={preferScope} />}
+      </>
     );
   if (held)
     return (
@@ -630,11 +659,15 @@ function Answers({
         </button>
       </p>
     );
-  const act = async (what: string, run: () => Promise<unknown>, said: string) => {
+  const act = async (what: string, run: () => Promise<unknown>, said: string, answer?: string) => {
     setBusy(what);
     setProblem(null);
     try {
       await run();
+      if (answer && generalizes?.trim()) {
+        offerHere.set(id, answer);
+        setOfferHere(answer);
+      }
       setSettled(said);
     } catch (e) {
       if (e instanceof HubError && (e.status === 404 || e.status === 409)) setSettled("Already settled.");
@@ -653,7 +686,7 @@ function Answers({
             type="button"
             className={`btn btn-sm${o.recommended ? " btn-blocked" : ""}`}
             disabled={busy !== null || !connected}
-            onClick={() => void act(o.label, () => hub()!.answerItem(id, o.label), `You answered: ${o.label}`)}
+            onClick={() => void act(o.label, () => hub()!.answerItem(id, o.label), `You answered: ${o.label}`, o.label)}
           >
             {o.label}
           </button>
@@ -681,6 +714,53 @@ function Answers({
         </p>
       )}
     </>
+  );
+}
+
+/** After an answer: "Always do this when …? Always · Just this time".
+ *  Always keeps it as a preference, listed in the boss's settings. */
+function Always({ id, when, then, scope }: { id: string; when: string; then: string; scope?: PreferenceScope | null }) {
+  const connected = useDesk((s) => !!s.hub);
+  const [said, setSaidHere] = useState<string | null>(alwaysHere.get(id) ?? null);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const setSaid = (s: string) => {
+    alwaysHere.set(id, s);
+    offerHere.delete(id);
+    setSaidHere(s);
+  };
+  const plainWhen = when.trim().replace(/^(when(ever)?|if)\s+/i, "").replace(/[.?:,]+$/, "");
+  if (said) return <p className="faint small">{said}</p>;
+  const always = async () => {
+    const hub = useDesk.getState().hub;
+    if (!hub) return;
+    setBusy(true);
+    setProblem(null);
+    try {
+      await hub.prefer({ whenText: plainWhen, thenText: then, scope: scope ?? undefined, fromItem: id });
+      setSaid(`Kept: when ${plainWhen}, ${then.charAt(0).toLowerCase()}${then.slice(1)}. It’s in the boss’s settings, to change or forget.`);
+    } catch (e) {
+      setProblem(plainError(e));
+    }
+    setBusy(false);
+  };
+  return (
+    <p className="small" role="group" aria-label="Always or just this time">
+      <span className="muted">Always do this when {plainWhen}?</span>{" "}
+      <button type="button" className="link dec-undo" disabled={busy || !connected} onClick={() => void always()}>
+        Always
+      </button>
+      <span className="faint"> · </span>
+      <button type="button" className="link" disabled={busy} onClick={() => setSaid("Just this time.")}>
+        Just this time
+      </button>
+      {problem && (
+        <span className="state-blocked" role="alert">
+          {" "}
+          {problem}
+        </span>
+      )}
+    </p>
   );
 }
 
