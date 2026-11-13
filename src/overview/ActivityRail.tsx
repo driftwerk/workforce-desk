@@ -22,6 +22,7 @@ import { placeLabel } from "../floor/target";
 import { openTarget } from "../shell/navigate";
 import { EventTicketChip } from "../board/TicketChip";
 import { useOverview } from "./store";
+import { useSubHeading } from "../floor/FloorShell";
 
 /** "allowed by you 16:31", "no longer waiting". */
 const resolvedText = (state: Extract<NeedState, { open: false }>): string => (state.at ? `${state.how} ${clock(state.at)}` : state.how);
@@ -136,6 +137,7 @@ export function ActivityRail({
   onClose: () => void;
   closeRef?: Ref<HTMLButtonElement>;
 }) {
+  const H = useSubHeading();
   const [filter, setFilter] = useState<ActivityFilter>("all");
   const [groupPicked, setGroup] = useState<string | null>(null);
   const group = sections && groupPicked && sections.some((s) => s.id === groupPicked) ? groupPicked : null;
@@ -248,9 +250,9 @@ export function ActivityRail({
     <aside className="activity" aria-labelledby="activity-head">
       <div className="activity-head">
         <div className="activity-title">
-          <h2 id="activity-head" className="display">
+          <H id="activity-head" className="display">
             Activity
-          </h2>
+          </H>
           <Marks badge={floorBadge} />
           <button ref={closeRef} type="button" className="icon-btn-sm" aria-label="Close Activity" title="Close (it waits on the right)" onClick={onClose}>
             <svg width="13" height="13" viewBox="0 0 14 14" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">

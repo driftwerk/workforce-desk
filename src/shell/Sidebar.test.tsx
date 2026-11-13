@@ -17,6 +17,9 @@ import { useBoardOrder } from "../board/order";
 import { ACME, ticket } from "../board/testing";
 import { useUi } from "./ui";
 import { servePictures } from "../pictures/testing";
+import { useFloor } from "../floor/store";
+import { agent, need, ready, session as asker, view as floorView } from "../floor/testing";
+import type { Session } from "../hub/types";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
@@ -104,9 +107,9 @@ describe("Sidebar", () => {
     useBoard.setState({ boards: { [ACME.id]: ACME, [GLOBEX.id]: GLOBEX }, supported: true, shown: null });
     sidebar();
     const boards = screen.getByRole("region", { name: "Boards" });
-    // In the middle with Rooms and Groups, between them; no row at the top.
+    // In the middle with Grids, Rooms and Groups, after Rooms; no row at the top.
     const regions = [...document.querySelectorAll(".side-scroll > [role=region]")].map((r) => r.getAttribute("aria-label"));
-    expect(regions).toEqual(["Rooms", "Boards", "Groups"]);
+    expect(regions).toEqual(["Grids", "Rooms", "Boards", "Groups"]);
     expect(within(document.querySelector<HTMLElement>(".side-top")!).queryByRole("button", { name: /^Board/ })).toBeNull();
     // The same + as Rooms' and Groups'.
     const plus = within(boards).getByRole("button", { name: "New board" });
@@ -255,13 +258,16 @@ describe("Sidebar", () => {
     expect(screen.getByRole("button", { name: /^Settings/ }).textContent).toBe("Settings ⌃⌥,");
   });
 
-  it("keeps Ask anyone and the views at the top, the actions, voice and look at the bottom, and scrolls the rest", () => {
+  it("keeps Ask anyone and the Dashboard at the top, the actions, voice and look at the bottom, and scrolls the rest", () => {
     const { container } = sidebar();
     const top = container.querySelector(".side-top")!;
     const middle = container.querySelector(".side-scroll")!;
     const foot = container.querySelector(".side-foot")!;
     expect(within(top as HTMLElement).getByRole("button", { name: /Ask anyone/ })).toBeTruthy();
-    expect(within(top as HTMLElement).getByRole("tablist", { name: "View" })).toBeTruthy();
+    expect(within(top as HTMLElement).getByRole("button", { name: /^Dashboard/ })).toBeTruthy();
+    // No tabs: one sidebar, whatever the main area shows.
+    expect(container.querySelector("[role=tablist]")).toBeNull();
+    expect(within(middle as HTMLElement).getByRole("region", { name: "Grids" })).toBeTruthy();
     expect(within(middle as HTMLElement).getByRole("region", { name: "Rooms" })).toBeTruthy();
     expect(within(middle as HTMLElement).getByRole("region", { name: "Groups" })).toBeTruthy();
     const actions = within(foot as HTMLElement).getAllByRole("button").filter((b) => b.classList.contains("side-btn"));
@@ -403,6 +409,212 @@ describe("grids in the sidebar", () => {
   });
 });
 
+describe("the Dashboard in the sidebar", () => {
+  const dash = () => screen.getByRole("button", { name: /^Dashboard/ });
+  afterEach(() => useFloor.setState({ hubs: {} }));
+
+  it("opens the Dashboard, lit while it shows, and counts what needs you in amber", () => {
+    useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "", local: true, revision: "" }] });
+    useFloor.setState({ hubs: { local: ready(floorView({ needs: [need("q-1", agent("scout")), need("q-2", asker("s9"))] })) } });
+    useDesk.setState({ view: "rooms", inbox: false });
+    useUi.setState({ settings: "appearance" });
+    sidebar();
+    expect(dash().getAttribute("aria-current")).toBeNull();
+    const badge = dash().querySelector(".badge")!;
+    expect(badge.classList.contains("badge-needs")).toBe(true);
+    expect(within(dash()).getByText("2 need you")).toBeTruthy();
+    fireEvent.click(dash());
+    expect(useDesk.getState().view).toBe("floor");
+    expect(useUi.getState().settings).toBeNull();
+    expect(dash().getAttribute("aria-current")).toBe("page");
+    expect(dash().classList.contains("on")).toBe(true);
+  });
+
+  it("has no badge while nothing needs you", () => {
+    sidebar();
+    expect(dash().querySelector(".badge")).toBeNull();
+  });
+});
+
+describe("grid rows", () => {
+  const gridRow = (name: string) => within(screen.getByRole("list", { name: "Grids" })).getAllByRole("button").find((b) => b.querySelector(".gi-name")?.textContent === name)!;
+  const s = (id: string, state: Session["state"]): Session =>
+    ({ id, engine: "claude", name: id, goal: "", cwd: "/tmp", state, live: true, createdAt: "", updatedAt: "" }) as Session;
+  const show = (gridId: string, sessions: string[]) =>
+    act(() => {
+      const g = useGrids.getState().grids[gridId]!;
+      const panes = sessions.map((id, i) => ({ id: `p-${gridId}-${i}`, content: { kind: "session" as const, sessionId: id }, rect: { x: i, y: 0, w: 1, h: 1 } }));
+      useGrids.setState((st) => ({ grids: { ...st.grids, [gridId]: { ...g, panes } } }));
+    });
+
+  it("say what their panes are doing, with a dot to match: needs you, working, or quiet", () => {
+    let two = "";
+    let three = "";
+    act(() => {
+      two = createGrid();
+      three = createGrid();
+    });
+    useDesk.setState({ sessions: { a: s("a", "blocked"), b: s("b", "working"), c: s("c", "working"), d: s("d", "working") } });
+    show(MAIN_GRID, ["a", "b"]);
+    show(two, ["b", "c", "d"]);
+    show(three, []);
+    sidebar();
+    const meta = (name: string) => gridRow(name).querySelector(".gi-meta")!;
+    const dot = (name: string) => gridRow(name).querySelector(".dot")!.className;
+    expect(meta("Main").textContent).toBe("1 needs you");
+    expect(meta("Main").classList.contains("state-blocked")).toBe(true);
+    expect(dot("Main")).toContain("dot-blocked");
+    expect(meta("Grid 2").textContent).toBe("3 working");
+    expect(dot("Grid 2")).toContain("dot-working");
+    expect(meta("Grid 3").textContent).toBe("quiet");
+    expect(dot("Grid 3")).toContain("dot-idle");
+    // As it changes, its row says so.
+    act(() => useDesk.setState((d) => ({ sessions: { ...d.sessions, a: s("a", "working") } })));
+    expect(meta("Main").textContent).toBe("2 working");
+  });
+
+  it("lights the shown grid only while a grid shows, as a room's row is lit only in Rooms", () => {
+    useDesk.setState({ view: "floor" });
+    sidebar();
+    expect(gridRow("Main").getAttribute("aria-current")).toBeNull();
+    // Picked from the Dashboard, it shows, and its row is lit.
+    fireEvent.click(gridRow("Main"));
+    expect(useDesk.getState().view).toBe("grids");
+    expect(gridRow("Main").getAttribute("aria-current")).toBe("true");
+    act(() => useDesk.setState({ view: "rooms" }));
+    expect(gridRow("Main").getAttribute("aria-current")).toBeNull();
+  });
+
+  it("shows a new grid from its +, from wherever you were", () => {
+    useDesk.setState({ view: "floor" });
+    sidebar();
+    fireEvent.click(screen.getByRole("button", { name: "New grid" }));
+    expect(useDesk.getState().view).toBe("grids");
+    expect(gridRow("Grid 2").getAttribute("aria-current")).toBe("true");
+  });
+
+  it("says where a grid in its own window is, and when it's away", () => {
+    act(() => {
+      const g = useGrids.getState().grids[MAIN_GRID]!;
+      useGrids.setState({ grids: { [MAIN_GRID]: { ...g, placement: { kind: "window", mode: "fill", monitor: { id: "m", name: "Studio Display", origin: { x: 0, y: 0 } } as never } } }, open: { [MAIN_GRID]: true } });
+    });
+    sidebar();
+    expect(gridRow("Main").querySelector(".gi-meta")!.textContent).toBe("quiet");
+    expect(gridRow("Main").title).toMatch(/^In Studio Display\. /);
+    act(() => useGrids.setState({ open: {} }));
+    expect(gridRow("Main").querySelector(".gi-meta")!.textContent).toBe("quiet · away");
+  });
+
+  it("shows a grid from the Dashboard: an away one brought back, one in its own window brought forward", async () => {
+    const windows = await import("../grids/windows");
+    const forward = vi.spyOn(windows, "focusGridWindow").mockResolvedValue();
+    const place = (open: boolean) =>
+      act(() => {
+        const g = useGrids.getState().grids[MAIN_GRID]!;
+        useGrids.setState({ grids: { [MAIN_GRID]: { ...g, placement: { kind: "window", mode: "fill", monitor: { id: "m", name: "Studio Display", origin: { x: 0, y: 0 } } as never } } }, open: open ? { [MAIN_GRID]: true } : {} });
+      });
+    place(true);
+    useDesk.setState({ view: "rooms" });
+    sidebar();
+    fireEvent.click(gridRow("Main"));
+    expect(forward).toHaveBeenCalledWith(MAIN_GRID);
+    expect(useDesk.getState().view).toBe("rooms");
+    // Away: shown here, from wherever you were.
+    place(false);
+    act(() => useDesk.setState({ view: "floor" }));
+    fireEvent.click(gridRow("Main"));
+    expect(useGrids.getState().grids[MAIN_GRID]!.placement.kind).toBe("main");
+    expect(useDesk.getState().view).toBe("grids");
+    // Moved back from its menu, from the Dashboard, it shows.
+    place(false);
+    act(() => useDesk.setState({ view: "floor" }));
+    fireEvent.click(screen.getByRole("button", { name: "Main options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move back to the main window" }));
+    expect(useDesk.getState().view).toBe("grids");
+    forward.mockRestore();
+  });
+
+  it("says nothing of no grids until it knows", () => {
+    useGrids.setState({ ready: false, order: [], grids: {} });
+    sidebar();
+    expect(within(screen.getByRole("region", { name: "Grids" })).queryByText("No grids yet")).toBeNull();
+    act(() => useGrids.setState({ ready: true }));
+    expect(within(screen.getByRole("region", { name: "Grids" })).getByText("No grids yet")).toBeTruthy();
+  });
+
+  it("folds, remembered, and folded still says what waits on you in its grids, each thing once", () => {
+    useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "", local: true, revision: "" }] });
+    let two = "";
+    act(() => void (two = createGrid()));
+    useDesk.setState({ sessions: { a: s("a", "blocked"), b: s("b", "asking"), c: s("c", "working") } });
+    show(MAIN_GRID, ["a", "c"]);
+    show(two, ["b"]);
+    // a waits on you twice over (blocked, and a need on the Floor): once.
+    useFloor.setState({ hubs: { local: ready(floorView({ needs: [need("q-1", asker("a"))] })) } });
+    sidebar();
+    const toggle = within(screen.getByRole("region", { name: "Grids" })).getByRole("button", { name: /^Grids/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(gridRow("Main").querySelector(".gi-meta")!.textContent).toBe("1 needs you");
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByRole("list", { name: "Grids" })).toBeNull();
+    expect(within(toggle).getByText("2 need you")).toBeTruthy();
+    expect(JSON.parse(localStorage.getItem(SECTIONS_KEY)!)).toEqual({ grids: true });
+    cleanup();
+    reloadSections();
+    sidebar();
+    expect(screen.queryByRole("list", { name: "Grids" })).toBeNull();
+    useFloor.setState({ hubs: {} });
+  });
+
+  it("opens a folded Grids when a grid is shown from elsewhere", async () => {
+    const { revealIn } = await import("../grids/windows");
+    useDesk.setState({ sessions: { a: s("a", "working") } });
+    show(MAIN_GRID, ["a"]);
+    useDesk.setState({ view: "floor" });
+    sidebar();
+    fireEvent.click(within(screen.getByRole("region", { name: "Grids" })).getByRole("button", { name: /^Grids/ }));
+    expect(screen.queryByRole("list", { name: "Grids" })).toBeNull();
+    act(() => void revealIn(MAIN_GRID, { kind: "session", sessionId: "a" }));
+    expect(useDesk.getState().view).toBe("grids");
+    expect(gridRow("Main").getAttribute("aria-current")).toBe("true");
+  });
+
+  it("unfolds Grids to show a grid made from its + while folded", () => {
+    sidebar();
+    fireEvent.click(within(screen.getByRole("region", { name: "Grids" })).getByRole("button", { name: /^Grids/ }));
+    fireEvent.click(screen.getByRole("button", { name: "New grid" }));
+    expect(gridRow("Grid 2").getAttribute("aria-current")).toBe("true");
+  });
+
+  it("stays folded when Desk starts on a grid, as it was left", () => {
+    localStorage.setItem(SECTIONS_KEY, JSON.stringify({ grids: true }));
+    reloadSections();
+    useDesk.setState({ view: "grids" });
+    sidebar();
+    act(() => useGrids.setState({ active: MAIN_GRID }));
+    expect(screen.queryByRole("list", { name: "Grids" })).toBeNull();
+  });
+
+  it("counts a session once however many panes show it, a machine's in its terminal too", () => {
+    const remote = (state: Session["state"]) =>
+      ({ ...s("t1", state), machine: "mac2", terminalId: "term1" }) as Session;
+    act(() => {
+      const g = useGrids.getState().grids[MAIN_GRID]!;
+      const panes = [
+        { id: "p1", content: { kind: "session" as const, sessionId: "mac2/t1" }, rect: { x: 0, y: 0, w: 1, h: 1 } },
+        { id: "p2", content: { kind: "terminal" as const, terminalId: "term1", machine: "mac2" }, rect: { x: 1, y: 0, w: 1, h: 1 } },
+      ];
+      useGrids.setState((st) => ({ grids: { ...st.grids, [MAIN_GRID]: { ...g, panes } } }));
+    });
+    useDesk.setState({ sessions: { "mac2/t1": remote("working") } });
+    sidebar();
+    expect(gridRow("Main").querySelector(".gi-meta")!.textContent).toBe("1 working");
+    act(() => useDesk.setState({ sessions: { "mac2/t1": remote("blocked") } }));
+    expect(gridRow("Main").querySelector(".gi-meta")!.textContent).toBe("1 needs you");
+  });
+});
+
 describe("rooms in the sidebar", () => {
   const room = (id: string, name: string, createdAt: string) => ({ id, slug: id, name, members: [], defaultMember: null, createdAt, updatedAt: createdAt }) as Room;
   const roomRows = () =>
@@ -485,7 +697,7 @@ describe("deleting from the sidebar", () => {
     expect(kept.get("grid.index")).toEqual({ order: [] });
     expect(kept.has(`grid.${was}`)).toBe(false);
     const grids = screen.getByRole("region", { name: "Grids" });
-    expect(within(grids).getAllByRole("button").map((b) => b.getAttribute("aria-label"))).toEqual(["New grid"]);
+    expect(within(grids).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent)).toEqual(["Grids", "New grid"]);
     expect(within(grids).getByText("No grids yet")).toBeTruthy();
     // + makes one again.
     fireEvent.click(within(grids).getByRole("button", { name: "New grid" }));
@@ -551,7 +763,10 @@ describe("unread in the sidebar", () => {
       useGrids.setState({ grids: { [MAIN_GRID]: { ...g, panes: [{ ...g.panes[0]!, content: { kind: "agent", agent: "local/allan" } }, ...g.panes.slice(1)] } } });
     });
     sidebar();
-    expect(within(rowOf("Main")).getByText("2 need you")).toBeTruthy();
+    // What's new in a grid's panes that isn't a need is its dot; the row's
+    // words say what waits on you.
+    expect(rowOf("Main").querySelector(".side-dot")).not.toBeNull();
+    expect(rowOf("Main").querySelector(".gi-meta")!.textContent).toBe("quiet");
   });
 
   it("opens the Unread page from its row, which counts everything once", async () => {

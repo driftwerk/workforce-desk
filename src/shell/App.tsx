@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { SetupLauncher } from "../setup/SetupLauncher";
 import { ShareAsk } from "../rooms/share";
 import { useChat } from "../chat/store";
-import { Floor } from "../floor/Floor";
+import { Dashboard } from "../dashboard/Dashboard";
 import { watchFloor } from "../floor/store";
 import { hearElsewhere } from "./elsewhere";
 import { GridsMain } from "../grids/Grids";
@@ -62,6 +62,7 @@ import { QuickAsk } from "./QuickAsk";
 import { SearchMemory } from "../memory/SearchMemory";
 import { LifecycleDialogs } from "../session/LifecycleDialogs";
 import { Sidebar } from "./Sidebar";
+import { setSectionOpen } from "./SideSection";
 import { useUi, type SettingsSection } from "./ui";
 import { requestFocus } from "./focus";
 import { dragWindow } from "../ui/drag";
@@ -70,6 +71,7 @@ import { WindowsSetup } from "../setup/WindowsSetup";
 import { useHost } from "./host";
 import { resumeAfterUpdate } from "../updates/store";
 import { UpdateNotice, useRestartWhenIdle, useUpdateChecks } from "../updates/UpdateNotice";
+import { useSidebarJumps } from "./jump";
 
 // An `@` by an agent's name before a rename still reaches them.
 rememberFormerNames();
@@ -294,10 +296,13 @@ export function App() {
   }, []);
   useGridWindows(useGrids((s) => s.ready));
 
+  // ⌘1 to ⌘9: the Dashboard, then the sidebar's rows; from Settings too.
+  useSidebarJumps();
   useAppShortcut("newSession", () => setNewSession({}));
   useAppShortcut("newTerminal", () => {
     useUi.getState().closeSettings();
     useDesk.getState().setView("grids");
+    setSectionOpen("grids", true);
     newTerminalHere();
   });
   useAppShortcut("reload", reloadDesk);
@@ -438,7 +443,7 @@ export function App() {
             main={
               <ErrorBoundary name="main">
                 {view === "floor" ? (
-                  <Floor onNewSession={() => setNewSession({})} />
+                  <Dashboard onNewSession={() => setNewSession({})} />
                 ) : view === "grids" ? (
                   <GridsMain />
                 ) : view === "board" ? (

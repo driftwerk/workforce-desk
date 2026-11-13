@@ -51,6 +51,7 @@ import {
 } from "./sections";
 import { besideOf } from "./target";
 import { clock, durationOf } from "./time";
+import { useSubHeading } from "./FloorShell";
 
 /** The Floor's sections now, from every hub's floor (as the header counts
  *  it), this computer's hub's word on who oversees what, and the sidebar. */
@@ -366,6 +367,7 @@ const FoldIcon = () => (
 /** A section: its header, then its needs (in view folded too), its plans,
  *  what's working and what's done today. */
 export function FloorSection({ section, now }: { section: Section; now: number }) {
+  const H = useSubHeading();
   const folded = useFolded((s) => !!s.folded[section.id]);
   const fold = useFolded((s) => s.fold);
   const layout = useLayout();
@@ -387,10 +389,10 @@ export function FloorSection({ section, now }: { section: Section; now: number }
       <div className="fsec-head">
         {boss && bossKey ? <AgentMark agent={bossKey} name={boss.name} /> : section.group && <GroupDot id={section.group.id} />}
         <div className="fsec-name">
-          <h2 className="display fsec-title">
+          <H className="display fsec-title">
             {section.group && boss && <GroupDot id={section.group.id} />}
             {title}
-          </h2>
+          </H>
           <BossLine section={section} />
         </div>
         <div className="fsec-tools">

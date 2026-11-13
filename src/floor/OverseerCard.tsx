@@ -9,6 +9,7 @@ import { parseBudget, parseRepo, setAgentOversight } from "../crew/oversight";
 import { PRESET_NAME, withPreset, type Preset } from "../crew/presets";
 import { suggestFull, type FullSuggestion } from "../crew/suggest";
 import { plainError } from "../ui/plainError";
+import { useSubHeading } from "./FloorShell";
 
 const DISMISSED_KEY = "desk.overseer-card.dismissed";
 const wasDismissed = (): boolean => {
@@ -53,6 +54,7 @@ interface FullPick {
  *  Desk finds before anything is written. Overseeing is the person's to
  *  set, so this is Desk's own card, never an agent's. */
 export function OverseerCard({ inSetup = false }: { inSetup?: boolean } = {}) {
+  const H = useSubHeading();
   const hub = useDesk((s) => s.hub);
   const sessions = useDesk((s) => s.sessions);
   const support = useOverview((s) => s.managerSupport);
@@ -171,9 +173,9 @@ export function OverseerCard({ inSetup = false }: { inSetup?: boolean } = {}) {
     >
       {/* In the setup, its step says what it is: the title stays for its name. */}
       <div className={`floor-card-head${inSetup ? " sr-only" : ""}`}>
-        <h2 id={`${ids}-title`} className="display floor-card-title">
+        <H id={`${ids}-title`} className="display floor-card-title">
           No one oversees your crew
-        </h2>
+        </H>
         {/* In the setup, its own Skip puts it off. */}
         {!inSetup && (
           <button

@@ -227,7 +227,8 @@
 .crew-floor-body > .stage-dock {
   padding: 12px 10px 0 0;
 }
-.activity-head h2 {
+.activity-head h2,
+.activity-head h3 {
   margin: 0;
   font-size: 16px;
   font-weight: 650;

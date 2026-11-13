@@ -11,6 +11,7 @@ import { create } from "zustand";
 import { close, zoneAt, type Pane, type PaneContent, type PresetId, type Zone } from "./engine";
 import { changePanes, createGrid, deliver, dropOnPane, layOut, movePane, movePaneWithin, useGrids } from "./store";
 import { boardContent, floorContent, roomContent, sessionContent } from "./engine";
+import { setSectionOpen } from "../shell/SideSection";
 
 export type GridTarget =
   | { kind: "pane"; gridId: string; paneId: string; zone: Zone }
@@ -136,7 +137,11 @@ export const endGridDrag = (canceled: boolean): { target: GridTarget; content: P
 
 /** Puts what was dropped where it landed. */
 export const dropOnGrid = (target: GridTarget, content: PaneContent): void => {
-  if (target.kind === "new") deliver(createGrid(), content);
+  if (target.kind === "new") {
+    deliver(createGrid(), content);
+    // Its row shows in the sidebar.
+    setSectionOpen("grids", true);
+  }
   else if (target.kind === "pane") dropOnPane(target.gridId, target.paneId, target.zone, content);
   else if (target.kind === "preset") layOut(target.gridId, target.preset, { slot: target.slot, content });
   else deliver(target.gridId, content);
