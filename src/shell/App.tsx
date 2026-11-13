@@ -62,6 +62,7 @@ import { QuickAsk } from "./QuickAsk";
 import { SearchMemory } from "../memory/SearchMemory";
 import { LifecycleDialogs } from "../session/LifecycleDialogs";
 import { Sidebar } from "./Sidebar";
+import { setSectionOpen } from "./SideSection";
 import { useUi, type SettingsSection } from "./ui";
 import { requestFocus } from "./focus";
 import { dragWindow } from "../ui/drag";
@@ -298,6 +299,7 @@ export function App() {
   useAppShortcut("newTerminal", () => {
     useUi.getState().closeSettings();
     useDesk.getState().setView("grids");
+    setSectionOpen("grids", true);
     newTerminalHere();
   });
   useAppShortcut("reload", reloadDesk);

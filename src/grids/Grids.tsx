@@ -149,7 +149,6 @@ const GridRow = memo(function GridRow({ id, needs, working, unread, lineBefore, 
  *  for the rest. A pane dragged onto a row goes to that grid. */
 export function GridsSection() {
   const ids = useGrids(useShallow((s) => s.order.filter((id) => s.grids[id])));
-  const active = useGrids((s) => s.active);
   const ready = useGrids((s) => s.ready);
   const summaries = useGridSummaries();
   const [menu, setMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
@@ -159,19 +158,6 @@ export function GridsSection() {
   const justDragged = useRef(false);
   const rows = useRef(new Map<string, HTMLElement>());
   const hint = useId();
-  // A grid shown from elsewhere (a pane revealed, a new terminal) opens
-  // Grids, so its row shows; once each time, so it can be closed again.
-  const shownBefore = useRef<string | null>(null);
-  const shown = useDesk((s) => s.view === "grids");
-  useEffect(() => {
-    if (!shown) {
-      shownBefore.current = null;
-      return;
-    }
-    if (active === shownBefore.current) return;
-    shownBefore.current = active;
-    if (active) setSectionOpen("grids", true);
-  }, [active, shown]);
   const grid = (id: string) => useGrids.getState().grids[id];
   const choose = useCallback((g: Grid) => {
     if (justDragged.current) return;
@@ -180,7 +166,6 @@ export function GridsSection() {
     // Its monitor is away: shown here until it's back (or for good).
     if (g.placement.kind !== "main") bringBack(g.id);
     else setActive(g.id);
-    shownBefore.current = g.id;
     useDesk.getState().setView("grids");
   }, []);
   // Its own window closes first, so it can't write the grid back. The
@@ -220,6 +205,7 @@ export function GridsSection() {
           onSelect: () => {
             bringBack(g.id);
             useDesk.getState().setView("grids");
+            setSectionOpen("grids", true);
           },
         },
     { kind: "separator" },

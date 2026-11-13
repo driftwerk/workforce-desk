@@ -6,14 +6,15 @@
 import { useShallow } from "zustand/react/shallow";
 import { useChat } from "../chat/store";
 import { waitsOnYou, shownState } from "../floor/background";
-import { useNeedCounts } from "../floor/store";
+import { useNeedCounts, useNeeds } from "../floor/store";
+import { sessionKey } from "../hub/machines";
 import { sessionItem, type ItemKey } from "../groups/model";
 import { sessionKeyIn, terminalKeyIn } from "../grids/engine";
 import type { Grid } from "../grids/model";
 import { useGrids } from "../grids/store";
 import { trackedIn } from "../grids/terminals";
 import { useDesk } from "../hub/store";
-import { itemBadge } from "./badges";
+import { inRoom, itemBadge } from "./badges";
 import { Marks, useBadgeData, useRoomBadgeOf } from "./Marks";
 
 export interface GridSummary {
@@ -48,7 +49,9 @@ export const useGridSummaries = (): Record<string, GridSummary> => {
           if (c?.kind === "agent") items.push(`agent:${c.agent}`);
           const s = c?.kind === "session" ? d.sessions[sessionKeyIn(c)!] : c?.kind === "terminal" ? trackedIn(d.sessions, terminalKeyIn(c)) : null;
           if (!s) continue;
-          const key = sessionItem(c?.kind === "session" ? sessionKeyIn(c)! : s.id);
+          const key = sessionItem(c?.kind === "session" ? sessionKeyIn(c)! : sessionKey(s));
+          // A session shown twice (its pane and the terminal it runs in) is one.
+          if (items.includes(key)) continue;
           items.push(key);
           const state = shownState(s);
           if (waitsOnYou({ state })) waiting.push(key);
@@ -62,6 +65,9 @@ export const useGridSummaries = (): Record<string, GridSummary> => {
   const needs = useNeedCounts();
   const data = useBadgeData();
   const roomBadge = useRoomBadgeOf();
+  const allNeeds = useNeeds();
+  const drafts = useDesk((s) => s.roomDrafts);
+  const roomWaits = (room: string) => inRoom(allNeeds, room).length + (drafts[room] ?? []).filter((d) => d.state === "failed" || d.state === "stopped").length;
   const out: Record<string, GridSummary> = {};
   grids.forEach((g, i) => {
     if (!g) return;
@@ -69,14 +75,18 @@ export const useGridSummaries = (): Record<string, GridSummary> => {
     const waiting = new Set(((fromSessions[i * 3 + 1] as string) || "").split("\n").filter(Boolean));
     for (const key of items) if (needs.has(key)) waiting.add(key);
     const rooms = shown(g).flatMap((p) => (p.content?.kind === "room" ? [p.content.room] : []));
-    const unread = items.some((key) => {
-      const b = itemBadge(key, data);
-      return b.dot || b.count > (needs.get(key) ?? 0);
-    }) || rooms.some((r) => {
-      const b = roomBadge(r);
-      return b.dot || b.count > 0;
-    });
-    out[g.id] = { needs: waiting.size, working: (fromSessions[i * 3 + 2] as number) + (agentsWorking[i] ?? 0), unread };
+    // A room's needs and failed answers wait on you, as its row counts them.
+    const roomNeeds = rooms.reduce((n, r) => n + roomWaits(r), 0);
+    const unread =
+      items.some((key) => {
+        const b = itemBadge(key, data);
+        return b.dot || b.count > (needs.get(key) ?? 0);
+      }) ||
+      rooms.some((r) => {
+        const b = roomBadge(r);
+        return b.dot || b.count > roomWaits(r);
+      });
+    out[g.id] = { needs: waiting.size + roomNeeds, working: (fromSessions[i * 3 + 2] as number) + (agentsWorking[i] ?? 0), unread };
   });
   return out;
 };
