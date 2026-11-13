@@ -81,8 +81,12 @@ export const ticketViewOf = (hub: HubRef) => ({
   comment: async (ticket: string, body: string): Promise<Posted> => {
     const res = await pairedHub(hub).fetch("POST", `${path(ticket)}/comments`, { type: "application/json", data: JSON.stringify({ body }) });
     if (!res.ok) throw await refusal(res);
-    const got = (await res.json()) as TicketComment & { pending?: boolean; message?: string };
-    return res.status === 202 || got.pending ? { kind: "pending", message: got.message ?? "Waiting for your approval." } : { kind: "posted", comment: got };
+    const got = (await res.json()) as TicketComment & { pending?: boolean; kept?: boolean; message?: string };
+    if (res.status === 202 || got.pending) return { kind: "pending", message: got.message ?? "Waiting for your approval." };
+    // Posted to its issue, but the hub couldn't keep its copy (it has no
+    // id): it shows when the comments are read again.
+    if (got.kept === false || !got.id) return { kind: "pending", message: got.message ?? "Posted. It shows when the comments are read again." };
+    return { kind: "posted", comment: got };
   },
 });
 
