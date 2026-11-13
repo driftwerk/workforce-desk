@@ -100,6 +100,18 @@ describe("a boss's preferences", () => {
     expect(container.textContent).toBe("");
   });
 
+  it("reads them again when you come back to Desk, and after a failure on Try again", async () => {
+    answer = (m, p, b) => (m === "GET" ? json({ error: "The hub is busy." }, 500) : hubAnswers(m, p, b));
+    render(<BossPreferences name="Desk" group={null} />);
+    expect((await screen.findByRole("alert")).textContent).toContain("Try again");
+    answer = hubAnswers;
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+    expect(await screen.findAllByRole("listitem")).toHaveLength(2);
+    list.push(pref({ id: "p9", whenText: "a new rule arrives", thenText: "show it" }));
+    fireEvent.focus(window);
+    await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(3));
+  });
+
   it("pauses and resumes through the hub", async () => {
     render(<BossPreferences name="Desk" group={null} />);
     fireEvent.click(await screen.findByRole("button", { name: "Pause: when a session wants to merge with CI red" }));

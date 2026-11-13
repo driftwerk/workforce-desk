@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { HubError } from "../hub/client";
 import { useDesk } from "../hub/store";
 import type { Preference, PreferencePatch, PreferenceScope } from "../hub/types";
@@ -47,29 +47,36 @@ type Loaded = { state: "loading" } | { state: "none" } | { state: "failed"; prob
 
 /** The preferences part of a boss's settings. Nothing on a hub without them. */
 export function BossPreferences({ name, group }: { name: string; group: string | null }) {
-  const connected = useDesk((s) => !!s.hub);
+  const hub = useDesk((s) => s.hub);
   const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
   const scope = bossScopeOf(group);
+  const asking = useRef(0);
 
-  useEffect(() => {
-    const hub = useDesk.getState().hub;
-    if (!connected || !hub) return;
+  // Read again when the hub changes and when you come back to Desk: the
+  // boss makes them and pauses them while you're elsewhere.
+  const load = useCallback(() => {
+    if (!hub) return;
     // A hub client without them (a test's) has none to show.
     if (typeof hub.preferences !== "function") return setLoaded({ state: "none" });
-    let live = true;
+    const n = ++asking.current;
     hub.preferences().then(
-      (list) => live && setLoaded({ state: "ok", list }),
+      (list) => n === asking.current && setLoaded({ state: "ok", list }),
       (e) => {
-        if (!live) return;
+        if (n !== asking.current) return;
         // An older hub keeps none.
         if (e instanceof HubError && e.status === 404) setLoaded({ state: "none" });
         else setLoaded({ state: "failed", problem: plainError(e) });
       },
     );
+  }, [hub]);
+  useEffect(() => {
+    load();
+    window.addEventListener("focus", load);
     return () => {
-      live = false;
+      window.removeEventListener("focus", load);
+      asking.current++;
     };
-  }, [connected]);
+  }, [load]);
 
   if (loaded.state === "none" || loaded.state === "loading") return null;
   const mine = loaded.state === "ok" ? loaded.list.filter((p) => p.bossScope === scope && p.state !== "retired") : [];
@@ -87,7 +94,10 @@ export function BossPreferences({ name, group }: { name: string; group: string |
       </span>
       {loaded.state === "failed" ? (
         <p className="small state-blocked" role="alert">
-          {loaded.problem}
+          {loaded.problem}{" "}
+          <button type="button" className="link" onClick={load}>
+            Try again
+          </button>
         </p>
       ) : mine.length === 0 ? (
         <p className="oversee-sub">None yet.</p>
@@ -106,6 +116,13 @@ function Row({ p, onChanged, onGone }: { p: Preference; onChanged: (p: Preferenc
   const groups = useLayout().groups;
   const connected = useDesk((s) => !!s.hub);
   const [mode, setMode] = useState<"show" | "edit" | "forget">("show");
+  const editButton = useRef<HTMLButtonElement>(null);
+  const was = useRef(mode);
+  // Back from editing or forgetting, focus returns to the row's Edit.
+  useEffect(() => {
+    if (mode === "show" && was.current !== "show") editButton.current?.focus();
+    was.current = mode;
+  }, [mode]);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const ids = useId();
@@ -173,13 +190,20 @@ function Row({ p, onChanged, onGone }: { p: Preference; onChanged: (p: Preferenc
                 >
                   Forget
                 </button>
-                <button type="button" className="link" disabled={busy} onClick={() => setMode("show")}>
+                <button type="button" className="link" autoFocus disabled={busy} onClick={() => setMode("show")}>
                   Keep
                 </button>
               </>
             ) : (
               <>
-                <button type="button" className="link" aria-label={`Edit: when ${p.whenText}`} disabled={!connected} onClick={() => setMode("edit")}>
+                <button
+                  ref={editButton}
+                  type="button"
+                  className="link"
+                  aria-label={`Edit: when ${p.whenText}`}
+                  disabled={busy || !connected}
+                  onClick={() => setMode("edit")}
+                >
                   Edit
                 </button>
                 <button
@@ -191,7 +215,13 @@ function Row({ p, onChanged, onGone }: { p: Preference; onChanged: (p: Preferenc
                 >
                   {paused ? "Resume" : "Pause"}
                 </button>
-                <button type="button" className="link" aria-label={`Forget: when ${p.whenText}`} disabled={!connected} onClick={() => setMode("forget")}>
+                <button
+                  type="button"
+                  className="link"
+                  aria-label={`Forget: when ${p.whenText}`}
+                  disabled={busy || !connected}
+                  onClick={() => setMode("forget")}
+                >
                   Forget
                 </button>
               </>
@@ -250,7 +280,7 @@ function Edit({
     >
       <label className="field">
         <span className="oversee-sub">When</span>
-        <input value={when} onChange={(e) => setWhen(e.target.value)} aria-describedby={problem ? `${ids}-p` : undefined} />
+        <input autoFocus value={when} onChange={(e) => setWhen(e.target.value)} aria-describedby={problem ? `${ids}-p` : undefined} />
       </label>
       <label className="field">
         <span className="oversee-sub">Then</span>
@@ -282,8 +312,13 @@ function Edit({
           {problem}
         </span>
       )}
+      {blank && (
+        <span id={`${ids}-blank`} className="oversee-sub">
+          Say the case, what to do then{where === "repo" ? ", and the repository" : ""}.
+        </span>
+      )}
       <span className="oversee-pref-tools">
-        <button type="submit" className="btn btn-sm btn-signal" disabled={busy || blank}>
+        <button type="submit" className="btn btn-sm btn-signal" disabled={busy || blank} aria-describedby={blank ? `${ids}-blank` : undefined}>
           {busy ? "Saving…" : "Save"}
         </button>
         <button type="button" className="btn btn-ghost btn-sm" disabled={busy} onClick={onCancel}>
