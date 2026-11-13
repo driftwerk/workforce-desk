@@ -1,5 +1,6 @@
 // A terminal opened on a machine, from Settings → Machines.
 
+import { setSectionOpen } from "../shell/SideSection";
 import { newTerminalHere } from "../grids/store";
 import { useDesk } from "../hub/store";
 import { useUi } from "../shell/ui";
@@ -12,4 +13,5 @@ export const openTerminalOn = (machine: MachineId, cwd?: string): void => {
   newTerminalHere(machine, cwd);
   useUi.getState().closeSettings();
   useDesk.getState().setView("grids");
+  setSectionOpen("grids", true);
 };
