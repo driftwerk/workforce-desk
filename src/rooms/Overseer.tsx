@@ -3,6 +3,7 @@ import { useDesk } from "../hub/store";
 import { HubError } from "../hub/client";
 import type {
   AnswerOption,
+  BriefGroup,
   DecisionLine,
   DeskExtras,
   MentionedAway,
@@ -61,6 +62,7 @@ export const overseerPost = (extras: DeskExtras | undefined, delivery: DeliveryK
 export function OverseerBody({ extras, content }: { extras: DeskExtras; content: string }) {
   if (extras.away) return <CatchUp away={extras.away} update={extras.update ?? {}} />;
   if (extras.update) return <Update update={extras.update} />;
+  if (extras.item?.forYou) return <ForYouPost item={extras.item} content={content} />;
   if (extras.item) return <NeedsYouPost item={extras.item} content={content} />;
   if (extras.decisions?.length)
     return (
@@ -606,6 +608,24 @@ function Waiting({ w }: { w: WaitingItem }) {
       options={w.options ?? []}
       notes={[w.notBlocking, w.holdingUp]}
     />
+  );
+}
+
+/** Something only you can do, in a message of its own: one line, as a
+ *  brief says it, with Done. */
+function ForYouPost({ item, content }: { item: MentionedItem; content: string }) {
+  const [first, rest] = firstSentence(unlead(content));
+  const action = item.question?.trim() || first;
+  const group: BriefGroup = {
+    sessionId: null,
+    label: "For you",
+    items: [{ id: item.itemId, kind: "forYou", action, why: null, detail: item.detail ?? (item.question ? null : rest || null), undo: null, settledBy: null }],
+    leftAlone: 0,
+  };
+  return (
+    <div className="msg-text overseer is-brief">
+      <Brief groups={[group]} />
+    </div>
   );
 }
 

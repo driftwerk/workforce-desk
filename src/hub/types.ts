@@ -1028,6 +1028,11 @@ export interface MentionedItem {
   items?: NeedItem[];
   /** What doesn't wait on it. */
   notBlocking?: string | null;
+  /** The longer part, behind "more". */
+  detail?: string | null;
+  /** Something only you can do (rotate a key, sign a form): marked Done
+   *  when done, with nothing to answer. */
+  forYou?: boolean;
   /** The kind of case your answer would settle from then on. */
   generalizes?: string | null;
   /** Set aside after it was said three times: still answered or dropped

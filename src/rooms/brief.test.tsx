@@ -146,6 +146,16 @@ describe("a brief update", () => {
     expect(container.textContent).toContain("Which tokens first");
   });
 
+  it("says a for-you item of its own in one line, with Done and nothing to answer", async () => {
+    show(said("Needs you. Rotate the GitHub Packages token. It’s in a local transcript.", { item: { itemId: "i9", forYou: true } }));
+    const row = screen.getByRole("region", { name: "For you" });
+    expect(within(row).getByRole("img", { name: "For you" }).textContent).toBe("●");
+    expect(within(row).getAllByRole("button").map((b) => b.textContent)).toEqual(["more", "Done"]);
+    fireEvent.click(within(row).getByRole("button", { name: /^Done: Rotate the GitHub Packages token/ }));
+    await within(row).findByRole("button", { name: "Settled" });
+    expect(asked).toContainEqual({ method: "POST", path: "/api/desk/items/i9/done", body: undefined });
+  });
+
   it("still says what waits on you that the brief leaves out", () => {
     const left: DeskExtras = {
       update: { ...BRIEF.update, waiting: [{ itemId: "w1", text: "Merge the hotfix?", age: "2 min" }] },
