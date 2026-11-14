@@ -180,6 +180,7 @@ fn acme(members: &[&str], level: &str) -> WantedGrant {
         group: "acme".into(),
         agent: "sarah".into(),
         agent_name: "Sarah".into(),
+        agent_since: Some("born-1".into()),
         grant: json!({
             "grantVersion": 1, "name": "Acme", "boss": "local:sarah",
             "level": level, "sees": "everything", "recall": false,
@@ -522,18 +523,97 @@ async fn a_higher_level_than_the_one_said_yes_to_asks_again() {
 }
 
 #[tokio::test]
-async fn act_fully_or_a_budget_from_the_hub_is_carried_as_act_with_no_budget() {
+async fn act_fully_with_no_budget_from_the_hub_is_carried_as_act_with_no_budget() {
     let f = files();
     let devbox = Machine::new("devbox");
-    let mut full = acme(&[S1], "full");
-    full.grant["act"]["budget_usd_per_day"] = json!(20);
-    let w = wanted(&[("devbox", vec![full], &[S1])]);
-    say(&f, &w, true).await.expect("asked");
+    let w = wanted(&[("devbox", vec![acme(&[S1], "full")], &[S1])]);
+    let (_, body, _) = say(&f, &w, true).await.expect("asked");
+    assert!(body.contains("acting within Desk"), "{body}");
     sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
     let g = devbox.grant("acme").unwrap();
     assert_eq!(g["level"], "act");
     assert!(g["act"].get("budget_usd_per_day").is_none(), "{g}");
     assert_eq!(g["act"]["parallel"], 4);
+    // A budget that can't be one is no budget.
+    for bad in [json!(0), json!(-5), json!(20_000), json!("20")] {
+        let mut full = acme(&[S1], "full");
+        full.grant["act"]["budget_usd_per_day"] = bad;
+        let g = capped(full.grant);
+        assert_eq!(g["level"], "act", "{g}");
+        assert!(g["act"].get("budget_usd_per_day").is_none(), "{g}");
+    }
+}
+
+#[tokio::test]
+async fn act_fully_with_its_one_budget_is_carried_once_the_person_says_yes_to_it() {
+    let f = files();
+    let devbox = Machine::new("devbox");
+    // Said yes at Act first.
+    let acting = wanted(&[("devbox", vec![acme(&[S1], "act")], &[S1])]);
+    say(&f, &acting, true).await.expect("asked");
+    sync(&f.bosses, &f.kept, &acting, &on(&[&devbox])).await;
+    assert_eq!(devbox.grant("acme").unwrap()["level"], "act");
+    // Act fully at home, with its budget: no higher until asked again.
+    let mut full = acme(&[S1], "full");
+    full.grant["act"]["budget_usd_per_day"] = json!(20);
+    let w = wanted(&[("devbox", vec![full], &[S1])]);
+    sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    let g = devbox.grant("acme").unwrap();
+    assert_eq!(g["level"], "act");
+    let (_, body, _) = say(&f, &w, true).await.expect("asked again");
+    assert!(
+        body.contains("at Act fully, within one daily budget of $20.00 counted across this computer and every machine"),
+        "{body}"
+    );
+    sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    let g = devbox.grant("acme").unwrap();
+    assert_eq!(g["level"], "full");
+    assert_eq!(g["act"]["budget_usd_per_day"], 20);
+    assert_eq!(g["act"]["parallel"], 4);
+}
+
+#[tokio::test]
+async fn act_fully_with_no_budget_set_at_home_says_so_and_a_lower_yes_carries_no_budget() {
+    let f = files();
+    let devbox = Machine::new("devbox");
+    let mut full = acme(&[S1], "full");
+    full.grant["act"]["budget_usd_per_day"] = json!(10_000.0);
+    let w = wanted(&[("devbox", vec![full], &[S1])]);
+    let (_, body, _) = say(&f, &w, false).await.expect("asked");
+    assert!(
+        body.contains("at Act fully, with no daily budget set (at most $10000.00 a day"),
+        "{body}"
+    );
+    // Said yes at Act, then raised: written at Act, with no budget.
+    let f = files();
+    let acting = wanted(&[("devbox", vec![acme(&[S1], "act")], &[S1])]);
+    say(&f, &acting, true).await.expect("asked");
+    sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    let g = devbox.grant("acme").unwrap();
+    assert_eq!(g["level"], "act");
+    assert!(g["act"].get("budget_usd_per_day").is_none(), "{g}");
+}
+
+#[tokio::test]
+async fn an_agent_made_again_with_the_same_id_is_asked_about_again() {
+    let f = files();
+    let devbox = Machine::new("devbox");
+    let w = wanted(&[("devbox", vec![acme(&[S1], "act")], &[S1])]);
+    say(&f, &w, true).await.expect("asked");
+    sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    assert_eq!(devbox.grant("acme").unwrap()["level"], "act");
+    // Sarah deleted and made again: the old yes isn't hers.
+    let mut again = acme(&[S1], "act");
+    again.agent_since = Some("born-2".into());
+    let again = wanted(&[("devbox", vec![again], &[S1])]);
+    sync(&f.bosses, &f.kept, &again, &on(&[&devbox])).await;
+    assert!(
+        devbox.grant("acme").is_none(),
+        "nothing is held for her until asked"
+    );
+    assert!(say(&f, &again, false).await.is_some(), "asked again");
+    sync(&f.bosses, &f.kept, &again, &on(&[&devbox])).await;
+    assert!(devbox.grant("acme").is_none(), "a Cancel gives her nothing");
 }
 
 #[tokio::test]
@@ -576,6 +656,7 @@ async fn narrowing_reaches_every_machine_before_anything_widens() {
         group: "globex".into(),
         agent: "tom".into(),
         agent_name: "Tom".into(),
+        agent_since: None,
         grant: json!({
             "grantVersion": 1, "name": "Globex", "boss": "local:tom",
             "level": "act", "sees": "everything", "recall": false,
