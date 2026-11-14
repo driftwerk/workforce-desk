@@ -582,7 +582,7 @@ export function ActFullySheet({
                 {on && linked && status && (
                   <span className="oversee-sub mono" role="status">
                     {spentToday(status)}
-                    {usdNow !== null && ` of ${usd(usdNow)}`}
+                    {status.spentTodayUsd !== null && usdNow !== null && ` of ${usd(usdNow)}`}
                   </span>
                 )}
               </span>
