@@ -208,7 +208,7 @@ const expiresIn = (at: string | null, now: number): string | null => {
 };
 
 /** One setup, as one card that changes in place: the one thing to do now
- *  (use a sign-in on this Mac, approve a code, sign in in Desk's window),
+ *  (use a sign-in on this computer, approve a code, sign in in Desk's window),
  *  then what came of it. Nothing on it is the agent's words. */
 export function SetupCard({
   setup: s,

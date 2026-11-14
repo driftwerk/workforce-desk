@@ -55,7 +55,7 @@ const setup = (s: Partial<Setup> = {}): Setup => ({
 
 const OFFER = now({
   kind: "offer",
-  title: "GitHub is signed in on this Mac as sarah",
+  title: "GitHub is signed in on this computer as sarah",
   detail: "Through GitHub CLI. Allan gets the same access (repo, read:org), read only. Desk keeps a copy in the vault on this computer.",
   action: "use_cli",
   other: "other_way",
@@ -105,12 +105,12 @@ const show = async (a: ConnectionsApi, count = 1, since = "2026-11-11T11:04:00Z"
   await act(async () => {});
 };
 
-it("is one card saying the one thing to do now: use the sign-in on this Mac", async () => {
+it("is one card saying the one thing to do now: use the sign-in on this computer", async () => {
   const a = api([setup({ way: "cli", now: OFFER })], { choose: vi.fn(async () => setup({ now: CONNECTED })) });
   await show(a);
   const region = screen.getByRole("region", { name: "Setting up GitHub · GitHub" });
   expect(region.className).toContain("setup-needs");
-  expect(screen.getByText("GitHub is signed in on this Mac as sarah")).toBeTruthy();
+  expect(screen.getByText("GitHub is signed in on this computer as sarah")).toBeTruthy();
   expect(screen.getByText(/repo, read:org/)).toBeTruthy();
   expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Use it", "Sign in another way"]);
   await act(async () => {
