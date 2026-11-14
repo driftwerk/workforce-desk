@@ -33,6 +33,7 @@ const engine = (id: string, name: string, sessions: number, over: Partial<BossEn
   reachedAt: null,
   problem: null,
   belowFull: [],
+  spentTodayUsd: null,
   ...over,
 });
 
@@ -47,6 +48,7 @@ const linked = (choice: BossChoice, over: Partial<RemoteBoss> = {}): RemoteBoss 
   pausing: false,
   stopping: false,
   waiting: 0,
+  spentTodayUsd: null,
   engines: [engine("local", "this computer", 2), engine("devbox", "devbox", 4)],
   ...over,
 });
@@ -163,6 +165,19 @@ describe("what the sheet offers as the boss stands", () => {
     expect(await screen.findByText("2 sessions wait for you.")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Let Allan run them" }));
     await waitFor(() => expect(calls.invoke).toHaveBeenCalledWith("boss_set", { group: "acme", choice: { level: "act", sees: "replies", budgetUsdPerDay: null } }));
+  });
+
+  it("says what Allan spent today at Act fully, and not known when an engine didn't say", async () => {
+    status = linked(FULL, { spentTodayUsd: 12.5 });
+    await open();
+    expect(await screen.findByText(/\$40\.00 a day · Spent today: \$12\.50/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: /Act fully/ }));
+    const sheet = await screen.findByRole("dialog", { name: "Allan acts fully in Acme" });
+    expect(within(sheet).getByText("Spent today: $12.50 of $40.00")).toBeTruthy();
+    cleanup();
+    status = linked(FULL);
+    await open();
+    expect(await screen.findByText(/Spent today: not known/)).toBeTruthy();
   });
 
   it("keeps Pause on offer until every engine has it, and Stop until it's clear", async () => {

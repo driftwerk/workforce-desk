@@ -53,6 +53,11 @@ const sameChoice = (a: BossChoice, b: BossChoice): boolean =>
 /** Whether a link's failure was the agent declining boss work. */
 const declined = (d: BossDone): boolean => d.failed.some((f) => f.why.includes("doesn't take boss work"));
 
+/** What the boss spent on the group today at Act fully, every engine
+ *  added up: "not known" when one didn't say (a hub older than the field). */
+const spentToday = (status: RemoteBoss): string =>
+  `Spent today: ${status.spentTodayUsd === null ? "not known" : usd(status.spentTodayUsd)}`;
+
 export function BossSheet({ group, onClose }: { group: string; onClose: () => void }) {
   const ids = useId();
   const layout = useLayout();
@@ -305,7 +310,10 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
                       <b>{LEVEL_NAME[l]}</b>
                       <span>{levelSays(l, bossName)}</span>
                       {i === 3 && choice.level === "full" && choice.budgetUsdPerDay !== null && (
-                        <span className="mono">{usd(choice.budgetUsdPerDay)} a day</span>
+                        <span className="mono">
+                          {usd(choice.budgetUsdPerDay)} a day
+                          {linkedHere && status?.choice.level === "full" && ` · ${spentToday(status)}`}
+                        </span>
                       )}
                     </button>
                   ))}
@@ -566,6 +574,12 @@ export function ActFullySheet({
                   Needed. Real money a day: what API keys and Bedrock are billed for. Your Claude and ChatGPT plans aren’t counted.
                   {usdNow !== null && ` Now ${usd(usdNow)} a day.`}
                 </span>
+                {on && linked && status && (
+                  <span className="oversee-sub mono" role="status">
+                    {spentToday(status)}
+                    {usdNow !== null && ` of ${usd(usdNow)}`}
+                  </span>
+                )}
               </span>
             </span>
             <Num

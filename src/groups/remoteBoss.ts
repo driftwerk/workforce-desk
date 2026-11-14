@@ -53,6 +53,9 @@ export interface BossEngine {
   problem: string | null;
   /** Other groups there the same boss runs below Act fully: "Atlas (suggest)". */
   belowFull: string[];
+  /** Real money the boss spent on the group here today, at Act fully; null
+   *  below it, or from a hub too old to say. */
+  spentTodayUsd: number | null;
 }
 
 /** A group's boss on another hub. */
@@ -71,6 +74,9 @@ export interface RemoteBoss {
   stopping: boolean;
   /** The group's sessions the boss doesn't run until the person says so. */
   waiting: number;
+  /** Real money the boss spent on the group today, every engine added up;
+   *  null when one of them didn't say. */
+  spentTodayUsd: number | null;
   engines: BossEngine[];
 }
 
