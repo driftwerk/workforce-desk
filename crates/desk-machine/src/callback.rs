@@ -43,11 +43,70 @@ pub const MAX_CARRIED: usize = 8;
 const ACCEPT_EVERY: Duration = Duration::from_millis(50);
 
 /// A sign-in page Desk opens: on exactly this host, at exactly one of these
-/// paths, with a query only when `query` says so.
+/// paths, with a query only when `query` says so, and, when `loopback_only`
+/// says so, sending the browser on to nowhere but this computer
+/// ([`returns_here_only`]).
 pub struct SignInPage {
     pub host: &'static str,
     pub paths: &'static [&'static str],
     pub query: bool,
+    pub loopback_only: bool,
+}
+
+/// The query parameters a sign-in page may send the browser on by when it's
+/// done.
+pub const RETURN_PARAMS: &[&str] = &[
+    "redirect_uri",
+    "redirect",
+    "redirect_url",
+    "return_to",
+    "callback",
+    "next",
+];
+
+/// Whether every one of `page`'s [`RETURN_PARAMS`] (named in any case)
+/// sends the browser on to nowhere but this computer. A value with a host
+/// is allowed only as `http(s)://` on `127.0.0.1`, `localhost` or `[::1]`;
+/// one starting `//` or `\` (a host by the page's own scheme) or with any
+/// other scheme (`javascript:`, `data:`, …) is refused. A value that isn't
+/// a URL (a path, a word), or a missing one, is allowed: the real shapes
+/// are still to be seen. The hub checks the same.
+pub fn returns_here_only(page: &url::Url) -> bool {
+    page.query_pairs()
+        .filter(|(k, _)| RETURN_PARAMS.iter().any(|p| k.eq_ignore_ascii_case(p)))
+        .all(|(_, v)| returns_here(&v))
+}
+
+/// One [`RETURN_PARAMS`] value, read as a browser reads it.
+fn returns_here(value: &str) -> bool {
+    // Browsers drop leading and trailing spaces and controls, and tabs and
+    // newlines anywhere, and read `\` as `/`.
+    let value: String = value
+        .trim_matches(|c: char| c <= ' ')
+        .chars()
+        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
+        .collect();
+    if value.starts_with(['/', '\\']) && value[1..].starts_with(['/', '\\']) {
+        return false;
+    }
+    let scheme = value.split_once(':').map(|(s, _)| s).filter(|s| {
+        s.starts_with(|c: char| c.is_ascii_alphabetic())
+            && s.chars()
+                .all(|c| c.is_ascii_alphanumeric() || "+-.".contains(c))
+    });
+    if scheme.is_none() {
+        return true;
+    }
+    let Ok(back) = url::Url::parse(&value) else {
+        return false;
+    };
+    matches!(back.scheme(), "http" | "https")
+        && match back.host() {
+            Some(url::Host::Domain(host)) => host == "localhost",
+            Some(url::Host::Ipv4(ip)) => ip == std::net::Ipv4Addr::LOCALHOST,
+            Some(url::Host::Ipv6(ip)) => ip == std::net::Ipv6Addr::LOCALHOST,
+            None => false,
+        }
 }
 
 /// The paths Claude Code's sign-in page is at (`claude setup-token` 2.1.318
@@ -62,16 +121,19 @@ pub const CLAUDE_PAGES: &[SignInPage] = &[
         host: "claude.ai",
         paths: CLAUDE_PATHS,
         query: true,
+        loopback_only: false,
     },
     SignInPage {
         host: "claude.com",
         paths: CLAUDE_PATHS,
         query: true,
+        loopback_only: false,
     },
     SignInPage {
         host: "platform.claude.com",
         paths: CLAUDE_PATHS,
         query: true,
+        loopback_only: false,
     },
 ];
 
@@ -80,6 +142,7 @@ pub const CODEX_PAGES: &[SignInPage] = &[SignInPage {
     host: "auth.openai.com",
     paths: &["/codex/device"],
     query: false,
+    loopback_only: false,
 }];
 
 /// Devin's sign-in page: `devin auth login` opens
@@ -91,19 +154,22 @@ pub const DEVIN_PAGES: &[SignInPage] = &[
         host: "app.devin.ai",
         paths: &["/auth/cli/continue"],
         query: true,
+        loopback_only: true,
     },
     // Its Windsurf sign-in, the hub's same list.
     SignInPage {
         host: "windsurf.com",
         paths: &["/windsurf/signin"],
         query: true,
+        loopback_only: true,
     },
 ];
 
 /// `said` as one of `pages`, read as a browser reads it (so a `\`, an `@`,
 /// an escape or a `..` can't move its host or path): https, no user,
-/// password, port or fragment, on exactly its host and path. None for
-/// anything else.
+/// password, port or fragment, on exactly its host and path, and sending
+/// the browser on only to this computer when the page says so
+/// ([`returns_here_only`]). None for anything else.
 pub fn sign_in_page(said: &str, pages: &[SignInPage]) -> Option<url::Url> {
     if said.len() > 4096 || said.chars().any(|c| c.is_whitespace() || c.is_control()) {
         return None;
@@ -124,7 +190,10 @@ pub fn sign_in_page(said: &str, pages: &[SignInPage]) -> Option<url::Url> {
     pages
         .iter()
         .any(|p| {
-            host == p.host && p.paths.contains(&page.path()) && (p.query || page.query().is_none())
+            host == p.host
+                && p.paths.contains(&page.path())
+                && (p.query || page.query().is_none())
+                && (!p.loopback_only || returns_here_only(&page))
         })
         .then_some(page)
 }
@@ -459,6 +528,57 @@ mod tests {
         ] {
             assert!(sign_in_page(bad, hosts).is_none(), "{bad}");
         }
+    }
+
+    #[test]
+    fn a_devin_page_sending_the_browser_anywhere_but_here_is_never_opened() {
+        let devin = |query: &str| format!("https://app.devin.ai/auth/cli/continue?state=s{query}");
+        for here in [
+            "",
+            "&redirect_uri=http%3A%2F%2Flocalhost%3A4321%2Fcallback",
+            "&redirect_uri=http%3A%2F%2F127.0.0.1%3A4321%2Fcallback",
+            "&redirect_uri=http%3A%2F%2F%5B%3A%3A1%5D%3A4321%2Fcallback",
+            "&redirect_uri=https%3A%2F%2FLOCALHOST%2Fcb",
+            "&next=%2Fdashboard",
+            "&return_to=settings",
+            "&callback=",
+        ] {
+            assert!(sign_in_page(&devin(here), DEVIN_PAGES).is_some(), "{here}");
+        }
+        for away in [
+            "&redirect_uri=https%3A%2F%2Fevil.example%2Fcb",
+            "&redirect_uri=%2F%2Fevil",
+            "&redirect=http%3A%2F%2Fevil.example%2F",
+            "&redirect_url=https%3A%2F%2F127.0.0.1.evil.example%2F",
+            "&return_to=https%3A%2F%2Flocalhost.evil.example%2F",
+            "&callback=https%3A%2F%2Flocalhost%40evil.example%2F",
+            "&next=javascript%3Aalert(1)",
+            "&next=data%3Atext%2Fhtml%2C%3Cscript%3E",
+            "&next=%5C%5Cevil",
+            "&next=%2F%5Cevil",
+            "&next=%20%2F%2Fevil",
+            "&next=%2F%09%2Fevil",
+            "&next=https%3Aevil.example",
+            "&Redirect_URI=https%3A%2F%2Fevil.example%2Fcb",
+            "&redirect_uri=http%3A%2F%2Flocalhost%3A4321%2Fcallback&next=https%3A%2F%2Fevil.example",
+        ] {
+            assert!(sign_in_page(&devin(away), DEVIN_PAGES).is_none(), "{away}");
+        }
+        assert!(
+            sign_in_page(
+                "https://windsurf.com/windsurf/signin?redirect_uri=https%3A%2F%2Fevil.example%2Fcb",
+                DEVIN_PAGES
+            )
+            .is_none()
+        );
+        // Claude's own pages may come back to Claude's own code page.
+        assert!(
+            sign_in_page(
+                &page("https%3A%2F%2Fplatform.claude.com%2Foauth%2Fcode%2Fcallback"),
+                CLAUDE_PAGES
+            )
+            .is_some()
+        );
     }
 
     // Desk forwards from macOS and Linux only (Windows lets a port be taken

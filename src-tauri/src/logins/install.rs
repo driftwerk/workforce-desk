@@ -115,6 +115,14 @@ impl Cli {
 /// into `~/.local/share/devin/cli/_versions/<version>`, made `current`, and
 /// linked from `~/.local/bin/devin`. A `~/.local/bin/devin` that isn't
 /// Devin's own link is left as it is, and said.
+///
+/// A bundle is refused whole, before anything of it is unpacked, when it
+/// names an entry outside its folder (from `/`, or through `..`), holds a
+/// link (symbolic or hard) whose target is from `/` or goes through `..`,
+/// or holds anything but files, folders and links (a device, a fifo). The
+/// links and kinds are read from `tar tv`, whose lines GNU tar and bsdtar
+/// both begin with the entry's kind (`-`, `d`, `l`, `h`, …) and end with
+/// ` -> target` for a symbolic link and ` link to target` for a hard one.
 fn devin_unpack(manifest: &str, bundles: &str) -> String {
     // Over HTTPS, each stays HTTPS through every redirect.
     let https_of = |url: &str| match url.starts_with("https://") {
@@ -159,6 +167,13 @@ if [ ! -x "$dir/bin/devin" ]; then
   tar tzf "$tmp/bundle.tar.gz" > "$tmp/list" || {{ echo "Devin's download isn't one Desk can read."; exit 1; }}
   if grep -Eq '^/|(^|/)\.\.(/|$)' "$tmp/list"; then
     echo "Devin's download names files outside its own folder, so Desk didn't install it."; exit 1
+  fi
+  tar tvzf "$tmp/bundle.tar.gz" > "$tmp/long" || {{ echo "Devin's download isn't one Desk can read."; exit 1; }}
+  if grep -Eqv '^[-dlh]' "$tmp/long"; then
+    echo "Devin's download holds something that isn't a file, folder or link, so Desk didn't install it."; exit 1
+  fi
+  if grep -Eq '( -> | link to )(/|(.*/)?\.\.(/|$))' "$tmp/long"; then
+    echo "Devin's download links to somewhere outside its own folder, so Desk didn't install it."; exit 1
   fi
   mkdir "$tmp/x"
   tar xzf "$tmp/bundle.tar.gz" --no-same-owner -C "$tmp/x"
@@ -1062,6 +1077,80 @@ mod tests {
                 .collect();
             assert!(left.is_empty(), "{left:?}");
         }
+    }
+
+    /// A bundle holding a link to somewhere outside its folder (a path from
+    /// `/`, or one through `..`), or a fifo: refused whole, and nothing of
+    /// it is left anywhere. A link inside its folder is unpacked as it is.
+    #[cfg(unix)]
+    #[test]
+    fn a_bundle_linking_outside_its_folder_or_holding_a_fifo_is_never_unpacked() {
+        enum Odd {
+            Link(&'static str),
+            Fifo,
+        }
+        for (odd, refusal) in [
+            (
+                Odd::Link("/Users/x"),
+                "links to somewhere outside its own folder",
+            ),
+            (
+                Odd::Link("../../../escaped"),
+                "links to somewhere outside its own folder",
+            ),
+            (
+                Odd::Link("devin/../../.."),
+                "links to somewhere outside its own folder",
+            ),
+            (Odd::Fifo, "isn't a file, folder or link"),
+        ] {
+            let (at, manifest, bundles) = devin_release_of(None, |build| {
+                let odd_one = build.join("bin/lib");
+                match odd {
+                    Odd::Link(to) => std::os::unix::fs::symlink(to, &odd_one).unwrap(),
+                    Odd::Fifo => assert!(
+                        std::process::Command::new("mkfifo")
+                            .arg(&odd_one)
+                            .status()
+                            .unwrap()
+                            .success()
+                    ),
+                }
+                vec!["bin/devin".into(), "bin/lib".into()]
+            });
+            let home = at.path().join("home");
+            let out = unpack(&home, &manifest, &bundles);
+            let said = String::from_utf8_lossy(&out.stdout);
+            assert!(!out.status.success(), "{said}");
+            assert!(said.contains(refusal), "{said}");
+            let versions = home.join(".local/share/devin/cli/_versions");
+            assert!(!versions.join("9.9.9").exists());
+            assert!(std::fs::symlink_metadata(versions.join("current")).is_err());
+            assert!(std::fs::symlink_metadata(home.join(".local/bin/devin")).is_err());
+            let left: Vec<_> = std::fs::read_dir(&versions)
+                .unwrap()
+                .map(|e| e.unwrap().file_name())
+                .collect();
+            assert!(left.is_empty(), "{left:?}");
+        }
+
+        // A link inside its own folder: unpacked, as it is.
+        let (at, manifest, bundles) = devin_release_of(None, |build| {
+            std::os::unix::fs::symlink("devin", build.join("bin/also")).unwrap();
+            vec!["bin/devin".into(), "bin/also".into()]
+        });
+        let home = at.path().join("home");
+        let out = unpack(&home, &manifest, &bundles);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        let also = home.join(".local/share/devin/cli/_versions/9.9.9/bin/also");
+        assert_eq!(
+            std::fs::read_link(&also).unwrap(),
+            std::path::Path::new("devin")
+        );
     }
 
     #[cfg(unix)]
