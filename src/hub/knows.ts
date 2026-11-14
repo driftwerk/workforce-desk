@@ -80,3 +80,14 @@ export const linkKnows = async (remote: string, agent: string): Promise<KnowsLin
     throw new HubError(502, e instanceof Error ? e.message : String(e));
   }
 };
+
+/** What links an agent elsewhere in this window: the link above in the main
+ *  window, which sets it (`shell/App.tsx`); none in a grid's, which isn't
+ *  granted the command. */
+let linker: typeof linkKnows | null = null;
+
+export const setKnowsLinker = (f: typeof linkKnows | null) => {
+  linker = f;
+};
+
+export const knowsLinker = (): typeof linkKnows | null => linker;

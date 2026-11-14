@@ -982,6 +982,145 @@ button.card-icon:hover:not(:disabled) {
   font-size: 12px;
   white-space: nowrap;
 }
+/* ── What they see (Sees) ─────────────────────────────────────────────────
+   Rows divided by hairlines, no box around them. */
+.sees-intro {
+  margin: -6px 0 0;
+}
+.sees-rows {
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
+.sees-rows > * + *,
+.sees-modes > * + * {
+  border-top: 1px solid var(--border);
+}
+.sees-rows > .ability-row {
+  padding: 12px 0;
+}
+.sees-rows .seg {
+  background: var(--sunken);
+}
+.sees-rows .seg button[aria-checked="true"] {
+  background: var(--raised);
+}
+.sees-mode {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 11px 0;
+}
+.sees-mode-pick {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(120px, 190px) minmax(0, 1fr);
+  align-items: baseline;
+  column-gap: 12px;
+  row-gap: 2px;
+  cursor: pointer;
+  color: var(--text);
+}
+.sees-mode-pick input {
+  margin: 0;
+  align-self: center;
+}
+.sees-mode-pick b {
+  font-weight: 600;
+  font-size: 15px;
+}
+.sees-mode-desc {
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.sees-change {
+  flex: none;
+  color: var(--signal);
+}
+.sees-change:hover {
+  color: var(--text);
+}
+@media (max-width: 760px) {
+  .sees-mode-pick {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+  .sees-mode-desc {
+    grid-column: 2;
+  }
+}
+.sees-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sees-foot p {
+  margin: 0;
+}
+.sees-foot .link {
+  color: var(--signal);
+}
+.sees-foot .link:hover {
+  color: var(--text);
+}
+.sees-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+.sees-log-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 0;
+  border-top: 1px solid var(--border);
+  color: var(--text);
+}
+.sees-log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sees-pick {
+  gap: 14px;
+}
+.sees-pick-filter {
+  width: 100%;
+}
+.sees-pick-kind {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.sees-pick-row {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+  color: var(--text);
+}
+.sees-pick-row input {
+  margin: 0;
+  flex: none;
+  align-self: center;
+}
+.sees-pick-name {
+  font-size: 14px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.sees-pick-sub {
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .agent-remove {
   display: flex;
   align-items: center;
