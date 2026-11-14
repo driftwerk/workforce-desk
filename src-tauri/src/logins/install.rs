@@ -156,7 +156,8 @@ if [ ! -x "$dir/bin/devin" ]; then
   if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum "$tmp/bundle.tar.gz" | cut -d' ' -f1)
   else got=$(shasum -a 256 "$tmp/bundle.tar.gz" | cut -d' ' -f1); fi
   [ "$got" = "$sha" ] || {{ echo "Devin's download didn't match its checksum, so Desk didn't install it."; exit 1; }}
-  if tar tzf "$tmp/bundle.tar.gz" | grep -Eq '^/|(^|/)\.\.(/|$)'; then
+  tar tzf "$tmp/bundle.tar.gz" > "$tmp/list" || {{ echo "Devin's download isn't one Desk can read."; exit 1; }}
+  if grep -Eq '^/|(^|/)\.\.(/|$)' "$tmp/list"; then
     echo "Devin's download names files outside its own folder, so Desk didn't install it."; exit 1
   fi
   mkdir "$tmp/x"
@@ -388,8 +389,8 @@ enum Other {
 /// Whether a failed run is one the other ways may get round: a download
 /// that failed, while this computer is online. Never a timeout, an
 /// unsupported system, or anything else the installer stopped at. Devin's
-/// own steps are tried after any failure online but a timeout: its
-/// installer can stop at `devin setup` as at a download.
+/// own steps have no other way to try, so any failure online but a
+/// timeout is worth one (there is none, and its command by hand is said).
 fn worth_other_ways(outcome: &Outcome, plan: Cli) -> bool {
     let offline_now = matches!(&outcome.status, Ok(s) if offline(s.code()));
     !outcome.ok()
@@ -481,9 +482,9 @@ fn spawn_script(backend: &Backend, script: &str) -> eyre::Result<std::process::C
 }
 
 /// Runs `script` as an installer. `no_terminal`: in a session of its own,
-/// with no terminal to open, so a wizard at its end (`devin setup`) finds
-/// nothing to ask on and can't wait, even when Desk itself was started from
-/// a terminal. It is still its own process group, so it is stopped whole.
+/// with no terminal to open, so nothing it runs (Devin's steps never run its
+/// `setup`, but a link to one could) finds anything to ask on and waits,
+/// even when Desk itself was started from a terminal. It is still its own process group, so it is stopped whole.
 fn spawn_as(
     backend: &Backend,
     script: &str,
@@ -827,7 +828,7 @@ mod tests {
     }
 
     #[test]
-    fn devins_installer_runs_with_nothing_to_read_and_its_own_steps_come_after() {
+    fn devin_installs_from_its_checked_download_and_never_runs_its_setup() {
         let run = Cli::Devin.run();
         assert!(run.contains("https://static.devin.ai/cli/current/manifest.json"));
         assert!(!run.contains("setup"), "Desk signs in itself");
