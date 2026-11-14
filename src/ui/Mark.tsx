@@ -15,24 +15,26 @@ const RING: Partial<Record<Look, string>> = {
 export const initialsFor = (name: string, engine?: string): string =>
   engine === "claude" ? "cc" : engine === "codex" ? "cx" : (firstGrapheme(name.trim()) ?? "?").toUpperCase();
 
+/** The board's initials: a person's first and last (`RL` for Richard
+ *  Lucas), a session's word starts in small letters (`bo` for brisk-otter). */
+export const markText = (name: string, agent: boolean): string => {
+  const words = name.trim().split(agent ? /[\s\-_]+/ : /\s+/).filter(Boolean);
+  const two = words.length > 1 ? words[0]![0]! + words.at(-1)![0]! : (words[0]?.[0] ?? "?");
+  return agent ? two.toLowerCase() : two.toUpperCase();
+};
+
 export type MarkSize = "xs" | "sm" | "md" | "lg" | "xl";
 
 /** What a mark is filled with: Desk's pastel marks, or (a person on the
  *  board) a chart series colour, read with `onSeriesMark`. */
 export type MarkTone = "mark" | "series";
 
-/** The face of a person's mark on the board: a series colour, by name, and
- *  the ink that reads on it. */
-export const seriesFace = (name: string): { background: string; color: string } => ({
-  background: tokenVar(markFor(name, SERIES_MARK_TOKENS)),
-  color: tokenVar("onSeriesMark"),
-});
 
 /** Who or what something is at a glance: their picture where they have one,
  *  else their letter, in the ring that says what they're doing. Agents and
  *  sessions are rounded squares; people are round, but on the board, where
  *  a person's mark is filled in a series colour (`tone="series"`), a rounded
- *  square as the board's design draws them. */
+ *  square as the board's design draws them, with the board's initials. */
 export function Mark({
   name,
   engine,
@@ -54,11 +56,14 @@ export function Mark({
   const [broken, setBroken] = useState<string | null>(null);
   const picture = src && src !== broken ? src : null;
   const series = tone === "series" && !engine;
-  const face = series ? seriesFace(name) : { background: tokenVar(engine ? ENGINE_MARK : markFor(name)) };
+  // A person on the board: a series colour, by name, and the ink that reads on it.
+  const face = series
+    ? { background: tokenVar(markFor(name, SERIES_MARK_TOKENS)), color: tokenVar("onSeriesMark") }
+    : { background: tokenVar(engine ? ENGINE_MARK : markFor(name)) };
   return (
     <span className={`mark mark-${size} ${person && !series ? "mark-person" : ""} ${state ? (RING[state] ?? "") : ""}`}>
       <span className="mark-face" style={picture ? undefined : face}>
-        {picture ? <img src={picture} alt="" draggable={false} onError={() => setBroken(picture)} /> : initialsFor(name, engine)}
+        {picture ? <img src={picture} alt="" draggable={false} onError={() => setBroken(picture)} /> : series ? markText(name, false) : initialsFor(name, engine)}
       </span>
     </span>
   );

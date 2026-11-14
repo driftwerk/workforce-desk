@@ -307,13 +307,8 @@ export const bylineText = (t: Ticket, layout: Layout, children?: number): string
   return parts.filter(Boolean).join(" · ");
 };
 
-/** A comment's mark: a person's initials, a session's word starts in
- *  small letters (`bo` for brisk-otter). */
-export const markText = (name: string, agent: boolean): string => {
-  const words = name.trim().split(agent ? /[\s\-_]+/ : /\s+/).filter(Boolean);
-  const two = words.length > 1 ? words[0]![0]! + words.at(-1)![0]! : (words[0]?.[0] ?? "?");
-  return agent ? two.toLowerCase() : two.toUpperCase();
-};
+/** A comment's mark: the board's initials (see `markText`). */
+export { markText } from "../ui/Mark";
 
 // ── The description ────────────────────────────────────────────────────
 

@@ -7,7 +7,6 @@ import { deskListeners, useDesk } from "../hub/store";
 import type { ActivityEvent, DeskEvent, HistoryEvent, Ticket, TicketComment } from "../hub/types";
 import { mergeEvents } from "../overview/activity";
 import { DESK_RICH_HOST } from "../shell/richHost";
-import { seriesFace } from "../ui/Mark";
 import { plainError } from "../ui/plainError";
 import { historyLine } from "./board";
 import { BranchIcon, MergeIcon, PrIcon } from "./cardFacts";
@@ -294,7 +293,7 @@ function CommentRow({
   const mine = !!me && c.author.kind === "person" && c.author.name === me;
   return (
     <li className={`ticket-comment ticket-comment-${c.author.kind}${c.flagged ? " is-flagged" : ""}${small ? " is-reply" : ""}`}>
-      <span className="ticket-comment-mark" aria-hidden="true" style={c.author.kind === "person" ? seriesFace(c.author.name) : undefined}>
+      <span className="ticket-comment-mark" aria-hidden="true">
         {markText(mine ? me.split(/\s+/)[0]! : c.author.name, c.author.kind === "agent")}
       </span>
       <div className="ticket-comment-main">

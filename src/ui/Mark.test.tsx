@@ -12,6 +12,7 @@ describe("a mark's fill", () => {
     const { container } = render(<Mark name="Richard Lucas" size="xs" person />);
     expect(face(container).style.background).toBe(tokenVar(markFor("Richard Lucas")));
     expect(face(container).style.color).toBe("");
+    expect(face(container).textContent).toBe("R");
     expect(container.querySelector(".mark")!.className).toContain("mark-person");
   });
 
@@ -22,7 +23,7 @@ describe("a mark's fill", () => {
     expect(face(container).style.background).toBe(tokenVar(token));
     expect(face(container).style.color).toBe("var(--on-series-mark)");
     expect(container.querySelector(".mark")!.className).not.toContain("mark-person");
-    expect(face(container).textContent).toBe("R");
+    expect(face(container).textContent).toBe("RL");
   });
 
   it("spreads names over the same slots in both lists", () => {
