@@ -520,6 +520,10 @@ fn level_words(level: &str) -> &'static str {
 /// budget.
 fn how_words(a: &Asked) -> String {
     match (a.level.as_str(), budget_of(&json!({"act": a.act}))) {
+        // The hub's word for no budget set: Act fully's most.
+        ("full", Some(usd)) if usd >= MOST_BUDGET_USD => format!(
+            "at Act fully, with no daily budget set (at most ${usd:.2} a day, counted across this computer and every machine)"
+        ),
         ("full", Some(usd)) => format!(
             "at Act fully, within one daily budget of ${usd:.2} counted across this computer and every machine"
         ),
@@ -943,7 +947,7 @@ pub async fn sync<E: Engine>(
             .filter_map(|g| {
                 let a = groups.get(&g.group).filter(|a| a.agent == g.agent)?;
                 let yes = yes_of(&kept, &g.group, a)?;
-                let grant = at_most(capped(g.grant.clone()), &yes.level);
+                let grant = capped(at_most(g.grant.clone(), &yes.level));
                 Some((g.group.clone(), (grant, yes.at)))
             })
             .collect();

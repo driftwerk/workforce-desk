@@ -573,6 +573,28 @@ async fn act_fully_with_its_one_budget_is_carried_once_the_person_says_yes_to_it
 }
 
 #[tokio::test]
+async fn act_fully_with_no_budget_set_at_home_says_so_and_a_lower_yes_carries_no_budget() {
+    let f = files();
+    let devbox = Machine::new("devbox");
+    let mut full = acme(&[S1], "full");
+    full.grant["act"]["budget_usd_per_day"] = json!(10_000.0);
+    let w = wanted(&[("devbox", vec![full], &[S1])]);
+    let (_, body, _) = say(&f, &w, false).await.expect("asked");
+    assert!(
+        body.contains("at Act fully, with no daily budget set (at most $10000.00 a day"),
+        "{body}"
+    );
+    // Said yes at Act, then raised: written at Act, with no budget.
+    let f = files();
+    let acting = wanted(&[("devbox", vec![acme(&[S1], "act")], &[S1])]);
+    say(&f, &acting, true).await.expect("asked");
+    sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    let g = devbox.grant("acme").unwrap();
+    assert_eq!(g["level"], "act");
+    assert!(g["act"].get("budget_usd_per_day").is_none(), "{g}");
+}
+
+#[tokio::test]
 async fn an_agent_made_again_with_the_same_id_is_asked_about_again() {
     let f = files();
     let devbox = Machine::new("devbox");
