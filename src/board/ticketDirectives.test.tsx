@@ -15,7 +15,7 @@ import { TicketBody } from "./TicketBody";
 import { forgetFetchedFiles } from "./TicketFiles";
 import { dateWords, toneOf } from "./ticketDirectives";
 import { deskFileId } from "./ticketFileImage";
-import { issueAddress } from "./ticketKeyedRich";
+import { descriptionLink, issueAddress, TICKET_RICH_HOST } from "./ticketKeyedRich";
 import { firstParagraph, foldSections, unfenced } from "./ticketRich";
 
 const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
@@ -160,6 +160,13 @@ describe("a synced description's links", () => {
     fireEvent.click(chip);
     await waitFor(() => expect(opened.urls).toEqual(["https://wiki.example/pages/42/"]));
     expect(onEdit).not.toHaveBeenCalled();
+  });
+});
+
+describe("a bare address outside a description", () => {
+  it("stays a link: only a description draws it as a chip", () => {
+    expect(TICKET_RICH_HOST.link("https://wiki.example/x", "https://wiki.example/x")).toBeUndefined();
+    expect(descriptionLink("https://wiki.example/x", "https://wiki.example/x")).toBeTruthy();
   });
 });
 

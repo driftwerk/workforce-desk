@@ -45,8 +45,7 @@ const wordsOf = (children: ReactNode): string | null =>
 
 /** Desk's markdown host for a ticket's own text (its description, its
  *  comments): a link to a ticket on a board here, or to its issue, is drawn
- *  as that ticket's chip, and a bare web address as a link chip; what the
- *  hub writes as directives (a mention, a status, a date, a panel, a
+ *  as that ticket's chip; what the hub writes as directives (a mention, a status, a date, a panel, a
  *  collapsible) is drawn as Desk draws it, and a file of the ticket's
  *  (`desk-file:`) is kept for the description to draw. */
 export const TICKET_RICH_HOST = {
@@ -57,12 +56,18 @@ export const TICKET_RICH_HOST = {
   link: (href: string, children: ReactNode) => {
     const tickets = useBoard.getState().tickets;
     const id = parseTicketLink(href) ?? ticketAt(href, tickets);
-    if (id && tickets[id]) return <IssueChip id={id}>{children}</IssueChip>;
-    // A bare address, its words itself: a Jira smart link to a page.
-    if (/^https:\/\//i.test(href) && wordsOf(children)?.trim() === href) return <SmartLink href={href} />;
-    return undefined;
+    return id && tickets[id] ? <IssueChip id={id}>{children}</IssueChip> : undefined;
   },
 } satisfies RichHost;
+
+/** A description's links: as {@link TICKET_RICH_HOST}'s, and a bare address
+ *  (its words itself, as the hub writes a Jira smart link to a page) as a
+ *  link chip. Only a description's: a comment's bare address stays a link. */
+export const descriptionLink = (href: string, children: ReactNode): ReactNode => {
+  const own = TICKET_RICH_HOST.link(href, children);
+  if (own) return own;
+  return /^https:\/\//i.test(href) && wordsOf(children)?.trim() === href ? <SmartLink href={href} /> : undefined;
+};
 
 /** Each board's ticket keys and ids, built once per change of the tickets
  *  and shared by every text drawn. */
