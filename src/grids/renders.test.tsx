@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { Profiler } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useDesk } from "../hub/store";
@@ -11,6 +11,7 @@ import { MAIN_GRID } from "./model";
 import type { GridStorage } from "./storage";
 import { createGrid, deliver, layOut, startGrids, useGrids } from "./store";
 import { useTerminals } from "./terminals";
+import { STATE_LABEL } from "../session/words";
 
 const counts = { dm: 0 };
 // How often each grid's sidebar row was drawn.
@@ -101,9 +102,14 @@ it("draws no pane again when a session it doesn't show moves", () => {
   );
   draws = 0;
   let n = 0;
-  for (const state of ["blocked", "working", "idle", "working", "background"] as const)
+  for (const state of ["working", "idle", "starting", "working", "blocked"] as const)
     act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s5: { ...s.sessions.s5!, state, updatedAt: new Date(Date.UTC(2026, 9, 29, 10, 0, n++)).toISOString() } } })));
   expect(draws).toBe(0);
+  // Opened now, Replace says where it stands now.
+  fireEvent.click(within(screen.getByRole("region", { name: "task-0" })).getByRole("button", { name: "Pane options" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Replace" }));
+  const s5 = within(screen.getByRole("menu", { name: "Replace" })).getByRole("menuitem", { name: /^task-5/ });
+  expect(s5.textContent).toContain(STATE_LABEL.blocked);
 });
 
 // Every grid's row is in the sidebar whatever the main area shows, so a
