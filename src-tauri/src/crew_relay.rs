@@ -436,16 +436,17 @@ async fn carry_desk<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &
         .get("engine")
         .and_then(Value::as_str)
         .is_none_or(|e| e == "claude");
-    match tokio::time::timeout(PLUGIN_FOR, ends.plugin_dir(machine)).await {
-        Ok(Some(dir)) => {
-            start.insert("env".into(), json!({"CLAUDE_CODE_PLUGIN_DIRS": dir}));
+    if claude {
+        match tokio::time::timeout(PLUGIN_FOR, ends.plugin_dir(machine)).await {
+            Ok(Some(dir)) => {
+                start.insert("env".into(), json!({"CLAUDE_CODE_PLUGIN_DIRS": dir}));
+            }
+            _ => {
+                return refused(format!(
+                    "Desk couldn't read where its plugin is on {name}, so it started nothing there; it tries again."
+                ));
+            }
         }
-        _ if claude => {
-            return refused(format!(
-                "Desk couldn't read where its plugin is on {name}, so it started nothing there; it tries again."
-            ));
-        }
-        _ => {}
     }
     let Ok(body) = serde_json::to_vec(&start) else {
         return unreached(name);
