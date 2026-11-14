@@ -7,9 +7,9 @@ import { useDesk } from "../hub/store";
 import { BrainDialog } from "../providers/BrainDialog";
 import { ConnectForm } from "../providers/ConnectForm";
 import { useProviderList, useProviders } from "../providers/store";
+import { useUi } from "../shell/ui";
 import { CLI_NAME, CopyInstall, PlanLoginAction, ReopenLink, usePlanLogin } from "./PlanLogin";
 import { useSettings } from "./store";
-import { useUi } from "../shell/ui";
 import { accountsOf, freeName, useAccounts } from "../engines/accounts";
 
 const SECTIONS: { group: ProviderGroup; label: string }[] = [

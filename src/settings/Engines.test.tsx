@@ -78,6 +78,7 @@ it("says what Engines are, and sends what agents think with to Providers", async
   render(<Engines />);
   await act(async () => {});
   expect(screen.getByText(/The coding tools Desk starts sessions in/).textContent).toContain("Claude Code, Codex and Devin");
+  useUi.setState({ settings: "engines" });
   fireEvent.click(screen.getByRole("button", { name: "Providers" }));
   expect(useUi.getState().settings).toBe("providers");
 });

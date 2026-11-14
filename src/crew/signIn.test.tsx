@@ -106,6 +106,7 @@ it("names its plans as the agents', and sends coding sessions' sign-in to Engine
   render(<Providers />);
   await act(async () => {});
   expect(screen.getByRole("heading", { name: "Plans your agents use" })).toBeTruthy();
+  useUi.setState({ settings: "providers" });
   fireEvent.click(screen.getByRole("button", { name: "Engines" }));
   expect(useUi.getState().settings).toBe("engines");
 });
