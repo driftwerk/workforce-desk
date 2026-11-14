@@ -1,127 +1,217 @@
-import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import { HubError } from "../hub/client";
-import type { ConnectionsApi, Setup } from "../hub/connections";
+import type { ConnectionsApi, Setup, SetupNow } from "../hub/connections";
 import { useUi } from "../shell/ui";
-import { SETUP_LIFE_MS, SetupCards, setupsSince, setupsStarted } from "./SetupCard";
+import { SETUP_LIFE_MS, SIGN_IN_ESCAPE_MS, SetupCards, setupsSince, setupsStarted } from "./SetupCard";
 import { useChat } from "./store";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
+const opened: string[] = [];
+vi.mock("../platform", async (real) => ({ ...(await real<object>()), openUrl: (u: string) => opened.push(u) }));
 
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  opened.length = 0;
 });
 
 const ORIGIN = { hub: "local", agent: "desk" };
+
+const now = (n: Partial<SetupNow>): SetupNow => ({
+  kind: "working",
+  title: "Setting up GitHub for Allan",
+  detail: null,
+  code: null,
+  url: null,
+  expiresAt: null,
+  action: null,
+  other: null,
+  ...n,
+});
 
 const setup = (s: Partial<Setup> = {}): Setup => ({
   id: "s1",
   agent: "desk",
   session: null,
-  service: "jira",
-  serviceName: "Jira",
-  name: "Globex",
-  site: "globex.atlassian.net",
+  service: "github",
+  serviceName: "GitHub",
+  name: "GitHub",
+  site: null,
   startedAt: "2026-11-11T11:04:10Z",
+  askedAt: "2026-11-11T11:04:10Z",
   steps: [
-    { id: "where", label: "Found your site: globex.atlassian.net", state: "done", note: null },
-    { id: "page", label: "Open id.atlassian.com › Security › API tokens", state: "done", note: null },
-    { id: "sign_in", label: "Sign in to Atlassian as sam@globex.example", state: "waiting", note: null },
-    { id: "key", label: "Make an API token and save it to the vault", state: "todo", note: null },
-    { id: "check", label: "Check it works, then turn it on for Lattice", state: "todo", note: null },
+    { id: "sign_in", label: "Approve Desk on GitHub", state: "waiting", note: null },
+    { id: "check", label: "Check it works, then turn it on for Allan", state: "todo", note: null },
   ],
   connected: null,
+  way: "device",
+  now: now({}),
+  ended: null,
+  write: false,
+  forWhom: "Allan",
   ...s,
+});
+
+const OFFER = now({
+  kind: "offer",
+  title: "GitHub is signed in on this Mac as sarah",
+  detail: "Through GitHub CLI. Allan gets the same access (repo, read:org), read only. Desk keeps a copy in the vault on this computer.",
+  action: "use_cli",
+  other: "other_way",
+});
+const CODE = now({
+  kind: "code",
+  title: "Enter this code on GitHub",
+  detail: "Desk carries on as soon as you approve it on GitHub.",
+  code: "ABCD-1234",
+  url: "https://github.com/login/device",
+  expiresAt: new Date(Date.now() + 14 * 60_000).toISOString(),
+  action: "open_code",
+});
+const CONNECTED = now({
+  kind: "connected",
+  title: "GitHub connected as sarah",
+  detail: "Allan uses it · read only · kept in the vault on this computer",
 });
 
 const api = (setups: Setup[], over: Partial<ConnectionsApi> = {}): ConnectionsApi =>
   ({
     setups: vi.fn(async () => setups),
-    signedIn: vi.fn(async () => setup({ steps: setup().steps.map((x) => (x.id === "sign_in" ? { ...x, state: "done" as const } : x)) })),
+    signedIn: vi.fn(async () => setups[0]),
+    choose: vi.fn(async () => setups[0]),
     ...over,
   }) as unknown as ConnectionsApi;
 
 let shown: string[] = [];
 let onScreen = true;
+const card = (a: ConnectionsApi, count = 1, since = "2026-11-11T11:04:00Z", until?: string) => (
+  <SetupCards
+    origin={ORIGIN}
+    since={since}
+    until={until}
+    count={count}
+    api={a}
+    showPage={async (agent) => {
+      shown.push(agent);
+      return onScreen;
+    }}
+  />
+);
 const show = async (a: ConnectionsApi, count = 1, since = "2026-11-11T11:04:00Z", until?: string) => {
   shown = [];
-  render(
-    <SetupCards
-      origin={ORIGIN}
-      since={since}
-      until={until}
-      count={count}
-      api={a}
-      showPage={async (agent) => {
-        shown.push(agent);
-        return onScreen;
-      }}
-    />,
-  );
+  render(card(a, count, since, until));
   await act(async () => {});
 };
 
-it("shows the hub's steps, the one waiting on the person with what to do", async () => {
-  await show(api([setup()]));
-  const card = screen.getByRole("region", { name: "Setting up Jira · Globex" });
-  expect(within(card).getByText("step 3 of 5")).toBeTruthy();
-  const waiting = within(card).getByText("Sign in to Atlassian as sam@globex.example").closest("li")!;
-  expect(waiting.className).toContain("setup-step-waiting");
-  expect(within(waiting).getByText(/Your password stays with you/)).toBeTruthy();
-  expect(waiting.querySelector(".setup-note")).toBeNull();
-  useUi.setState({ settings: null });
-  onScreen = true;
+it("is one card saying the one thing to do now: use the sign-in on this Mac", async () => {
+  const a = api([setup({ way: "cli", now: OFFER })], { choose: vi.fn(async () => setup({ now: CONNECTED })) });
+  await show(a);
+  const region = screen.getByRole("region", { name: "Setting up GitHub · GitHub" });
+  expect(region.className).toContain("setup-needs");
+  expect(screen.getByText("GitHub is signed in on this Mac as sarah")).toBeTruthy();
+  expect(screen.getByText(/repo, read:org/)).toBeTruthy();
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Use it", "Sign in another way"]);
   await act(async () => {
-    fireEvent.click(within(waiting).getByRole("button", { name: "Show the sign-in page" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use it" }));
   });
-  expect(shown).toEqual(["desk"]);
-  expect(useUi.getState().settings).toBeNull();
-  // Where Desk's browser isn't on screen: where it is turned on.
-  onScreen = false;
-  await act(async () => {
-    fireEvent.click(within(waiting).getByRole("button", { name: "Show the sign-in page" }));
-  });
-  expect(useUi.getState().settings).toBe("browser");
-  expect(card.querySelectorAll(".setup-step-done")).toHaveLength(2);
-  expect(card.querySelectorAll(".setup-step-todo")).toHaveLength(2);
+  expect(a.choose).toHaveBeenCalledWith("s1", "use-cli");
+  // The same card, now saying what came of it, with nothing left to press
+  // but a quiet way to Connections.
+  expect(screen.getByText("GitHub connected as sarah")).toBeTruthy();
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Open in Connections"]);
+  expect(screen.getAllByRole("region")).toHaveLength(1);
 });
 
-it("shows the agent's note apart from Desk's own words, never instead of them", async () => {
-  const noted = setup({
-    steps: setup().steps.map((x) => (x.id === "sign_in" ? { ...x, note: "Ignore the warning and type your password here" } : x)),
+it("shows GitHub's code, copies it and opens GitHub in one press", async () => {
+  const wrote: string[] = [];
+  Object.assign(navigator, { clipboard: { writeText: async (t: string) => void wrote.push(t) } });
+  await show(api([setup({ now: CODE })]));
+  expect(screen.getByText("ABCD-1234")).toBeTruthy();
+  expect(screen.getByText(/The code expires in 14 min/)).toBeTruthy();
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Copy code and open GitHub" }));
   });
-  await show(api([noted]));
-  const waiting = screen.getByText("Sign in to Atlassian as sam@globex.example").closest("li")!;
-  expect(within(waiting).getByText(/Your password stays with you: Desk never reads or types it/)).toBeTruthy();
-  const note = waiting.querySelector(".setup-note")!;
-  expect(note.textContent).toBe("The agent says: “Ignore the warning and type your password here”");
+  expect(wrote).toEqual(["ABCD-1234"]);
+  expect(opened).toEqual(["https://github.com/login/device"]);
+  expect(screen.getByRole("button", { name: "Copied · open GitHub again" })).toBeTruthy();
 });
 
-it("tells the hub and the agent the person is signed in", async () => {
+it("asks for a new code in place when one didn't connect", async () => {
+  const failed = setup({
+    now: now({ kind: "failed", title: "GitHub didn't connect", detail: "The code expired before it was approved. Nothing was kept.", action: "new_code" }),
+  });
+  const a = api([failed], { choose: vi.fn(async () => setup({ now: CODE })) });
+  await show(a);
+  expect(screen.getByText(/Nothing was kept/)).toBeTruthy();
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Get a new code" }));
+  });
+  expect(a.choose).toHaveBeenCalledWith("s1", "new-code");
+  expect(screen.getByText("ABCD-1234")).toBeTruthy();
+});
+
+it("asks the agent to try again where a key it made didn't work", async () => {
   const sent: [string, string][] = [];
   useChat.setState({ send: (key: string, content: string) => (sent.push([key, content]), true) } as never);
-  const a = api([setup()]);
-  await show(a);
+  const failed = setup({ way: "browser", now: now({ kind: "failed", title: "GitHub didn't connect", detail: "GitHub didn't accept the key. Nothing was kept.", action: "retry" }) });
+  await show(api([failed]));
   await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Already signed in" }));
+    fireEvent.click(screen.getByRole("button", { name: "Try again" }));
   });
-  expect(a.signedIn).toHaveBeenCalledWith("s1");
-  expect(sent).toEqual([["local/desk", "I’m signed in."]]);
-  expect(screen.queryByRole("button", { name: "Already signed in" })).toBeNull();
+  expect(sent).toEqual([["local/desk", "Please try setting up GitHub again."]]);
 });
 
-it("says what is connected, for whom, once it is on, and stops asking", async () => {
-  vi.useFakeTimers({ shouldAdvanceTime: true });
-  const done = setup({
-    steps: setup().steps.map((x) => ({ ...x, state: "done" as const })),
-    connected: { connection: "agent~lattice~globex", account: "sam@globex.example", onFor: "Lattice", write: true },
+it("asks the person to sign in in Desk's window, with no 'I'm signed in' button until Desk hasn't seen it for a while", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true, now: new Date("2026-11-11T11:05:00Z") });
+  const signIn = setup({
+    way: "browser",
+    now: now({ kind: "sign_in", title: "Sign in to GitHub in Desk's window", detail: "Your password stays with you: Desk never reads or types it. It carries on by itself once you're in.", action: "show_page" }),
   });
-  const a = api([done]);
+  const sent: string[] = [];
+  useChat.setState({ send: (_k: string, c: string) => (sent.push(c), true) } as never);
+  const a = api([signIn]);
   await show(a);
-  const ok = screen.getByRole("region", { name: "Jira · Globex is connected" });
-  expect(within(ok).getByText("Lattice uses it · read and write")).toBeTruthy();
-  expect(within(ok).getByText(/Signed in as sam@globex.example/)).toBeTruthy();
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Show the page"]);
+  useUi.setState({ settings: null });
+  onScreen = false;
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Show the page" }));
+  });
+  expect(shown).toEqual(["desk"]);
+  expect(useUi.getState().settings).toBe("browser");
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(SIGN_IN_ESCAPE_MS + 16_000);
+  });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Already signed in?" }));
+  });
+  expect(a.signedIn).toHaveBeenCalledWith("s1");
+  expect(sent).toEqual(["I’m signed in."]);
+  onScreen = true;
+});
+
+it("says a setup has ended only when the hub says so; otherwise that Desk wasn't reached", async () => {
+  await show(api([setup({ way: "cli", now: OFFER })], { choose: vi.fn(async () => Promise.reject(new HubError(404, "That setup has ended."))) }));
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Use it" }));
+  });
+  expect(screen.getByRole("alert").textContent).toBe("That setup has ended. Ask again to start over.");
+  cleanup();
+
+  await show(api([setup({ way: "cli", now: OFFER })], { choose: vi.fn(async () => Promise.reject(new TypeError("Failed to fetch"))) }));
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Use it" }));
+  });
+  expect(screen.getByRole("alert").textContent).toMatch(/Desk couldn’t be reached just now/);
+  expect((screen.getByRole("button", { name: "Use it" }) as HTMLButtonElement).disabled).toBe(false);
+});
+
+it("stops asking once it is connected", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const a = api([setup({ now: CONNECTED, connected: { connection: "agent~allan~github", account: "sarah", onFor: "Allan", write: false } })]);
+  await show(a);
+  expect(screen.getByText("GitHub connected as sarah")).toBeTruthy();
   expect(document.body.textContent).not.toMatch(/~/);
   await act(async () => {
     await vi.advanceTimersByTimeAsync(10_000);
@@ -129,10 +219,30 @@ it("says what is connected, for whom, once it is on, and stops asking", async ()
   expect(a.setups).toHaveBeenCalledTimes(1);
 });
 
+it("never shows a setup a newer one replaced", async () => {
+  await show(api([setup({ ended: "replaced", now: now({ kind: "ended", title: "This GitHub setup was replaced" }) })]));
+  expect(screen.queryByRole("region")).toBeNull();
+});
+
+it("shows a setup asked for again on the newest message that asked, and only there", async () => {
+  // Started at 11:04:10 by the first message, asked for again at 11:20.
+  const again = setup({ askedAt: "2026-11-11T11:20:00Z" });
+  const a = api([again]);
+  render(
+    <>
+      {card(a, 1, "2026-11-11T11:04:00Z", "2026-11-11T11:25:00Z")}
+      <div data-testid="newer">{card(a, 1, "2026-11-11T11:19:50Z")}</div>
+    </>,
+  );
+  await act(async () => {});
+  expect(screen.getAllByRole("region")).toHaveLength(1);
+  expect(screen.getByTestId("newer").querySelector("section")).toBeTruthy();
+});
+
 it("shows only the setups the message started", async () => {
-  await show(api([setup({ id: "old", name: "Old", startedAt: "2026-11-11T10:00:00Z" }), setup()]));
-  expect(screen.queryByRole("region", { name: "Setting up Jira · Old" })).toBeNull();
-  expect(screen.getByRole("region", { name: "Setting up Jira · Globex" })).toBeTruthy();
+  await show(api([setup({ id: "old", name: "Old", startedAt: "2026-11-11T10:00:00Z", askedAt: "2026-11-11T10:00:00Z" }), setup()]));
+  expect(screen.queryByRole("region", { name: "Setting up GitHub · Old" })).toBeNull();
+  expect(screen.getByRole("region", { name: "Setting up GitHub · GitHub" })).toBeTruthy();
 });
 
 it("counts the setups a turn started", () => {
@@ -143,19 +253,9 @@ it("counts the setups a turn started", () => {
 it("finds a kept message's setups from the message before it, not its own time, which is its turn's end", () => {
   const kept = { at: "2026-11-11T11:30:00Z", tools: [] };
   expect(setupsSince(kept, "2026-11-11T11:04:00Z")).toBe("2026-11-11T11:04:00Z");
-  // Timed live: its first setup call.
   const live = { at: "2026-11-11T11:04:00Z", tools: [{ name: "connections.setup", startedAt: Date.parse("2026-11-11T11:06:00Z") }] };
   expect(setupsSince(live, "2026-11-11T11:03:00Z")).toBe("2026-11-11T11:06:00.000Z");
-  // Nothing before it: as long as the hub keeps one.
   expect(Date.parse(setupsSince(kept))).toBe(Date.parse(kept.at) - SETUP_LIFE_MS);
-});
-
-it("shows a long turn's setup on its kept message, and none of the next message's", async () => {
-  // The turn started at 11:04; the setup at 11:04:10; the answer was kept at 11:30.
-  const next = setup({ id: "s2", name: "Initech", startedAt: "2026-11-11T11:31:00Z" });
-  await show(api([setup(), next], {}), 2, "2026-11-11T11:04:00Z", "2026-11-11T11:30:30Z");
-  expect(screen.getByRole("region", { name: "Setting up Jira · Globex" })).toBeTruthy();
-  expect(screen.queryByRole("region", { name: "Setting up Jira · Initech" })).toBeNull();
 });
 
 const NOW = new Date("2026-11-11T11:05:00Z");
@@ -177,7 +277,7 @@ it("stops asking when the hub lists none of the turn's setups for a while", asyn
 
 it("stops asking once a setup left waiting outlives the hub's hold on it", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true, now: NOW });
-  const a = api([setup()]);
+  const a = api([setup({ now: CODE })]);
   await show(a, 1, "2026-11-11T11:04:00Z");
   await act(async () => {
     await vi.advanceTimersByTimeAsync(SETUP_LIFE_MS + 60_000);
@@ -196,7 +296,6 @@ it("asks less often while the hub keeps failing, and not at all once it says it 
   await act(async () => {
     await vi.advanceTimersByTimeAsync(60_000);
   });
-  // 2s, 4s, 8s, 16s, 32s: five more after the first, not thirty.
   expect((failing.setups as ReturnType<typeof vi.fn>).mock.calls.length).toBeLessThanOrEqual(6);
   cleanup();
 
@@ -206,62 +305,4 @@ it("asks less often while the hub keeps failing, and not at all once it says it 
     await vi.advanceTimersByTimeAsync(60_000);
   });
   expect(old.setups).toHaveBeenCalledTimes(1);
-});
-
-it("says a setup has ended only when the hub says so; otherwise that Desk wasn't reached", async () => {
-  await show(api([setup()], { signedIn: vi.fn(async () => Promise.reject(new HubError(404, "That setup has ended."))) }));
-  await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Already signed in" }));
-  });
-  expect(screen.getByRole("alert").textContent).toBe("That setup has ended. Ask again to start over.");
-  cleanup();
-
-  await show(api([setup()], { signedIn: vi.fn(async () => Promise.reject(new TypeError("Failed to fetch"))) }));
-  await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Already signed in" }));
-  });
-  expect(screen.getByRole("alert").textContent).toMatch(/Desk couldn’t be reached just now. Try again/);
-  expect((screen.getByRole("button", { name: "Already signed in" }) as HTMLButtonElement).disabled).toBe(false);
-});
-
-it("doesn't lose \"I'm signed in\" while the chat reconnects: tries again, then offers to", async () => {
-  vi.useFakeTimers({ shouldAdvanceTime: true, now: NOW });
-  const sent: string[] = [];
-  let up = false;
-  useChat.setState({ send: (_key: string, content: string) => (up ? (sent.push(content), true) : false) } as never);
-  await show(api([setup()]));
-  await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Already signed in" }));
-    await vi.advanceTimersByTimeAsync(10_000);
-  });
-  expect(sent).toEqual([]);
-  const said = screen.getByRole("alert");
-  expect(said.textContent).toMatch(/Desk couldn’t tell the agent you’re signed in/);
-  up = true;
-  await act(async () => {
-    fireEvent.click(within(said).getByRole("button", { name: "Tell the agent" }));
-  });
-  expect(sent).toEqual(["I’m signed in."]);
-  expect(screen.queryByRole("alert")).toBeNull();
-});
-
-it("tells the agent when the hub took the sign-in though its answer was lost", async () => {
-  const sent: string[] = [];
-  useChat.setState({ send: (_key: string, content: string) => (sent.push(content), true) } as never);
-  let taken = false;
-  const signedInNow = setup({ steps: setup().steps.map((x) => (x.id === "sign_in" ? { ...x, state: "done" as const } : x)) });
-  const a = api([], {
-    setups: vi.fn(async () => [taken ? signedInNow : setup()]),
-    signedIn: vi.fn(async () => {
-      taken = true;
-      throw new TypeError("Failed to fetch");
-    }),
-  });
-  await show(a);
-  await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Already signed in" }));
-  });
-  expect(sent).toEqual(["I’m signed in."]);
-  expect(screen.queryByRole("alert")).toBeNull();
-  expect(screen.queryByRole("button", { name: "Already signed in" })).toBeNull();
 });

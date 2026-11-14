@@ -61,6 +61,7 @@ const api = (list: Connector[], over: Partial<ConnectionsApi> = {}): Connections
   setPicks: vi.fn(async () => []),
   setups: vi.fn(async () => []),
   signedIn: vi.fn(),
+  choose: vi.fn(),
   ...over,
 });
 

@@ -662,6 +662,32 @@ describe("reading a new key", () => {
     expect(readKey("#k", origin, [at], 4)).toMatchObject({ value: "lin_" });
   });
 
+  it("finds the one key shown on the page itself, by the service's shape", () => {
+    const shape = "(?:github_pat_|ghp_)[!#-&(-~]{9,4085}";
+    const sized = () => {
+      for (const el of Array.from(document.body.querySelectorAll("*"))) (el as HTMLElement).getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect;
+    };
+    // GitHub's new token: shown in <code> inside a flash, beside a copy
+    // button; the deepest element showing it is read.
+    document.body.innerHTML = `<div class="flash"><p>Make sure to copy it now.</p><div><code id="new">github_pat_11ABCDEFG0123456789_abcdefXYZ</code></div><clipboard-copy value="github_pat_11ABCDEFG0123456789_abcdefXYZ">Copy</clipboard-copy></div>`;
+    sized();
+    expect(readKey(null, origin, [at], 512, shape)).toEqual({ value: "github_pat_11ABCDEFG0123456789_abcdefXYZ", origin, path: at });
+    // A key typed into an editable field is never one shown by the service.
+    document.body.innerHTML = `<input id="e" value="ghp_typedbytheagent0123456789">`;
+    sized();
+    expect(readKey(null, origin, [at], 512, shape)).toEqual({ refused: "no key shown on the page" });
+    // Hidden, or in a form with a password: not read.
+    document.body.innerHTML = `<div style="display:none"><code>ghp_hidden0123456789abcdef</code></div><form><input readonly value="ghp_inform0123456789abcdef"><input type="password"></form>`;
+    sized();
+    expect(readKey(null, origin, [at], 512, shape)).toEqual({ refused: "no key shown on the page" });
+    // Two different keys: it asks which.
+    document.body.innerHTML = `<code>ghp_first0123456789abcdef</code><code>ghp_second0123456789abcdef</code>`;
+    sized();
+    expect(readKey(null, origin, [at], 512, shape)).toMatchObject({ refused: expect.stringContaining("several keys") });
+    expect(readKey(null, origin, [at], 512, null)).toEqual({ refused: "no key shape" });
+    expect(readKey(null, "https://evil.example", [at], 512, shape)).toEqual({ refused: "not a key page" });
+  });
+
   it("never reads an editable field, a password field, or a field in a form with a password", () => {
     document.body.innerHTML = `<input id="e" value="typed"><input id="p" type="password" readonly value="pw">
 <input id="a" readonly autocomplete="current-password" value="pw2">

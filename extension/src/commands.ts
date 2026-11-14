@@ -163,7 +163,7 @@ export async function perform(c: Command, tabs: DeskTabs, exec: Exec): Promise<u
       });
     case "capture_key": {
       await here();
-      const read = await exec.run(tab, readKey, [c.selector, c.origin, c.paths, MAX_KEY]);
+      const read = await exec.run(tab, readKey, [c.selector ?? null, c.origin, c.paths, MAX_KEY, c.shape ?? null]);
       if ("refused" in read) throw new Fail(`Desk didn't read a key there: ${read.refused}.`);
       return read;
     }

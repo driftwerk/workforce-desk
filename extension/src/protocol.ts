@@ -91,7 +91,7 @@ export type Command =
   | { cmd: "wait"; session: string; selector: string; timeout_ms: number }
   | { cmd: "upload"; session: string; selector: string; files: UploadFile[] }
   | { cmd: "capture"; session: string; refuse?: KeyPage[] }
-  | { cmd: "capture_key"; session: string; selector: string; origin: string; paths: string[] }
+  | { cmd: "capture_key"; session: string; selector: string | null; shape?: string | null; origin: string; paths: string[] }
   | { cmd: "front"; session: string }
   | { cmd: "hand_over"; session: string }
   | { cmd: "close"; session: string }
