@@ -4,7 +4,7 @@
 
 import { describe, expect, it } from "vitest";
 import type { ActivityEvent, HistoryEvent, TicketComment, TicketDev } from "../hub/types";
-import { counts, eventParts, factOrder, filtered, firstParagraph, foldSections, layoutOf, prRows, remoteStateWord, timeline, type EventWords, type FactId } from "./ticketRich";
+import { counts, eventParts, remoteParts, factOrder, filtered, firstParagraph, foldSections, layoutOf, prRows, remoteStateWord, timeline, type EventWords, type FactId } from "./ticketRich";
 import { ticket, YOU } from "./testing";
 
 const comment = (id: string, at: string, over: Partial<TicketComment> = {}): TicketComment => ({
@@ -161,3 +161,26 @@ describe("a ticket's description", () => {
     expect(firstParagraph("## Only a heading")).toBe("## Only a heading");
   });
 });
+
+describe("history in words", () => {
+  const at = "2026-11-02T09:00:00Z";
+  const say = (e: Partial<HistoryEvent>) => text(remoteParts({ at, by: "remote", kind: "field", actor: "Dana", ...e } as HistoryEvent, words));
+
+  it("says a long text changed without saying it became nothing", () => {
+    expect(say({ field: "description" })).toBe("Dana edited the description");
+  });
+  it("says a label added or taken off, one at a time", () => {
+    expect(say({ field: "labels", to: "bug" })).toBe("Dana added the label bug");
+    expect(say({ field: "labels", from: "ux" })).toBe("Dana took off the label ux");
+  });
+  it("says an unlink and a cleared field plainly", () => {
+    expect(say({ field: "link", from: "ACM-2" })).toBe("Dana unlinked ACM-2");
+    expect(say({ field: "Fix Version", from: "2026.12" })).toBe("Dana cleared the Fix Version, which was 2026.12");
+    expect(say({ field: "Fix Version", from: "2026.11", to: "2026.12" })).toBe("Dana changed the Fix Version from 2026.11 to 2026.12");
+  });
+  it("draws GitHub's PR and branch only when it opened, merged or made one", () => {
+    expect(say({ by: "github", actor: undefined, field: "#5850", to: "merged" })).toBe("GitHub · #5850 merged");
+    expect(say({ by: "github", actor: "GitHub", field: "title", from: "Old", to: "New" })).toBe("GitHub changed the title from Old to New");
+  });
+});
+

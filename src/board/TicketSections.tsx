@@ -160,7 +160,7 @@ function Who({ name, me }: { name?: string; me?: string | null }) {
 }
 
 /** A state's colour, by what it says. */
-const stateTone = (state: string | undefined, done?: boolean): string =>
+export const stateTone = (state: string | undefined, done?: boolean): string =>
   done || /^(done|closed|resolved|completed)$/i.test(state ?? "") ? "state-done" : /progress|review|doing/i.test(state ?? "") ? "ticket-tone-working" : "muted";
 
 /** Its sub-tasks (Jira) or sub-issues (Linear): how many are done, as a

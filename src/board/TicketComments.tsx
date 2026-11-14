@@ -1,18 +1,31 @@
 import { RichHostProvider, RichMarkdown } from "@workforce/rich";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useChat } from "../chat/store";
 import { dayClock } from "../floor/time";
 import { useSessionNames } from "../groups/names";
 import { deskListeners, useDesk } from "../hub/store";
 import type { ActivityEvent, DeskEvent, HistoryEvent, Ticket, TicketComment } from "../hub/types";
 import { mergeEvents } from "../overview/activity";
+import { parseTicketLink } from "../shell/links";
 import { DESK_RICH_HOST } from "../shell/richHost";
 import { plainError } from "../ui/plainError";
 import { historyLine } from "./board";
 import { BranchIcon, MergeIcon, PrIcon } from "./cardFacts";
 import { useBoard } from "./store";
 import { counts, dayText, eventParts, filtered, markText, timeline, type ActivityFilter, type EventWords, type Layout, type Part, type TimelineRow } from "./ticketRich";
+import { linkTicketKeys } from "./ticketKeys";
+import { IssueChip } from "./IssueChip";
 import { localTicketView } from "./ticketView";
+
+/** A comment's markdown host: Desk's, with a link to a ticket on a board
+ *  here drawn as that ticket's chip. */
+const COMMENT_HOST = {
+  ...DESK_RICH_HOST,
+  link: (href: string, children: ReactNode) => {
+    const id = parseTicketLink(href);
+    return id && useBoard.getState().tickets[id] ? <IssueChip id={id}>{children}</IssueChip> : undefined;
+  },
+};
 
 /** The longest comment Desk posts. */
 export const COMMENT_MAX = 10_000;
@@ -283,6 +296,7 @@ function CommentRow({
   person: string | null | undefined;
   small?: boolean;
 }) {
+  const body = useKeyedBody(c.body, t.board);
   const behalf = onBehalfOf(c, t, person);
   // Posted there on the person's behalf, it's said so in place of where.
   const where = behalf ?? whereSaid(c) ?? (c.author.kind === "person" ? c.author.on : null);
@@ -304,8 +318,8 @@ function CommentRow({
         </div>
         {c.flagged && <p className="small ticket-comment-flag">Reads as instructions to an AI: shown as written, never acted on.</p>}
         <div className="ticket-comment-body rich">
-          <RichHostProvider host={DESK_RICH_HOST}>
-            <RichMarkdown text={c.body} />
+          <RichHostProvider host={COMMENT_HOST}>
+            <RichMarkdown text={body} />
           </RichHostProvider>
         </div>
         {replies.length > 0 && (
@@ -318,6 +332,21 @@ function CommentRow({
       </div>
     </li>
   );
+}
+
+/** A comment's text with each key of a ticket on the same board made a
+ *  link to it, so it's drawn as that ticket's chip. */
+function useKeyedBody(text: string, board: string): string {
+  const tickets = useBoard((s) => s.tickets);
+  return useMemo(() => {
+    const ids = new Map<string, string>();
+    for (const o of Object.values(tickets)) {
+      if (o.board !== board) continue;
+      const key = o.external?.key ?? o.key;
+      if (key) ids.set(key, o.id);
+    }
+    return ids.size ? linkTicketKeys(text, (k) => ids.get(k)) : text;
+  }, [text, board, tickets]);
 }
 
 /** A row of history: who, what happened, when. */
