@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import type { Ticket, TicketFile } from "../hub/types";
+import type { RemoteLink, Ticket, TicketFile } from "../hub/types";
 import { openUrl } from "../platform";
 import { plainError } from "../ui/plainError";
 import { FileViewer } from "./FileViewer";
 import { useBoard } from "./store";
+import { devOf } from "./ticketRich";
+import { SectionHead } from "./TicketSections";
 import { fileKind, fileLine, localTicketView, UPLOAD_MAX } from "./ticketView";
 
 /** The most files' bytes kept fetched (as `blob:` URLs) at once. */
@@ -153,18 +155,17 @@ export type Uploads = ReturnType<typeof useUploads>;
  *  a link's. A picture or file opens in the viewer; a link where it is. On a
  *  ticket of your own, files are dropped on it or added, and taken off. */
 export function TicketFiles({ ticket: t, local, uploads }: { ticket: Ticket; local: boolean; uploads: Uploads }) {
-  const files = t.files ?? [];
+  // Its issue's plain web links (Figma, a doc) are files too; a page it's
+  // related to some way is linked work.
+  const files = [...(t.files ?? []), ...(devOf(t)?.links ?? []).filter((l) => !l.words).map((l) => linkFile(l, t))];
   const [open, setOpen] = useState<number | null>(null);
   const pick = useRef<HTMLInputElement>(null);
   const viewable = files.filter((f) => f.source !== "linear_link");
   const { adding, add, remove } = uploads;
   if (!files.length && !local) return null;
   return (
-    <section aria-label="Attachments">
-      <h2 className="ticket-section-head">
-        Attachments · {files.length}
-        {adding > 0 && <span className="ticket-section-note"> · adding {adding}…</span>}
-      </h2>
+    <section className="ticket-files" aria-label="Files">
+      <SectionHead title="Files" note={`${files.length}${adding > 0 ? ` · adding ${adding}…` : ""}`} />
       <div className="ticket-file-cards">
         {files.map((f) => (
           <FileCard
@@ -193,6 +194,19 @@ export function TicketFiles({ ticket: t, local, uploads }: { ticket: Ticket; loc
     </section>
   );
 }
+
+/** A web link of its issue's, as a link file's card. */
+const linkFile = (l: RemoteLink, t: Ticket): TicketFile => ({
+  id: `link:${l.url}`,
+  source: "linear_link",
+  name: l.title,
+  mediaType: "",
+  size: null,
+  url: l.url,
+  thumb: false,
+  addedBy: { kind: "desk", id: "remote", name: t.external ? t.external.system : "" },
+  addedAt: "",
+});
 
 /** One file's card. */
 function FileCard({ ticket, file: f, onOpen, onRemove }: { ticket: string; file: TicketFile; onOpen: () => void; onRemove?: () => void }) {

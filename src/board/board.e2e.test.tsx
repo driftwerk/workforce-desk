@@ -320,12 +320,11 @@ describe("a ticket's panel", () => {
     expect(within(panel).getByRole("heading", { name: "Hash every partner key at rest" })).toBeTruthy();
     expect((within(panel).getByLabelText("State") as HTMLSelectElement).value).toBe("doing");
     expect(within(panel).getByText("acme-web", { selector: ".board-who-name" })).toBeTruthy();
-    // A reading column (its description, files and comments) and a details
-    // column (what to do with it, its facts, needs and history).
+    // A reading column (its description, its PRs and its activity) and a
+    // details column (what to do with it, its needs and facts).
     expect(within(panel).getByRole("article", { name: "Description" })).toBeTruthy();
-    expect(within(panel).getByRole("region", { name: "Comments" })).toBeTruthy();
     const side = within(panel).getByRole("complementary", { name: "Details" });
-    expect(within(side).getByRole("button", { name: "Start a session" })).toBeTruthy();
+    expect(within(side).getByRole("button", { name: "Start a session on it" })).toBeTruthy();
     expect(within(side).getByRole("button", { name: "Hand to…" })).toBeTruthy();
     expect(within(side).getByRole("combobox", { name: "State" })).toBeTruthy();
     expect(within(side).getByRole("button", { name: "Copy link" })).toBeTruthy();
@@ -333,20 +332,21 @@ describe("a ticket's panel", () => {
     const needs = within(panel).getByRole("region", { name: "Needs" });
     expect(within(needs).getByRole("button", { name: /ACM-10.*Note service.*Done/ })).toBeTruthy();
     expect(within(needs).getByRole("button", { name: /ACM-15.*Retire the legacy routes.*Backlog/ })).toBeTruthy();
-    expect(within(panel).getByText("PR #491")).toBeTruthy();
-    const history = within(panel).getByRole("region", { name: "History" });
-    // The time as this computer says it, whatever its locale, then the words.
-    const rows = within(history)
+    expect(within(panel).getByRole("button", { name: /#491/ })).toBeTruthy();
+    // Its history, oldest first, in its activity: the words, then the day.
+    const activity = within(panel).getByRole("region", { name: "Activity" });
+    await waitFor(() => expect(within(activity).getAllByRole("listitem")).toHaveLength(3));
+    const rows = within(activity)
       .getAllByRole("listitem")
-      .map((li) => li.textContent!.slice(li.querySelector("time")!.textContent!.length));
+      .map((li) => li.querySelector(".ticket-ev-text")!.textContent);
     expect(rows).toEqual(["You created it", "You gave it to acme-web", "acme-web noted “Both gateways already hash; checking partner keys.”"]);
-    await waitFor(() => expect(within(history).getByText("412k tokens · $3.10 this month")).toBeTruthy());
+    await waitFor(() => expect(within(side).getByText("412k tokens · $3.10")).toBeTruthy());
   });
 
   it("adds and drops a need, hands the ticket on, pins it and drops it, each through the hub", async () => {
     const panel = await open();
     const needs = within(panel).getByRole("region", { name: "Needs" });
-    fireEvent.click(within(needs).getByRole("button", { name: "Add another need…" }));
+    fireEvent.click(within(needs).getByRole("button", { name: "Add a ticket it needs first…" }));
     fireEvent.change(within(needs).getByRole("textbox", { name: "A ticket it needs" }), { target: { value: "Rate-limit" } });
     fireEvent.click(await within(needs).findByRole("button", { name: /ACM-16/ }));
     await waitFor(() => expect(hub.requests.some((r) => r.route === "PUT /api/desk/tickets/t12/needs/t16")).toBe(true));
@@ -376,8 +376,8 @@ describe("a ticket's panel", () => {
   it("says its spend is at least what was read when a session's ledger has more pages, and doesn't read it again on every change", async () => {
     hub.endlessLedger = true;
     const panel = await open();
-    const history = within(panel).getByRole("region", { name: "History" });
-    await waitFor(() => expect(within(history).getByText("at least 412k tokens · $3.10 this month")).toBeTruthy());
+    const side = within(panel).getByRole("complementary", { name: "Details" });
+    await waitFor(() => expect(within(side).getByText("at least 412k tokens · $3.10")).toBeTruthy());
     const reads = hub.requests.filter((r) => r.route.startsWith("GET /api/desk/ledger")).length;
     await act(async () => void hub.put({ ...hub.tickets.get("t12")!, title: "Hash keys", updatedAt: "2026-11-05T15:10:00Z" }));
     await act(async () => void hub.put({ ...hub.tickets.get("t12")!, pinned: true, updatedAt: "2026-11-05T15:11:00Z" }));
@@ -387,12 +387,13 @@ describe("a ticket's panel", () => {
   it("keeps older history it showed when the ticket changes and its history is read again", async () => {
     hub.olderHistory = [{ id: "e0", at: "2026-11-04T09:00:00Z", kind: "ticket_edited", actor: { kind: "you", id: "you", name: "You" }, text: "made ACM-12 need ACM-10", ticket: "t12" }];
     const panel = await open();
-    const history = within(panel).getByRole("region", { name: "History" });
+    const history = within(panel).getByRole("region", { name: "Activity" });
     fireEvent.click(await within(history).findByRole("button", { name: "Show older" }));
     await waitFor(() => expect(within(history).getAllByRole("listitem")).toHaveLength(4));
     await act(async () => void hub.put({ ...hub.tickets.get("t12")!, title: "Hash keys", updatedAt: "2026-11-05T15:10:00Z" }));
     await waitFor(() => expect(hub.requests.filter((r) => r.route === "GET /api/desk/tickets/t12/history").length).toBe(2));
     expect(within(history).getAllByRole("listitem")).toHaveLength(4);
+    // Oldest first: the older page's row leads.
     expect(within(history).getAllByRole("listitem")[0]!.textContent).toContain("made it need ACM-10");
     expect(within(history).queryByRole("button", { name: "Show older" })).toBeNull();
   });

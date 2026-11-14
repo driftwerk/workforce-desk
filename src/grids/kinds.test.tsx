@@ -638,13 +638,15 @@ describe("a ticket opened from a board pane", () => {
     expect(dialog()!.getAttribute("aria-label")).toBe("Ticket ACM-2");
   });
 
-  it("Esc in its Snooze menu closes the menu, not the popup", () => {
+  it("Esc in its Hand to menu closes the menu, not the popup", () => {
     withPopup();
     fireEvent.click(card("ACM-1"));
-    fireEvent.click(within(dialog()!).getByRole("button", { name: "Snooze" }));
-    const menu = screen.getByRole("menu", { name: "Snooze" });
-    fireEvent.keyDown(within(menu).getAllByRole("menuitem")[0]!, { key: "Escape" });
-    expect(screen.queryByRole("menu", { name: "Snooze" })).toBeNull();
+    // Over a grid it's a quick look: Pin and Snooze stay on the board.
+    expect(within(dialog()!).queryByRole("button", { name: "Snooze" })).toBeNull();
+    fireEvent.click(within(dialog()!).getByRole("button", { name: "Hand to…" }));
+    const menu = screen.getByRole("menu", { name: "Hand it to" });
+    fireEvent.keyDown(within(menu).queryAllByRole("menuitem")[0] ?? menu, { key: "Escape" });
+    expect(screen.queryByRole("menu", { name: "Hand it to" })).toBeNull();
     expect(dialog()).toBeTruthy();
   });
 

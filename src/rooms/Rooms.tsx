@@ -26,6 +26,7 @@ import { useProviders } from "../providers/store";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { AgentMark } from "../ui/Mark";
 import { WorkingRow } from "../chat/WorkingRow";
+import { setupsStarted } from "../chat/SetupCard";
 import { EmojiButton } from "../emoji/EmojiButton";
 import { useEmojiInput } from "../emoji/useEmojiInput";
 import { Message } from "./Message";
@@ -477,7 +478,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
         </div>
       ) : tab === "connectors" && local ? (
         <div className="agent-panel" role="tabpanel" id="agent-tab-panel" aria-labelledby="agent-tab-connectors">
-          <AgentConnectors agent={agent} />
+          <AgentConnectors key={agentKey(agent)} agent={agent} />
         </div>
       ) : tab === "files" && local ? (
         <div className="agent-panel" role="tabpanel" id="agent-tab-panel" aria-labelledby="agent-tab-files">
@@ -535,7 +536,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                     <span className="faint small">This is the start of your conversation with {agent.name}.</span>
                   </div>
                 )}
-                {shown.map((m) => (
+                {shown.map((m, i) => (
                   <Fragment key={m.id}>
                     {m.id === newLine.current && (
                       <div className="new-divider" role="separator" aria-label="New messages">
@@ -555,6 +556,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                         onRetry={retry}
                         onRemove={discard}
                         orphan={!!m.answeredDeleted || orphanSet.has(m.id)}
+                        {...turnOf(shown, m, i)}
                       />
                       {!editing && deleting !== m.id && threadsOf.has(m.id) && (
                         <ThreadChip agent={activeAgent} hub={agent.hubId} name={agent.name} thread={threadsOf.get(m.id)!} />
@@ -691,6 +693,27 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
     </Root>
   );
 }
+
+const startsSetups = (m: ChatMessage): boolean =>
+  m.role === "assistant" && (setupsStarted(m.steps) > 0 || setupsStarted(m.tools) > 0);
+
+/** Where a message's setups lie among `shown`, for one that set
+ *  connections up: from your message it answers (else your last before it:
+ *  a delivery between them came mid-turn), or from an answer of the same
+ *  turn that set some up before it (kept once its own had started), to the
+ *  next of either. Others get none, so a message coming after them
+ *  doesn't render them again. */
+export const turnOf = (shown: readonly ChatMessage[], m: ChatMessage, i: number): { turnSince?: string; turnUntil?: string } => {
+  if (!startsSetups(m)) return {};
+  const said = m.replyTo ? shown.findIndex((x) => x.role === "user" && x.clientId === m.replyTo) : -1;
+  const asked = said >= 0 && said < i ? said : shown.slice(0, i).findLastIndex((x) => x.role === "user");
+  const earlier = shown.slice(asked + 1, i).findLastIndex(startsSetups);
+  const from = earlier >= 0 ? shown[asked + 1 + earlier] : asked >= 0 ? shown[asked] : undefined;
+  // Up to your next message, or the next answer that set some up: a
+  // delivery between came mid-turn.
+  const until = shown.slice(i + 1).find((x) => x.role === "user" || startsSetups(x));
+  return { turnSince: from?.at, turnUntil: until?.at };
+};
 
 /** A message in a DM, rendered again only when it, or how it's shown,
  *  changes: not while you type, nor as another message streams in. */
