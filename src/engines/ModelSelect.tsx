@@ -25,11 +25,17 @@ export function ModelSelect({
   const known = !value || listed.some((m) => m.id === value);
   const [typing, setTyping] = useState<string | null>(null);
   const field = useRef<HTMLInputElement>(null);
+  // Escape leaves the field: the blur that follows keeps nothing typed.
+  const cancelled = useRef(false);
   useEffect(() => {
     if (typing !== null) field.current?.focus();
   }, [typing !== null]);
 
   const done = () => {
+    if (cancelled.current) {
+      cancelled.current = false;
+      return;
+    }
     const id = typing?.trim() ?? "";
     setTyping(null);
     if (id && id !== value) onChange(id);
@@ -42,6 +48,7 @@ export function ModelSelect({
         aria-label={`${label}: the model's exact id`}
         placeholder="model id"
         value={typing}
+        readOnly={disabled}
         spellCheck={false}
         autoComplete="off"
         onChange={(e) => setTyping(e.target.value)}
@@ -52,6 +59,8 @@ export function ModelSelect({
             done();
           } else if (e.key === "Escape") {
             e.preventDefault();
+            e.stopPropagation();
+            cancelled.current = true;
             setTyping(null);
           }
         }}

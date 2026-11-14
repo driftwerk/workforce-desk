@@ -1470,7 +1470,7 @@ button.card-icon:hover:not(:disabled) {
 }
 
 /* ── A boss's plan in its DM (BD11): goal, waves, each ticket's engine and
-   folder, where it stands, and Approve and run. After the approved mockup
+   folder, where it stands, and Approve and start. After the approved mockup
    (floor-groups-mockup.html, b); every colour is a token. */
 
 .plancard {
@@ -1677,6 +1677,9 @@ button.card-icon:hover:not(:disabled) {
   align-items: center;
   flex-wrap: wrap;
   justify-content: flex-end;
+}
+.pc-tk-run .pc-engine {
+  min-width: 9.5em;
 }
 .pc-machine {
   background: var(--signal-soft);

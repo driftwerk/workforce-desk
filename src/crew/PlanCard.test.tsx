@@ -452,16 +452,36 @@ describe("progress", () => {
 describe("a draft plan's review: where each ticket runs, and with what", () => {
   const models = () => (bodies(`PATCH /api/desk/plans/${PLAN}`).at(-1) as { tickets: { model?: string | null; machine?: string | null; folder: string }[] }).tickets;
 
-  it("sets every ticket's model from the plan's defaults, keeping a ticket set otherwise", async () => {
-    plans.plan.tickets[1]!.model = "opus";
-    plans.plan.revisions[0]!.snapshot.tickets[1]!.model = "opus";
+  it("sets every ticket's model from the plan's defaults, keeping a ticket set otherwise and another engine's", async () => {
+    plans.plan.tickets[2]!.model = "opus";
+    plans.plan.revisions[0]!.snapshot.tickets[2]!.model = "opus";
     await show();
     expect(within(card()).getByText("Draft — review")).toBeTruthy();
-    expect((within(card()).getByRole("combobox", { name: "Model for ACM-21" }) as HTMLSelectElement).value).toBe("opus");
+    expect((within(card()).getByRole("combobox", { name: "Model for ACM-22" }) as HTMLSelectElement).value).toBe("opus");
     await act(async () => fireEvent.change(within(card()).getByRole("combobox", { name: "Every ticket's model" }), { target: { value: "sonnet" } }));
     expect(bodies(`PATCH /api/desk/plans/${PLAN}`)).toHaveLength(1);
-    expect(models().map((t) => t.model)).toEqual(["sonnet", "opus", "sonnet", "sonnet"]);
+    // ACM-21 runs on Codex: Claude Code's model isn't its.
+    expect(models().map((t) => t.model)).toEqual(["sonnet", null, "opus", "sonnet"]);
     await waitFor(() => expect((within(card()).getByRole("combobox", { name: "Model for ACM-20" }) as HTMLSelectElement).value).toBe("sonnet"));
+  });
+
+  it("takes the engine's default model when a ticket moves to an engine without it", async () => {
+    plans.plan.tickets[0]!.model = "opus";
+    plans.plan.revisions[0]!.snapshot.tickets[0]!.model = "opus";
+    await show();
+    await act(async () => fireEvent.change(within(card()).getByRole("combobox", { name: "Engine for ACM-20" }), { target: { value: "codex" } }));
+    expect(models()[0]).toMatchObject({ model: null });
+  });
+
+  it("keeps nothing typed in Other… when Escape leaves it", async () => {
+    await show();
+    fireEvent.change(within(card()).getByRole("combobox", { name: "Model for ACM-20" }), { target: { value: "\u0000other" } });
+    const field = within(card()).getByRole("textbox", { name: "Model for ACM-20: the model's exact id" });
+    fireEvent.change(field, { target: { value: "claude-opus-4-1" } });
+    fireEvent.keyDown(field, { key: "Escape" });
+    fireEvent.blur(field);
+    expect(bodies(`PATCH /api/desk/plans/${PLAN}`)).toHaveLength(0);
+    expect((within(card()).getByRole("combobox", { name: "Model for ACM-20" }) as HTMLSelectElement).value).toBe("");
   });
 
   it("takes a model's exact id from Other…", async () => {

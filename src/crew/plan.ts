@@ -4,6 +4,7 @@
 // both with a plan; Desk works them out again over the board's tickets as
 // they move, which the hub announces one ticket at a time.
 
+import { ENGINE_MODELS } from "../engines/engines";
 import { amountText } from "../spend/budgets";
 import type {
   BossPlan,
@@ -415,12 +416,25 @@ export type TicketDefault = "machine" | "engine" | "model";
 const valueOf = (t: Pick<DraftTicket, TicketDefault>, key: TicketDefault): string | null =>
   key === "engine" ? (t.engine ?? "claude") : (t[key] ?? null);
 
+/** The tickets a default of `key` is about: a model is an engine's, so
+ *  only the tickets on the plan's default engine; the rest, every one. */
+const among = <T extends Pick<DraftTicket, TicketDefault>>(tickets: readonly T[], key: TicketDefault): T[] => {
+  if (key !== "model") return [...tickets];
+  const engine = defaultOf(tickets, "engine");
+  return tickets.filter((t) => valueOf(t, "engine") === engine);
+};
+
+/** `model` kept for a ticket now on `engine` when it is one of that
+ *  engine's own (or its default); else the engine's default. */
+export const modelOn = (engine: Engine, model: string | null | undefined): string | null =>
+  model && ENGINE_MODELS[engine]?.some((m) => m.id === model) ? model : null;
+
 /** A plan's default `key`: what most of its tickets have (the first's,
  *  on a tie). The hub keeps no default of its own; a ticket set otherwise
  *  has overridden it. */
 export const defaultOf = (tickets: readonly Pick<DraftTicket, TicketDefault>[], key: TicketDefault): string | null => {
   const counts = new Map<string | null, number>();
-  for (const t of tickets) counts.set(valueOf(t, key), (counts.get(valueOf(t, key)) ?? 0) + 1);
+  for (const t of among(tickets, key)) counts.set(valueOf(t, key), (counts.get(valueOf(t, key)) ?? 0) + 1);
   let best: string | null = key === "engine" ? "claude" : null;
   let most = 0;
   for (const [v, n] of counts) if (n > most) [best, most] = [v, n];
@@ -432,10 +446,13 @@ export const defaultOf = (tickets: readonly Pick<DraftTicket, TicketDefault>[], 
  *  own. Which ones moved, by place. */
 export const withDefault = (tickets: readonly DraftTicket[], key: TicketDefault, from: string | null, to: string | null): { tickets: DraftTicket[]; moved: number[] } => {
   const moved: number[] = [];
+  const about = new Set(among(tickets, key));
   const next = tickets.map((t, i) => {
-    if (valueOf(t, key) !== from) return t;
+    if (!about.has(t) || valueOf(t, key) !== from) return t;
     moved.push(i);
-    return key === "engine" ? { ...t, engine: (to ?? "claude") as Engine } : { ...t, [key]: to };
+    if (key !== "engine") return { ...t, [key]: to };
+    const engine = (to ?? "claude") as Engine;
+    return { ...t, engine, model: modelOn(engine, t.model) };
   });
   return { tickets: next, moved };
 };
