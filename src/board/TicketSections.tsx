@@ -1,8 +1,8 @@
-import { useState, type ReactNode } from "react";
+import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useSessionName } from "../groups/names";
 import { SYSTEM_TITLE } from "../hub/boardSync";
 import { useDesk } from "../hub/store";
-import type { Board, Ticket, TicketChild, TicketLink } from "../hub/types";
+import type { Board, Ticket, TicketChild, TicketLink, TicketState } from "../hub/types";
 import { openUrl } from "../platform";
 import { Mark } from "../ui/Mark";
 import {
@@ -14,6 +14,8 @@ import {
   MergeIcon,
   PrChip,
   PrIcon,
+  PriorityBars,
+  prChip,
   ProjectIcon,
   StateGlyph,
   TypeGlyph,
@@ -23,7 +25,21 @@ import {
 } from "./cardFacts";
 import { useOpenTicket, useTicketPopup } from "./opener";
 import { useBoard } from "./store";
-import { agoText, checksText, devOf, prRows, type Layout, type PrRow } from "./ticketRich";
+import { TicketActivity } from "./TicketComments";
+import {
+  agoText,
+  checksText,
+  childColumn,
+  childGroups,
+  childTone,
+  dayText,
+  devOf,
+  epicProgress,
+  prRows,
+  type ChildGrouping,
+  type Layout,
+  type PrRow,
+} from "./ticketRich";
 
 /** What a synced ticket's view draws of its issue beside its words: where
  *  it sits (team, epic or project, parent), its sub-items, its development,
@@ -411,3 +427,202 @@ export function Dotted({ name }: { name: string }) {
 }
 
 export const systemWord = (t: Ticket): string | null => (t.external ? SYSTEM_TITLE[t.external.system] : null);
+
+// ── An epic: its progress and its children ─────────────────────────────
+
+/** Which Desk column each of an epic's children counts in: its own
+ *  ticket's here, else by the board's states, else by its state's words. */
+const useChildColumn = (t: Ticket): ((c: TicketChild) => TicketState) => {
+  const all = useBoard((s) => s.tickets);
+  const states = useBoard((s) => s.boards[t.board]?.sync?.states);
+  return useMemo(() => {
+    const here = new Map<string, TicketState>();
+    for (const o of Object.values(all)) if (o.external?.key && o.external.system === t.external?.system) here.set(o.external.key, o.state);
+    return (c: TicketChild) => childColumn(c, here.get(c.key), states ?? {});
+  }, [all, states, t.external?.system]);
+};
+
+/** The site's priority names by rank, from its issues here: a child's
+ *  bars say theirs in a tooltip. */
+const usePriorityNames = (t: Ticket): Map<number, string> => {
+  const all = useBoard((s) => s.tickets);
+  return useMemo(() => {
+    const names = new Map<number, string>();
+    for (const o of Object.values(all)) {
+      const d = o.external?.details;
+      if (o.board === t.board && d?.priorityRank !== undefined && d.priority && !names.has(d.priorityRank)) names.set(d.priorityRank, d.priority);
+    }
+    return names;
+  }, [all, t.board]);
+};
+
+/** How far an epic is: done of all its children by Desk's columns, its
+ *  points, its due day, a bar of done, doing and review, and the rest, and
+ *  how many children are blocked. */
+export function EpicProgress({ ticket: t }: { ticket: Ticket }) {
+  const columnOf = useChildColumn(t);
+  const d = t.external?.details;
+  if (!d) return null;
+  const p = epicProgress(d, columnOf);
+  if (!p.total) return null;
+  const pct = (n: number) => `${(n / p.total) * 100}%`;
+  return (
+    <section className="ticket-epic-progress" aria-label="Progress">
+      <div className="ticket-epic-line">
+        <span className="ticket-epic-pct">{p.pct}%</span>
+        <span className="muted">
+          {p.done} of {p.total} done
+          {p.points ? ` · ${p.points.done} of ${p.points.total} points` : ""}
+        </span>
+        {d.due && <span className="ticket-epic-due">due {dayText(d.due)}</span>}
+      </div>
+      <span className="ticket-bar ticket-bar-epic" role="img" aria-label={`${p.done} done, ${p.moving} in doing or review, ${p.rest} to do, of ${p.total}`}>
+        {p.done > 0 && <i style={{ width: pct(p.done), background: "var(--done)" }} />}
+        {p.moving > 0 && <i style={{ width: pct(p.moving), background: "var(--working)" }} />}
+        {p.rest > 0 && <i style={{ width: pct(p.rest), background: "var(--border)" }} />}
+      </span>
+      <div className="ticket-epic-legend">
+        <span>
+          <i style={{ background: "var(--done)" }} aria-hidden="true" />
+          Done {p.done}
+        </span>
+        <span>
+          <i style={{ background: "var(--working)" }} aria-hidden="true" />
+          Doing and review {p.moving}
+        </span>
+        <span>
+          <i style={{ background: "var(--border)" }} aria-hidden="true" />
+          To do and backlog {p.rest}
+        </span>
+        {!!p.blocked && <span className="state-blocked">{p.blocked} blocked</span>}
+      </div>
+    </section>
+  );
+}
+
+const GROUPINGS: { id: ChildGrouping; word: string }[] = [
+  { id: "none", word: "None" },
+  { id: "state", word: "State" },
+  { id: "assignee", word: "Assignee" },
+  { id: "type", word: "Type" },
+];
+
+/** An epic's children as rows, grouped by state (or who has them, or
+ *  type, or not at all), done ones folded after two or hidden. A child
+ *  outside the board's filter lists here too: the hub searched for it. */
+export function EpicChildren({ ticket: t }: { ticket: Ticket }) {
+  const [by, setBy] = useState<ChildGrouping>("state");
+  const [hideDone, setHideDone] = useState(false);
+  const [unfold, setUnfold] = useState(false);
+  const columnOf = useChildColumn(t);
+  const names = usePriorityNames(t);
+  const issue = useOpenIssue(t);
+  const me = useBoard((s) => s.boards[t.board]?.sync?.meName);
+  const d = t.external?.details;
+  const children = d?.children ?? [];
+  if (!children.length) return null;
+  const groups = childGroups(children, columnOf, by, { hideDone, unfold });
+  const total = d?.subItems?.total ?? children.length;
+  return (
+    <section className="ticket-epic-children" aria-label="Child items">
+      <div className="ticket-sec-head ticket-epic-head">
+        <h2 className="ticket-section-head">Child items</h2>
+        <span className="ticket-sec-note">{total}</span>
+        <span className="ticket-sec-gap" />
+        <span className="ticket-epic-controls">
+          <span className="ticket-epic-by" id={`group-by-${t.id}`}>
+            Group by
+          </span>
+          <span className="ticket-filters" role="group" aria-labelledby={`group-by-${t.id}`}>
+            {GROUPINGS.map((g) => (
+              <button key={g.id} type="button" className="chip-btn" aria-pressed={by === g.id} onClick={() => setBy(g.id)}>
+                {g.word}
+              </button>
+            ))}
+          </span>
+          <button type="button" className="chip-btn ticket-epic-hide" aria-pressed={hideDone} onClick={() => setHideDone(!hideDone)}>
+            Hide done
+          </button>
+        </span>
+      </div>
+      <div className="ticket-rows">
+        {groups.map((g) => (
+          <div key={g.id} className="ticket-epic-group" role="group" aria-label={g.title ?? "Child items"}>
+            {g.title !== null && (
+              <h3 className="ticket-epic-group-head">
+                {g.title}
+                <span className="ticket-epic-group-n">
+                  {g.count}
+                  {g.points !== null ? ` · ${g.points} pts` : ""}
+                </span>
+              </h3>
+            )}
+            {g.rows.map((c) => (
+              <EpicChildRow
+                key={c.key}
+                child={c}
+                finished={["done", "dropped"].includes(columnOf(c))}
+                priority={c.priorityRank !== undefined ? names.get(c.priorityRank) : undefined}
+                me={me}
+                onOpen={issue.can(c.key) ? () => issue.open(c.key) : undefined}
+              />
+            ))}
+            {g.folded > 0 && (
+              <button type="button" className="link ticket-epic-more" onClick={() => setUnfold(true)}>
+                {g.folded} more done
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function EpicChildRow({
+  child: c,
+  finished,
+  priority,
+  me,
+  onOpen,
+}: {
+  child: TicketChild;
+  finished: boolean;
+  priority?: string;
+  me?: string | null;
+  onOpen?: () => void;
+}) {
+  const pr = c.prs ? prChip({ links: [] }, c.prs) : null;
+  return (
+    <button type="button" className="ticket-row ticket-epic-row" disabled={!onOpen} onClick={onOpen}>
+      <TypeGlyph kind={c.kind ?? "Story"} level={c.kindLevel ?? 0} />
+      <span className="mono ticket-row-key">{c.key}</span>
+      <span className={`ticket-row-title${finished ? " ticket-row-title-done" : ""}`}>{c.title}</span>
+      {/* Bars only: the site's name for it is its tooltip. Done, it no
+          longer matters. Short of room, its PR, then its priority and
+          points, give way to its title (board.css). */}
+      {!finished && c.priorityRank !== undefined && (
+        <span className="ticket-row-prio">
+          <PriorityBars rank={c.priorityRank} name={priority} />
+        </span>
+      )}
+      {c.points !== undefined && <span className="mono ticket-row-pts">{c.points} pts</span>}
+      {pr && <PrChip look={pr.look} text={pr.text} title={pr.title} />}
+      {c.state && <span className={`ticket-row-state ticket-tone-${childTone(c)}`}>{c.state}</span>}
+      <Who name={c.assignee} me={me} />
+    </button>
+  );
+}
+
+/** An epic's comments and history, folded in its details column; its
+ *  timeline is the ticket's own, opened. */
+export function ActivityFold({ ticket: t, layout }: { ticket: Ticket; layout: Layout }) {
+  const [n, setN] = useState(0);
+  const count = useCallback((k: number) => setN(k), []);
+  return (
+    <details className="ticket-activity-fold">
+      <summary>Comments and history{n ? ` · ${n}` : ""}</summary>
+      <TicketActivity ticket={t} layout={layout} onCount={count} />
+    </details>
+  );
+}

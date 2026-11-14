@@ -35,13 +35,14 @@ import {
   factOrder,
   firstParagraph,
   foldSections,
+  isEpic,
   layoutOf,
   remoteStateWord,
   spanText,
   type FactId,
   type Layout,
 } from "./ticketRich";
-import { Crumbs, Development, Dotted, LinkedWork, Person, SectionHead, SubItems } from "./TicketSections";
+import { ActivityFold, Crumbs, Development, Dotted, EpicChildren, EpicProgress, LinkedWork, Person, SectionHead, SubItems } from "./TicketSections";
 
 const STATES: TicketState[] = ["backlog", "todo", "doing", "review", "done", "dropped"];
 
@@ -286,6 +287,9 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
   const compact = layout === "compact";
   const byline = bylineText(t, layout);
   const working = t.assignee?.kind === "session" ? t.assignee.id : null;
+  // An epic reads as its progress and children; its comments and history
+  // fold in its details column.
+  const epic = isEpic(t);
   const openHand = (e: React.MouseEvent<HTMLElement>) => setMenu({ kind: "hand", at: below(e.currentTarget), from: e.currentTarget });
 
   const description = () => {
@@ -478,10 +482,13 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
             </aside>
           )}
           <div className="ticket-reading">
+            {epic && <EpicProgress ticket={t} />}
             <article className="ticket-description" aria-label="Description">
               {description()}
             </article>
-            {t.external?.system === "linear" ? (
+            {epic ? (
+              <EpicChildren ticket={t} />
+            ) : t.external?.system === "linear" ? (
               <>
                 <Development ticket={t} layout={layout} />
                 <SubItems ticket={t} layout={layout} />
@@ -497,7 +504,7 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
                 you drop them. */}
             {!(compact && synced) && <LinkedWork ticket={t} working={working} />}
             {!(compact && synced) && <TicketFiles ticket={t} local={local} uploads={uploads} />}
-            <TicketActivity ticket={t} layout={layout} />
+            {!epic ? <TicketActivity ticket={t} layout={layout} /> : !wide && <ActivityFold ticket={t} layout={layout} />}
             {!wide && foot}
           </div>
         </div>
@@ -506,6 +513,7 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
             {actions}
             {needs}
             {facts}
+            {epic && <ActivityFold ticket={t} layout="compact" />}
             {foot}
           </aside>
         )}
@@ -678,10 +686,31 @@ function Facts({ ticket: t, layout, onState }: { ticket: Ticket; layout: Layout;
       ),
     };
   else if (!system) facts.assignee = { label: "Assignee", value: t.assignee ? mine(t.assignee) : <span className="muted">Unassigned</span> };
-  if (d?.reporter && system === "jira") facts.reporter = { label: "Reporter", value: <Person name={d.reporter} me={sync?.meName} /> };
+  const epic = isEpic(t);
+  // An epic's byline says who wrote it.
+  if (d?.reporter && system === "jira" && !epic) facts.reporter = { label: "Reporter", value: <Person name={d.reporter} me={sync?.meName} /> };
   if (d?.priority || d?.priorityRank)
     facts.priority = { label: "Priority", value: <>{d.priorityRank !== undefined && <PriorityBars rank={d.priorityRank} name={d.priority} />}{d.priority}</> };
-  if (d?.points !== undefined)
+  if (epic && (d?.subItems?.total ?? d?.children?.length))
+    facts.children = {
+      label: "Children",
+      value: (
+        <>
+          {d!.subItems?.total ?? d!.children!.length}
+          {d!.subItems && <span className="ticket-there">{d!.subItems.done} done</span>}
+        </>
+      ),
+    };
+  if (epic && d?.childPoints)
+    facts.points = {
+      label: "Points",
+      value: (
+        <span className="mono ticket-points-of">
+          {d.childPoints.done} / {d.childPoints.total}
+        </span>
+      ),
+    };
+  else if (d?.points !== undefined)
     facts.points = system === "linear" ? { label: "Estimate", value: <><span className="mono">{d.points}</span> pts</> } : { label: "Points", value: <span className="mono">{d.points}</span> };
   if (d?.sprint) {
     const name = sprintName(d.sprint);
