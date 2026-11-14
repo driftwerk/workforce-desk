@@ -92,6 +92,28 @@ describe("What they see", () => {
     }
   });
 
+  it("shows a late answer, and a later read's limit never undoes it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let first: (v: KnowsView) => void = () => {};
+      api.rule.mockReturnValueOnce(new Promise<KnowsView>((r) => (first = r)));
+      render(<WhatTheySee agent={ledger} hub={local} />);
+      await vi.advanceTimersByTimeAsync(READ_LIMIT + 10);
+      await screen.findByRole("alert");
+      // Try again: this read hangs too, and the first answers meanwhile.
+      api.rule.mockReturnValueOnce(new Promise(() => {}));
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      first(kept);
+      expect(await screen.findByRole("radio", { name: /Everything/ })).toBeTruthy();
+      // The second read's limit passes: what was shown stays.
+      await vi.advanceTimersByTimeAsync(READ_LIMIT + 10);
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.getByRole("radio", { name: /Everything/ })).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("offers Try again when the read fails", async () => {
     api.rule.mockRejectedValueOnce(new HubError(500, "Desk couldn't read what its agents see."));
     render(<WhatTheySee agent={ledger} hub={local} />);

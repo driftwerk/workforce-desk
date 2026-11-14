@@ -60,10 +60,10 @@ type Status = { state: "idle" | "saving" } | { state: "failed"; problem: string 
  *  is asked what becomes of it. */
 type Asking = { held: KnowsHeld; why: "narrowed" | "transcripts" | "earlier" };
 
-/** A refusal of a rule's route in the person's words. */
 /** How long a read of what an agent sees may take before it is said. */
 export const READ_LIMIT = 10_000;
 
+/** A refusal of a rule's route in the person's words. */
 const said = (e: unknown): string => {
   if (e instanceof HubError && (e.status === 401 || e.status === 403)) return "Only the person whose Desk this is can change what an agent sees.";
   return plainError(e);
@@ -110,6 +110,10 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
   const confirmed = useRef<KnowsView | null>(null);
   /** Bumped by each change, so an older read doesn't undo a newer one. */
   const seq = useRef(0);
+  /** Bumped when the section turns to another agent or goes, so nothing
+   *  still on its way for the one before is shown. */
+  const shownFor = useRef(0);
+  const lateTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const logShown = useRef(false);
   logShown.current = showLog;
 
@@ -122,13 +126,15 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
     const k = api();
     if (!k) return setLoad({ problem: "Desk isn’t ready just now.", retry: true });
     const n = seq.current;
-    // A read that takes too long is said, with Try again; one that answers
-    // after all is still shown.
-    let answered = false;
+    // Any answer for this agent is shown, a late one too; one that takes
+    // too long is said, with Try again, while nothing has answered.
+    const shown = shownFor.current;
+    clearTimeout(lateTimer.current);
     const late = setTimeout(() => {
-      if (!answered && n === seq.current)
-        setLoad({ problem: "This computer’s hub didn’t answer in time, so what they see can’t be shown just now.", retry: true });
+      if (shown === shownFor.current) setLoad((l) => (l === "loading" ? { problem: "This computer’s hub didn’t answer in time.", retry: true } : l));
     }, READ_LIMIT);
+    lateTimer.current = late;
+    const current = () => shown === shownFor.current && n === seq.current;
     try {
       // An agent elsewhere linked in an earlier run: its rule is kept by
       // the id its hub gave, which may differ in case from the roster's.
@@ -138,14 +144,12 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
         if (kept) known.set(self, kept.agent);
       }
       const v = await k.rule(keyOf());
-      answered = true;
-      if (n !== seq.current) return;
+      if (!current()) return;
       confirmed.current = v;
       setView(v);
       setLoad("ok");
     } catch (e) {
-      answered = true;
-      if (n !== seq.current) return;
+      if (!current()) return;
       if (e instanceof HubError && (e.status === 404 || e.status === 405)) setLoad("missing");
       else setLoad({ problem: said(e), retry: true });
     } finally {
@@ -164,6 +168,11 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
     setLog(null);
     setShowLog(false);
     void read();
+    // Another agent, or gone: nothing still on its way is shown.
+    return () => {
+      shownFor.current++;
+      clearTimeout(lateTimer.current);
+    };
   }, [read]);
 
   const readLog = useCallback(async () => {
@@ -307,7 +316,10 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
       )}
       {load === "missing" && (
         <p className="small muted" role="status">
-          This computer’s hub doesn’t keep what agents see yet. It comes with a newer Desk: update Desk and restart it, then choose here what {name} sees.
+          This computer’s hub doesn’t keep what agents see yet. It comes with a newer Desk: update Desk and restart it, then choose here what {name} sees.{" "}
+          <button type="button" className="link link-signal small" onClick={again}>
+            Try again
+          </button>
         </p>
       )}
       {typeof load === "object" && (
