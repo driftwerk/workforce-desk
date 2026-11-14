@@ -469,8 +469,15 @@ pub fn machine_open_sign_in_page(
         "devin" => callback::DEVIN_PAGES,
         _ => return Err("Desk doesn't sign that in.".into()),
     };
-    let page = callback::sign_in_page(&url, hosts)
-        .ok_or("That page isn't the sign-in's own, so Desk won't open it.")?;
+    let Some(page) = callback::sign_in_page(&url, hosts) else {
+        // Its shape only: a sign-in's query holds its codes.
+        tracing::warn!(
+            engine = %engine,
+            page = %callback::refused_shape(&url),
+            "a machine's sign-in page wasn't the sign-in's own, so Desk didn't open it"
+        );
+        return Err("That page isn't the sign-in's own, so Desk won't open it.".into());
+    };
     open_page(&app, &page)?;
     Ok(())
 }

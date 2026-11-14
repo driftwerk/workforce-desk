@@ -53,31 +53,45 @@ pub struct SignInPage {
     pub loopback_only: bool,
 }
 
-/// The query parameters a sign-in page may send the browser on by when it's
-/// done.
-pub const RETURN_PARAMS: &[&str] = &[
-    "redirect_uri",
-    "redirect",
-    "redirect_url",
-    "return_to",
-    "callback",
-    "next",
-];
+/// The engines' own apps a sign-in page may send the browser on to
+/// (Windsurf's editor sign-in comes back to `windsurf://codeium.windsurf`).
+pub const APP_SCHEMES: &[&str] = &["windsurf", "devin", "codeium"];
 
-/// Whether every one of `page`'s [`RETURN_PARAMS`] (named in any case)
-/// sends the browser on to nowhere but this computer. A value with a host
-/// is allowed only as `http(s)://` on `127.0.0.1`, `localhost` or `[::1]`;
-/// one starting `//` or `\` (a host by the page's own scheme) or with any
-/// other scheme (`javascript:`, `data:`, …) is refused. A value that isn't
-/// a URL (a path, a word), or a missing one, is allowed: the real shapes
-/// are still to be seen. The hub checks the same.
+/// Whether `page` sends the browser on to nowhere but this computer
+/// ([`sends_away`] finds nothing).
 pub fn returns_here_only(page: &url::Url) -> bool {
-    page.query_pairs()
-        .filter(|(k, _)| RETURN_PARAMS.iter().any(|p| k.eq_ignore_ascii_case(p)))
-        .all(|(_, v)| returns_here(&v))
+    sends_away(page).is_none()
 }
 
-/// One [`RETURN_PARAMS`] value, read as a browser reads it.
+/// The first of `page`'s query parameters, split at `&` and at `;`, whose
+/// name or value could send the browser somewhere but this computer, by its
+/// name (`?` when that is no plain name); none when no parameter does.
+///
+/// Every name and value is checked, whatever it is called: one with a
+/// scheme is allowed only as `http(s)://` on `127.0.0.1`, `localhost` or
+/// `[::1]`, or as one of [`APP_SCHEMES`]; one starting with two of `/` and
+/// `\` (a host by the page's own scheme) is refused, and so is any other
+/// scheme (`javascript:`, `data:`, `file:`, `blob:`, …). One that isn't a
+/// URL (a path, a word) is allowed: the real shapes are still to be seen.
+pub fn sends_away(page: &url::Url) -> Option<String> {
+    page.query()?
+        .split(['&', ';'])
+        .flat_map(|piece| url::form_urlencoded::parse(piece.as_bytes()))
+        .find(|(name, value)| !returns_here(name) || !returns_here(value))
+        .map(|(name, _)| {
+            let plain = !name.is_empty()
+                && name.len() <= 64
+                && name
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || "_-.[]".contains(c));
+            match plain {
+                true => name.into_owned(),
+                false => "?".to_string(),
+            }
+        })
+}
+
+/// One query name or value, read as a browser reads it.
 fn returns_here(value: &str) -> bool {
     // Browsers drop leading and trailing spaces and controls, and tabs and
     // newlines anywhere, and read `\` as `/`.
@@ -100,6 +114,9 @@ fn returns_here(value: &str) -> bool {
     let Ok(back) = url::Url::parse(&value) else {
         return false;
     };
+    if APP_SCHEMES.contains(&back.scheme()) {
+        return true;
+    }
     matches!(back.scheme(), "http" | "https")
         && match back.host() {
             Some(url::Host::Domain(host)) => host == "localhost",
@@ -196,6 +213,29 @@ pub fn sign_in_page(said: &str, pages: &[SignInPage]) -> Option<url::Url> {
                 && (!p.loopback_only || returns_here_only(&page))
         })
         .then_some(page)
+}
+
+/// A page Desk refused, as it may be logged: its scheme, host, port and path
+/// only (no user, query or fragment), and the parameter that sent the
+/// browser away, if one did.
+pub fn refused_shape(said: &str) -> String {
+    let Ok(page) = url::Url::parse(said) else {
+        return format!("a page Desk can't read ({} characters)", said.len());
+    };
+    let port = page.port().map(|p| format!(":{p}")).unwrap_or_default();
+    let mut shape = format!(
+        "{}://{}{port}{}",
+        page.scheme(),
+        page.host_str().unwrap_or(""),
+        page.path()
+    );
+    if shape.len() > 200 {
+        shape = shape.chars().take(200).collect::<String>() + "…";
+    }
+    match sends_away(&page) {
+        Some(name) => format!("{shape} (sent away by `{name}`)"),
+        None => shape,
+    }
 }
 
 /// The port `url` comes back to, when it is a sign-in page of Claude's own
@@ -542,6 +582,10 @@ mod tests {
             "&next=%2Fdashboard",
             "&return_to=settings",
             "&callback=",
+            "&redirect_uri=windsurf%3A%2F%2Fcodeium.windsurf%2Fauth",
+            "&redirect_uri=DEVIN%3A%2F%2Fcallback",
+            "&callback=codeium%3A%2F%2Fx",
+            "&when=12%3A30;page=2",
         ] {
             assert!(sign_in_page(&devin(here), DEVIN_PAGES).is_some(), "{here}");
         }
@@ -561,6 +605,17 @@ mod tests {
             "&next=https%3Aevil.example",
             "&Redirect_URI=https%3A%2F%2Fevil.example%2Fcb",
             "&redirect_uri=http%3A%2F%2Flocalhost%3A4321%2Fcallback&next=https%3A%2F%2Fevil.example",
+            // Whatever the parameter is called, and however it is split.
+            "&returnTo=https%3A%2F%2Fevil.example",
+            "&redirectUrl=https%3A%2F%2Fevil.example",
+            "&continue=%2F%2Fevil",
+            "&redirect_uri%5B%5D=https%3A%2F%2Fevil.example",
+            "&redirect_uri[]=https%3A%2F%2Fevil.example",
+            "&x=1;redirect_uri=https%3A%2F%2Fevil.example",
+            "&https%3A%2F%2Fevil.example",
+            "&next=file%3A%2F%2F%2Fetc%2Fpasswd",
+            "&next=blob%3Ahttps%3A%2F%2Flocalhost%2Fx",
+            "&next=vscode%3A%2F%2Fx",
         ] {
             assert!(sign_in_page(&devin(away), DEVIN_PAGES).is_none(), "{away}");
         }
@@ -578,6 +633,28 @@ mod tests {
                 CLAUDE_PAGES
             )
             .is_some()
+        );
+    }
+
+    #[test]
+    fn a_refused_page_is_logged_without_its_query() {
+        assert_eq!(
+            refused_shape(
+                "https://app.devin.ai/auth/cli/continue?state=secret&returnTo=https%3A%2F%2Fevil.example#f"
+            ),
+            "https://app.devin.ai/auth/cli/continue (sent away by `returnTo`)"
+        );
+        assert_eq!(
+            refused_shape("https://user:pw@evil.example:8443/a/b?code=secret"),
+            "https://evil.example:8443/a/b"
+        );
+        assert_eq!(
+            refused_shape("https://app.devin.ai/x?https%3A%2F%2Fevil.example%2Fsecret"),
+            "https://app.devin.ai/x (sent away by `?`)"
+        );
+        assert_eq!(
+            refused_shape("not a page"),
+            "a page Desk can't read (10 characters)"
         );
     }
 
