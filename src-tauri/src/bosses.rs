@@ -334,7 +334,7 @@ fn write_kept(path: &Path, kept: &Kept) -> Result<(), String> {
 }
 
 /// What is kept, as it is now.
-async fn load(kept_at: &Path) -> Kept {
+pub(crate) async fn load(kept_at: &Path) -> Kept {
     let _one = KEPT.lock().await;
     read_kept(kept_at)
 }
@@ -368,7 +368,7 @@ async fn change_group<R>(
 static OPS: std::sync::Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>> =
     std::sync::Mutex::new(BTreeMap::new());
 
-fn ops_of(kept_at: &Path, group: &str) -> Arc<tokio::sync::Mutex<()>> {
+pub(crate) fn ops_of(kept_at: &Path, group: &str) -> Arc<tokio::sync::Mutex<()>> {
     let mut ops = OPS.lock().unwrap_or_else(|e| e.into_inner());
     // Those no change holds or waits on: a group whose record went keeps
     // none. (Every other holder clones under this lock.)
@@ -431,7 +431,7 @@ pub fn canonical(url: &str) -> Option<String> {
 }
 
 /// A path segment, escaped.
-fn seg(s: &str) -> String {
+pub(crate) fn seg(s: &str) -> String {
     const KEEP: &percent_encoding::AsciiSet = &percent_encoding::NON_ALPHANUMERIC
         .remove(b'-')
         .remove(b'_')
@@ -440,12 +440,12 @@ fn seg(s: &str) -> String {
     percent_encoding::utf8_percent_encode(s, KEEP).to_string()
 }
 
-fn ok(status: u16) -> bool {
+pub(crate) fn ok(status: u16) -> bool {
     (200..300).contains(&status)
 }
 
 /// A hub's words for its refusal, or its status.
-fn said(status: u16, body: &[u8]) -> String {
+pub(crate) fn said(status: u16, body: &[u8]) -> String {
     words_of(body).unwrap_or_else(|| format!("it answered {status}"))
 }
 
@@ -454,7 +454,7 @@ fn json_of(body: &str) -> Option<Value> {
 }
 
 /// "a", "a and b", "a, b and c".
-fn and(names: &[&str]) -> String {
+pub(crate) fn and(names: &[&str]) -> String {
     match names {
         [] => String::new(),
         [one] => (*one).to_string(),
@@ -462,7 +462,7 @@ fn and(names: &[&str]) -> String {
     }
 }
 
-fn capital(s: &str) -> String {
+pub(crate) fn capital(s: &str) -> String {
     let mut c = s.chars();
     c.next()
         .map(|f| f.to_uppercase().chain(c).collect())
@@ -470,13 +470,13 @@ fn capital(s: &str) -> String {
 }
 
 /// Whether `id` can name a group on an engine: as `grant::group_id_ok`.
-fn group_id_ok(id: &str) -> bool {
+pub(crate) fn group_id_ok(id: &str) -> bool {
     !id.trim().is_empty() && id.len() <= 100 && !id.contains('/') && !id.contains(':')
 }
 
 /// Whether `id` can name a hub, an engine or an agent in a link and a
 /// grant, as the engines' `name_ok` takes one.
-fn name_ok(id: &str) -> bool {
+pub(crate) fn name_ok(id: &str) -> bool {
     (1..=100).contains(&id.len())
         && id
             .chars()
@@ -559,7 +559,7 @@ pub fn group_of(layout: &Value, id: &str) -> Result<Group, String> {
     })
 }
 
-fn uuid_ok(s: &str) -> bool {
+pub(crate) fn uuid_ok(s: &str) -> bool {
     s.len() == 36
         && s.chars().enumerate().all(|(i, c)| {
             if [8, 13, 18, 23].contains(&i) {
@@ -610,7 +610,7 @@ const QUOTED_MAX: usize = 40;
 /// question says it: no control, direction or invisible characters, on one
 /// line, at most [`QUOTED_MAX`] characters, in quotes. So no name can push
 /// what the question asks out of sight, or pass for another part of it.
-fn quoted(s: &str) -> String {
+pub(crate) fn quoted(s: &str) -> String {
     let plain: String = s
         .chars()
         .map(|c| match c {
@@ -1018,7 +1018,7 @@ fn grant_says(boss_key: &str, choice: &Choice, name: &str, members: Vec<String>)
 
 /// The revision the engine has for `group` (its grant's, or what a deleted
 /// one left; 0 for none), and its grant.
-async fn revision_on(engine: &impl Engine, group: &str) -> Result<(i64, Value), String> {
+pub(crate) async fn revision_on(engine: &impl Engine, group: &str) -> Result<(i64, Value), String> {
     let a = engine.call("GET", "/api/desk/grants", None).await?;
     if !ok(a.status) {
         return Err(format!(
@@ -1121,7 +1121,7 @@ async fn stop_on(engine: &impl Engine, group: &str) -> Result<(), String> {
 }
 
 /// Deletes `group`'s grant on `engine` (what it leaves keeps its stop).
-async fn delete_grant(engine: &impl Engine, group: &str) -> Result<(), String> {
+pub(crate) async fn delete_grant(engine: &impl Engine, group: &str) -> Result<(), String> {
     match engine
         .call("DELETE", &format!("/api/desk/grants/{}", seg(group)), None)
         .await
@@ -2429,7 +2429,11 @@ impl BossHub for PairedHub<'_> {
 }
 
 /// This computer's engine and every machine's, as the commands reach them.
-fn engines_now<'a>(local: &'a Broker, machines: &MachineIo, ids: &[String]) -> Engines<Via<'a>> {
+pub(crate) fn engines_now<'a>(
+    local: &'a Broker,
+    machines: &MachineIo,
+    ids: &[String],
+) -> Engines<Via<'a>> {
     let here = Via {
         id: LOCAL_ENGINE.into(),
         name: HERE.into(),
@@ -2489,7 +2493,7 @@ async fn machine_ids(local: &Broker, kept_at: &Path, group: Option<&str>) -> Vec
     ids
 }
 
-fn kept_path() -> Result<PathBuf, String> {
+pub(crate) fn kept_path() -> Result<PathBuf, String> {
     desk_core::Paths::new()
         .map(|p| p.root.join(KEPT_FILE))
         .map_err(|e| e.to_string())
@@ -2597,7 +2601,7 @@ type Answered = std::pin::Pin<Box<dyn Future<Output = Result<bool, String>> + Se
 /// The native question, Cancel first: true only on its yes. The gate is
 /// held around the question alone, never the requests after it, so a
 /// Cancel quietens questions, not Pause, Stop or a narrowing.
-fn native_ask(app: tauri::AppHandle) -> impl FnOnce(String, String, String) -> Answered {
+pub(crate) fn native_ask(app: tauri::AppHandle) -> impl FnOnce(String, String, String) -> Answered {
     move |title, question, yes| {
         Box::pin(async move {
             let _asking = GATE.start()?;
@@ -2834,14 +2838,17 @@ pub async fn boss_unpause_engine(
 }
 
 /// The sidebar changed: keeping alive runs soon, so a session that joins or
-/// leaves a group with a boss is granted or taken out without waiting.
+/// leaves a group with a boss is granted or taken out without waiting, a
+/// boss on another hub's ([`keep_alive`]) or one here's
+/// ([`crate::local_bosses::keep_alive`]).
 #[tauri::command]
 pub fn boss_layout_changed() {
     WAKE.notify_one();
+    crate::local_bosses::WAKE.notify_one();
 }
 
 /// Wakes keeping alive before its time.
-static WAKE: tokio::sync::Notify = tokio::sync::Notify::const_new();
+pub(crate) static WAKE: tokio::sync::Notify = tokio::sync::Notify::const_new();
 
 /// The least time between two runs of keeping alive, however often the
 /// sidebar changes.

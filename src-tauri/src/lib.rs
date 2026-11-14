@@ -16,6 +16,7 @@ mod hub_io;
 mod hubs;
 mod knows_machines;
 mod links;
+mod local_bosses;
 mod logins;
 mod machine_accounts;
 mod machine_secret;
@@ -1165,6 +1166,9 @@ pub fn run() {
             app.manage(sockets);
             // A group's boss on another hub: its grants and links renewed.
             bosses::keep_alive(app.handle().clone());
+            // A group's boss here: its grants on the machines that hold the
+            // group's sessions.
+            local_bosses::keep_alive(app.handle().clone());
             // A local boss's calls on its group's machine sessions, carried
             // to each machine while Desk is open.
             app.manage(crew_relay::start(app.handle().clone()));
