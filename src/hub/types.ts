@@ -539,7 +539,9 @@ export type EngineSignIn = { id: string; engine: Engine } & (
   | { state: "browser"; say: string; instead: string }
   | { state: "paste"; url: string }
   | { state: "done" }
-  | { state: "failed"; why: string }
+  /** `instead`, when there is one, is the label of the way on beside it
+   *  (Devin's: a new sign-in with a code to paste, `manual`). */
+  | { state: "failed"; why: string; instead?: string }
 );
 
 export interface AccountsInfo {

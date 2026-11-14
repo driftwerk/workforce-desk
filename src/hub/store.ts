@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { shownState } from "../floor/background";
 import type { Prompt, Working } from "../chat/conversation";
 import type { Attachment, ToolCall } from "../chat/types";
+import { useChat } from "../chat/store";
 import { DeskHub, HubError, ROOM_PAGE } from "./client";
 import { explain, type ExplainOptions, type Problem } from "../ui/problem";
 import type { DeskTransport } from "./transport";
@@ -365,7 +366,8 @@ export const useDesk = create<DeskState>((set, get) => ({
   error: null,
   detached: false,
   connect: (transport, opts) => {
-    const hub = new DeskHub(transport);
+    // As the person: this computer's hub by their paired Desk.
+    const hub = new DeskHub(transport, () => useChat.getState().hubs.find((h) => h.local));
     set((s) => ({
       hub,
       detached: opts?.notify === false,
@@ -410,7 +412,8 @@ export const useDesk = create<DeskState>((set, get) => ({
   },
   connectMachine: (machine, transport) => {
     if (machine === LOCAL) throw new Error("This computer's engine is connected with `connect`.");
-    const hub = new DeskHub(transport);
+    // As the person: the machine's hub by the device Desk paired there.
+    const hub = new DeskHub(transport, () => useChat.getState().hubs.find((h) => h.machine === machine));
     set((s) => ({ engines: { ...s.engines, [machine]: { hub, connected: false, loaded: false, error: null } } }));
     const mine = () => get().engines[machine]?.hub === hub;
     const stop = hub.events(
