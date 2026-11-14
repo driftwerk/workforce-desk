@@ -16,12 +16,14 @@ const api = {
   log: vi.fn(),
 };
 const linkKnows = vi.fn();
+const tellMachines = vi.fn();
 const here = vi.hoisted(() => ({ linker: true }));
 
 vi.mock("../hub/knows", async (original) => ({
   ...(await original<typeof import("../hub/knows")>()),
   knowsOf: () => api,
   knowsLinker: () => (here.linker ? (...a: unknown[]) => linkKnows(...a) : null),
+  knowsTeller: () => (here.linker ? (...a: unknown[]) => tellMachines(...a) : null),
 }));
 
 const local: HubAccount = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" };
@@ -188,6 +190,40 @@ describe("What they see", () => {
     fireEvent.click(screen.getByRole("radio", { name: "Live" }));
     await waitFor(() => expect(api.setRule).toHaveBeenCalledTimes(2));
     expect(linkKnows).toHaveBeenCalledTimes(1);
+  });
+
+  it("tells the machines an agent elsewhere's rule changed, and what the person chose of what it holds", async () => {
+    kept = viewOf(ruleOf("dw/Allan", { places: ["all"], transcripts: true }));
+    api.setRule.mockImplementationOnce((agent: string, b: { places: string[]; transcripts: boolean }) => {
+      kept = viewOf(ruleOf(agent, b), { items: 5, transcripts: 5, sessions: 1, by_kind: { transcript: 5 } });
+      return Promise.resolve({ rule: kept.rule, heldOutside: kept.heldOutside });
+    });
+    await show(allan, driftwerk);
+    fireEvent.click(screen.getByRole("switch", { name: "Include transcripts" }));
+    await waitFor(() => expect(tellMachines).toHaveBeenCalledWith("dw", "allan", undefined));
+    const dialog = await screen.findByRole("dialog");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete them" }));
+    await waitFor(() => expect(tellMachines).toHaveBeenLastCalledWith("dw", "allan", "delete"));
+    expect(screen.queryByText(/aren’t shared yet/)).toBeNull();
+  });
+
+  it("asks about what an agent elsewhere holds of a machine when only the machine's part narrowed", async () => {
+    kept = viewOf(ruleOf("dw/Allan", { places: ["group:g1", "session:devbox/s1"] }));
+    tellMachines.mockResolvedValueOnce({ held: { items: 7, transcripts: 0, sessions: 1 }, grew: true });
+    await show(allan, driftwerk);
+    fireEvent.click(screen.getByRole("radio", { name: /Only their own work/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain("They hold 7 items");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete them" }));
+    // Kept by the key read: this rule shares nothing, so it wasn't linked.
+    await waitFor(() => expect(tellMachines).toHaveBeenLastCalledWith("dw", "Allan", "delete"));
+  });
+
+  it("doesn't tell the machines of an agent on this computer, whose sessions there aren't shared yet", async () => {
+    await show();
+    fireEvent.click(screen.getByRole("radio", { name: /Everything/ }));
+    await waitFor(() => expect(api.setRule).toHaveBeenCalled());
+    expect(tellMachines).not.toHaveBeenCalled();
   });
 
   it("says in plain words when the agent's hub won't take Desk work, and keeps nothing", async () => {

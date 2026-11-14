@@ -1470,7 +1470,7 @@ button.card-icon:hover:not(:disabled) {
 }
 
 /* ── A boss's plan in its DM (BD11): goal, waves, each ticket's engine and
-   folder, where it stands, and Approve and run. After the approved mockup
+   folder, where it stands, and Approve and start. After the approved mockup
    (floor-groups-mockup.html, b); every colour is a token. */
 
 .plancard {
@@ -1664,6 +1664,60 @@ button.card-icon:hover:not(:disabled) {
 .pc-engine:disabled {
   opacity: 0.6;
 }
+/* Other…: a model's exact id, in the picker's own shape. */
+.pc-model-other {
+  background-image: none;
+  padding-right: 10px;
+  width: 13em;
+}
+/* A ticket's machine, engine and model, at its line's end. */
+.pc-tk-run {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.pc-tk-run .pc-engine {
+  min-width: 9.5em;
+}
+.pc-machine {
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+  border-color: transparent;
+}
+
+/* A draft plan's defaults for every ticket: where they run, engine, model. */
+.pc-defaults {
+  margin: 10px 16px 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pc-defaults-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.pc-defaults-head .pc-wave-label {
+  margin: 0;
+}
+.pc-defaults-row,
+.pc-edit-where {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 16px;
+}
+.pc-defaults-row .pc-engine,
+.pc-edit-where .pc-engine {
+  align-self: flex-start;
+}
 .pc-foot {
   padding: 12px 16px 14px;
   border-top: 1px solid var(--border);
@@ -1769,7 +1823,12 @@ button.card-icon:hover:not(:disabled) {
   padding: 6px 10px;
 }
 .pc-edit-folder {
+  font-family: var(--font-mono);
   font-size: 12.5px;
+}
+/* In a ticket's column of fields it is a line, never a column's height. */
+.pc-edit-row > .pc-edit-folder {
+  flex: none;
 }
 .pc-edit-needs {
   display: flex;
@@ -1787,7 +1846,7 @@ button.card-icon:hover:not(:disabled) {
   .pc-tk {
     grid-template-columns: auto minmax(0, 1fr);
   }
-  .pc-tk .pc-engine {
+  .pc-tk .pc-tk-run {
     grid-column: 2;
     justify-self: start;
   }
@@ -1876,4 +1935,124 @@ button.card-icon:hover:not(:disabled) {
   .handoff-spinner {
     animation-duration: 2.4s;
   }
+}
+
+/* A plan's card's meta line, and Open on board beside it in a DM. */
+.pc-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+/* As a setting card's action (.link-card-action). */
+.pc-open-board,
+.plan-row-board {
+  font-weight: 600;
+  color: var(--signal-soft-text);
+}
+.pc-open-board:hover,
+.plan-row-board:hover {
+  color: var(--text);
+}
+
+/* A plan in a line (the board's plans, a boss's Settings): goal, standing,
+   a short bar, how far it has got, Pause or Resume. Wraps when narrow. */
+.plan-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  min-height: 38px;
+  font-size: 13px;
+}
+.plan-row-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 4px 6px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+.plan-row-toggle:hover {
+  background: var(--raised);
+}
+.plan-row-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.plan-row > .plan-row-goal {
+  flex: 1 1 220px;
+}
+.plan-row-goal {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.plan-row-bar {
+  flex: none;
+  width: 96px;
+  height: 6px;
+}
+.plan-row-line {
+  flex: none;
+  min-width: 11.5em;
+  text-align: right;
+  white-space: nowrap;
+}
+/* Bar, count and button take the same width on every line, so they line
+   up under the line above's. */
+.plan-row > .chip {
+  flex: none;
+}
+.plan-row-act {
+  flex: none;
+  min-width: 84px;
+  display: flex;
+  justify-content: flex-end;
+}
+/* A narrow board: the goal on a line of its own, the rest under it. */
+@container (max-width: 560px) {
+  .plan-row-toggle {
+    flex-basis: 100%;
+  }
+  .plan-row-line {
+    min-width: 0;
+    flex: 1 1 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+}
+.plan-row-said {
+  flex: 1 1 100%;
+  overflow-wrap: anywhere;
+}
+/* A boss's plans on its Settings tab, as its other rows are. */
+.plan-rows {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-fill);
+  display: flex;
+  flex-direction: column;
+}
+.plan-rows .plan-row-goal {
+  flex-basis: 160px;
+}
+/* On Settings the bar says it (and its count, on hover). */
+.plan-rows .plan-row-line {
+  display: none;
+}
+.plan-rows > .plan-row {
+  padding: 8px 16px;
+  min-height: 50px;
+}
+.plan-rows > .plan-row + .plan-row {
+  border-top: 1px solid var(--border);
 }

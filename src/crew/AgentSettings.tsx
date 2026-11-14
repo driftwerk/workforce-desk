@@ -16,6 +16,7 @@ import { useUi } from "../shell/ui";
 import { PictureField } from "../pictures/PictureField";
 import { useAgentImage } from "../pictures/who";
 import { CheckingIn, HowTheyRemember, HowTheyWork } from "./AgentAbilities";
+import { BossPlans } from "./PlanRow";
 import { OverseesTheCrew } from "./OverseesTheCrew";
 import { WhatTheySee } from "./WhatTheySee";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
@@ -47,6 +48,7 @@ export function AgentSettings({ agent, hub, onOpenFiles }: { agent: Agent; hub: 
           />
         )}
         {local && <OverseesTheCrew agent={agent} />}
+        {local && <BossPlans boss={agent.id} name={agent.name} />}
         {local && <FineTuning agent={agent} onOpen={onOpenFiles} />}
         {local && !agent.isDefault && <Remove agent={agent} />}
       </div>

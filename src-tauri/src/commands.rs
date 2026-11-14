@@ -56,6 +56,7 @@ pub const COMMANDS: &[&str] = &[
     "boss_retry",
     "boss_unpause_engine",
     "boss_layout_changed",
+    "knows_machines",
     "pair_request",
     "pair_collect",
     "fonts_list",
