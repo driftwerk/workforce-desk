@@ -711,6 +711,40 @@ button.ticket-chip:hover {
   border-color: transparent;
 }
 
+/* A card's plan chip shows its plan, when the board can show it. */
+.board-plan-chip-link {
+  cursor: pointer;
+}
+.board-plan-chip-link:hover {
+  text-decoration: underline;
+}
+
+/* The board's plans, under its header as its sync is: a line each (goal,
+   standing, progress, Pause or Resume), the one shown with its whole card
+   under it, in a scroll of its own so the columns stay in sight. */
+.board-plans {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 28px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+  max-height: 55vh;
+  overflow-y: auto;
+}
+.board-plans > .plan-row-open {
+  margin: 0 -10px;
+  padding: 0 10px;
+  border-radius: var(--radius);
+  background: var(--raised);
+}
+.board-plan-card {
+  padding: 6px 0 8px;
+}
+.board-plan-card .plancard {
+  max-width: 900px;
+}
+
 /* ── Sync with Linear or Jira ───────────────────────────────────────────── */
 
 /* A synced board's sync, under its header: what it's linked to, its chip,

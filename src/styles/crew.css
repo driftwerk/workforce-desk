@@ -1877,3 +1877,94 @@ button.card-icon:hover:not(:disabled) {
     animation-duration: 2.4s;
   }
 }
+
+/* A plan's card's meta line, and Open on board beside it in a DM. */
+.pc-meta {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+}
+/* As a setting card's action (.link-card-action). */
+.pc-open-board,
+.plan-row-board {
+  font-weight: 600;
+  color: var(--signal-soft-text);
+}
+.pc-open-board:hover,
+.plan-row-board:hover {
+  color: var(--text);
+}
+
+/* A plan in a line (the board's plans, a boss's Settings): goal, standing,
+   a short bar, how far it has got, Pause or Resume. Wraps when narrow. */
+.plan-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  min-height: 38px;
+  font-size: 13px;
+}
+.plan-row-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 220px;
+  min-width: 0;
+  padding: 4px 6px;
+  margin-left: -6px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+.plan-row-toggle:hover {
+  background: var(--raised);
+}
+.plan-row-toggle:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.plan-row > .plan-row-goal {
+  flex: 1 1 220px;
+}
+.plan-row-goal {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.plan-row-bar {
+  flex: none;
+  width: 96px;
+  height: 6px;
+}
+.plan-row-line {
+  flex: none;
+  white-space: nowrap;
+}
+.plan-row-said {
+  flex: 1 1 100%;
+  overflow-wrap: anywhere;
+}
+/* A boss's plans on its Settings tab, as its other rows are. */
+.plan-rows {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-fill);
+  display: flex;
+  flex-direction: column;
+}
+.plan-rows .plan-row-goal {
+  flex-basis: 160px;
+}
+.plan-rows > .plan-row {
+  padding: 8px 16px;
+  min-height: 50px;
+}
+.plan-rows > .plan-row + .plan-row {
+  border-top: 1px solid var(--border);
+}

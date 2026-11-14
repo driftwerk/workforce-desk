@@ -13,6 +13,7 @@ import { useMinute } from "../floor/RightNow";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { leftFilterOf, syncStatus } from "../hub/boardSync";
 import { BoardDialog } from "./BoardDialogs";
+import { BoardPlans } from "./BoardPlans";
 import { LeftFilterShelf, SyncBar } from "./SyncBar";
 import { hubNameOf, localSync, syncChoices, useSyncHubs, type SyncChoice } from "./syncStore";
 import { type BoardAction, FILTERS, STATE_TITLE, anchored, planOfTickets, statesOf, columns, keyOf, landing, lineAt, nudge, shelfLabel, snoozed, waitingOnYou, type BoardFilter, type Column, type Over } from "./board";
@@ -92,8 +93,9 @@ export const useShiftWheel = (el: HTMLElement | null): void => {
 
 /** Every ticket's state, worked out once for the board's cards. */
 const States = createContext<ReadonlyMap<string, TicketState>>(new Map());
-/** The plan each ticket is in, by its goal, for the board's cards. */
-const Plans = createContext<ReadonlyMap<string, string>>(new Map());
+/** The plan each ticket is in (its id and goal), for the board's cards;
+ *  with `show`, a card's plan chip shows that plan's card. */
+const Plans = createContext<{ of: ReadonlyMap<string, { id: string; goal: string }>; show: ((plan: string) => void) | null }>({ of: new Map(), show: null });
 
 const KEYS: Record<string, "up" | "down" | "left" | "right"> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
 
@@ -176,12 +178,19 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   useEffect(() => {
     for (const p of plans) if (!usePlans.getState().details[p.id]) void usePlans.getState().fetch(p.id);
   }, [plans]);
-  const [planShown, setPlan] = useState<string | null>(null);
-  const plan = planShown && plans.some((p) => p.id === planShown) ? planShown : null;
+  // The plan shown, kept by the store so a plan's card in the boss's DM
+  // (Open on board) can show it here. A grid's pane has no header to show
+  // it in, so it shows every plan's tickets.
+  const planShown = useBoard((s) => s.plan);
+  const setPlan = useBoard((s) => s.showPlan);
+  const plan = !pane && planShown && plans.some((p) => p.id === planShown) ? planShown : null;
   const ticketPlans = useMemo(() => planOfTickets(plans.map((p) => details[p.id]).filter((d) => !!d)), [plans, details]);
   const planTickets = useMemo(() => (plan ? new Set([...ticketPlans].filter(([, p]) => p === plan).map(([t]) => t)) : null), [plan, ticketPlans]);
   const planNames = useMemo(() => new Map(plans.map((p) => [p.id, p.goal])), [plans]);
-  const planChips = useMemo(() => new Map([...ticketPlans].map(([t, p]) => [t, planNames.get(p) ?? ""])), [ticketPlans, planNames]);
+  const planChips = useMemo(
+    () => ({ of: new Map([...ticketPlans].map(([t, p]) => [t, { id: p, goal: planNames.get(p) ?? "" }])), show: pane ? null : setPlan }),
+    [ticketPlans, planNames, pane, setPlan],
+  );
   // Who the person is on the board's Jira or Linear, for Mine.
   const me = board?.sync?.me ?? null;
   // A synced board's own filters (epic, type, sprint; cycle, project,
@@ -393,6 +402,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
           on every switch, stacking another board's sync above this one. */}
       {board.sync && <SyncBar key={`sync:${board.id}`} board={board} now={now} onToken={tokenFor && chrome ? () => setNewToken(true) : undefined} />}
       <LeftFilterShelf key={`left:${board.id}`} board={board} tickets={left} />
+      <BoardPlans plans={plans} shown={plan} />
       {columnsShown}
       {live}
       {menu && (
@@ -699,7 +709,9 @@ function DraggableCard({
 }) {
   const el = useRef<HTMLButtonElement | null>(null);
   const states = useContext(States);
-  const plan = useContext(Plans).get(ticket.id);
+  const plans = useContext(Plans);
+  const plan = plans.of.get(ticket.id);
+  const showPlan = plans.show;
   const openTicket = useContext(TicketOpener);
   // A dropped ticket comes back by Bring it back, never by landing in a column.
   const drag = useDraggable({ id: ticket.id, type: "ticket", element: el, disabled: ticket.state === "dropped" });
@@ -714,7 +726,8 @@ function DraggableCard({
           states={states}
           waiting={waiting}
           settled={settled}
-          plan={plan}
+          plan={plan?.goal}
+          onPlan={plan && showPlan ? () => showPlan(plan.id) : undefined}
           buttonRef={(b) => {
             el.current = b;
             register(ticket.id, b);

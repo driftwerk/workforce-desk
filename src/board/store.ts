@@ -13,12 +13,16 @@ interface BoardState {
   shown: string | null;
   /** The ticket open in its panel. */
   open: string | null;
+  /** The boss's plan the board shows (its card above the columns, its
+   *  tickets alone in them), by id; null shows every plan's. */
+  plan: string | null;
   /** The ticket open as a popup over a grid (see TicketPopup). */
   popup: string | null;
   /** Reads every board and its tickets; read again (`tries` more times)
    *  when a change came meanwhile. */
   load: (tries?: number) => Promise<void>;
   show: (board: string) => void;
+  showPlan: (plan: string | null) => void;
   openTicket: (id: string | null) => void;
   openPopup: (id: string | null) => void;
   /** A ticket the hub announced. */
@@ -81,6 +85,7 @@ export const useBoard = create<BoardState>((set, get) => {
     supported: null,
     shown: null,
     open: null,
+    plan: null,
     popup: null,
     load: async (tries = LOAD_TRIES) => {
       const hub = hubNow();
@@ -114,6 +119,7 @@ export const useBoard = create<BoardState>((set, get) => {
       }
     },
     show: (shown) => set({ shown }),
+    showPlan: (plan) => set({ plan }),
     openTicket: (open) => set({ open }),
     openPopup: (popup) => set({ popup }),
     heard: (t) => {
@@ -288,5 +294,5 @@ deskListeners.add(onEvent);
 
 // Another hub (or none): what the last one said is no longer so.
 useDesk.subscribe((now, before) => {
-  if (now.hub !== before.hub) useBoard.setState({ boards: {}, tickets: {}, supported: null, open: null });
+  if (now.hub !== before.hub) useBoard.setState({ boards: {}, tickets: {}, supported: null, open: null, plan: null });
 });
