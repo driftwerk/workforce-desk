@@ -474,7 +474,7 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
             )}
           </div>
           {!wide && (
-            <aside className="ticket-band" aria-label="Details">
+            <aside className={`ticket-band${epic ? " ticket-band-epic" : ""}`} aria-label="Details">
               {actions}
               {t.needs.length > 0 && needs}
               {facts}

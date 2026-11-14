@@ -1966,11 +1966,14 @@ button.ticket-row:not(:disabled):hover {
 .ticket-facts-cols {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  align-items: start;
   gap: 0 28px;
 }
-/* A column with fewer facts than the other keeps its rows packed. */
-.ticket-facts-cols > .ticket-facts {
+/* An epic's band has seven facts: its shorter column keeps its rows
+   packed, not spread down the taller one's height. */
+.ticket-band-epic .ticket-facts-cols {
+  align-items: start;
+}
+.ticket-band-epic .ticket-facts-cols > .ticket-facts {
   align-content: start;
 }
 .ticket-compact .ticket-facts-cols {
