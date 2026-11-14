@@ -299,7 +299,7 @@ describe("a ticket's comments", () => {
     useBoard.setState({ tickets: {}, open: null });
   });
 
-  it("draws a key in a description as its chip; editing gets the text as written, and the chip opens its ticket, not the editor", () => {
+  it("draws a key in a description as its chip; the chip opens its ticket, not the editor, and the text still does", () => {
     const id = "0f3c2a9e-1b2c-4d5e-8f90-123456789abd";
     const other = ticket(3, {
       id,
@@ -309,17 +309,17 @@ describe("a ticket's comments", () => {
     });
     useBoard.setState({ tickets: { [id]: other } });
     const text = "Follows ACME-3 and ACME-9.";
-    let edited: string | null = null;
-    const { container } = render(<TicketBody text={text} board={other.board} onEdit={() => (edited = text)} />);
+    const onEdit = vi.fn();
+    const { container } = render(<TicketBody text={text} board={other.board} onEdit={onEdit} />);
     const chip = screen.getByRole("button", { name: "Open ACME-3: Unified login, Done" });
     expect(container.querySelectorAll(".ticket-issue-chip")).toHaveLength(1);
     expect(container.textContent).toContain("ACME-9");
     expect(container.innerHTML).not.toContain("desk://");
     fireEvent.click(chip);
-    expect(edited).toBeNull();
+    expect(onEdit).not.toHaveBeenCalled();
     expect(useBoard.getState().open).toBe(id);
     fireEvent.click(screen.getByText(/Follows/));
-    expect(edited).toBe(text);
+    expect(onEdit).toHaveBeenCalledTimes(1);
     useBoard.setState({ tickets: {}, open: null });
   });
 
