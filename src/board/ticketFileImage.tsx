@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { openUrl } from "../platform";
 import { FileViewer } from "./FileViewer";
 import { useBoard } from "./store";
 import { FileIcon } from "./ticketDirectives";
@@ -36,7 +37,13 @@ export function TicketFileImage({ ticket, id, alt, inLink = false }: { ticket: s
           {shown.url ? <img src={shown.url} alt={name} /> : <span className="ticket-md-picture-wait">{shown.problem ? name : ""}</span>}
         </button>
       ) : (
-        <button type="button" className="ticket-inline-chip ticket-md-file" onClick={() => setOpen(true)} title={file.name}>
+        <button
+          type="button"
+          className="ticket-inline-chip ticket-md-file"
+          // A link of its issue's opens where it is, as its card does.
+          onClick={() => (file.source === "linear_link" ? file.url && /^https:\/\//i.test(file.url) && void openUrl(file.url) : setOpen(true))}
+          title={file.name}
+        >
           <FileIcon />
           {name}
         </button>

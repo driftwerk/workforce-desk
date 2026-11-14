@@ -317,29 +317,46 @@ export { markText } from "../ui/Mark";
 
 // ── The description ────────────────────────────────────────────────────
 
-/** A container directive's opening line (`:::panel{tone=info}`,
- *  `::::details[Title]`) and its closing one. */
-const CONTAINER_OPEN = /^\s*:{3,}[A-Za-z]/;
-const CONTAINER_CLOSE = /^\s*:{3,}\s*$/;
+/** A container Desk draws, opening (`:::panel{tone=info}`,
+ *  `::::details[Title]`), and a closing fence. Others (Linear's or
+ *  Docusaurus's `:::tip`) read as words, so they aren't containers here. */
+const CONTAINER_OPEN = /^\s*(:{3,})(panel|details)(?![A-Za-z0-9_-])/i;
+const CONTAINER_CLOSE = /^\s*(:{3,})\s*$/;
+
+/** Each line's containers, as a renderer reads them: a closing fence ends
+ *  the innermost one only when it has at least that one's colons. Calls
+ *  `line` with each line, whether it is a fence, and the containers it's in
+ *  (each a collapsible or not). */
+const walkContainers = (body: string, line: (l: string, i: number, fence: boolean, open: readonly boolean[]) => void): void => {
+  const open: { colons: number; details: boolean }[] = [];
+  let fenced = false;
+  body.split("\n").forEach((l, i) => {
+    if (/^\s*(```|~~~)/.test(l)) fenced = !fenced;
+    else if (!fenced) {
+      const o = CONTAINER_OPEN.exec(l);
+      if (o) {
+        open.push({ colons: o[1]!.length, details: o[2]!.toLowerCase() === "details" });
+        return line(l, i, true, open.map((c) => c.details));
+      }
+      const c = CONTAINER_CLOSE.exec(l);
+      if (c && open.length && c[1]!.length >= open[open.length - 1]!.colons) {
+        const was = open.map((x) => x.details);
+        open.pop();
+        return line(l, i, true, was);
+      }
+    }
+    line(l, i, false, open.map((c) => c.details));
+  });
+};
 
 /** A description with its panels' fence lines gone, so their words read as
  *  paragraphs, and its collapsibles gone whole: they're closed until
  *  clicked, so no preview shows what's in them. */
 export const unfenced = (body: string): string => {
   const out: string[] = [];
-  const open: boolean[] = [];
-  let fenced = false;
-  for (const l of body.split("\n")) {
-    if (/^\s*(```|~~~)/.test(l)) fenced = !fenced;
-    else if (!fenced && CONTAINER_OPEN.test(l)) {
-      open.push(/^\s*:{3,}details\b/.test(l));
-      continue;
-    } else if (!fenced && CONTAINER_CLOSE.test(l) && open.length) {
-      open.pop();
-      continue;
-    }
-    if (!open.includes(true)) out.push(l);
-  }
+  walkContainers(body, (l, _i, fence, open) => {
+    if (!fence && !open.includes(true)) out.push(l);
+  });
   return out.join("\n");
 };
 
@@ -351,13 +368,9 @@ export const foldSections = (body: string, keep = 2): { shown: string; more: num
   let fenced = false;
   // Inside a panel or a collapsible (`:::` … `:::`), a heading is its own:
   // never where the description is cut.
-  let inside = 0;
-  lines.forEach((l, i) => {
+  walkContainers(body, (l, i, fence, open) => {
     if (/^\s*(```|~~~)/.test(l)) fenced = !fenced;
-    else if (fenced) return;
-    else if (CONTAINER_OPEN.test(l)) inside += 1;
-    else if (CONTAINER_CLOSE.test(l)) inside = Math.max(0, inside - 1);
-    else if (!inside && /^#{1,6}\s/.test(l)) starts.push(i);
+    else if (!fenced && !fence && !open.length && /^#{1,6}\s/.test(l)) starts.push(i);
   });
   // Words before the first heading are a section of their own; blank lines
   // alone aren't.

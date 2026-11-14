@@ -1,7 +1,7 @@
 import { RichHostProvider, RichMarkdown } from "@workforce/rich";
 import { useMemo } from "react";
 import { ticketImage } from "./ticketFileImage";
-import { descriptionLink, TICKET_RICH_HOST, useKeyedBody } from "./ticketKeyedRich";
+import { DESCRIPTION_RICH_HOST, useKeyedBody } from "./ticketKeyedRich";
 
 /** A description someone's tool sent with its newlines written out (`\n` as
  *  two characters, one line in all): real line breaks, as the hub makes them
@@ -17,7 +17,7 @@ export const unescapeNewlines = (text: string): string =>
  *  a picture or a collapsible's title is itself. */
 export function TicketBody({ text, board, ticket, onEdit }: { text: string; board?: string; ticket?: string; onEdit: () => void }) {
   const shown = useKeyedBody(unescapeNewlines(text), board);
-  const host = useMemo(() => ({ ...TICKET_RICH_HOST, link: descriptionLink, image: ticketImage(ticket) }), [ticket]);
+  const host = useMemo(() => ({ ...DESCRIPTION_RICH_HOST, image: ticketImage(ticket) }), [ticket]);
   return (
     <div
       className="ticket-text ticket-md rich"

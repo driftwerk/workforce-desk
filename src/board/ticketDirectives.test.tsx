@@ -10,6 +10,7 @@ vi.mock("./ticketView", async (real) => ({ ...(await real<typeof import("./ticke
 const opened = vi.hoisted(() => ({ urls: [] as string[] }));
 vi.mock("../platform", async (real) => ({ ...(await real<typeof import("../platform")>()), openUrl: (u: string) => void opened.urls.push(u) }));
 
+import { RichHostProvider, RichMarkdown } from "@workforce/rich";
 import { useBoard } from "./store";
 import { TicketBody } from "./TicketBody";
 import { forgetFetchedFiles } from "./TicketFiles";
@@ -123,7 +124,7 @@ describe("a synced description's directives", () => {
 
 describe("every name the hub writes is drawn, whatever its form", () => {
   it("never shows a hub directive's syntax", () => {
-    const { container } = body(":mention[] and :panel[a note] and :details[more]\n\n::status[Done]{tone=success}\n\n:::date\nInside.\n:::");
+    const { container } = body(":mention[] and :panel[a note] and :details[more] and :status[]{tone=info} :date[]\n\n::status[Done]{tone=success}\n\n:::date\nInside.\n:::");
     expect(container.textContent).not.toMatch(/:(mention|panel|details|status|date)/);
     expect(container.querySelector(".ticket-mention")?.textContent).toBe("@someone");
     expect(container.querySelector(".ticket-lozenge")?.textContent).toBe("Done");
@@ -158,15 +159,19 @@ describe("a synced description's links", () => {
 
   it("names an issue by its site and key: Jira's browse address, Linear's with or without its slug", () => {
     expect(issueAddress("https://acme.atlassian.net/browse/PLT-875")).toBe("acme.atlassian.net|PLT-875");
-    expect(issueAddress("https://linear.app/acme/issue/MAN-611/rate-limit-pairing")).toBe("linear.app|MAN-611");
-    expect(issueAddress("https://linear.app/acme/issue/MAN-611")).toBe("linear.app|MAN-611");
+    expect(issueAddress("https://linear.app/acme/issue/MAN-611/rate-limit-pairing")).toBe("linear.app/acme|MAN-611");
+    expect(issueAddress("https://linear.app/Acme/issue/MAN-611")).toBe("linear.app/acme|MAN-611");
+    expect(issueAddress("https://acme.atlassian.net/browse/DATA_ENG-12")).toBe("acme.atlassian.net|DATA_ENG-12");
+    expect(issueAddress("https://acme.atlassian.net/browse/PLATFORMOPS-5")).toBe("acme.atlassian.net|PLATFORMOPS-5");
     expect(issueAddress("http://acme.atlassian.net/browse/PLT-875")).toBeNull();
     expect(issueAddress("https://acme.atlassian.net/browse/PLT-875x")).toBeNull();
     const id = "0f3c2a9e-1b2c-4d5e-8f90-123456789abd";
     const linear = ticket(3, { id, key: "MAN-611", title: "Rate-limit pairing", external: { system: "linear", key: "MAN-611", url: "https://linear.app/acme/issue/MAN-611/rate-limit-pairing", remoteUpdatedAt: "2026-11-10T09:00:00Z", synced: true, link: "l2", details: { stateKind: "started", remoteState: "In Review" } } as never });
     useBoard.setState({ tickets: { ...useBoard.getState().tickets, [id]: linear } });
-    const { container } = body("Same week as [rate-limit pairing](https://linear.app/acme/issue/MAN-611).");
+    const { container } = body("Same week as [rate-limit pairing](https://linear.app/acme/issue/MAN-611). Not [theirs](https://linear.app/otherco/issue/MAN-611/x).");
     expect(container.querySelector(".ticket-issue-chip .ticket-issue-chip-text")?.textContent).toBe("rate-limit pairing");
+    expect(container.querySelectorAll(".ticket-issue-chip")).toHaveLength(1);
+    expect(screen.getByRole("link", { name: "theirs" })).not.toBeNull();
   });
 
   it("draws a bare address as a link chip that opens it, and a worded link as a link", async () => {
@@ -180,10 +185,21 @@ describe("a synced description's links", () => {
   });
 });
 
-describe("a bare address outside a description", () => {
-  it("stays a link: only a description draws it as a chip", () => {
+describe("outside a description", () => {
+  it("a bare address stays a link: only a description draws it as a chip, encoded or not", () => {
     expect(TICKET_RICH_HOST.link("https://wiki.example/x", "https://wiki.example/x")).toBeUndefined();
     expect(descriptionLink("https://wiki.example/x", "https://wiki.example/x")).toBeTruthy();
+    expect(descriptionLink("https://wiki.example/Caf%C3%A9", "https://wiki.example/Café")).toBeTruthy();
+  });
+
+  it("a comment reads directives as words: the hub writes them only in a description", () => {
+    expect("directive" in TICKET_RICH_HOST).toBe(false);
+    const { container } = render(
+      <RichHostProvider host={TICKET_RICH_HOST}>
+        <RichMarkdown text=":mention[Ann] :status[Done]{tone=success}" />
+      </RichHostProvider>,
+    );
+    expect(container.textContent).toBe(":mention[Ann] :status[Done]{tone=success}");
   });
 });
 
@@ -231,6 +247,12 @@ describe("folding a description with panels and collapsibles", () => {
     const { shown, more } = foldSections(text);
     expect(more).toBe(2);
     expect(shown.endsWith("::::")).toBe(true);
+  });
+
+  it("ends a container only at a fence with its colons, and leaves others' containers words", () => {
+    const text = "Intro.\n\n## One\n\nA.\n\n::::details[X]\n:::\n## Inside\n::::\n\n## Two\n\nB.\n\n## Three\n\nC.";
+    expect(foldSections(text).shown.endsWith("::::")).toBe(true);
+    expect(firstParagraph(":::tip\nWords.\n:::")).toBe(":::tip\nWords.\n:::");
   });
 
   it("reads a panel's words as the first paragraph, never a collapsible's", () => {

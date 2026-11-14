@@ -142,7 +142,7 @@ export const ticketDirective = (d: Directive): ReactNode => {
     case "mention":
       return standing(d, <span className="ticket-mention">@{said.replace(/^@/, "") || "someone"}</span>);
     case "status":
-      return standing(d, said ? <span className={`ticket-lozenge tone-${toneOf(d.attributes.tone)}`}>{said}</span> : null);
+      return standing(d, said ? <span className={`ticket-lozenge tone-${toneOf(d.attributes.tone)}`}>{said}</span> : <></>);
     case "date":
       return standing(
         d,
@@ -151,7 +151,9 @@ export const ticketDirective = (d: Directive): ReactNode => {
             <CalendarIcon />
             {dateWords(said)}
           </span>
-        ) : null,
+        ) : (
+          <></>
+        ),
       );
     case "panel": {
       if (d.kind !== "container") return standing(d, d.label);
