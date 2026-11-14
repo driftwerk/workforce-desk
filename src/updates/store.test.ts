@@ -53,6 +53,8 @@ describe("what holds a restart, and which version catches up", () => {
     expect(olderThan("1.2.3-rc.1", "1.2.3-rc.1")).toBe(false);
     // Build metadata is no part of the order.
     expect(olderThan("1.2.3+a", "1.2.3+b")).toBe(false);
+    expect(olderThan("v1.2.3", "1.2.4")).toBe(true);
+    expect(olderThan("1.2.3", "v1.2.3")).toBe(false);
     expect(olderThan("1.2.3-rc.1+a", "1.2.3-rc.1+b")).toBe(false);
   });
 });

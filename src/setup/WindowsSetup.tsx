@@ -114,6 +114,7 @@ export function WindowsSetup() {
     run(
       `setting Desk up in ${name}`,
       async () => {
+        setSudoNote(null);
         try {
           if (fix === "convert") {
             setFixing(`Moving ${name} to WSL 2… This takes a few minutes; your files stay.`);
@@ -152,6 +153,7 @@ export function WindowsSetup() {
       "installing Ubuntu alongside",
       async () => {
         let name: string;
+        setSudoNote(null);
         try {
           setFixing("Installing Ubuntu 24.04… About 5 minutes. Your Linux stays as it is.");
           const made = await installUbuntuAlongside();

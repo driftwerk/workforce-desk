@@ -80,10 +80,10 @@ export const isWorking = (s: Session): boolean =>
  *  `1.2.3`), its dot-separated identifiers compared one by one: numbers as
  *  numbers (`rc.2` before `rc.10`), numbers before words, words as text, and
  *  the shorter before the longer when all it has is the same
- *  (`alpha` before `alpha.1`). Build metadata (`+…`) is ignored. */
+ *  (`alpha` before `alpha.1`). Build metadata (`+…`) and a leading `v` are ignored. */
 export const olderThan = (a: string, b: string): boolean => {
   const split = (v: string) => {
-    const [core, ...rest] = v.split("+")[0]!.split("-");
+    const [core, ...rest] = v.trim().replace(/^v/i, "").split("+")[0]!.split("-");
     const nums = core!.split(".").map((p) => (Number.isNaN(Number.parseInt(p, 10)) ? 0 : Number.parseInt(p, 10)));
     return { nums, pre: rest.length ? rest.join("-").split(".") : null };
   };

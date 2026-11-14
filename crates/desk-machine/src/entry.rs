@@ -197,7 +197,11 @@ pub fn read(file: &Path) -> Result<Vec<Entry>, String> {
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
         Err(e) => {
             tracing::warn!(error = %e, "couldn't read Desk's SSH entries");
-            Err("Desk couldn't read its SSH entries, so it left them as they are.".into())
+            Err(format!(
+                "Desk couldn't read its SSH entries in {}, so it left them as they are. \
+                 Remove that file and Desk writes it afresh.",
+                file.display()
+            ))
         }
     }
 }
