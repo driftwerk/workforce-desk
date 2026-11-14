@@ -6,9 +6,12 @@ import type { Exec } from "./commands";
 import { DeskTabs, type ChromeTabs, type Kept } from "./desk";
 import { identity, type Identity } from "./identity";
 import { HOST, Link, type LinkState, type Port } from "./link";
-import type { ToHub } from "./protocol";
+import { REVISION, type ToHub } from "./protocol";
+import type { Reloader } from "./update";
 
 const KEPT = "desk";
+/** The revision this extension last reloaded itself for (`storage.local`). */
+const RELOADED_FOR = "reloadedFor";
 /** The person's own window they used last (`storage.session`). */
 const PERSONS = "persons";
 
@@ -146,9 +149,26 @@ const nativePort = (): Port => {
   };
 };
 
+const reloader: Reloader = {
+  // getSelf needs no permission; a Chrome without it never reloads this.
+  installType: async () => (chrome.management?.getSelf ? (await chrome.management.getSelf()).installType : "unknown"),
+  reloadedFor: async () => ((await chrome.storage.local.get(RELOADED_FOR))[RELOADED_FOR] as number | undefined) ?? null,
+  remember: (revision) => chrome.storage.local.set({ [RELOADED_FOR]: revision }),
+  // An unpacked extension's files are read from its folder as they are now.
+  onDisk: async () => {
+    const r = await fetch(chrome.runtime.getURL("revision.json"), { cache: "no-store" });
+    const n = r.ok ? ((await r.json()) as { revision?: unknown }).revision : null;
+    return Number.isSafeInteger(n) ? (n as number) : null;
+  },
+  reload: () => {
+    console.info(`Desk expects a newer extension than this one (revision ${REVISION}): reloading it from disk.`);
+    chrome.runtime.reload();
+  },
+};
+
 let me: Promise<Identity> | null = null;
 const tabs = new DeskTabs(tabsApi);
-const link = new Link(nativePort, () => (me ??= identity()), tabs, exec, chrome.runtime.getManifest().version, (f, ms) => setTimeout(f, ms));
+const link = new Link(nativePort, () => (me ??= identity()), tabs, exec, chrome.runtime.getManifest().version, (f, ms) => setTimeout(f, ms), reloader);
 
 const badge = (s: LinkState) => {
   void chrome.action.setBadgeText({ text: s.state === "ready" ? (s.activity ? "●" : "") : s.state === "waiting" ? "!" : "" });

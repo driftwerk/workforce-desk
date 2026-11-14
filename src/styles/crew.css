@@ -982,6 +982,120 @@ button.card-icon:hover:not(:disabled) {
   font-size: 12px;
   white-space: nowrap;
 }
+/* ── What they see (Sees) ─────────────────────────────────────────────────
+   One ability card, as How they work's: the choices its rows, "Choose…"
+   beside the one it opens. */
+.sees-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sees-mode {
+  display: flex;
+  align-items: center;
+}
+.sees-mode + .sees-mode,
+.ability-card > .pick-list + .ability-row {
+  border-top: 1px solid var(--border);
+}
+.sees-mode .pick {
+  flex: 1;
+  min-width: 0;
+}
+.sees-change {
+  flex: none;
+  margin-right: 16px;
+}
+/* Settings' `.link-signal` (its links in the signal's text colour), here
+   where settings.css may load before app.css's `.link` and lose to it. */
+.sees .link-signal {
+  color: var(--signal-soft-text);
+}
+.sees .link-signal:hover {
+  color: var(--text);
+}
+.sees-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.sees-foot p {
+  margin: 0;
+}
+.sees-log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.sees-log-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 13px;
+}
+.sees-log-list li {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0;
+  border-top: 1px solid var(--border);
+  color: var(--text);
+}
+.sees-pick {
+  flex: 1;
+  min-height: 0;
+  gap: 14px;
+}
+.sees-pick-filter {
+  width: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  outline: none;
+}
+.sees-pick-filter:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
+.sees-pick-kind {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.sees-pick-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 10px;
+  row-gap: 2px;
+  padding: 10px 6px;
+  border-top: 1px solid var(--border);
+  cursor: pointer;
+  color: var(--text);
+}
+.sees-pick-row:hover {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
+}
+.sees-pick-row input {
+  margin: 0;
+  flex: none;
+  align-self: center;
+}
+.sees-pick-name {
+  font-size: 15px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.sees-pick-sub {
+  font-size: 13px;
+  color: var(--muted);
+}
+
 .agent-remove {
   display: flex;
   align-items: center;

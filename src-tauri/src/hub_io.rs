@@ -677,9 +677,40 @@ pub async fn hub_fetch(
     if page_refused(&method, &path) {
         return Err("Desk asks that of a workspace itself, never for the page.".into());
     }
-    let (meta, bytes) = io.fetch(&hub, &method, &path, body).await?;
+    let started = std::time::Instant::now();
+    let fetched = io.fetch(&hub, &method, &path, body).await;
+    if let Some(trace) = knows_trace(&path, &fetched, started.elapsed()) {
+        tracing::info!(%hub, %method, path = %split(&path).0, "{trace}");
+    }
+    let (meta, bytes) = fetched?;
     Ok(tauri::ipc::Response::new(framed(&meta, &bytes)))
 }
+
+/// A read of what agents see (Sees) that failed or was slow, in words for
+/// Desk's log, so one the page couldn't show leaves a trace. Never the
+/// answer's body: its status, or the error, and how long it took.
+fn knows_trace(
+    path: &str,
+    fetched: &Result<(Meta, Vec<u8>), String>,
+    took: std::time::Duration,
+) -> Option<String> {
+    if !split(path).0.starts_with("/api/desk/knows") {
+        return None;
+    }
+    let ms = took.as_millis();
+    match fetched {
+        Err(e) => Some(format!("a Sees read failed after {ms} ms: {e}")),
+        Ok((meta, _)) if meta.status >= 400 => Some(format!(
+            "a Sees read was answered {} after {ms} ms",
+            meta.status
+        )),
+        Ok(_) if took >= KNOWS_SLOW => Some(format!("a Sees read took {ms} ms")),
+        Ok(_) => None,
+    }
+}
+
+/// A Sees read slower than this is logged.
+const KNOWS_SLOW: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// What only the native side asks of a paired hub, never the page: minting
 /// a token (its answer holds it: board sync, Desk work, a boss link) and keeping one for this computer's hub to
@@ -708,6 +739,9 @@ fn page_refused(method: &str, target: &str) -> bool {
             // A boss link's token is in its answer (RBD1).
             | ("POST", ["api", "me", "desk-boss-links"])
             | ("PUT", ["api", "desk", "knows-links", _, _])
+            // A boss's relayed calls: the native side's alone, as any
+            // method, on any hub (`crate::crew_relay`).
+            | (_, ["api", "desk", "crew", "relay" | "served", ..])
     )
 }
 
@@ -1491,6 +1525,27 @@ mod tests {
         }
     }
 
+    /// A boss's relayed calls are never the page's, on any hub, however
+    /// spelled.
+    #[test]
+    fn the_relay_is_never_asked_of_a_workspace_for_the_page() {
+        for (method, target) in [
+            ("GET", "/api/desk/crew/relay"),
+            ("get", "/api/desk/crew/relay?token=x"),
+            (
+                "POST",
+                "/api/desk/crew/relay/0f0e0d0c-0b0a-4909-8807-060504030201",
+            ),
+            ("POST", "//api/Desk/Crew/%72elay/x/"),
+            ("POST", "/api/desk/crew/served"),
+            ("PUT", "/api/desk/crew/served/x"),
+        ] {
+            assert!(page_refused(method, target), "{method} {target}");
+        }
+        assert!(!page_refused("GET", "/api/desk/crew"));
+        assert!(!page_refused("GET", "/api/desk/overview"));
+    }
+
     #[test]
     fn this_computer_s_engine_key_is_read_from_its_hub_s_answer() {
         assert_eq!(
@@ -1592,6 +1647,37 @@ mod tests {
                 "nothing more was sent"
             );
         }
+    }
+
+    #[test]
+    fn a_sees_read_that_failed_or_was_slow_is_traced_and_no_other() {
+        let ok = |status| {
+            Ok((
+                Meta {
+                    status,
+                    content_type: None,
+                },
+                b"{\"secret\":1}".to_vec(),
+            ))
+        };
+        let quick = Duration::from_millis(40);
+        assert_eq!(
+            knows_trace("/api/desk/knows/dw/allan", &ok(200), quick),
+            None
+        );
+        assert_eq!(
+            knows_trace("/api/desk/knows/dw/allan?x=1", &ok(404), quick).as_deref(),
+            Some("a Sees read was answered 404 after 40 ms")
+        );
+        assert_eq!(
+            knows_trace("/api/desk/knows", &Err("unreachable".into()), quick).as_deref(),
+            Some("a Sees read failed after 40 ms: unreachable")
+        );
+        assert_eq!(
+            knows_trace("/api/desk/knows", &ok(200), Duration::from_secs(4)).as_deref(),
+            Some("a Sees read took 4000 ms")
+        );
+        assert_eq!(knows_trace("/api/desk/sessions", &ok(500), quick), None);
     }
 
     #[tokio::test]

@@ -6,7 +6,8 @@
 import { perform, Fail, type Exec } from "./commands";
 import type { DeskTabs } from "./desk";
 import type { Identity } from "./identity";
-import { PROTOCOL, fromHub, type Status, type ToHub } from "./protocol";
+import { PROTOCOL, REVISION, fromHub, type Status, type ToHub } from "./protocol";
+import { upToDate, type Reloader } from "./update";
 
 /** Desk Helper's native messaging host. */
 export const HOST = "xyz.driftwerk.desk";
@@ -26,8 +27,13 @@ export interface Port {
   disconnect(): void;
 }
 
+/** How often an older unpacked build looks again for its rebuilt files. */
+export const RECHECK_MS = 15_000;
+
 export class Link {
   private port: Port | null = null;
+  /** The connection an older build is looking for its rebuilt files on. */
+  private checking: Port | null = null;
   private retry = 1000;
   private changed: (s: LinkState) => void = () => undefined;
   state: LinkState = { state: "connecting", why: null, label: null, activity: null };
@@ -39,6 +45,10 @@ export class Link {
     private readonly exec: Exec,
     private readonly version: string,
     private readonly later: (f: () => void, ms: number) => void,
+    /** How this build reloads itself when Desk expects a newer one; none
+     *  means it never does. */
+    private readonly reloader: Reloader | null = null,
+    private readonly revision: number = REVISION,
   ) {}
 
   onChange(f: (s: LinkState) => void): void {
@@ -65,7 +75,7 @@ export class Link {
       this.retry = Math.min(this.retry * 2, 60_000);
     });
     port.onMessage((raw) => void this.take(raw, me, port));
-    port.post({ type: "hello", protocol: PROTOCOL, version: this.version, key: me.publicKey, label: me.label });
+    port.post({ type: "hello", protocol: PROTOCOL, revision: this.revision, version: this.version, key: me.publicKey, label: me.label });
   }
 
   private async take(raw: unknown, me: Identity, port: Port): Promise<void> {
@@ -89,6 +99,9 @@ export class Link {
       case "status":
         this.set({ activity: m.activity });
         return;
+      case "expects":
+        await this.upToDate(m.revision, port, null);
+        return;
       case "call": {
         if (this.state.state !== "ready") {
           port.post({ type: "result", id: m.id, ok: false, error: "This Chrome isn't confirmed in Desk yet." });
@@ -104,6 +117,40 @@ export class Link {
         return;
       }
     }
+  }
+
+  /** Desk Helper expects `expected`: an older unpacked build reloads
+   *  itself. While its files on disk aren't rebuilt yet it looks again every
+   *  [`RECHECK_MS`] on this same connection (Desk Helper says `expects` once
+   *  per connection), telling Desk Helper only when that changes. */
+  private async upToDate(expected: number, port: Port, said: string | null): Promise<void> {
+    if (!this.reloader || this.port !== port) return;
+    // One look at a time: a second `expects` doesn't start another.
+    if (said === null && this.checking === port) return;
+    this.checking = port;
+    const reloader = this.reloader;
+    let outcome: Awaited<ReturnType<typeof upToDate>>;
+    try {
+      outcome = await upToDate(expected, this.revision, reloader);
+    } catch {
+      // Chrome couldn't say: nothing is reloaded, and a later `expects` looks again.
+      this.checking = null;
+      return;
+    }
+    if (outcome !== "unbuilt") this.checking = null;
+    if (outcome === "current") return;
+    // Desk Helper logs it; it isn't relayed to the hub.
+    if (outcome !== said) port.post({ type: "updating", revision: expected, outcome });
+    if (outcome === "unbuilt") {
+      this.later(() => void this.upToDate(expected, port, outcome), RECHECK_MS);
+      return;
+    }
+    if (outcome !== "reloading") return;
+    // Desk's window would be left behind: what names it goes with the
+    // reload (`storage.session`). Nothing is asked of it yet.
+    await this.tabs.stop().catch(() => 0);
+    // A moment for the message to reach Desk Helper first.
+    this.later(() => reloader.reload(), 250);
   }
 
   /** The person closed one of Desk's tabs. */
