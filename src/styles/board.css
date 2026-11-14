@@ -1682,8 +1682,9 @@ button.ticket-row:not(:disabled):hover {
   color: inherit;
   font: 500 13px var(--font-mono);
 }
-/* A ticket named in a comment, as its issue's chip with its state. */
-.ticket-comment-body .ticket-issue-chip {
+/* A ticket named in a description or a comment, as its issue's chip with
+   its state. */
+.ticket-issue-chip {
   display: inline-flex;
   align-items: center;
   gap: 5px;
@@ -1700,7 +1701,7 @@ button.ticket-row:not(:disabled):hover {
   white-space: nowrap;
   cursor: pointer;
 }
-.ticket-comment-body .ticket-issue-chip:hover {
+.ticket-issue-chip:hover {
   border-color: var(--muted);
 }
 .ticket-issue-chip-key {

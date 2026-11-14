@@ -5,7 +5,7 @@ import { useOpenTicket } from "./opener";
 import { useBoard } from "./store";
 import { stateTone } from "./TicketSections";
 
-/** A ticket named in a comment, inline as its issue's chip: its type (or
+/** A ticket named in a description or a comment, inline as its issue's chip: its type (or
  *  Linear state), its key, what the link said when that was more than the
  *  key, and its state. It reads the ticket from the board itself, so its
  *  state stays current; gone from the board meanwhile, it's the link's text. */
