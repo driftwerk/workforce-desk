@@ -217,7 +217,7 @@ async fn hubs_list(
 /// Forgets a paired hub and its token. (A hub is paired, and its token
 /// kept, by `hub_io::pair_collect`: the page never holds one to hand over.)
 #[tauri::command]
-fn hubs_remove(
+async fn hubs_remove(
     handle: tauri::AppHandle,
     app: State<'_, App>,
     io: State<'_, hub_io::HubIo>,
@@ -226,6 +226,8 @@ fn hubs_remove(
     if hubs::machine_of(&id).is_some() {
         return Err("A machine is removed from Settings → Machines.".into());
     }
+    // Its agents' links are revoked while Desk can still ask it to.
+    bosses::hub_removing(&handle, &id).await;
     let removed = hubs::remove(&app.paths, &id).map_err(text);
     io.forget();
     // Its agents boss nothing here any more: their groups are stopped.

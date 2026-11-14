@@ -217,6 +217,15 @@ impl HubIo {
         Ok((reach.base, label))
     }
 
+    /// Whether Desk is still paired with hub `id`: its record is there,
+    /// reached or not.
+    pub async fn is_paired(&self, id: &str) -> bool {
+        !matches!(
+            self.paired.reach_async(id).await,
+            Err(crate::paired::Failure::Unknown)
+        )
+    }
+
     /// Forgets the hubs read, and which were found old, after one is
     /// paired or removed.
     pub fn forget(&self) {
