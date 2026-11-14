@@ -997,7 +997,7 @@ pub async fn pair_collect(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::paired::tests::{account, paired};
     use std::time::Duration;
@@ -1007,7 +1007,9 @@ mod tests {
 
     /// A hub on a loopback port answering each request with the next of
     /// `answers`, and telling each request's head and body.
-    async fn hub(answers: Vec<String>) -> (String, tokio::sync::mpsc::UnboundedReceiver<String>) {
+    pub(crate) async fn hub(
+        answers: Vec<String>,
+    ) -> (String, tokio::sync::mpsc::UnboundedReceiver<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1058,7 +1060,7 @@ mod tests {
         )
     }
 
-    fn io_for(hubs: Vec<crate::hubs::HubAccount>) -> HubIo {
+    pub(crate) fn io_for(hubs: Vec<crate::hubs::HubAccount>) -> HubIo {
         HubIo::new(paired(hubs), Arc::default())
     }
 
@@ -1154,7 +1156,7 @@ mod tests {
         );
     }
 
-    fn status(line: &str, body: &str) -> String {
+    pub(crate) fn status(line: &str, body: &str) -> String {
         format!(
             "HTTP/1.1 {line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
             body.len()

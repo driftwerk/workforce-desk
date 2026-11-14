@@ -10,9 +10,9 @@
 //! sessions that move. Agents on this computer's hub aren't shared with
 //! from machines yet: a machine's hub can't reach this computer's.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use serde_json::json;
@@ -56,17 +56,59 @@ struct Share {
 struct Held {
     places: Vec<String>,
     transcripts: bool,
-    outside: u64,
+    outside: Outside,
 }
+
+/// What an agent holds of the person's machines that their rules no longer
+/// cover, summed over the machines, as the page says it beside this
+/// computer's (`heldOutside`).
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Outside {
+    pub items: u64,
+    pub transcripts: u64,
+    pub sessions: u64,
+}
+
+impl Outside {
+    fn add(&mut self, o: &Outside) {
+        self.items += o.items;
+        self.transcripts += o.transcripts;
+        self.sessions += o.sessions;
+    }
+}
+
+/// What telling the machines did, as the page is told of it: what the
+/// agent holds of them outside the rule now, and whether that grew, so the
+/// person is asked what to do with it as for this computer's.
+#[derive(Debug, Default, Clone, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Told {
+    pub held: Outside,
+    pub grew: bool,
+}
+
+/// How long a machine's link is trusted before it is made again: well
+/// inside a token's life on the agent's hub.
+const RELINK: Duration = Duration::from_secs(12 * 60 * 60);
 
 /// What machine sharing remembers in this run of Desk.
 #[derive(Default)]
 pub struct KnowsMachines {
-    /// The agents each machine was linked with: (machine hub, rule key).
-    /// Linked again in each run, which replaces the machine's old token.
-    linked: Mutex<HashSet<(String, String)>>,
+    /// When each machine was linked with each agent: (machine hub, rule
+    /// key). Linked again after [`RELINK`], and in each run.
+    linked: Mutex<HashMap<(String, String), Instant>>,
     /// One pass at a time, so a rule changed twice isn't told out of order.
     pass: tokio::sync::Mutex<()>,
+}
+
+/// Whether `s` can be a hub's or an agent's id in a path: never `.` or
+/// `..`.
+fn plain(s: &str) -> bool {
+    (1..=64).contains(&s.len())
+        && s.chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+        && !s.chars().all(|c| c == '.')
 }
 
 impl KnowsMachines {
@@ -107,19 +149,15 @@ impl KnowsMachines {
         hub: &str,
         agent: &str,
         choice: Option<Choice>,
-    ) {
-        let plain = |s: &str| {
-            (1..=64).contains(&s.len())
-                && s.chars()
-                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
-        };
+    ) -> Told {
+        let mut told = Told::default();
         if !plain(hub)
             || !plain(agent)
             || hub == LOCAL
             || crate::hubs::machine_of(hub).is_some()
             || machines.is_empty()
         {
-            return;
+            return told;
         }
         let _one = self.pass.lock().await;
         let share = match get_json::<Share>(
@@ -130,19 +168,30 @@ impl KnowsMachines {
         .await
         {
             Ok(Some(s)) => s,
-            Ok(None) => return,
+            Ok(None) => return told,
             Err(e) => {
                 tracing::debug!(%hub, %agent, error = %e, "this computer's hub didn't say what machines share");
-                return;
+                return told;
             }
         };
         for m in machines {
-            if let Err(e) = self.tell(io, m, hub, agent, &share, choice).await {
-                tracing::warn!(machine = %m.name, %hub, %agent, error = %e, "a machine wasn't told what an agent sees");
+            match self.tell(io, m, hub, agent, &share, choice).await {
+                Ok(Some((before, after))) => {
+                    told.grew |= after.items > before.items;
+                    told.held.add(&after);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    tracing::warn!(machine = %m.name, %hub, %agent, error = %e, "a machine wasn't told what an agent sees");
+                }
             }
         }
+        told
     }
 
+    /// Tells machine `m` its part of the rule: what the agent held of it
+    /// outside the rule before and after, `None` when it shares nothing
+    /// with the agent or can't yet.
     async fn tell(
         &self,
         io: &HubIo,
@@ -151,18 +200,37 @@ impl KnowsMachines {
         agent: &str,
         share: &Share,
         choice: Option<Choice>,
-    ) -> Result<(), String> {
+    ) -> Result<Option<(Outside, Outside)>, String> {
         let places = places_for(share, &m.id);
         let path = format!("/api/desk/knows/{hub}/{agent}");
-        // A machine on an older Desk has no rules: nothing to tell it.
-        let Some(held) = rule_of(io, &m.hub, &path).await? else {
-            return Ok(());
-        };
-        let key = (m.hub.clone(), format!("{hub}/{agent}"));
-        if places.is_empty() && held.places.is_empty() && held.outside == 0 {
-            return Ok(());
+        // A machine whose hub keeps no rules, or not each machine's part of
+        // one (before Sees K7), is told nothing: it would send as this
+        // computer does, the digest and all.
+        if get_json::<serde_json::Value>(io, &m.hub, &format!("{path}/machines"))
+            .await?
+            .is_none()
+        {
+            return Ok(None);
         }
-        if !places.is_empty() && !self.linked.lock().expect("linked").contains(&key) {
+        let Some(held) = rule_of(io, &m.hub, &path).await? else {
+            return Ok(None);
+        };
+        if places.is_empty() && held.places.is_empty() && held.outside.items == 0 {
+            return Ok(None);
+        }
+        let key = (m.hub.clone(), format!("{hub}/{agent}"));
+        let fresh = self
+            .linked
+            .lock()
+            .expect("linked")
+            .get(&key)
+            .is_some_and(|at| at.elapsed() < RELINK);
+        if !places.is_empty() && !fresh {
+            // The agent's hub must keep each engine's token apart, or the
+            // machine's would replace this computer's there.
+            if !keeps_engines_apart(io, hub).await {
+                return Err("its agent's hub is older and can't take a machine's work yet".into());
+            }
             let engine_key = || async {
                 let (meta, body) = io
                     .fetch(&m.hub, "GET", "/api/desk/engine-key", None)
@@ -174,9 +242,12 @@ impl KnowsMachines {
                 .await?
             {
                 KnowsLinked::Kept { .. } => {
-                    self.linked.lock().expect("linked").insert(key);
+                    self.linked
+                        .lock()
+                        .expect("linked")
+                        .insert(key.clone(), Instant::now());
                 }
-                KnowsLinked::Local { .. } => return Ok(()),
+                KnowsLinked::Local { .. } => return Ok(None),
                 KnowsLinked::NotAllowed { status, error } => {
                     return Err(format!("{status}: {error}"));
                 }
@@ -197,26 +268,36 @@ impl KnowsMachines {
                 return Err(words(meta.status, &answer));
             }
         }
-        if let Some(choice) = choice {
-            // Asked again: the PUT may have narrowed it just now.
-            let now = rule_of(io, &m.hub, &path).await?.unwrap_or_default();
-            if now.outside > 0 {
-                let body = json!({ "choice": choice });
-                let (meta, answer) = io
-                    .fetch(
-                        &m.hub,
-                        "POST",
-                        &format!("{path}/held"),
-                        Some(("application/json".into(), body.to_string().into_bytes())),
-                    )
-                    .await?;
-                if !(200..300).contains(&meta.status) {
-                    return Err(words(meta.status, &answer));
-                }
+        // Asked again: the PUT may have narrowed it just now.
+        let mut now = rule_of(io, &m.hub, &path).await?.unwrap_or_default();
+        if let Some(choice) = choice
+            && now.outside.items > 0
+        {
+            let body = json!({ "choice": choice });
+            let (meta, answer) = io
+                .fetch(
+                    &m.hub,
+                    "POST",
+                    &format!("{path}/held"),
+                    Some(("application/json".into(), body.to_string().into_bytes())),
+                )
+                .await?;
+            if !(200..300).contains(&meta.status) {
+                return Err(words(meta.status, &answer));
             }
+            now = rule_of(io, &m.hub, &path).await?.unwrap_or_default();
         }
-        Ok(())
+        Ok(Some((held.outside, now.outside)))
     }
+}
+
+/// Whether agent hub `hub` keeps each of the person's engines' tokens and
+/// rows apart (Sees K7): it says so, an older one has no such route.
+async fn keeps_engines_apart(io: &HubIo, hub: &str) -> bool {
+    matches!(
+        get_json::<serde_json::Value>(io, hub, "/api/me/desk-knows-tokens/engines").await,
+        Ok(Some(v)) if v["engines"] == json!(true)
+    )
 }
 
 /// This computer's hub, by its id here.
@@ -286,10 +367,15 @@ async fn rule_of(io: &HubIo, hub: &str, path: &str) -> Result<Option<Held>, Stri
         })
         .unwrap_or_default();
     places.sort();
+    let n = |k: &str| v["heldOutside"][k].as_u64().unwrap_or(0);
     Ok(Some(Held {
         places,
         transcripts: v["rule"]["transcripts"].as_bool().unwrap_or(false),
-        outside: v["heldOutside"]["items"].as_u64().unwrap_or(0),
+        outside: Outside {
+            items: n("items"),
+            transcripts: n("transcripts"),
+            sessions: n("sessions"),
+        },
     }))
 }
 
@@ -325,18 +411,215 @@ pub async fn knows_machines(
     hub: String,
     agent: String,
     choice: Option<Choice>,
-) -> CommandResult<()> {
+) -> CommandResult<Told> {
     let machines = Arc::clone(&machines);
     let list = tauri::async_runtime::spawn_blocking(move || machines_of(&machines))
         .await
         .map_err(|e| e.to_string())?;
-    knows.sync(&io, &list, &hub, &agent, choice).await;
-    Ok(())
+    Ok(knows.sync(&io, &list, &hub, &agent, choice).await)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hub_io::tests::{hub, io_for, status};
+    use crate::paired::tests::account;
+
+    fn machine(hub: &str) -> Machine {
+        Machine {
+            hub: hub.into(),
+            id: "box".into(),
+            name: "box".into(),
+        }
+    }
+
+    fn rule(places: &[&str], transcripts: bool, outside: u64) -> String {
+        status(
+            "200 OK",
+            &json!({
+                "rule": { "places": places, "transcripts": transcripts },
+                "heldOutside": { "items": outside, "transcripts": 0, "sessions": u64::from(outside > 0) },
+            })
+            .to_string(),
+        )
+    }
+
+    fn json_ok(v: serde_json::Value) -> String {
+        status("200 OK", &v.to_string())
+    }
+
+    /// Every request a fake hub saw, by its request line.
+    fn lines(rx: &mut tokio::sync::mpsc::UnboundedReceiver<String>) -> Vec<String> {
+        let mut out = Vec::new();
+        while let Ok(r) = rx.try_recv() {
+            out.push(
+                r.lines()
+                    .next()
+                    .unwrap_or_default()
+                    .replace(" HTTP/1.1", ""),
+            );
+        }
+        out
+    }
+
+    #[tokio::test]
+    async fn a_machine_is_linked_once_under_its_own_engine_and_told_its_own_sessions() {
+        let share = json!({ "everything": false, "transcripts": true, "machines": { "box": ["session:s1"] } });
+        let (mac, mut mac_seen) = hub(vec![json_ok(share.clone()), json_ok(share)]).await;
+        let (agents, mut agents_seen) = hub(vec![
+            json_ok(json!({ "engines": true })),
+            status(
+                "201 Created",
+                &json!({ "id": "0f6c1a2e-1b2c-4d5e-8f90-a1b2c3d4e5f6", "token": "T", "agentId": "allan" }).to_string(),
+            ),
+        ])
+        .await;
+        let (boxed, mut box_seen) = hub(vec![
+            json_ok(json!({})),
+            rule(&[], false, 0),
+            json_ok(json!({ "publicKey": "ed25519:K" })),
+            status("204 No Content", ""),
+            json_ok(json!({})),
+            rule(&["session:s1"], true, 0),
+            // Told again: nothing changed, nothing linked or set.
+            json_ok(json!({})),
+            rule(&["session:s1"], true, 0),
+            rule(&["session:s1"], true, 0),
+        ])
+        .await;
+        let io = io_for(vec![
+            account("local", &mac, true, "MAC"),
+            account("dw", &agents, false, "DW"),
+            account("box", &boxed, true, "BOX"),
+        ]);
+        let knows = KnowsMachines::default();
+        let told = knows
+            .sync(&io, &[machine("box")], "dw", "allan", None)
+            .await;
+        assert_eq!(told, Told::default());
+        assert_eq!(
+            lines(&mut box_seen),
+            [
+                "GET /api/desk/knows/dw/allan/machines",
+                "GET /api/desk/knows/dw/allan",
+                "GET /api/desk/engine-key",
+                "PUT /api/desk/knows-links/dw/allan",
+                "PUT /api/desk/knows/dw/allan",
+                "GET /api/desk/knows/dw/allan",
+            ]
+        );
+        let asked = lines(&mut agents_seen);
+        assert_eq!(
+            asked,
+            [
+                "GET /api/me/desk-knows-tokens/engines",
+                "POST /api/me/desk-knows-tokens"
+            ]
+        );
+        knows
+            .sync(&io, &[machine("box")], "dw", "allan", None)
+            .await;
+        assert_eq!(
+            lines(&mut box_seen),
+            [
+                "GET /api/desk/knows/dw/allan/machines",
+                "GET /api/desk/knows/dw/allan",
+                "GET /api/desk/knows/dw/allan",
+            ]
+        );
+        assert!(lines(&mut agents_seen).is_empty());
+        assert_eq!(lines(&mut mac_seen).len(), 2);
+    }
+
+    #[tokio::test]
+    async fn an_older_agent_hub_or_machine_is_told_nothing() {
+        let share = json!({ "everything": true, "transcripts": false, "machines": {} });
+        let (mac, _mac_seen) = hub(vec![json_ok(share.clone()), json_ok(share)]).await;
+        let (agents, mut agents_seen) = hub(vec![status("405 Method Not Allowed", "")]).await;
+        let (boxed, mut box_seen) = hub(vec![
+            json_ok(json!({})),
+            rule(&[], false, 0),
+            // A machine before Sees K7.
+            status("404 Not Found", ""),
+        ])
+        .await;
+        let io = io_for(vec![
+            account("local", &mac, true, "MAC"),
+            account("dw", &agents, false, "DW"),
+            account("box", &boxed, true, "BOX"),
+        ]);
+        let knows = KnowsMachines::default();
+        // The agent's hub can't keep a machine's token apart: no mint.
+        knows
+            .sync(&io, &[machine("box")], "dw", "allan", None)
+            .await;
+        assert_eq!(
+            lines(&mut agents_seen),
+            ["GET /api/me/desk-knows-tokens/engines"]
+        );
+        assert_eq!(
+            lines(&mut box_seen),
+            [
+                "GET /api/desk/knows/dw/allan/machines",
+                "GET /api/desk/knows/dw/allan"
+            ]
+        );
+        knows
+            .sync(&io, &[machine("box")], "dw", "allan", None)
+            .await;
+        assert_eq!(
+            lines(&mut box_seen),
+            ["GET /api/desk/knows/dw/allan/machines"]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_narrowed_rule_says_what_grew_and_the_persons_choice_is_passed_on() {
+        let share = json!({ "everything": false, "transcripts": false, "machines": {} });
+        let (mac, _mac_seen) = hub(vec![json_ok(share.clone()), json_ok(share)]).await;
+        let (boxed, mut box_seen) = hub(vec![
+            json_ok(json!({})),
+            rule(&["session:s1"], false, 0),
+            json_ok(json!({})),
+            rule(&[], false, 3),
+            // The person chose: deleted there.
+            json_ok(json!({})),
+            rule(&[], false, 3),
+            rule(&[], false, 3),
+            json_ok(json!({ "choice": "delete", "covered": 3 })),
+            rule(&[], false, 0),
+        ])
+        .await;
+        let io = io_for(vec![
+            account("local", &mac, true, "MAC"),
+            account("box", &boxed, true, "BOX"),
+        ]);
+        let knows = KnowsMachines::default();
+        let told = knows
+            .sync(&io, &[machine("box")], "dw", "allan", None)
+            .await;
+        assert!(told.grew);
+        assert_eq!(told.held.items, 3);
+        assert!(lines(&mut box_seen).contains(&"PUT /api/desk/knows/dw/allan".to_string()));
+        let told = knows
+            .sync(&io, &[machine("box")], "dw", "allan", Some(Choice::Delete))
+            .await;
+        assert_eq!(told, Told::default());
+        let seen = lines(&mut box_seen);
+        assert!(
+            seen.contains(&"POST /api/desk/knows/dw/allan/held".to_string()),
+            "{seen:?}"
+        );
+        assert!(!seen.contains(&"PUT /api/desk/knows/dw/allan".to_string()));
+    }
+
+    #[test]
+    fn a_path_segment_is_never_dots_alone() {
+        assert!(plain("allan") && plain("dw.example"));
+        for bad in ["", ".", "..", "a/b", "a b"] {
+            assert!(!plain(bad), "{bad}");
+        }
+    }
 
     fn share(everything: bool, machines: &[(&str, &[&str])]) -> Share {
         Share {

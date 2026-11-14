@@ -1084,8 +1084,9 @@ pub fn run() {
                             .await
                             .unwrap_or_default()
                         };
-                        let io = handle.state::<hub_io::HubIo>();
-                        knows.sync_all(&io, &list).await;
+                        if let Some(io) = handle.try_state::<hub_io::HubIo>() {
+                            knows.sync_all(&io, &list).await;
+                        }
                     }
                 });
             }

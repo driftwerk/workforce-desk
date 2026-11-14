@@ -9,7 +9,17 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { agentKey, type Agent, type HubAccount } from "../chat/types";
 import { HubError } from "../hub/client";
 import { useMachines } from "../hub/engines";
-import { knowsLinker, knowsOf, knowsTeller, type KnowsDigest, type KnowsHeld, type KnowsLogEntry, type KnowsRule, type KnowsView } from "../hub/knows";
+import {
+  knowsLinker,
+  knowsOf,
+  knowsTeller,
+  type MachinesTold,
+  type KnowsDigest,
+  type KnowsHeld,
+  type KnowsLogEntry,
+  type KnowsRule,
+  type KnowsView,
+} from "../hub/knows";
 import { localAccount } from "../groups/move";
 import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
@@ -85,6 +95,17 @@ export const heldSaid = (h: KnowsHeld): string => {
     : `${n(h.items)} ${h.items === 1 ? "item" : "items"}${h.transcripts > 0 ? `, ${n(h.transcripts)} of them transcript exchanges,` : ""}`;
   return h.sessions > 0 ? `${what} from ${n(h.sessions)} ${h.sessions === 1 ? "session" : "sessions"}` : what;
 };
+
+/** What an agent holds outside its rule here and on the person's machines. */
+const withMachines = (here: KnowsHeld, machines: MachinesTold | null): KnowsHeld =>
+  machines
+    ? {
+        ...here,
+        items: here.items + machines.held.items,
+        transcripts: here.transcripts + machines.held.transcripts,
+        sessions: here.sessions + machines.held.sessions,
+      }
+    : here;
 
 export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | undefined }) {
   const ids = useId();
@@ -210,14 +231,16 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
       if (!nothing && !(await link())) return back();
       try {
         const changed = await k.setRule(keyOf(), next);
-        tell();
+        // The machines' part, told now: what they hold outside it is asked
+        // about with this computer's.
+        const machines = await tell();
         if (n === seq.current) setStatus({ state: "idle" });
         // Asked only when it now holds more outside the rule than before:
         // what was kept earlier was asked about then.
         const before = confirmed.current?.heldOutside.items ?? 0;
-        if (narrows(was, next) && changed.heldOutside.items > before)
+        if (narrows(was, next) && (changed.heldOutside.items > before || machines?.grew))
           setAsking({
-            held: changed.heldOutside,
+            held: withMachines(changed.heldOutside, machines),
             why:
               was.transcripts && !next.transcripts && modeOf(was.places) === modeOf(next.places) && was.places.join() === next.places.join()
                 ? "transcripts"
@@ -234,10 +257,10 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
 
   /** Tells the machines this rule's part for them now, with the person's
    *  choice when there was one: an agent elsewhere's alone. */
-  const tell = (choice?: "delete" | "keep") => {
+  const tell = async (choice?: "delete" | "keep"): Promise<MachinesTold | null> => {
     const t = knowsTeller();
     const at = keyOf().indexOf("/");
-    if (remote && t && at > 0) void t(keyOf().slice(0, at), keyOf().slice(at + 1), choice);
+    return remote && t && at > 0 ? t(keyOf().slice(0, at), keyOf().slice(at + 1), choice) : null;
   };
 
   const choose = (choice: "delete" | "keep") => {
@@ -248,7 +271,7 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
       try {
         await k.choose(keyOf(), choice);
         setStatus({ state: "idle" });
-        tell(choice);
+        await tell(choice);
       } catch (e) {
         setStatus({ state: "failed", problem: said(e) });
       }

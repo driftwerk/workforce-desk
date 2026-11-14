@@ -153,6 +153,18 @@ describe("What they see", () => {
     expect(screen.queryByText(/aren’t shared yet/)).toBeNull();
   });
 
+  it("asks about what an agent elsewhere holds of a machine when only the machine's part narrowed", async () => {
+    kept = viewOf(ruleOf("dw/Allan", { places: ["group:g1", "session:devbox/s1"] }));
+    tellMachines.mockResolvedValueOnce({ held: { items: 7, transcripts: 0, sessions: 1 }, grew: true });
+    await show(allan, driftwerk);
+    fireEvent.click(screen.getByRole("radio", { name: /Only their own work/ }));
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog.textContent).toContain("They hold 7 items");
+    fireEvent.click(within(dialog).getByRole("button", { name: "Delete them" }));
+    // Kept by the key read: this rule shares nothing, so it wasn't linked.
+    await waitFor(() => expect(tellMachines).toHaveBeenLastCalledWith("dw", "Allan", "delete"));
+  });
+
   it("doesn't tell the machines of an agent on this computer, whose sessions there aren't shared yet", async () => {
     await show();
     fireEvent.click(screen.getByRole("radio", { name: /Everything/ }));

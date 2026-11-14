@@ -96,14 +96,19 @@ export const knowsLinker = (): typeof linkKnows | null => linker;
  *  them now, after its rule changed: with `choice` when it narrowed and the
  *  person said what to do with what the agent holds (Sees K7). Quiet when
  *  it can't: Desk tells them again every few minutes. */
-export const tellMachines = async (hub: string, agent: string, choice?: "keep" | "delete"): Promise<void> => {
-  if (!inTauri) return;
+export const tellMachines = async (hub: string, agent: string, choice?: "keep" | "delete"): Promise<MachinesTold | null> => {
+  if (!inTauri) return null;
   try {
-    await invoke("knows_machines", { hub, agent, choice: choice ?? null });
+    return await invoke<MachinesTold>("knows_machines", { hub, agent, choice: choice ?? null });
   } catch {
     // Told again on Desk's next pass.
+    return null;
   }
 };
+
+/** What an agent holds of the person's machines outside its rule now, and
+ *  whether telling them grew it (Sees K7). */
+export type MachinesTold = { held: { items: number; transcripts: number; sessions: number }; grew: boolean };
 
 /** What tells the machines in this window: the one above in the main
  *  window, which sets it (`shell/App.tsx`); none in a grid's. */
