@@ -124,6 +124,20 @@ describe("Start a session on a ticket: where it runs", () => {
     expect(screen.getByRole("radio", { name: "This Mac" }).getAttribute("aria-checked")).toBe("true");
   });
 
+  it("never offers a machine's folder on this Mac", async () => {
+    localStorage.setItem(`desk.board.start.${t.board}`, JSON.stringify({ cwd: "~/src/workforce", engine: "claude", machine: "devbox" }));
+    await open();
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: "This Mac" })));
+    expect((screen.getByPlaceholderText("Choose a folder, or type its path") as HTMLInputElement).value).toBe("");
+  });
+
+  it("goes by the folder a plan gave a ticket that runs here", async () => {
+    const planned = planTicket(7, "Fix it", { id: t.id, folder: "/w/planned" });
+    usePlans.setState({ details: { p1: { id: "p1", tickets: [planned] } as unknown as BossPlanDetail } });
+    await open();
+    expect((screen.getByPlaceholderText("Choose a folder, or type its path") as HTMLInputElement).value).toBe("/w/planned");
+  });
+
   it("falls back to this Mac when the machine it went by can't take a session now", async () => {
     localStorage.setItem(`desk.board.start.${t.board}`, JSON.stringify({ cwd: "~", engine: "claude", machine: "buildbox" }));
     await open();
@@ -171,6 +185,16 @@ describe("Start a session on a ticket: on a machine", () => {
     const alert = await screen.findByRole("alert");
     expect(alert.textContent).toContain("did start on devbox");
     expect(alert.textContent).toContain("don’t start another");
+  });
+
+  it("won't start a second session once the first couldn't be given the ticket", async () => {
+    assign.mockRejectedValue(new Error("the hub went away"));
+    await open();
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: "devbox" })));
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start session" })));
+    await screen.findByRole("alert");
+    expect((screen.getByRole("button", { name: "Start session" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(machineStart).toHaveBeenCalledTimes(1);
   });
 
   it("starts here with the model chosen, as before", async () => {

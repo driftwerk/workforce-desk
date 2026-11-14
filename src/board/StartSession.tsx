@@ -40,7 +40,13 @@ export function StartSession({ ticket: t, onClose, native = machineNative }: { t
   // board's, else its last start's: nothing is typed unless there is nothing.
   const boardTickets = useBoard((s) => s.tickets);
   const [from] = useState(() =>
-    startDefaults(t, Object.values(boardTickets).filter((x) => x.board === t.board), sessions, lastBoardStart(t.board)),
+    startDefaults(
+      t,
+      Object.values(boardTickets).filter((x) => x.board === t.board),
+      sessions,
+      // A last start on a machine has a folder of that machine's.
+      ((l) => (l?.machine ? null : l))(lastBoardStart(t.board)),
+    ),
   );
   const recent = recentFolders(Object.values(sessions));
   const layout = useLayout();
@@ -59,7 +65,7 @@ export function StartSession({ ticket: t, onClose, native = machineNative }: { t
   const whereSaid = remote ? where : thisComputerLower(platform);
   const [picked, setEngine] = useState<Engine>((on.engine ?? from.engine ?? "claude") as Engine);
   // A folder for each computer: one here isn't one there.
-  const [cwds, setCwds] = useState<Record<string, string>>({ [LOCAL]: from.cwd, ...(on.machine !== LOCAL ? { [on.machine]: on.folder } : {}) });
+  const [cwds, setCwds] = useState<Record<string, string>>({ [LOCAL]: on.machine === LOCAL && on.folder ? on.folder : from.cwd, ...(on.machine !== LOCAL ? { [on.machine]: on.folder } : {}) });
   const cwd = cwds[machine] ?? "";
   const setCwd = (dir: string) => setCwds((c) => ({ ...c, [machine]: dir }));
   const [models, setModels] = useState<Partial<Record<Engine, string | null>>>(on.model ? { [picked]: on.model } : {});
@@ -67,6 +73,8 @@ export function StartSession({ ticket: t, onClose, native = machineNative }: { t
   const [readAt, setReadAt] = useState(0);
   const [engines, setEngines] = useState<EngineInfo[] | null>(null);
   const [busy, setBusy] = useState(false);
+  // The session started but the ticket couldn't be given to it: starting again would make a second.
+  const [orphan, setOrphan] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const sheet = useRef<HTMLFormElement>(null);
   const keys = useModal(sheet, onClose);
@@ -154,11 +162,17 @@ export function StartSession({ ticket: t, onClose, native = machineNative }: { t
       }
       onClose();
     } catch (err) {
+      if (started) setOrphan(true);
       setProblem(
         started
           ? `${started.name} did start on ${where}, but the ticket couldn’t be given to it (${plainError(err)}). It is running: don’t start another.`
           : plainError(err),
       );
+      if (started) {
+        rememberBoardGroup(group);
+        const made = keyOf(machine, started.id);
+        if (group !== UNGROUPED && layout.groups.some((g) => g.id === group)) moveItem([], sessionItem(made), group, null);
+      }
       setBusy(false);
     }
   };
@@ -245,7 +259,7 @@ export function StartSession({ ticket: t, onClose, native = machineNative }: { t
           <button type="button" className="btn btn-ghost" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="btn btn-signal" disabled={busy || (!remote && !cwd.trim()) || !!badModel || noEngine || !hub}>
+          <button type="submit" className="btn btn-signal" disabled={busy || orphan || (!remote && !cwd.trim()) || !!badModel || noEngine || !hub}>
             Start session
           </button>
         </footer>
