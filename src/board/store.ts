@@ -118,7 +118,8 @@ export const useBoard = create<BoardState>((set, get) => {
         // Kept as last read; the next snapshot reads them again.
       }
     },
-    show: (shown) => set({ shown }),
+    // Another board's plan isn't kept for when this one shows again.
+    show: (shown) => set((s) => (s.shown === shown ? {} : { shown, plan: null })),
     showPlan: (plan) => set({ plan }),
     openTicket: (open) => set({ open }),
     openPopup: (popup) => set({ popup }),

@@ -48,7 +48,8 @@ export function PlanRow({ plan, open, onToggle, controls }: { plan: BossPlan; op
     }
   };
   const busy = asking !== null;
-  const told = refusal?.text ?? problem;
+  // The open card says the hub's refusal itself.
+  const told = (open ? null : refusal?.text) ?? problem;
   return (
     <div className={open ? "plan-row plan-row-open" : "plan-row"} role="group" aria-label={`Plan: ${plan.goal}`} aria-describedby={told ? said : undefined}>
       {open === undefined ? (
@@ -73,7 +74,7 @@ export function PlanRow({ plan, open, onToggle, controls }: { plan: BossPlan; op
       <span className={`chip pc-chip-${stand.look}`} title={paused ? `Paused: ${paused}` : undefined}>
         {stand.text}
       </span>
-      <span className="pc-segbar plan-row-bar" role="img" aria-label={segments(now).map((s) => `${s.n} ${s.kind}`).join(", ") || "nothing yet"}>
+      <span className="pc-segbar plan-row-bar" role="img" title={line} aria-label={segments(now).map((s) => `${s.n} ${s.kind}`).join(", ") || "nothing yet"}>
         {segments(now).map((s) => (
           <i key={s.kind} className={`pc-s-${s.kind}`} style={{ flex: s.n }} />
         ))}
@@ -84,16 +85,19 @@ export function PlanRow({ plan, open, onToggle, controls }: { plan: BossPlan; op
           Open on board
         </button>
       )}
-      {plan.state === "running" && (
-        <button type="button" className="btn btn-sm" aria-disabled={busy || undefined} onClick={() => void run("pause")}>
-          {asking === "pause" ? "Pausing…" : "Pause"}
-        </button>
-      )}
-      {plan.state === "paused" && resumable(plan.paused) && (
-        <button type="button" className="btn btn-sm" aria-disabled={busy || undefined} onClick={() => void run("resume")}>
-          {asking === "resume" ? "Resuming…" : "Resume"}
-        </button>
-      )}
+      {/* Kept as wide with no button, so each line's count lines up. */}
+      <span className="plan-row-act">
+        {plan.state === "running" && (
+          <button type="button" className="btn btn-sm" aria-disabled={busy || undefined} onClick={() => void run("pause")}>
+            {asking === "pause" ? "Pausing…" : "Pause"}
+          </button>
+        )}
+        {plan.state === "paused" && resumable(plan.paused) && (
+          <button type="button" className="btn btn-sm" aria-disabled={busy || undefined} onClick={() => void run("resume")}>
+            {asking === "resume" ? "Resuming…" : "Resume"}
+          </button>
+        )}
+      </span>
       {told && (
         <span id={said} className="small state-blocked plan-row-said" role="alert">
           {told}

@@ -402,7 +402,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
           on every switch, stacking another board's sync above this one. */}
       {board.sync && <SyncBar key={`sync:${board.id}`} board={board} now={now} onToken={tokenFor && chrome ? () => setNewToken(true) : undefined} />}
       <LeftFilterShelf key={`left:${board.id}`} board={board} tickets={left} />
-      <BoardPlans plans={plans} shown={plan} />
+      {!pane && <BoardPlans plans={plans} shown={plan} />}
       {columnsShown}
       {live}
       {menu && (

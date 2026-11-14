@@ -731,6 +731,16 @@ button.ticket-chip:hover {
   flex: none;
   max-height: 55vh;
   overflow-y: auto;
+  /* A shadow at an edge with more to scroll to, so a card's foot (its
+     Approve) is never out of sight unsaid. */
+  background:
+    linear-gradient(var(--bg) 30%, transparent) center top,
+    linear-gradient(transparent, var(--bg) 70%) center bottom,
+    radial-gradient(farthest-side at 50% 0, var(--lift), transparent) center top,
+    radial-gradient(farthest-side at 50% 100%, var(--lift), transparent) center bottom;
+  background-repeat: no-repeat;
+  background-size: 100% 28px, 100% 28px, 100% 10px, 100% 10px;
+  background-attachment: local, local, scroll, scroll;
 }
 .board-plans > .plan-row-open {
   margin: 0 -10px;
@@ -914,7 +924,8 @@ button.ticket-chip:hover {
     margin-inline: 16px;
     padding-inline: 12px;
   }
-  .board-sync {
+  .board-sync,
+  .board-plans {
     margin-inline: 0;
     padding-inline: 16px;
   }

@@ -1944,7 +1944,32 @@ button.card-icon:hover:not(:disabled) {
 }
 .plan-row-line {
   flex: none;
+  min-width: 11.5em;
+  text-align: right;
   white-space: nowrap;
+}
+/* Bar, count and button take the same width on every line, so they line
+   up under the line above's. */
+.plan-row > .chip {
+  flex: none;
+}
+.plan-row-act {
+  flex: none;
+  min-width: 84px;
+  display: flex;
+  justify-content: flex-end;
+}
+/* A narrow board: the goal on a line of its own, the rest under it. */
+@container (max-width: 560px) {
+  .plan-row-toggle {
+    flex-basis: 100%;
+  }
+  .plan-row-line {
+    min-width: 0;
+    flex: 1 1 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 .plan-row-said {
   flex: 1 1 100%;
@@ -1960,6 +1985,10 @@ button.card-icon:hover:not(:disabled) {
 }
 .plan-rows .plan-row-goal {
   flex-basis: 160px;
+}
+/* On Settings the bar says it (and its count, on hover). */
+.plan-rows .plan-row-line {
+  display: none;
 }
 .plan-rows > .plan-row {
   padding: 8px 16px;
