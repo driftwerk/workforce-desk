@@ -8,7 +8,7 @@ import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { accountsOn, useAccounts } from "../engines/accounts";
-import { APPROVE_WITHIN_MS, CODE_WITHIN_MS, OPEN_WITHIN_MS, SIGN_IN_POLL_MS } from "../engines/signIn";
+import { APPROVE_WITHIN_MS, CODE_WITHIN_MS, OPEN_WITHIN_MS, SIGN_IN_POLL_MS, useDevinSignIn } from "../engines/signIn";
 import { CONNECT_WITHIN_MS, ENGINES_WITHIN_MS } from "./EngineBlocks";
 import type { DeskHub } from "../hub/client";
 import { HubError } from "../hub/client";
@@ -604,6 +604,77 @@ it("signs Devin in on a machine with a token pasted back: sent at once, the fiel
   expect(screen.getByText("Devin is signed in.")).toBeTruthy();
   // The token is in nothing Desk draws.
   expect(document.body.innerHTML).not.toMatch(/tok-one|tok-two/);
+});
+
+it("says a malformed Devin token is to be pasted as the page shows it, and a token Devin asks for again after taking it", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const e = devinHub();
+  e.signIn.now = { id: "dv-1", engine: "devin", state: "paste", url: DEVIN_PAGE };
+  const { n } = await onDevbox(e as unknown as ReturnType<typeof fakeHub>);
+  await act(async () => fireEvent.click(within(devinBlock()).getByRole("button", { name: "Sign in…" })));
+  const field = within(devinBlock()).getByLabelText("Token from Devin’s sign-in page") as HTMLInputElement;
+  const send = async (token: string) => {
+    fireEvent.change(field, { target: { value: token } });
+    await act(async () => fireEvent.click(within(devinBlock()).getByRole("button", { name: "Send" })));
+  };
+  // Malformed (400): pasted again as the page shows it, not a new page.
+  e.sendEngineSignInToken.mockRejectedValueOnce(new HubError(400, "that isn't a sign-in token"));
+  await send("tok-bad");
+  expect(within(devinBlock()).getByText("That token didn’t go through: that isn't a sign-in token. Paste the token exactly as the page shows it.")).toBeTruthy();
+  expect(within(devinBlock()).queryByText(/Open the page again/)).toBeNull();
+  // Taken by the hub, and Devin still asking on the same page while it checks: nothing said.
+  await send("tok-one");
+  await tick();
+  expect(within(devinBlock()).queryByText(/didn’t/)).toBeNull();
+  expect(screen.getByText("Sign in on the page that opened, then paste the token it shows here.")).toBeTruthy();
+  // Devin asks again, with a fresh page: said, and that page opened too.
+  const fresh = `${DEVIN_PAGE}2`;
+  e.signIn.now = { id: "dv-1", engine: "devin", state: "paste", url: fresh };
+  await tick();
+  expect(within(devinBlock()).getByText("Devin didn’t take that token; paste it again.")).toBeTruthy();
+  expect(n.fake.openSignInPage).toHaveBeenLastCalledWith("devin", fresh);
+  expect(n.fake.openSignInPage).toHaveBeenCalledTimes(2);
+  // Asked again after leaving the paste (same page): said too.
+  await send("tok-two");
+  expect(within(devinBlock()).queryByText(/didn’t/)).toBeNull();
+  e.signIn.now = { id: "dv-1", engine: "devin", state: "starting" };
+  await tick();
+  e.signIn.now = { id: "dv-1", engine: "devin", state: "paste", url: fresh };
+  await tick();
+  expect(within(devinBlock()).getByText("Devin didn’t take that token; paste it again.")).toBeTruthy();
+});
+
+it("opens each page a local Devin sign-in gives: its page, then the one with a token to paste", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const e = devinHub();
+  const n = here(e);
+  await act(async () => {});
+  e.signIn.now = { id: "dv-1", engine: "devin", state: "page", url: DEVIN_PAGE };
+  await act(async () => fireEvent.click(within(devinBlock()).getByRole("button", { name: "Sign in…" })));
+  expect(n.fake.openSignInPage).toHaveBeenCalledTimes(1);
+  const paste = `${DEVIN_PAGE}&manual=1`;
+  e.signIn.now = { id: "dv-1", engine: "devin", state: "paste", url: paste };
+  await tick();
+  await tick();
+  expect(n.fake.openSignInPage).toHaveBeenLastCalledWith("devin", paste);
+  expect(n.fake.openSignInPage).toHaveBeenCalledTimes(2);
+});
+
+it("signs Devin in on a machine with a token to paste, whatever its begin is asked", async () => {
+  const e = devinHub();
+  withEngine("devbox", e.hub as unknown as DeskHub);
+  const n = fakeNative();
+  function Begin() {
+    const devin = useDevinSignIn("devbox", "devbox", n.native);
+    return (
+      <button type="button" onClick={() => void devin.begin(false)}>
+        Begin
+      </button>
+    );
+  }
+  render(<Begin />);
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Begin" })));
+  expect(e.hub.startEngineSignIn).toHaveBeenCalledWith("devin", { manual: true });
 });
 
 it("stops Devin's sign-in on its hub when its page won't open here, or nobody signs in within 10 minutes", async () => {

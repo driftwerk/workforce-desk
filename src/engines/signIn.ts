@@ -540,8 +540,17 @@ export type DevinRun =
 
 export const devinNotOpened = (where: Where): string => `Devin’s sign-in page didn’t open within 30 s: Devin on ${where} didn’t answer.`;
 export const devinNotSigned = "Nobody signed in on Devin’s page within 10 minutes, so Desk stopped it.";
-/** What a token the sign-in didn't take says. */
-export const tokenRefused = (why: string): string => `That token didn’t go through: ${why.replace(/\.$/, "")}. Open the page again for a new one.`;
+/** What a token the hub refused says, by why it refused it (`status`): a
+ *  token that wasn't one (400) is pasted again as the page shows it; a
+ *  sign-in no longer waiting for one (409) needs the page again. */
+export const tokenRefused = (why: string, status?: number): string => {
+  const said = `That token didn’t go through: ${why.replace(/\.$/, "")}.`;
+  if (status === 400) return `${said} Paste the token exactly as the page shows it.`;
+  if (status === 409) return `${said} Open the page again for a new one.`;
+  return said;
+};
+/** What Devin asking for a token again, after one was sent, says. */
+export const tokenNotTaken = "Devin didn’t take that token; paste it again.";
 
 /** Signing in to Devin on `machine`'s engine, by Devin's own sign-in run by
  *  its hub: its page opened here once it's checked to be Devin's own, and
@@ -552,8 +561,11 @@ export function useDevinSignIn(machine: MachineId, where: Where, native: Machine
   const [run, setRun] = useState<DevinRun>({ at: "idle" });
   const runNow = useRef(run);
   runNow.current = run;
-  /** The page opened for each sign-in, once. */
+  /** The page opened for each sign-in, once per page it gives. */
   const opened = useRef<string | null>(null);
+  /** The token last sent and taken by the hub: for which sign-in, its page
+   *  then, and whether the sign-in has moved off asking for it since. */
+  const sent = useRef<{ id: string; url: string; left: boolean } | null>(null);
   const live = useLive();
   const done = useRef(onDone);
   done.current = onDone;
@@ -585,17 +597,27 @@ export function useDevinSignIn(machine: MachineId, where: Where, native: Machine
       if (!live.current) return;
       const now = runNow.current;
       if (!((now.at === "opening" && (now.id === null || now.id === s.id)) || (now.at === "page" && now.id === s.id))) return;
+      const token = sent.current?.id === s.id ? sent.current : null;
+      if (token && s.state !== "paste") token.left = true;
       switch (s.state) {
         case "starting":
           return setRun((now) => (now.at === "opening" ? { at: "opening", id: s.id } : now));
         case "page":
         case "paste": {
-          if (opened.current !== s.id) {
-            opened.current = s.id;
+          const page = `${s.id} ${s.url}`;
+          if (opened.current !== page) {
+            opened.current = page;
             openPage(s.url, s.id);
           }
           const paste = s.state === "paste";
-          return setRun((now) => (now.at === "page" && now.id === s.id && now.paste === paste && now.url === s.url ? now : { at: "page", id: s.id, url: s.url, paste, why: now.at === "page" ? now.why : null }));
+          // Asked again for a token after one went: Devin didn't take it.
+          const retake = paste && token !== null && (token.left || token.url !== s.url);
+          if (retake) sent.current = null;
+          return setRun((now) =>
+            !retake && now.at === "page" && now.id === s.id && now.paste === paste && now.url === s.url
+              ? now
+              : { at: "page", id: s.id, url: s.url, paste, why: retake ? tokenNotTaken : now.at === "page" ? now.why : null },
+          );
         }
         case "done":
           put({ at: "done" });
@@ -646,12 +668,14 @@ export function useDevinSignIn(machine: MachineId, where: Where, native: Machine
     return () => clearTimeout(t);
   }, [phase, hub, where]);
 
-  /** Starts it: by the page alone, or (`withToken`, and always on a
+  /** Starts it: by the page alone, or (`asked`, and always on a
    *  machine) with a token to paste back. */
-  const begin = async (withToken = machine !== LOCAL) => {
+  const begin = async (asked = false) => {
     if (!hub) return;
+    const withToken = asked || machine !== LOCAL;
     const mine = ++gen.current;
     manual.current = withToken;
+    sent.current = null;
     const was = runNow.current;
     if (was.at === "opening" || was.at === "page") if (was.id) void hub.cancelEngineSignIn(was.id).catch(() => undefined);
     opened.current = null;
@@ -674,8 +698,10 @@ export function useDevinSignIn(machine: MachineId, where: Where, native: Machine
   const sendToken = async (token: string) => {
     const now = runNow.current;
     if (!hub || now.at !== "page") return;
+    sent.current = null;
     try {
       await hub.sendEngineSignInToken(now.id, token.trim());
+      sent.current = { id: now.id, url: now.url, left: false };
       if (live.current) setRun((r) => (r.at === "page" && r.id === now.id ? { ...r, why: null } : r));
       // The sign-in says when it's done; read it now rather than in a second.
       void hub
@@ -684,8 +710,9 @@ export function useDevinSignIn(machine: MachineId, where: Where, native: Machine
         .catch(() => undefined);
     } catch (e) {
       if (!live.current) return;
-      const why = e instanceof HubError && e.status === 409 ? "Devin wasn’t waiting for one just then" : plainError(e);
-      setRun((r) => (r.at === "page" && r.id === now.id ? { ...r, why: tokenRefused(why) } : r));
+      const status = e instanceof HubError ? e.status : undefined;
+      const why = status === 409 ? "Devin wasn’t waiting for one just then" : plainError(e);
+      setRun((r) => (r.at === "page" && r.id === now.id ? { ...r, why: tokenRefused(why, status) } : r));
     }
   };
 
@@ -695,7 +722,8 @@ export function useDevinSignIn(machine: MachineId, where: Where, native: Machine
     if (hub && id) void hub.cancelEngineSignIn(id).catch(() => undefined);
   };
 
-  /** "Try again": the same way as the last begin. */
+  /** "Try again": the same way as the last begin (on a machine, always
+   *  with a token to paste). */
   const again = () => void begin(manual.current);
   /** "Paste a token instead": the sign-in again, with a token to paste. */
   const withToken = () => void begin(true);

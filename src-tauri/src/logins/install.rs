@@ -459,7 +459,13 @@ fn passed_over(outcome: &Outcome) -> bool {
 }
 
 fn script(plan: Cli) -> String {
-    format!("{}set -o pipefail; {}", clear_dead_link(plan), plan.run())
+    as_installer(plan, &plan.run())
+}
+
+/// `run` as an installer runs it: a dead link cleared first, and a failing
+/// step anywhere in a pipe failing the pipe.
+fn as_installer(plan: Cli, run: &str) -> String {
+    format!("{}set -o pipefail; {run}", clear_dead_link(plan))
 }
 
 /// A `~/.local/bin/<cli>` link whose target is gone (an uninstall that
@@ -854,6 +860,17 @@ mod tests {
     /// prints `devin 9.9.9`.
     #[cfg(unix)]
     fn devin_release(sha: Option<&str>) -> (tempfile::TempDir, String, String) {
+        devin_release_of(sha, |_| vec!["bin".into()])
+    }
+
+    /// [`devin_release`] whose bundle is `entries` (as `tar` names them,
+    /// read from `build/`, which already holds `bin/devin`), each kept as
+    /// written, `../` and leading `/` too.
+    #[cfg(unix)]
+    fn devin_release_of(
+        sha: Option<&str>,
+        entries: impl FnOnce(&std::path::Path) -> Vec<String>,
+    ) -> (tempfile::TempDir, String, String) {
         use std::os::unix::fs::PermissionsExt;
         let at = tempfile::tempdir().unwrap();
         let root = at.path();
@@ -864,10 +881,13 @@ mod tests {
             .unwrap();
         std::fs::create_dir_all(root.join("cdn/9.9.9")).unwrap();
         let tarball = root.join("cdn/9.9.9/devin.tar.gz");
+        let list = root.join("entries");
+        std::fs::write(&list, entries(&root.join("build")).join("\n") + "\n").unwrap();
         let made = std::process::Command::new("tar")
-            .args(["czf", tarball.to_str().unwrap(), "-C"])
+            .args(["czPf", tarball.to_str().unwrap(), "-C"])
             .arg(root.join("build"))
-            .arg("bin")
+            .arg("-T")
+            .arg(&list)
             .status()
             .unwrap();
         assert!(made.success());
@@ -914,7 +934,10 @@ mod tests {
     #[cfg(unix)]
     fn unpack(home: &std::path::Path, manifest: &str, bundles: &str) -> std::process::Output {
         std::process::Command::new("/bin/bash")
-            .args(["-c", &devin_unpack(manifest, bundles)])
+            .args([
+                "-c",
+                &as_installer(Cli::Devin, &devin_unpack(manifest, bundles)),
+            ])
             .env("HOME", home)
             .env_remove("XDG_DATA_HOME")
             .stdin(Stdio::null())
@@ -989,6 +1012,56 @@ mod tests {
             std::fs::read_to_string(home.join(".local/bin/devin")).unwrap(),
             "mine"
         );
+    }
+
+    /// A long bundle (thousands of files) with one file outside its own
+    /// folder near its end, by `../` or by a path from `/`: refused whole,
+    /// and nothing of it is left anywhere.
+    #[cfg(unix)]
+    #[test]
+    fn a_bundle_naming_a_file_outside_its_folder_is_never_unpacked() {
+        for absolute in [false, true] {
+            let mut escape = None;
+            let (at, manifest, bundles) = devin_release_of(None, |build| {
+                let many = build.join("bin/lib");
+                std::fs::create_dir_all(&many).unwrap();
+                let mut entries = vec!["bin/devin".to_string()];
+                for i in 0..3000 {
+                    std::fs::write(many.join(format!("f{i}")), "x").unwrap();
+                    entries.push(format!("bin/lib/f{i}"));
+                }
+                // Beside `build`, where a `../` from it lands.
+                let out = build.parent().unwrap().join("escaped");
+                std::fs::write(&out, "out").unwrap();
+                let bad = match absolute {
+                    true => out.to_str().unwrap().to_string(),
+                    false => "../escaped".to_string(),
+                };
+                entries.insert(entries.len() - 5, bad);
+                escape = Some(out);
+                entries
+            });
+            let escape = escape.unwrap();
+            std::fs::remove_file(&escape).unwrap();
+            let home = at.path().join("home");
+            let out = unpack(&home, &manifest, &bundles);
+            let said = String::from_utf8_lossy(&out.stdout);
+            assert!(!out.status.success(), "{said}");
+            assert!(
+                said.contains("names files outside its own folder"),
+                "{said}"
+            );
+            assert!(!escape.exists());
+            let versions = home.join(".local/share/devin/cli/_versions");
+            assert!(!versions.join("9.9.9").exists());
+            assert!(std::fs::symlink_metadata(versions.join("current")).is_err());
+            assert!(std::fs::symlink_metadata(home.join(".local/bin/devin")).is_err());
+            let left: Vec<_> = std::fs::read_dir(&versions)
+                .unwrap()
+                .map(|e| e.unwrap().file_name())
+                .collect();
+            assert!(left.is_empty(), "{left:?}");
+        }
     }
 
     #[cfg(unix)]
