@@ -148,6 +148,12 @@ it("draws a session's sidebar row again only for what that row shows", () => {
   for (const state of ["blocked", "working", "idle", "working"] as const)
     act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s5: { ...s.sessions.s5!, state, updatedAt: new Date(Date.UTC(2026, 9, 29, 10, 0, n++)).toISOString() } } })));
   expect(rowDraws["session:s5"]).toBeGreaterThan(0);
+  // And it says the newest: blocked, then working again.
+  const dot = () => document.querySelector('[data-item="session:s5"] .dot')!.className;
+  act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s5: { ...s.sessions.s5!, state: "blocked" } } })));
+  expect(dot()).toContain("dot-blocked");
+  act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s5: { ...s.sessions.s5!, state: "working" } } })));
+  expect(dot()).not.toContain("dot-blocked");
   for (const id of ["s0", "s1", "s2", "s3", "s4"]) expect(rowDraws[`session:${id}`] ?? 0).toBe(0);
   expect(rowDraws["agent:local/allan"] ?? 0).toBe(0);
   // Opening one lights its row, and only its.
