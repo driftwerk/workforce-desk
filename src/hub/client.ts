@@ -477,7 +477,13 @@ export class DeskHub {
   signInCode = (id: string, code: string): Promise<AccountSignIn> =>
     this.call("POST", `/api/desk/accounts/sign-ins/${id}/code`, { code });
   /** An engine's own sign-in, run by the hub (Codex's device page). */
-  startEngineSignIn = (engine: Engine): Promise<EngineSignIn> => this.call("POST", "/api/desk/engines/sign-ins", { engine });
+  /** `manual`: for a computer with no browser, the sign-in gives a token
+   *  to paste back (Devin). */
+  startEngineSignIn = (engine: Engine, opts: { manual?: boolean } = {}): Promise<EngineSignIn> =>
+    this.call("POST", "/api/desk/engines/sign-ins", opts.manual ? { engine, manual: true } : { engine });
+  /** The token the sign-in's page gave, typed into the sign-in and kept
+   *  nowhere. 204, or a 409 when it isn't waiting for one. */
+  sendEngineSignInToken = (id: string, token: string): Promise<void> => this.call("POST", `/api/desk/engines/sign-ins/${encodeURIComponent(id)}/token`, { token });
   engineSignIn = (id: string): Promise<EngineSignIn> => this.call("GET", `/api/desk/engines/sign-ins/${encodeURIComponent(id)}`);
   cancelEngineSignIn = (id: string): Promise<void> => this.call("DELETE", `/api/desk/engines/sign-ins/${encodeURIComponent(id)}`);
   /** "OK" on a sign-in problem the person has dealt with. */

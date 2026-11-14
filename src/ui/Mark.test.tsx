@@ -1,7 +1,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
-import { markFor, MARK_TOKENS, SERIES_MARK_TOKENS, tokenVar } from "../theme/tokens";
-import { Mark, markText } from "./Mark";
+import { ENGINE_MARK, markFor, MARK_TOKENS, SERIES_MARK_TOKENS, tokenVar } from "../theme/tokens";
+import { initialsFor, Mark, markText } from "./Mark";
 
 afterEach(cleanup);
 
@@ -41,6 +41,17 @@ describe("a mark's fill", () => {
   it("spreads names over the same slots in both lists", () => {
     for (const name of ["Kingsley", "Matt", "Richard Lucas", "Pia", "atlas"])
       expect(SERIES_MARK_TOKENS.indexOf(markFor(name, SERIES_MARK_TOKENS) as never)).toBe(MARK_TOKENS.indexOf(markFor(name) as never));
+  });
+});
+
+describe("an engine's mark", () => {
+  it("is its own initials, on the one ground every engine has", () => {
+    expect(["claude", "codex", "devin"].map((e) => initialsFor("brisk-otter", e))).toEqual(["cc", "cx", "dv"]);
+    expect(initialsFor("brisk-otter", "gemini")).toBe("B");
+    const { container } = render(<Mark name="brisk-otter" engine="devin" state="working" />);
+    expect(face(container).textContent).toBe("dv");
+    expect(face(container).style.background).toBe(tokenVar(ENGINE_MARK));
+    expect(container.querySelector(".mark")!.className).toContain("ring-working");
   });
 });
 

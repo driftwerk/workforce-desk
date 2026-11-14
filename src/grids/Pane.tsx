@@ -135,7 +135,7 @@ export function usePaneLabel(content: PaneContent | null): Label {
   const t = describeTerminal(info, programs);
   const cwd = info?.cwd ?? content.cwd ?? null;
   return {
-    name: t.codex ? "Codex" : t.claude ? "Claude Code" : ["Terminal", folder(cwd)].filter(Boolean).join(" · "),
+    name: t.codex ? ENGINE.codex : t.claude ? ENGINE.claude : t.devin ? ENGINE.devin : ["Terminal", folder(cwd)].filter(Boolean).join(" · "),
     meta: t.running ? `${t.shell} → ${t.running}` : t.shell,
     state: null,
     tracked: null,

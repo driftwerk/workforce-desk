@@ -494,3 +494,133 @@ it("installs a machine's engines over its connection, as adding it did, then rea
   expect(e.hub.enginesNow).toHaveBeenCalled();
   expect(within(claudeBlock()).getByText("Version 2.1.318")).toBeTruthy();
 });
+
+// Devin: its own row, installed and signed in the way Codex is.
+
+const DEVIN_PAGE = "https://app.devin.ai/auth/cli/continue?state=s";
+const devin = (over: Record<string, unknown> = {}) => ({
+  engine: "devin",
+  title: "Devin",
+  program: "/Users/x/.local/bin/devin",
+  installed: true,
+  version: "3000.12.57",
+  views: ["terminal"],
+  caps: { terminal: { state: "hooks", approvals: "desk", resume: "byId", interrupt: "keys", plan: null, approveForMe: false, fast: false, accounts: "none", line: "paste", steer: "none", notes: [] } },
+  signIn: { state: "out" },
+  ...over,
+});
+const withDevin = (over: Record<string, unknown> = {}) => [...engineInfo(), devin(over)];
+const devinBlock = () => screen.getByRole("listitem", { name: "Devin" });
+
+/** A hub whose engines include Devin, and whose Devin sign-in the test moves along. */
+function devinHub(over: Record<string, unknown> = {}) {
+  const e = fakeHub();
+  const signIn: { now: EngineSignIn } = { now: { id: "dv-1", engine: "devin", state: "starting" } };
+  e.hub.engines.mockResolvedValue(withDevin(over) as never);
+  e.hub.enginesNow.mockResolvedValue(withDevin(over) as never);
+  e.hub.startEngineSignIn.mockImplementation(async () => signIn.now);
+  e.hub.engineSignIn.mockImplementation(async () => signIn.now);
+  const sendEngineSignInToken = vi.fn(async (_id: string, _token: string) => {});
+  Object.assign(e.hub, { sendEngineSignInToken });
+  return { ...e, signIn, sendEngineSignInToken };
+}
+
+const here = (e: ReturnType<typeof devinHub>, n = fakeNative()) => {
+  useDesk.setState({ hub: e.hub as unknown as DeskHub, fail: vi.fn() });
+  render(
+    <StrictMode>
+      <EngineBlocks native={n.native} />
+    </StrictMode>,
+  );
+  return n;
+};
+
+it("installs Devin on this Mac from its row, by its own installer", async () => {
+  installHeard.length = 0;
+  const e = devinHub({ installed: false, version: null });
+  here(e);
+  await act(async () => {});
+  expect(within(devinBlock()).getByText("Not installed")).toBeTruthy();
+  await act(async () => fireEvent.click(within(devinBlock()).getByRole("button", { name: "Install Devin" })));
+  expect(installCli).toHaveBeenCalledWith("devin");
+  await act(async () => installHeard.forEach((f) => f("devin", { state: "running", line: "Installed devin v3000.12.57" })));
+  expect(within(devinBlock()).getByRole("status").textContent).toContain("Installing Devin…");
+  e.hub.enginesNow.mockResolvedValue(withDevin() as never);
+  await act(async () => installHeard.forEach((f) => f("devin", { state: "done" })));
+  expect(within(devinBlock()).getByText("Version 3000.12.57")).toBeTruthy();
+});
+
+it("offers no Install for Devin on a machine yet: Desk installs Claude Code and Codex there", async () => {
+  const e = devinHub({ installed: false, version: null });
+  await onDevbox(e);
+  expect(within(devinBlock()).getByText("Not installed")).toBeTruthy();
+  expect(within(devinBlock()).queryByRole("button", { name: /Install/ })).toBeNull();
+});
+
+it("says Devin signed in to itself, and signs it in on this Mac by its page, which finishes by itself", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const e = devinHub();
+  const n = here(e);
+  await act(async () => {});
+  expect(within(devinBlock()).getByText("Not signed in")).toBeTruthy();
+  await act(async () => fireEvent.click(within(devinBlock()).getByRole("button", { name: "Sign in…" })));
+  expect(e.hub.startEngineSignIn).toHaveBeenCalledWith("devin");
+  expect(screen.getByText("Opening Devin’s sign-in page…")).toBeTruthy();
+  e.signIn.now = { id: "dv-1", engine: "devin", state: "page", url: DEVIN_PAGE };
+  await tick();
+  expect(n.fake.openSignInPage).toHaveBeenCalledWith("devin", DEVIN_PAGE);
+  expect(n.fake.openSignInPage).toHaveBeenCalledTimes(1);
+  expect(screen.getByText("Finish signing in in your browser.")).toBeTruthy();
+  e.signIn.now = { id: "dv-1", engine: "devin", state: "done" };
+  e.hub.enginesNow.mockResolvedValue(withDevin({ signIn: { state: "in", via: "vendor", who: "sam@example.com", plan: null } }) as never);
+  await tick();
+  expect(screen.getByText("Devin is signed in.")).toBeTruthy();
+  expect(within(devinBlock()).getByText("Signed in to Devin as sam@example.com")).toBeTruthy();
+});
+
+it("signs Devin in on a machine with a token pasted back: sent at once, the field cleared, a refusal said", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const e = devinHub();
+  e.signIn.now = { id: "dv-1", engine: "devin", state: "paste", url: DEVIN_PAGE };
+  const { n } = await onDevbox(e as unknown as ReturnType<typeof fakeHub>);
+  await act(async () => fireEvent.click(within(devinBlock()).getByRole("button", { name: "Sign in…" })));
+  expect(e.hub.startEngineSignIn).toHaveBeenCalledWith("devin", { manual: true });
+  expect(n.fake.openSignInPage).toHaveBeenCalledWith("devin", DEVIN_PAGE);
+  const field = within(devinBlock()).getByLabelText("Token from Devin’s sign-in page") as HTMLInputElement;
+  expect(field.type).toBe("password");
+  // Refused: said in place, and the field stays, empty.
+  e.sendEngineSignInToken.mockRejectedValueOnce(new HubError(409, "not waiting for a token"));
+  fireEvent.change(field, { target: { value: "  tok-one  " } });
+  await act(async () => fireEvent.click(within(devinBlock()).getByRole("button", { name: "Send" })));
+  expect(e.sendEngineSignInToken).toHaveBeenLastCalledWith("dv-1", "tok-one");
+  expect(field.value).toBe("");
+  expect(within(devinBlock()).getByText("That token didn’t go through: Devin wasn’t waiting for one just then. Open the page again for a new one.")).toBeTruthy();
+  // Taken: the sign-in carries on to done.
+  fireEvent.change(field, { target: { value: "tok-two" } });
+  e.signIn.now = { id: "dv-1", engine: "devin", state: "done" };
+  await act(async () => fireEvent.keyDown(field, { key: "Enter" }));
+  expect(e.sendEngineSignInToken).toHaveBeenLastCalledWith("dv-1", "tok-two");
+  await tick();
+  expect(screen.getByText("Devin is signed in.")).toBeTruthy();
+  // The token is in nothing Desk draws.
+  expect(document.body.innerHTML).not.toMatch(/tok-one|tok-two/);
+});
+
+it("stops Devin's sign-in on its hub when its page won't open here, or nobody signs in within 10 minutes", async () => {
+  vi.useFakeTimers({ shouldAdvanceTime: true });
+  const n = fakeNative();
+  n.fake.openSignInPage.mockRejectedValueOnce(new Error("That page isn't the sign-in's own, so Desk won't open it."));
+  const e = devinHub();
+  e.signIn.now = { id: "dv-1", engine: "devin", state: "page", url: DEVIN_PAGE };
+  here(e, n);
+  await act(async () => {});
+  await act(async () => fireEvent.click(within(devinBlock()).getByRole("button", { name: "Sign in…" })));
+  expect(e.hub.cancelEngineSignIn).toHaveBeenCalledWith("dv-1");
+  expect(within(devinBlock()).getByRole("alert").textContent).toContain("isn't the sign-in's own");
+  e.hub.cancelEngineSignIn.mockClear();
+  await act(async () => fireEvent.click(within(devinBlock()).getByRole("button", { name: "Try again" })));
+  expect(screen.getByText("Finish signing in in your browser.")).toBeTruthy();
+  await act(async () => void (await vi.advanceTimersByTimeAsync(APPROVE_WITHIN_MS)));
+  expect(e.hub.cancelEngineSignIn).toHaveBeenCalledWith("dv-1");
+  expect(within(devinBlock()).getByRole("alert").textContent).toContain("Nobody signed in on Devin’s page within 10 minutes");
+});

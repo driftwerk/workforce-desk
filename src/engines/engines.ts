@@ -47,10 +47,12 @@ export const answersInDesk = (engine: Engine, caps: Caps | null | undefined): bo
   caps ? caps.approvals === "desk" : engine === "claude";
 
 /** How an engine's sign-in reads in Settings → Engines. The plan's name is
- *  shown as the engine says it. */
-export const signInText = (s: SignIn): string => {
+ *  shown as the engine says it; an engine on its own account (`title`,
+ *  Devin) is signed in to itself. */
+export const signInText = (s: SignIn, title?: string): string => {
   switch (s.state) {
     case "in": {
+      if (s.via === "vendor" && title) return s.who ? `Signed in to ${title} as ${s.who}` : `Signed in to ${title}`;
       const how = s.via === "plan" ? (s.plan ? `${s.plan} plan` : "a plan") : s.via === "key" ? "an API key" : "its own account";
       return s.who ? `Signed in as ${s.who}, on ${how}` : `Signed in, on ${how}`;
     }

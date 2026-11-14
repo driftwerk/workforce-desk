@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useReducer, useRef, useState } from "react";
-import { EngineBlocks } from "../settings/EngineBlocks";
+import { EngineBlocks, type SignedInEngine } from "../settings/EngineBlocks";
 import { useHost } from "../shell/host";
 import { askDesk, useCanAskDesk } from "../ui/askDesk";
 import { redact } from "../ui/redact";
@@ -241,7 +241,8 @@ export function AddMachine({ onClose, native = realNative, target: given }: { on
     if (cancelled) onClose();
   }, [cancelled, onClose]);
 
-  const signedIn = useCallback((engine: "claude" | "codex") => dispatch({ type: "signedIn", engine }), []);
+  // Adding a machine signs in Claude Code and Codex (Devin there comes later).
+  const signedIn = useCallback((engine: SignedInEngine) => engine !== "devin" && dispatch({ type: "signedIn", engine }), []);
   const editing = flow.at === "address";
   const ready = setUp(flow);
   const here = thisComputerLower(platform);

@@ -177,7 +177,7 @@ export interface MachineNative {
   signInForwardStop(id: MachineId, signIn: string): Promise<void>;
   /** Opens a page a machine's engine gave for signing in, once the native
    *  side has checked it is that engine's own (https, its hosts). */
-  openSignInPage(engine: "claude" | "codex", url: string): Promise<void>;
+  openSignInPage(engine: "claude" | "codex" | "devin", url: string): Promise<void>;
   /** Desk's Claude Code plugin folder on the machine (`<bin>/current/claude-plugin`). */
   pluginDir(id: MachineId): Promise<string | null>;
   /** The machine's engine's admin surface, through its own broker. */

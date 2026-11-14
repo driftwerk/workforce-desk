@@ -3,7 +3,7 @@
 //! short probe runs where the installer ran: a 1 MB slice of what it
 //! downloads, and the free space in the home folder.
 
-use super::Plan;
+use super::install::Cli;
 
 /// About what the Claude Code binary needs once downloaded and unpacked.
 const NEEDED_KB: u64 = 300 * 1024;
@@ -17,13 +17,13 @@ pub struct Target {
     prelude: &'static str,
 }
 
-impl Plan {
+impl Cli {
     pub fn target(self) -> Target {
         match self {
             // The platform is worked out the way Anthropic's script does;
             // when `latest` can't be read, `latest` itself is probed and
             // shows the same failure.
-            Plan::Claude => Target {
+            Cli::Claude => Target {
                 host: "downloads.claude.ai",
                 prelude: r#"base=https://downloads.claude.ai/claude-code-releases
 arch=$(uname -m)
@@ -37,9 +37,14 @@ v=$(curl -fsSL --max-time 15 "$url" 2>/dev/null) && [ -n "$v" ] && url=$base/$v/
             },
             // No binary URL is known here: the install script itself shows
             // whether the network and the host answer.
-            Plan::Chatgpt => Target {
+            Cli::Chatgpt => Target {
                 host: "chatgpt.com",
                 prelude: "url=https://chatgpt.com/codex/install.sh",
+            },
+            // Its manifest, which every install reads first.
+            Cli::Devin => Target {
+                host: "static.devin.ai",
+                prelude: "url=https://static.devin.ai/cli/current/manifest.json",
             },
         }
     }
@@ -74,10 +79,18 @@ pub fn wrapped(script: &str) -> String {
 /// probe is worth running.
 pub fn is_download_failure(last: &str) -> bool {
     let l = last.to_lowercase();
-    // Anthropic's installer says these two; curl itself says the third.
-    ["download failed", "checksum verification failed", "curl: ("]
-        .iter()
-        .any(|s| l.contains(s))
+    // Anthropic's installer says the first two, Devin's the next two
+    // ("Failed to download from …", "Failed to fetch manifest from …");
+    // curl itself says the last.
+    [
+        "download failed",
+        "checksum verification failed",
+        "failed to download",
+        "failed to fetch manifest",
+        "curl: (",
+    ]
+    .iter()
+    .any(|s| l.contains(s))
 }
 
 #[derive(Debug, Default, PartialEq)]
@@ -275,7 +288,7 @@ mod tests {
 
     #[test]
     fn the_script_travels_as_one_line_of_plain_characters() {
-        let w = wrapped(&Plan::Claude.target().script());
+        let w = wrapped(&Cli::Claude.target().script());
         assert!(
             w.chars()
                 .all(|c| c.is_ascii_alphanumeric() || "+/= |-".contains(c))
@@ -285,7 +298,7 @@ mod tests {
 
     #[test]
     fn slow_tools_in_the_script_are_capped() {
-        let s = Plan::Claude.target().script();
+        let s = Cli::Claude.target().script();
         assert!(s.contains("$t df -Pk") && s.contains("$t ldd"));
     }
 
@@ -296,22 +309,34 @@ mod tests {
         assert!(is_download_failure("curl: (56) Recv failure"));
         assert!(!is_download_failure("Unsupported architecture"));
         assert!(!is_download_failure("Could not verify checksum tool"));
+        assert!(is_download_failure(
+            "Error: Failed to download from https://static.devin.ai/cli/x.tar.gz"
+        ));
+        assert!(is_download_failure(
+            "Error: Failed to fetch manifest from https://static.devin.ai/cli/current/manifest.json"
+        ));
     }
 
     #[test]
     fn each_plan_probes_its_own_host() {
         assert!(
-            Plan::Claude
+            Cli::Claude
                 .target()
                 .script()
                 .contains("downloads.claude.ai/claude-code-releases")
         );
         assert!(
-            Plan::Chatgpt
+            Cli::Chatgpt
                 .target()
                 .script()
                 .contains("chatgpt.com/codex/install.sh")
         );
-        assert!(Plan::Claude.target().script().contains("df -Pk"));
+        assert!(
+            Cli::Devin
+                .target()
+                .script()
+                .contains("static.devin.ai/cli/current/manifest.json")
+        );
+        assert!(Cli::Claude.target().script().contains("df -Pk"));
     }
 }

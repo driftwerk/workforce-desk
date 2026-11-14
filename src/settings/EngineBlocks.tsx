@@ -3,7 +3,7 @@ import { explain } from "../ui/problem";
 import { ProblemNote } from "../ui/ProblemNote";
 import { hasAccounts } from "../engines/accounts";
 import { defaultCaps, installedText, runsText, signInText } from "../engines/engines";
-import { CODEX_LOGIN, useCodexSignIn } from "../engines/signIn";
+import { CODEX_LOGIN, useCodexSignIn, useDevinSignIn } from "../engines/signIn";
 import { LOCAL, type MachineId } from "../hub/machines";
 import { hubOf, useHubOf } from "../hub/store";
 import type { EngineInfo } from "../hub/types";
@@ -11,10 +11,10 @@ import { native as realNative, type MachineNative } from "../machines/native";
 import { openTerminalOn } from "../machines/watch";
 import { thisComputerLower } from "../machines/words";
 import { useHost } from "../shell/host";
-import { installCli, onInstallProgress, subscribe, type PlanName } from "../platform";
-import { Accounts, useHasAccount } from "./Accounts";
+import { installCli, onInstallProgress, subscribe, type CliName } from "../platform";
+import { Accounts, CodeField, useHasAccount } from "./Accounts";
 
-export type SignedInEngine = "claude" | "codex";
+export type SignedInEngine = "claude" | "codex" | "devin";
 
 /** Copies `text`, saying so on the button for a moment. */
 export function CopyButton({ text, label = "Copy" }: { text: string; label?: string }) {
@@ -65,7 +65,8 @@ const codexSignedInHere = async (): Promise<boolean> => {
 };
 
 /** The engines on `machine` (this computer when none), each where it
- *  stands, and its sign-in: Claude's accounts, Codex's ChatGPT. One
+ *  stands, and its sign-in: Claude's accounts, Codex's ChatGPT, Devin's
+ *  own. One
  *  component wherever an engine signs in: Settings → Engines with any
  *  computer chosen, a machine's page, and adding a machine. */
 export function EngineBlocks({
@@ -116,6 +117,8 @@ export function EngineBlocks({
   // Codex signs in to ChatGPT through its device page, run by its engine's
   // hub: a machine's, or this computer's own `codex login`.
   const codex = useCodexSignIn(machine, where, native, () => void reload(true));
+  // Devin signs in by its own page, also run by its engine's hub.
+  const devin = useDevinSignIn(machine, where, native, () => void reload(true));
 
   // Each engine signed in there, said once.
   const told = useRef(new Set<SignedInEngine>());
@@ -129,10 +132,12 @@ export function EngineBlocks({
   const list = Array.isArray(engines) ? engines.filter((e) => !only || only.includes(e.engine)) : [];
   const claudeIn = list.some((e) => e.engine === "claude" && e.signIn.state === "in");
   const codexIn = list.some((e) => e.engine === "codex" && e.signIn.state === "in") || codex.run.at === "done";
+  const devinIn = list.some((e) => e.engine === "devin" && e.signIn.state === "in") || devin.run.at === "done";
   const accountsIn = useHasAccount(machine);
   useEffect(() => {
     if (claudeIn || accountsIn) signed("claude");
     if (codexIn) signed("codex");
+    if (devinIn) signed("devin");
   });
 
   if (!hub && !Array.isArray(engines)) {
@@ -178,11 +183,16 @@ export function EngineBlocks({
                 Sign in…
               </button>
             )}
-            {e.installed === false && INSTALLS[e.engine] && <InstallEngine engine={e} machine={machine} where={where} native={native} onInstalled={() => void reload(true)} />}
+            {e.engine === "devin" && e.installed && e.signIn.state !== "in" && devin.run.at === "idle" && (
+              <button type="button" className="btn btn-sm engine-head-action" onClick={() => void devin.begin()}>
+                Sign in…
+              </button>
+            )}
+            {e.installed === false && installsOn(e.engine, machine) && <InstallEngine engine={e} machine={machine} where={where} native={native} onInstalled={() => void reload(true)} />}
           </span>
           {e.installed && (
             <span className="small">
-              {codex.run.at === "done" && e.engine === "codex" ? "Signed in" : signInText(e.signIn)}
+              {codex.run.at === "done" && e.engine === "codex" ? "Signed in" : devin.run.at === "done" && e.engine === "devin" && e.signIn.state !== "in" ? signInText({ state: "in", via: "vendor", who: null, plan: null }, e.title) : signInText(e.signIn, e.title)}
               {e.engine === "codex" && e.signIn.state !== "in" && <span className="muted"> · optional, for Codex sessions</span>}
             </span>
           )}
@@ -211,14 +221,21 @@ export function EngineBlocks({
             />
           )}
           {e.installed && e.engine === "codex" && codex.run.at !== "idle" && <CodexSigningIn codex={codex} machine={machine} where={where} />}
+          {e.installed && e.engine === "devin" && devin.run.at !== "idle" && <DevinSigningIn devin={devin} />}
         </li>
       ))}
     </ul>
   );
 }
 
-/** The engines Desk can install, by their installers' plan names. */
-const INSTALLS: Partial<Record<string, PlanName>> = { claude: "claude", codex: "chatgpt" };
+/** The engines Desk can install, by their installers' names. */
+const INSTALLS: Partial<Record<string, CliName>> = { claude: "claude", codex: "chatgpt", devin: "devin" };
+/** What Desk installs on a machine, over its connection (both at once). */
+const MACHINE_INSTALLS = new Set(["claude", "codex"]);
+
+/** Whether Desk can install `engine` on `machine` from its row. */
+export const installsOn = (engine: string, machine: MachineId): boolean =>
+  !!INSTALLS[engine] && (machine === LOCAL || MACHINE_INSTALLS.has(engine));
 
 /** "Install" on an engine that isn't there: on this computer, its own
  *  installer, run by Desk (as signing in to a plan does); on a machine,
@@ -301,6 +318,79 @@ export function InstallEngine({
         {state.at === "failed" ? "Try again" : `Install ${engine.title}`}
       </button>
     </span>
+  );
+}
+
+/** Devin's sign-in under way, as Codex's is drawn: its page opening, open
+ *  (with the field for the token it gives, where it gives one), done, or
+ *  failed with why. */
+export function DevinSigningIn({ devin }: { devin: ReturnType<typeof useDevinSignIn> }) {
+  const r = devin.run;
+  if (r.at === "idle") return null;
+  return (
+    <div className="account-add account-add-solo" role="group" aria-label="Signing in to Devin" aria-live="polite">
+      <b className="small">Signing in to Devin</b>
+      {r.at === "opening" && (
+        <>
+          <p className="small">Opening Devin’s sign-in page…</p>
+          <span className="faint small">If the page hasn’t opened in 30 s, Desk stops and says why.</span>
+        </>
+      )}
+      {r.at === "page" &&
+        (r.paste ? (
+          <>
+            {r.why ? <p className="small state-blocked">{r.why}</p> : <p className="small">Sign in on the page that opened, then paste the token it shows here.</p>}
+            <CodeField onSend={(token) => void devin.sendToken(token)} focus secret label="Token from Devin’s sign-in page" placeholder="Token from the page" />
+            <span>
+              <button type="button" className="btn btn-ghost" onClick={() => devin.openPage(r.url)}>
+                Open the sign-in page again
+              </button>
+            </span>
+            <span className="faint small">Desk passes the token straight to Devin, and keeps it nowhere. It waits up to 10 minutes, then stops the sign-in.</span>
+          </>
+        ) : (
+          <>
+            <p className="small">Finish signing in in your browser.</p>
+            <span className="account-links">
+              <button type="button" className="btn btn-ghost" onClick={() => devin.openPage(r.url)}>
+                Open the sign-in page again
+              </button>
+              <button type="button" className="link small" onClick={devin.withToken}>
+                Paste a token instead
+              </button>
+            </span>
+            <span className="faint small">Desk carries on by itself once you’ve signed in. It waits up to 10 minutes, then stops the sign-in.</span>
+          </>
+        ))}
+      {r.at === "done" && (
+        <p className="small">
+          <span className="state-done">Devin is signed in.</span>
+        </p>
+      )}
+      {r.at === "failed" && (
+        <div role="alert">
+          <ProblemNote problem={explain(new Error(r.why), { what: "signing in to Devin", retry: devin.again })} />
+        </div>
+      )}
+      <span className="account-actions">
+        {r.at === "done" ? (
+          <button type="button" className="btn" onClick={devin.reset}>
+            Done
+          </button>
+        ) : (
+          <>
+            <button type="button" className="btn btn-ghost" onClick={r.at === "failed" ? devin.reset : devin.cancel}>
+              Cancel
+            </button>
+            {r.at === "failed" && (
+              <button type="button" className="btn" onClick={devin.again}>
+                Try again
+              </button>
+            )}
+          </>
+        )}
+      </span>
+    </div>
   );
 }
 

@@ -1,6 +1,6 @@
-//! Installing Claude Code or Codex when a plan's sign-in needs it and this
-//! computer doesn't have it: each one's official installer, run as the person,
-//! with what it prints passed on line by line.
+//! Installing Claude Code, Codex or Devin when this computer doesn't have
+//! it: each one's official installer, run as the person, with what it prints
+//! passed on line by line.
 
 use std::io::{BufRead, BufReader};
 use std::process::Stdio;
@@ -8,46 +8,109 @@ use std::sync::{Arc, Mutex};
 
 use desk_core::backend::Backend;
 use desk_core::host::Host;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
 
 use super::{Plan, cli, deadline, probe, scan};
 
+/// A CLI Desk installs: the one a plan signs in with (named by its plan,
+/// `claude` and `chatgpt`, as the page asks for it), or an engine's own
+/// (`devin`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Cli {
+    Claude,
+    Chatgpt,
+    Devin,
+}
+
+impl From<Plan> for Cli {
+    fn from(plan: Plan) -> Self {
+        match plan {
+            Plan::Claude => Cli::Claude,
+            Plan::Chatgpt => Cli::Chatgpt,
+        }
+    }
+}
+
 impl Plan {
     /// The CLI a plan signs in with.
     pub fn program(self) -> &'static str {
+        Cli::from(self).program()
+    }
+}
+
+/// Devin's own installer: it ends by running `devin setup`, a wizard.
+const DEVIN_INSTALLER: &str = "https://cli.devin.ai/install.sh";
+/// Where Devin's manifest and bundles are, as its installer reads them.
+const DEVIN_MANIFEST: &str = "https://static.devin.ai/cli/current/manifest.json";
+const DEVIN_BUNDLES: &str = "https://static.devin.ai/cli/";
+
+impl Cli {
+    pub fn program(self) -> &'static str {
         match self {
-            Plan::Claude => "claude",
-            Plan::Chatgpt => "codex",
+            Cli::Claude => "claude",
+            Cli::Chatgpt => "codex",
+            Cli::Devin => "devin",
         }
     }
 
     pub fn cli_name(self) -> &'static str {
         match self {
-            Plan::Claude => "Claude Code",
-            Plan::Chatgpt => "Codex",
+            Cli::Claude => "Claude Code",
+            Cli::Chatgpt => "Codex",
+            Cli::Devin => "Devin",
         }
     }
 
     /// The official installer, from each one's own install page:
-    /// code.claude.com/docs/en/setup and learn.chatgpt.com/docs/codex/cli.
+    /// code.claude.com/docs/en/setup, learn.chatgpt.com/docs/codex/cli and
+    /// docs.devin.ai/cli. What the person runs by hand when Desk can't.
     fn installer(self) -> &'static str {
         match self {
-            Plan::Claude => "curl -fsSL https://claude.ai/install.sh | bash",
-            Plan::Chatgpt => "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
+            Cli::Claude => "curl -fsSL https://claude.ai/install.sh | bash",
+            Cli::Chatgpt => "curl -fsSL https://chatgpt.com/codex/install.sh | sh",
+            Cli::Devin => "curl -fsSL https://cli.devin.ai/install.sh | bash",
         }
+    }
+
+    /// What Desk runs: the installer, except Devin's, which is downloaded
+    /// first and run with nothing to read, so the `devin setup` it ends with
+    /// can't wait for an answer nobody will type (it is never fed the rest
+    /// of the script, as `curl | bash` would).
+    fn run(self) -> String {
+        match self {
+            Cli::Devin => format!(
+                "s=$(curl -fsSL {DEVIN_INSTALLER}) && bash -c \"$s\" devin-install </dev/null"
+            ),
+            _ => self.installer().to_string(),
+        }
+    }
+
+    /// Whether the CLI found after its installer stopped is installed,
+    /// whatever the installer's exit: Devin's ends with `devin setup`,
+    /// which can stop with nothing typed after the install itself is done.
+    fn found_is_done(self) -> bool {
+        self == Cli::Devin
     }
 
     /// The other ways each one's own docs give, tried in turn when the
     /// installer can't be downloaded: npm into `~/.local` (no sudo; its
     /// `bin` is where Desk looks), then Homebrew. Each exits 127 when its
-    /// tool isn't there, and is passed over.
-    fn alternatives(self) -> [(&'static str, String); 2] {
+    /// tool isn't there, and is passed over. Devin's: its installer's own
+    /// steps, done by Desk (its checked bundle, without `setup`).
+    fn alternatives(self) -> Vec<(&'static str, String)> {
         let (package, cask) = match self {
-            Plan::Claude => ("@anthropic-ai/claude-code", "claude-code"),
-            Plan::Chatgpt => ("@openai/codex", "codex"),
+            Cli::Claude => ("@anthropic-ai/claude-code", "claude-code"),
+            Cli::Chatgpt => ("@openai/codex", "codex"),
+            Cli::Devin => {
+                return vec![(
+                    "Devin's checked download",
+                    devin_unpack(DEVIN_MANIFEST, DEVIN_BUNDLES),
+                )];
+            }
         };
-        [
+        vec![
             (
                 "npm",
                 format!(
@@ -62,12 +125,77 @@ impl Plan {
     }
 }
 
+/// Devin's installer's own steps, without the `devin setup` it ends with:
+/// its manifest read for this computer's bundle, the bundle (only one under
+/// `bundles`) downloaded and checked against the manifest's sha256, unpacked
+/// into `~/.local/share/devin/cli/_versions/<version>`, made `current`, and
+/// linked from `~/.local/bin/devin`. A `~/.local/bin/devin` that isn't
+/// Devin's own link is left as it is, and said.
+fn devin_unpack(manifest: &str, bundles: &str) -> String {
+    format!(
+        r#"set -eu
+case "$(uname -s)/$(uname -m)" in
+  Darwin/arm64) target=aarch64-apple-darwin ;;
+  Darwin/x86_64) target=x86_64-apple-darwin ;;
+  Linux/x86_64) target=x86_64-unknown-linux ;;
+  Linux/aarch64|Linux/arm64) target=aarch64-unknown-linux ;;
+  *) echo "Devin doesn't run on $(uname -s) $(uname -m)."; exit 1 ;;
+esac
+manifest=$(curl -fsSL --max-time 30 '{manifest}') || {{ echo "Failed to fetch Devin's manifest"; exit 1; }}
+field() {{ grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 | sed 's/.*"\([^"]*\)"$/\1/'; }}
+version=$(printf '%s' "$manifest" | field version || true)
+entry=$(printf '%s' "$manifest" | grep -o "\"$target\"[[:space:]]*:[[:space:]]*{{[^}}]*}}" | head -1 || true)
+url=$(printf '%s' "$entry" | field url || true)
+sha=$(printf '%s' "$entry" | field sha256 || true)
+case "$version" in ''|.*|*[!0-9A-Za-z.+-]*) echo "Devin's manifest has no version Desk can use."; exit 1 ;; esac
+case "$sha" in *[!0-9a-f]*|'') echo "Devin's manifest has no checksum for $target."; exit 1 ;; esac
+[ ${{#sha}} -eq 64 ] || {{ echo "Devin's manifest has no checksum for $target."; exit 1; }}
+case "$url" in *..*|*[[:space:]]*) url= ;; '{bundles}'*) ;; *) url= ;; esac
+[ -n "$url" ] || {{ echo "Devin's manifest has no download of Devin's own for $target."; exit 1; }}
+data="${{XDG_DATA_HOME:-$HOME/.local/share}}"
+for old in cognition chisel; do
+  if [ -d "$data/$old" ] && [ ! -e "$data/devin" ]; then mv "$data/$old" "$data/devin" && ln -s "$data/devin" "$data/$old"; fi
+done
+versions="$data/devin/cli/_versions"
+dir="$versions/$version"
+mkdir -p "$versions" "$HOME/.local/bin"
+if [ ! -x "$dir/bin/devin" ]; then
+  tmp=$(mktemp -d "$versions/_desk.XXXXXX")
+  trap 'rm -rf "$tmp"' EXIT
+  curl -fsSL --max-time 900 "$url" -o "$tmp/bundle.tar.gz" || {{ echo "Failed to download Devin"; exit 1; }}
+  if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum "$tmp/bundle.tar.gz" | cut -d' ' -f1)
+  else got=$(shasum -a 256 "$tmp/bundle.tar.gz" | cut -d' ' -f1); fi
+  [ "$got" = "$sha" ] || {{ echo "Devin's download didn't match its checksum, so Desk didn't install it."; exit 1; }}
+  mkdir "$tmp/x"
+  tar xzf "$tmp/bundle.tar.gz" -C "$tmp/x"
+  [ -x "$tmp/x/bin/devin" ] || {{ echo "Devin's download has no devin in it."; exit 1; }}
+  rm -rf "$dir"
+  mv "$tmp/x" "$dir"
+fi
+rm -f "$versions/current"
+ln -s "$version" "$versions/current"
+link="$HOME/.local/bin/devin"
+if [ -L "$link" ]; then
+  case "$(readlink "$link")" in
+    */devin/cli/_versions/*|*/cognition/cli/_versions/*|*/chisel/cli/_versions/*) rm -f "$link" ;;
+    *) echo "~/.local/bin/devin points somewhere else, so Desk left it."; exit 1 ;;
+  esac
+elif [ -e "$link" ]; then
+  echo "~/.local/bin/devin is there already and isn't Devin's link, so Desk left it."; exit 1
+fi
+ln -s "$versions/current/bin/devin" "$link"
+echo curl-bash > "$dir/distribution"
+echo "Installed devin v$version."
+"#
+    )
+}
+
 /// The exit code a way to install gives when its tool isn't there.
 const NOT_THERE: i32 = 127;
 
-/// Whether the plan's CLI can be found where the backend runs: on the
-/// login PATH or in `~/.local/bin`, where both installers put it.
-pub fn installed(backend: &Backend, plan: Plan) -> bool {
+/// Whether the CLI can be found where the backend runs: on the login PATH
+/// or in `~/.local/bin`, where the installers put it.
+pub fn installed(backend: &Backend, plan: Cli) -> bool {
     cli::installed(backend, plan.program())
 }
 
@@ -105,7 +233,7 @@ impl Progress {
 
 #[derive(Serialize, Clone)]
 struct Event {
-    plan: Plan,
+    plan: Cli,
     #[serde(flatten)]
     progress: Progress,
 }
@@ -117,7 +245,7 @@ fn offline(code: Option<i32>) -> bool {
 
 /// What to tell the person when the installer stops. What it last said
 /// goes under Details, never in the sentence.
-fn failure(plan: Plan, code: Option<i32>, _last: &str) -> String {
+fn failure(plan: Cli, code: Option<i32>, _last: &str) -> String {
     if offline(code) {
         return format!(
             "Couldn't download {}. Check this computer is online and try again.",
@@ -138,13 +266,13 @@ const PROBE_DEADLINE: std::time::Duration = std::time::Duration::from_secs(45);
 
 #[derive(Default)]
 pub struct Installs {
-    running: Arc<Mutex<Vec<Plan>>>,
+    running: Arc<Mutex<Vec<Cli>>>,
 }
 
 impl Installs {
     /// Runs the installer in the background; progress arrives as
     /// `cli-install` events.
-    pub fn start(&self, app: &AppHandle, backend: Backend, plan: Plan) -> Result<(), String> {
+    pub fn start(&self, app: &AppHandle, backend: Backend, plan: Cli) -> Result<(), String> {
         {
             let mut running = self.running.lock().expect("installs");
             if running.contains(&plan) {
@@ -207,7 +335,10 @@ impl Installs {
             // the same way. If none works, what's said and offered stays
             // the installer's; theirs goes under Details.
             let mut also = None;
-            if worth_other_ways(&outcome) {
+            let found = |outcome: &Outcome| {
+                !outcome.timed_out && plan.found_is_done() && installed(&backend, plan)
+            };
+            if worth_other_ways(&outcome, plan) && !found(&outcome) {
                 match other_ways(&backend, plan, &report, brew_here(&backend)) {
                     Other::Installed(other) => outcome = other,
                     Other::Failed { name, last } => also = Some((name, last)),
@@ -219,6 +350,7 @@ impl Installs {
                 !outcome.ok() && (outcome.timed_out || probe::is_download_failure(&outcome.last));
             let last = outcome.last.trim().to_string();
             let mut progress = match &outcome.status {
+                _ if found(&outcome) => Progress::Done,
                 _ if outcome.timed_out => Progress::failed(format!(
                     "{}'s installer didn't finish within {} minutes.",
                     plan.cli_name(),
@@ -266,10 +398,15 @@ enum Other {
 
 /// Whether a failed run is one the other ways may get round: a download
 /// that failed, while this computer is online. Never a timeout, an
-/// unsupported system, or anything else the installer stopped at.
-fn worth_other_ways(outcome: &Outcome) -> bool {
+/// unsupported system, or anything else the installer stopped at. Devin's
+/// own steps are tried after any failure online but a timeout: its
+/// installer can stop at `devin setup` as at a download.
+fn worth_other_ways(outcome: &Outcome, plan: Cli) -> bool {
     let offline_now = matches!(&outcome.status, Ok(s) if offline(s.code()));
-    !outcome.ok() && !outcome.timed_out && !offline_now && probe::is_download_failure(&outcome.last)
+    !outcome.ok()
+        && !outcome.timed_out
+        && !offline_now
+        && (plan == Cli::Devin || probe::is_download_failure(&outcome.last))
 }
 
 /// Whether Homebrew is one of the ways where `backend` runs: a Mac's own.
@@ -296,7 +433,7 @@ fn said_under_details(last: &str, also: Option<&(&'static str, String)>) -> Opti
 
 fn other_ways(
     backend: &Backend,
-    plan: Plan,
+    plan: Cli,
     report: &(impl Fn(Progress) + Clone + Send + 'static),
     brew: bool,
 ) -> Other {
@@ -331,18 +468,14 @@ fn passed_over(outcome: &Outcome) -> bool {
     matches!(&outcome.status, Ok(s) if s.code() == Some(NOT_THERE))
 }
 
-fn script(plan: Plan) -> String {
-    format!(
-        "{}set -o pipefail; {}",
-        clear_dead_link(plan),
-        plan.installer()
-    )
+fn script(plan: Cli) -> String {
+    format!("{}set -o pipefail; {}", clear_dead_link(plan), plan.run())
 }
 
 /// A `~/.local/bin/<cli>` link whose target is gone (an uninstall that
 /// left it behind) stops the installer putting its own there: removed
 /// first, and said. Only a dangling link at that one path.
-fn clear_dead_link(plan: Plan) -> String {
+fn clear_dead_link(plan: Cli) -> String {
     let at = format!("$HOME/.local/bin/{}", plan.program());
     format!(
         "if [ -L \"{at}\" ] && [ ! -e \"{at}\" ]; then rm -f \"{at}\" && echo \"Removed a broken link at ~/.local/bin/{}\"; fi; ",
@@ -350,7 +483,7 @@ fn clear_dead_link(plan: Plan) -> String {
     )
 }
 
-fn spawn(backend: &Backend, plan: Plan) -> eyre::Result<std::process::Child> {
+fn spawn(backend: &Backend, plan: Cli) -> eyre::Result<std::process::Child> {
     spawn_script(backend, &script(plan))
 }
 
@@ -435,7 +568,7 @@ fn drain(
 }
 
 /// Looks into a failed download where the installer ran.
-fn diagnose(backend: &Backend, plan: Plan) -> probe::Diagnosis {
+fn diagnose(backend: &Backend, plan: Cli) -> probe::Diagnosis {
     let target = plan.target();
     let ran = cli::installer(backend, &probe::wrapped(&target.script()))
         .ok()
@@ -453,31 +586,31 @@ mod tests {
     #[test]
     fn failures_are_said_plainly() {
         assert_eq!(
-            failure(Plan::Claude, Some(6), "curl: (6) Could not resolve host"),
+            failure(Cli::Claude, Some(6), "curl: (6) Could not resolve host"),
             "Couldn't download Claude Code. Check this computer is online and try again."
         );
         assert_eq!(
-            failure(Plan::Chatgpt, Some(1), "  Unsupported architecture  "),
+            failure(Cli::Chatgpt, Some(1), "  Unsupported architecture  "),
             "Codex's installer stopped before it finished.",
             "what it printed is for Details"
         );
         assert_eq!(
-            failure(Plan::Chatgpt, Some(1), ""),
+            failure(Cli::Chatgpt, Some(1), ""),
             "Codex's installer stopped before it finished."
         );
     }
 
     #[test]
     fn each_plan_installs_its_own_cli_from_its_official_installer() {
-        assert_eq!(Plan::Claude.program(), "claude");
+        assert_eq!(Cli::Claude.program(), "claude");
         assert!(
-            Plan::Claude
+            Cli::Claude
                 .installer()
                 .contains("https://claude.ai/install.sh")
         );
-        assert_eq!(Plan::Chatgpt.program(), "codex");
+        assert_eq!(Cli::Chatgpt.program(), "codex");
         assert!(
-            Plan::Chatgpt
+            Cli::Chatgpt
                 .installer()
                 .contains("https://chatgpt.com/codex/install.sh")
         );
@@ -487,7 +620,7 @@ mod tests {
     fn a_failed_install_carries_the_command_to_run_by_hand() {
         let p = Progress::Failed {
             message: "The download stalled.".into(),
-            command: Some(Plan::Claude.installer().into()),
+            command: Some(Cli::Claude.installer().into()),
             hint: Some("Run it in Ubuntu (WSL).".into()),
             details: Some("curl: (56) Recv failure".into()),
         };
@@ -510,7 +643,7 @@ mod tests {
         std::fs::create_dir_all(&bin).unwrap();
         let run = || {
             std::process::Command::new("/bin/bash")
-                .args(["-c", &clear_dead_link(Plan::Claude)])
+                .args(["-c", &clear_dead_link(Cli::Claude)])
                 .env("HOME", home.path())
                 .output()
                 .unwrap()
@@ -537,14 +670,14 @@ mod tests {
         std::fs::remove_file(bin.join("claude")).unwrap();
         assert!(run().status.success());
         assert!(
-            script(Plan::Claude)
+            script(Cli::Claude)
                 .ends_with("set -o pipefail; curl -fsSL https://claude.ai/install.sh | bash")
         );
     }
 
     #[test]
     fn each_cli_has_its_docs_other_ways_npm_into_home_then_homebrew() {
-        let [npm, brew] = Plan::Claude.alternatives();
+        let [npm, brew] = <[_; 2]>::try_from(Cli::Claude.alternatives()).unwrap();
         assert_eq!(npm.0, "npm");
         assert!(
             npm.1
@@ -552,7 +685,7 @@ mod tests {
         );
         assert_eq!(brew.0, "Homebrew");
         assert!(brew.1.ends_with("brew install --cask claude-code"));
-        let [npm, brew] = Plan::Chatgpt.alternatives();
+        let [npm, brew] = <[_; 2]>::try_from(Cli::Chatgpt.alternatives()).unwrap();
         assert!(npm.1.ends_with("@openai/codex"));
         assert!(brew.1.ends_with("brew install --cask codex"));
     }
@@ -575,21 +708,34 @@ mod tests {
             probe::is_download_failure(stalled),
             "the fixture is a download failure"
         );
-        assert!(worth_other_ways(&ran(18, stalled, false)));
-        assert!(!worth_other_ways(&ran(
-            1,
-            "Unsupported architecture",
-            false
-        )));
+        assert!(worth_other_ways(&ran(18, stalled, false), Cli::Claude));
+        assert!(!worth_other_ways(
+            &ran(1, "Unsupported architecture", false),
+            Cli::Claude
+        ));
         assert!(
-            !worth_other_ways(&ran(18, stalled, true)),
+            !worth_other_ways(&ran(18, stalled, true), Cli::Claude),
             "never after a timeout"
         );
         assert!(
-            !worth_other_ways(&ran(6, "curl: (6) Could not resolve host", false)),
+            !worth_other_ways(
+                &ran(6, "curl: (6) Could not resolve host", false),
+                Cli::Claude
+            ),
             "never offline"
         );
-        assert!(!worth_other_ways(&ran(0, "", false)));
+        assert!(!worth_other_ways(&ran(0, "", false), Cli::Claude));
+        // Devin's own steps: after `setup` stopped too, never offline or late.
+        assert!(worth_other_ways(
+            &ran(1, "Error: no tty", false),
+            Cli::Devin
+        ));
+        assert!(!worth_other_ways(&ran(1, "x", true), Cli::Devin));
+        assert!(!worth_other_ways(
+            &ran(6, "curl: (6) Could not resolve host", false),
+            Cli::Devin
+        ));
+        assert!(!worth_other_ways(&ran(0, "", false), Cli::Devin));
     }
 
     #[test]
@@ -621,7 +767,7 @@ mod tests {
     fn a_way_whose_tool_isnt_there_is_passed_over_and_one_that_is_runs() {
         let bin = tempfile::tempdir().unwrap();
         let run = |path: &str| {
-            let [(_, npm), _] = Plan::Claude.alternatives();
+            let [(_, npm), _] = <[_; 2]>::try_from(Cli::Claude.alternatives()).unwrap();
             let mut command = std::process::Command::new("/bin/bash");
             command
                 .args(["-c", &npm])
@@ -651,6 +797,176 @@ mod tests {
                 "npm install -g --prefix {}/.local @anthropic-ai/claude-code",
                 bin.path().display()
             )
+        );
+    }
+
+    #[test]
+    fn devins_installer_runs_with_nothing_to_read_and_its_own_steps_come_after() {
+        let run = Cli::Devin.run();
+        assert!(run.starts_with("s=$(curl -fsSL https://cli.devin.ai/install.sh) && bash -c"));
+        assert!(
+            run.ends_with("</dev/null"),
+            "devin setup can't wait on stdin"
+        );
+        assert!(!run.contains('|'), "never fed the rest of its script");
+        assert_eq!(
+            Cli::Devin.installer(),
+            "curl -fsSL https://cli.devin.ai/install.sh | bash"
+        );
+        let ways = Cli::Devin.alternatives();
+        assert_eq!(ways.len(), 1);
+        assert!(
+            ways[0]
+                .1
+                .contains("https://static.devin.ai/cli/current/manifest.json")
+        );
+        assert!(!ways[0].1.contains("setup"));
+        assert!(Cli::Devin.found_is_done() && !Cli::Claude.found_is_done());
+        assert_eq!(Cli::from(Plan::Chatgpt), Cli::Chatgpt);
+        assert_eq!(
+            serde_json::from_str::<Cli>("\"devin\"").unwrap(),
+            Cli::Devin
+        );
+    }
+
+    /// A Devin manifest, bundle and home in a folder: the bundle's `devin`
+    /// prints `devin 9.9.9`.
+    #[cfg(unix)]
+    fn devin_release(sha: Option<&str>) -> (tempfile::TempDir, String, String) {
+        use std::os::unix::fs::PermissionsExt;
+        let at = tempfile::tempdir().unwrap();
+        let root = at.path();
+        let bundle = root.join("build/bin");
+        std::fs::create_dir_all(&bundle).unwrap();
+        std::fs::write(bundle.join("devin"), "#!/bin/sh\necho devin 9.9.9\n").unwrap();
+        std::fs::set_permissions(bundle.join("devin"), std::fs::Permissions::from_mode(0o755))
+            .unwrap();
+        std::fs::create_dir_all(root.join("cdn/9.9.9")).unwrap();
+        let tarball = root.join("cdn/9.9.9/devin.tar.gz");
+        let made = std::process::Command::new("tar")
+            .args(["czf", tarball.to_str().unwrap(), "-C"])
+            .arg(root.join("build"))
+            .arg("bin")
+            .status()
+            .unwrap();
+        assert!(made.success());
+        let real = {
+            let out = std::process::Command::new("sh")
+                .args([
+                    "-c",
+                    "sha256sum \"$1\" 2>/dev/null || shasum -a 256 \"$1\"",
+                    "_",
+                ])
+                .arg(&tarball)
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout)
+                .split_whitespace()
+                .next()
+                .unwrap()
+                .to_string()
+        };
+        let bundles = format!("file://{}/cdn/", root.display());
+        let platforms = [
+            "aarch64-apple-darwin",
+            "x86_64-apple-darwin",
+            "x86_64-unknown-linux",
+            "aarch64-unknown-linux",
+        ]
+        .map(|t| {
+            format!(
+                r#""{t}":{{"url":"{bundles}9.9.9/devin.tar.gz","sha256":"{}"}}"#,
+                sha.unwrap_or(&real)
+            )
+        })
+        .join(",");
+        std::fs::write(
+            root.join("cdn/manifest.json"),
+            format!(r#"{{"version":"9.9.9","platforms":{{{platforms}}}}}"#),
+        )
+        .unwrap();
+        std::fs::create_dir_all(root.join("home")).unwrap();
+        let manifest = format!("file://{}/cdn/manifest.json", root.display());
+        (at, manifest, bundles)
+    }
+
+    #[cfg(unix)]
+    fn unpack(home: &std::path::Path, manifest: &str, bundles: &str) -> std::process::Output {
+        std::process::Command::new("/bin/bash")
+            .args(["-c", &devin_unpack(manifest, bundles)])
+            .env("HOME", home)
+            .env_remove("XDG_DATA_HOME")
+            .stdin(Stdio::null())
+            .output()
+            .unwrap()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn desk_unpacks_devins_checked_bundle_itself_without_setup() {
+        let (at, manifest, bundles) = devin_release(None);
+        let home = at.path().join("home");
+        let out = unpack(&home, &manifest, &bundles);
+        assert!(
+            out.status.success(),
+            "{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        let link = home.join(".local/bin/devin");
+        assert_eq!(
+            std::fs::read_link(&link).unwrap(),
+            home.join(".local/share/devin/cli/_versions/current/bin/devin")
+        );
+        let ran = std::process::Command::new(&link).output().unwrap();
+        assert_eq!(String::from_utf8_lossy(&ran.stdout).trim(), "devin 9.9.9");
+        let version = home.join(".local/share/devin/cli/_versions/9.9.9");
+        assert_eq!(
+            std::fs::read_to_string(version.join("distribution")).unwrap(),
+            "curl-bash\n"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "Installed devin v9.9.9."
+        );
+        // Again, over its own link: kept as Devin's.
+        assert!(unpack(&home, &manifest, &bundles).status.success());
+        assert!(std::fs::read_link(&link).is_ok());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_bundle_that_doesnt_match_its_checksum_or_isnt_devins_own_is_never_installed() {
+        let (at, manifest, bundles) = devin_release(Some(&"0".repeat(64)));
+        let home = at.path().join("home");
+        let out = unpack(&home, &manifest, &bundles);
+        assert!(!out.status.success());
+        assert!(
+            String::from_utf8_lossy(&out.stdout).contains("didn't match its checksum"),
+            "{}",
+            String::from_utf8_lossy(&out.stdout)
+        );
+        assert!(std::fs::symlink_metadata(home.join(".local/bin/devin")).is_err());
+        assert!(!home.join(".local/share/devin/cli/_versions/9.9.9").exists());
+
+        // A download from anywhere but Devin's own: refused before it's fetched.
+        let (at, manifest, _) = devin_release(None);
+        let home = at.path().join("home");
+        let out = unpack(&home, &manifest, "https://static.devin.ai/cli/");
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stdout).contains("no download of Devin's own"));
+        assert!(std::fs::symlink_metadata(home.join(".local/bin/devin")).is_err());
+
+        // A ~/.local/bin/devin of the person's own: left as it is, and said.
+        let (at, manifest, bundles) = devin_release(None);
+        let home = at.path().join("home");
+        std::fs::create_dir_all(home.join(".local/bin")).unwrap();
+        std::fs::write(home.join(".local/bin/devin"), "mine").unwrap();
+        let out = unpack(&home, &manifest, &bundles);
+        assert!(!out.status.success());
+        assert!(String::from_utf8_lossy(&out.stdout).contains("Desk left it"));
+        assert_eq!(
+            std::fs::read_to_string(home.join(".local/bin/devin")).unwrap(),
+            "mine"
         );
     }
 

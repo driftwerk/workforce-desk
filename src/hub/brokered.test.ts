@@ -62,6 +62,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   startEngineSignIn: (h) => h.startEngineSignIn("codex"),
   engineSignIn: (h) => h.engineSignIn("cx1"),
   cancelEngineSignIn: (h) => h.cancelEngineSignIn("cx1"),
+  sendEngineSignInToken: (h) => h.sendEngineSignInToken("dv1", "t"),
   dismissSignInProblem: (h) => h.dismissSignInProblem("a1"),
   switchAccount: (h) => h.switchAccount("s1", "a1"),
   switchAll: (h) => h.switchAll("a1", "a2"),
@@ -225,9 +226,8 @@ const HELPERS = new Set(["t", "request", "call", "desk", "text", "putText", "con
 const publicMembers = (h: DeskHub): string[] =>
   [...Object.keys(h), ...Object.getOwnPropertyNames(Object.getPrototypeOf(h))].filter((k) => !HELPERS.has(k)).sort();
 
-/** What DeskHub asks of a machine's hub alone, never this computer's: an
- *  engine's own sign-in (Codex's device page). */
-const MACHINE_ONLY = new Set(["startEngineSignIn", "engineSignIn", "cancelEngineSignIn"]);
+/** What DeskHub asks of a machine's hub alone, never this computer's. */
+const MACHINE_ONLY = new Set<string>([]);
 
 /** The kind a request made now is recorded as. */
 let asking: "http" | "machine_http" = "http";

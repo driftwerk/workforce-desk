@@ -19,9 +19,9 @@ import { nameOfMachine, thisComputerLower } from "../machines/words";
 import { machineHome, pickFolder } from "../platform";
 import { useHost } from "../shell/host";
 import { NEW_SESSION_LINE } from "../shell/newLines";
-import { CodexSigningIn, InstallEngine } from "../settings/EngineBlocks";
+import { CodexSigningIn, DevinSigningIn, InstallEngine, installsOn } from "../settings/EngineBlocks";
 import { SignInClaude } from "../settings/Accounts";
-import { useCodexSignIn } from "../engines/signIn";
+import { useCodexSignIn, useDevinSignIn } from "../engines/signIn";
 import { openSettingsAt, type Problem } from "../ui/problem";
 import { ProblemNote } from "../ui/ProblemNote";
 import { branchFor, choicesFor, lastFolder, nameFromGoal, remember, type Choices } from "./remembered";
@@ -73,11 +73,13 @@ export const whyNotStart = (o: {
   /** No engine there to start on; the one chosen isn't signed in (both
    *  said above, with their fix). */
   noEngine?: boolean;
+  /** What isn't installed there that Desk installs (its titles). */
+  absent?: string[];
   signedOut?: string | null;
 }): Blocked | null => {
   if (o.starting) return null;
   if (!o.hub) return { words: `Desk can’t reach ${o.remote ? o.where : "this computer’s helper"} right now: it starts sessions once it’s back.` };
-  if (o.noEngine) return { words: "Install Claude Code or Codex above, then start." };
+  if (o.noEngine) return { words: `Install ${anyOf(o.absent?.length ? o.absent : ["Claude Code", "Codex"])} above, then start.` };
   if (o.signedOut) return { words: `Sign ${o.signedOut} in above, then start.` };
   if (!o.folder && !o.remote) return { words: "Pick the folder it works in." };
   if (o.remote && o.noFolder) return { words: `That folder isn’t on ${o.where}: make it, or pick one that is.` };
@@ -381,6 +383,7 @@ export function NewSession({
     cantSignIn: cantSignIn ? ENGINE_TITLE[engine] : null,
     starting: busy,
     noEngine,
+    absent: engines ? installable(engines, runOn).map((e) => e.title) : [],
     signedOut: signedOut && engineInfo ? engineInfo.title : null,
   });
   const groupName = group === UNGROUPED ? "Ungrouped" : (layout.groups.find((g) => g.id === group)?.name ?? "Ungrouped");
@@ -597,12 +600,12 @@ export function NewSession({
 /** No engine to start a session with there: what isn't installed, each
  *  with Install. */
 export function NothingToStart({ engines, machine, where, native, onFixed }: { engines: EngineInfo[]; machine: MachineId; where: string; native: MachineNative; onFixed: () => void }) {
-  const absent = engines.filter((e) => e.installed === false && (e.engine === "claude" || e.engine === "codex"));
+  const absent = installable(engines, machine);
   return (
     <div className="new-fix" role="group" aria-label="Nothing to start a session with">
       <p className="small state-blocked">
         {absent.length
-          ? `Neither Claude Code nor Codex is installed on ${where}, so there’s nothing to start a session with yet.`
+          ? `${noneOf(absent.map((e) => e.title))} installed on ${where}, so there’s nothing to start a session with yet.`
           : `Nothing on ${where} can start a session yet.`}
       </p>
       <span>
@@ -615,11 +618,28 @@ export function NothingToStart({ engines, machine, where, native, onFixed }: { e
   );
 }
 
+/** The engines not installed there that Desk installs from New session. */
+export const installable = (engines: EngineInfo[], machine: MachineId): EngineInfo[] =>
+  engines.filter((e) => e.installed === false && ["claude", "codex", "devin"].includes(e.engine) && installsOn(e.engine, machine));
+
+/** "Neither Claude Code nor Codex is", "None of Claude Code, Codex or Devin is". */
+export const noneOf = (titles: string[]): string =>
+  titles.length === 1
+    ? `${titles[0]} isn’t`
+    : titles.length === 2
+      ? `Neither ${titles[0]} nor ${titles[1]} is`
+      : `None of ${titles.slice(0, -1).join(", ")} or ${titles.at(-1)} is`;
+
+/** "Claude Code or Codex", "Claude Code, Codex or Devin". */
+const anyOf = (titles: string[]): string => (titles.length < 2 ? (titles[0] ?? "") : `${titles.slice(0, -1).join(", ")} or ${titles.at(-1)}`);
+
 /** The engine chosen is installed but never signed in, and has no account:
- *  sign it in here (Claude to an account, Codex to ChatGPT). */
+ *  sign it in here (Claude to an account, Codex to ChatGPT, Devin to its
+ *  own). */
 function NotSignedIn({ engine, machine, where, native, onFixed }: { engine: EngineInfo; machine: MachineId; where: string; native: MachineNative; onFixed: () => void }) {
   const [signing, setSigning] = useState(false);
   const codex = useCodexSignIn(machine, where, native, onFixed);
+  const devin = useDevinSignIn(machine, where, native, onFixed);
   if (engine.engine === "claude" && signing)
     return (
       <SignInClaude
@@ -633,14 +653,16 @@ function NotSignedIn({ engine, machine, where, native, onFixed }: { engine: Engi
       />
     );
   if (engine.engine === "codex" && codex.run.at !== "idle") return <CodexSigningIn codex={codex} machine={machine} where={where} />;
+  if (engine.engine === "devin" && devin.run.at !== "idle") return <DevinSigningIn devin={devin} />;
+  const begin = engine.engine === "codex" ? () => void codex.begin() : engine.engine === "devin" ? () => void devin.begin() : () => setSigning(true);
   return (
     <div className="new-fix" role="group" aria-label={`${engine.title} isn’t signed in`}>
       <p className="small state-blocked">
         {engine.title} isn’t signed in on {where}, so a session would stop at its sign-in.
       </p>
       <span>
-        <button type="button" className="btn btn-sm btn-signal" onClick={() => (engine.engine === "codex" ? void codex.begin() : setSigning(true))}>
-          {engine.engine === "codex" ? "Sign in to ChatGPT…" : "Sign in to Claude…"}
+        <button type="button" className="btn btn-sm btn-signal" onClick={begin}>
+          {engine.engine === "codex" ? "Sign in to ChatGPT…" : engine.engine === "devin" ? "Sign in to Devin…" : "Sign in to Claude…"}
         </button>
       </span>
     </div>
