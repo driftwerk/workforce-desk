@@ -114,6 +114,15 @@ fn plain(s: &str) -> bool {
 }
 
 impl KnowsMachines {
+    /// Machine hub `hub` is gone: it is linked again from nothing if it
+    /// comes back.
+    pub fn forget_machine(&self, hub: &str) {
+        self.linked
+            .lock()
+            .expect("linked")
+            .retain(|(h, _), _| h != hub);
+    }
+
     /// Tells every machine its part of every rule for an agent on another
     /// hub. What one machine or rule can't be told is skipped and logged.
     pub async fn sync_all(&self, io: &HubIo, machines: &[Machine]) {
@@ -309,6 +318,192 @@ async fn keeps_engines_apart(io: &HubIo, hub: &str) -> bool {
         get_json::<serde_json::Value>(io, hub, "/api/me/desk-knows-tokens/engines").await,
         Ok(Some(v)) if v["engines"] == json!(true)
     )
+}
+
+/// What ending sharing is still owed: an agent hub that couldn't be told
+/// to end a removed engine's tokens.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+struct Owed {
+    hub: String,
+    engine: String,
+}
+
+/// Taking back what a machine, or a hub, was given to share by (Sees): when
+/// a machine is removed from Desk, or a hub is, nothing may go on sharing
+/// with the token it holds. Each step is the person's own Desk's, with its
+/// device tokens; what an agent's hub couldn't be told is kept in a file
+/// and told again every few minutes, until it answers.
+pub struct Ending {
+    file: std::path::PathBuf,
+    one: tokio::sync::Mutex<()>,
+}
+
+/// How long one call to take sharing back may take: removing a machine or
+/// a hub is never held up longer by one that doesn't answer.
+const CALL: Duration = Duration::from_secs(20);
+
+/// What ended a token on a hub: done, or to be tried again.
+enum Ended {
+    Done,
+    Later(String),
+}
+
+impl Ending {
+    pub fn at(paths: &desk_core::Paths) -> Self {
+        Self {
+            file: paths.root.join("knows-ended.json"),
+            one: tokio::sync::Mutex::new(()),
+        }
+    }
+
+    fn owed(&self) -> Vec<Owed> {
+        let text = match std::fs::read_to_string(&self.file) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+            Err(e) => {
+                tracing::warn!(error = %e, "what Desk still owes to end sharing couldn't be read");
+                return Vec::new();
+            }
+        };
+        serde_json::from_str(&text).unwrap_or_else(|e| {
+            // Kept aside, never overwritten: what it held may still be owed.
+            tracing::warn!(error = %e, "what Desk still owes to end sharing is unreadable; kept as knows-ended.json.bad");
+            let _ = std::fs::rename(&self.file, self.file.with_extension("json.bad"));
+            Vec::new()
+        })
+    }
+
+    fn keep(&self, owed: &[Owed]) {
+        let wrote = serde_json::to_string(owed)
+            .map_err(|e| e.to_string())
+            .and_then(|s| desk_core::write_private(&self.file, &s).map_err(|e| e.to_string()));
+        if let Err(e) = wrote {
+            tracing::warn!(error = %e, "what Desk still owes to end sharing wasn't kept");
+        }
+    }
+
+    /// Machine `id` is being removed from Desk. Its own hub, if still
+    /// reached, unlinks its agents (each token ended where it was made); and
+    /// every agent hub in `hubs` is told to end the tokens this computer
+    /// minted for it, which works with the machine gone or unreachable.
+    pub async fn machine(&self, io: &HubIo, machine_hub: Option<&str>, id: &str, hubs: &[String]) {
+        let _one = self.one.lock().await;
+        if let Some(hub) = machine_hub {
+            unlink_on(io, hub, "/api/desk/knows-links").await;
+        }
+        let mut owed = self.owed();
+        for hub in hubs {
+            match end_engine(io, hub, id).await {
+                Ended::Done => {}
+                Ended::Later(why) => {
+                    tracing::warn!(%hub, machine = %id, error = %why, "a removed machine's Desk work tokens weren't ended yet; tried again");
+                    let o = Owed {
+                        hub: hub.clone(),
+                        engine: id.to_string(),
+                    };
+                    if !owed.contains(&o) {
+                        owed.push(o);
+                    }
+                }
+            }
+        }
+        self.keep(&owed);
+    }
+
+    /// Hub `hub` is being removed from Desk: its agents are unlinked on
+    /// this computer's hub and on each machine's (`here`), and every one of
+    /// this computer's engines' tokens (`engines`) ended there, while Desk
+    /// can still reach it. Not tried again: nothing reaches it afterwards.
+    pub async fn hub(&self, io: &HubIo, hub: &str, here: &[String], engines: &[String]) {
+        if !plain(hub) {
+            return;
+        }
+        for h in here {
+            unlink_on(io, h, &format!("/api/desk/knows-links/{hub}")).await;
+        }
+        for engine in engines {
+            if let Ended::Later(why) = end_engine(io, hub, engine).await {
+                tracing::warn!(%hub, %engine, error = %why, "a removed hub's Desk work tokens weren't ended; they end when they expire");
+            }
+        }
+    }
+
+    /// Tells again each hub that couldn't be told, dropping those Desk is
+    /// no longer paired with.
+    pub async fn retry(&self, io: &HubIo, paired: Option<&[String]>) {
+        // Which hubs Desk is paired with couldn't be read: nothing is
+        // dropped, nothing told, until it can.
+        let Some(paired) = paired else { return };
+        let _one = self.one.lock().await;
+        let owed = self.owed();
+        if owed.is_empty() {
+            return;
+        }
+        let mut still = Vec::new();
+        for o in owed {
+            if !paired.contains(&o.hub) {
+                continue;
+            }
+            if let Ended::Later(why) = end_engine(io, &o.hub, &o.engine).await {
+                tracing::debug!(hub = %o.hub, engine = %o.engine, error = %why, "a removed machine's Desk work tokens aren't ended yet");
+                still.push(o);
+            }
+        }
+        self.keep(&still);
+    }
+}
+
+/// `DELETE path` on hub `hub` (this computer's or a machine's), which
+/// unlinks what it names and ends each token on its own hub. Best effort:
+/// a hub that can't be reached is left, and said.
+async fn unlink_on(io: &HubIo, hub: &str, path: &str) {
+    let asked = tokio::time::timeout(CALL, io.fetch(hub, "DELETE", path, None))
+        .await
+        .unwrap_or_else(|_| Err("it didn't answer in time".to_string()));
+    match asked {
+        Ok((meta, _)) if (200..300).contains(&meta.status) => {}
+        Ok((meta, _)) => {
+            tracing::warn!(%hub, status = meta.status, "a hub didn't unlink what it shares by");
+        }
+        Err(e) => {
+            tracing::warn!(%hub, error = %e, "a hub couldn't be asked to unlink what it shares by");
+        }
+    }
+}
+
+/// Ends, on agent hub `hub` and with this computer's device token there,
+/// every Desk work token this computer minted for engine `engine`. A hub
+/// that no longer knows the device (401, 403) or is older and has no such
+/// route (404) has nothing more to end; anything else is tried again.
+async fn end_engine(io: &HubIo, hub: &str, engine: &str) -> Ended {
+    if !plain(hub) || !plain(engine) || hub == LOCAL || crate::hubs::machine_of(hub).is_some() {
+        return Ended::Done;
+    }
+    let path = format!("/api/me/desk-knows-tokens/engines/{engine}");
+    let asked = tokio::time::timeout(CALL, io.fetch(hub, "DELETE", &path, None))
+        .await
+        .unwrap_or_else(|_| Err("it didn't answer in time".to_string()));
+    match asked {
+        Ok((meta, _)) if (200..300).contains(&meta.status) => Ended::Done,
+        Ok((meta, _)) if matches!(meta.status, 401 | 403 | 404) => {
+            tracing::warn!(%hub, %engine, status = meta.status, "an agent's hub wouldn't end a removed engine's Desk work tokens (no such tokens, an older hub, or this computer's device isn't known there); any live ones end when they expire");
+            Ended::Done
+        }
+        Ok((meta, body)) => Ended::Later(words(meta.status, &body)),
+        Err(e) => Ended::Later(e),
+    }
+}
+
+/// The hubs of other workspaces Desk is paired with, by id.
+pub fn remote_hubs(paths: &desk_core::Paths) -> Vec<String> {
+    paired_hubs(paths).unwrap_or_default()
+}
+
+/// The same, or none when the list couldn't be read.
+pub fn paired_hubs(paths: &desk_core::Paths) -> Option<Vec<String>> {
+    crate::hubs::read_records(paths)
+        .ok()
+        .map(|r| r.into_iter().map(|r| r.id).collect())
 }
 
 /// This computer's hub, by its id here.
@@ -660,5 +855,152 @@ mod tests {
         assert_eq!(split_key("allan"), None);
         assert_eq!(split_key("/allan"), None);
         assert!(keys_of(b"nope").is_empty());
+    }
+
+    fn ending() -> (Ending, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        (Ending::at(&desk_core::Paths::at(dir.path())), dir)
+    }
+
+    #[tokio::test]
+    async fn a_removed_machine_unlinks_and_every_hubs_tokens_for_it_end_and_an_unreached_hub_is_told_again()
+     {
+        let (boxed, mut box_seen) = hub(vec![status("204 No Content", "")]).await;
+        let (dw, mut dw_seen) = hub(vec![
+            status("503 Service Unavailable", "{}"),
+            json_ok(json!({ "revoked": 2 })),
+        ])
+        .await;
+        let (old, mut old_seen) = hub(vec![status("404 Not Found", "{}")]).await;
+        let io = io_for(vec![
+            account("local", "http://127.0.0.1:9", true, "MAC"),
+            account("dw", &dw, false, "DW"),
+            account("old", &old, false, "OLD"),
+            account("box", &boxed, true, "BOX"),
+        ]);
+        let (ending, _dir) = ending();
+        let hubs = vec!["dw".to_string(), "old".to_string()];
+        ending.machine(&io, Some("box"), "box", &hubs).await;
+        // The machine's own hub unlinks; each agent hub ends the tokens of
+        // that engine; an older hub with no such route has none to end.
+        assert_eq!(lines(&mut box_seen), ["DELETE /api/desk/knows-links"]);
+        assert_eq!(
+            lines(&mut dw_seen),
+            ["DELETE /api/me/desk-knows-tokens/engines/box"]
+        );
+        assert_eq!(
+            lines(&mut old_seen),
+            ["DELETE /api/me/desk-knows-tokens/engines/box"]
+        );
+        // The one that couldn't be reached is owed, and told again.
+        assert_eq!(
+            ending.owed(),
+            [Owed {
+                hub: "dw".into(),
+                engine: "box".into()
+            }]
+        );
+        ending.retry(&io, Some(&hubs)).await;
+        assert_eq!(
+            lines(&mut dw_seen),
+            ["DELETE /api/me/desk-knows-tokens/engines/box"]
+        );
+        assert!(ending.owed().is_empty());
+    }
+
+    #[tokio::test]
+    async fn what_is_owed_to_a_hub_desk_is_no_longer_paired_with_is_dropped() {
+        let (dw, mut seen) = hub(vec![status("500 Internal Server Error", "{}")]).await;
+        let io = io_for(vec![
+            account("local", "http://127.0.0.1:9", true, "MAC"),
+            account("dw", &dw, false, "DW"),
+        ]);
+        let (ending, _dir) = ending();
+        ending.machine(&io, None, "box", &["dw".to_string()]).await;
+        assert_eq!(ending.owed().len(), 1);
+        lines(&mut seen);
+        ending.retry(&io, Some(&[])).await;
+        assert!(ending.owed().is_empty());
+        assert!(lines(&mut seen).is_empty());
+        // An id that isn't plain, or a hub that isn't a workspace's, is
+        // never asked.
+        ending
+            .machine(&io, None, "../x", &["dw".to_string(), "local".to_string()])
+            .await;
+        assert!(lines(&mut seen).is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_removed_hub_is_unlinked_on_this_computer_and_each_machine_and_its_tokens_end() {
+        let (mac, mut mac_seen) = hub(vec![status("204 No Content", "")]).await;
+        let (boxed, mut box_seen) = hub(vec![status("202 Accepted", "{}")]).await;
+        let (dw, mut dw_seen) = hub(vec![
+            json_ok(json!({ "revoked": 1 })),
+            json_ok(json!({ "revoked": 1 })),
+        ])
+        .await;
+        let io = io_for(vec![
+            account("local", &mac, true, "MAC"),
+            account("dw", &dw, false, "DW"),
+            account("box", &boxed, true, "BOX"),
+        ]);
+        let (ending, _dir) = ending();
+        ending
+            .hub(
+                &io,
+                "dw",
+                &["local".to_string(), "box".to_string()],
+                &["local".to_string(), "box".to_string()],
+            )
+            .await;
+        assert_eq!(lines(&mut mac_seen), ["DELETE /api/desk/knows-links/dw"]);
+        assert_eq!(lines(&mut box_seen), ["DELETE /api/desk/knows-links/dw"]);
+        assert_eq!(
+            lines(&mut dw_seen),
+            [
+                "DELETE /api/me/desk-knows-tokens/engines/local",
+                "DELETE /api/me/desk-knows-tokens/engines/box"
+            ]
+        );
+        assert!(ending.owed().is_empty());
+    }
+
+    #[tokio::test]
+    async fn what_is_owed_survives_an_unreadable_pairing_list_or_file() {
+        let (dw, mut seen) = hub(vec![status("500 Internal Server Error", "{}")]).await;
+        let io = io_for(vec![
+            account("local", "http://127.0.0.1:9", true, "MAC"),
+            account("dw", &dw, false, "DW"),
+        ]);
+        let (ending, _dir) = ending();
+        ending.machine(&io, None, "box", &["dw".to_string()]).await;
+        lines(&mut seen);
+        // The pairing list couldn't be read: nothing is dropped or sent.
+        ending.retry(&io, None).await;
+        assert_eq!(ending.owed().len(), 1);
+        assert!(lines(&mut seen).is_empty());
+        // A file that can't be parsed is kept aside, not overwritten.
+        std::fs::write(&ending.file, "{ not json").unwrap();
+        assert!(ending.owed().is_empty());
+        assert_eq!(
+            std::fs::read_to_string(ending.file.with_extension("json.bad")).unwrap(),
+            "{ not json"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_hub_that_doesnt_know_this_computer_has_nothing_owed() {
+        let (dw, _seen) = hub(vec![
+            status("401 Unauthorized", "{}"),
+            status("403 Forbidden", "{}"),
+        ])
+        .await;
+        let io = io_for(vec![
+            account("local", "http://127.0.0.1:9", true, "MAC"),
+            account("dw", &dw, false, "DW"),
+        ]);
+        let (ending, _dir) = ending();
+        ending.machine(&io, None, "box", &["dw".to_string()]).await;
+        assert!(ending.owed().is_empty());
     }
 }
