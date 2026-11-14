@@ -508,7 +508,7 @@ async fn linked(dir: &Path, e: &Engines<FakeEngine>, hub: &FakeHub, choice: Choi
         e,
         hub,
         &at(),
-        None,
+        Revoke::Later,
         ACME,
         "allan",
         choice,
@@ -547,7 +547,7 @@ async fn linking_asks_once_then_links_and_grants_every_engine_and_keeps_no_token
         &e,
         &hub,
         &at(),
-        None,
+        Revoke::Later,
         ACME,
         "allan",
         suggest(),
@@ -610,7 +610,7 @@ async fn a_cancel_sends_nothing() {
         &e,
         &hub,
         &at(),
-        None,
+        Revoke::Later,
         ACME,
         "allan",
         suggest(),
@@ -647,7 +647,7 @@ async fn the_question_says_the_terms_first_and_names_the_page_sets_plainly() {
         &e,
         &hub,
         &wide,
-        None,
+        Revoke::Later,
         ACME,
         "allan",
         full(40.0),
@@ -938,7 +938,7 @@ async fn stop_stops_revokes_unlinks_and_deletes_the_grants() {
     let e = two();
     let hub = FakeHub::new(HubMode::Takes);
     linked(dir.path(), &e, &hub, suggest()).await;
-    let done = unlink(&kept, &e, Some(&hub), ACME).await.unwrap();
+    let done = unlink(&kept, &e, Revoke::By(&hub), ACME).await.unwrap();
     assert!(done.failed.is_empty(), "{:?}", done.failed);
     assert!(hub.live().is_empty());
     let asked = e.here.asked();
@@ -980,7 +980,7 @@ async fn keeping_alive_finishes_a_stop_and_never_relinks() {
     *hub.expires_at.lock().unwrap() = Utc::now() + Duration::days(2);
     linked(dir.path(), &e, &hub, suggest()).await;
     devbox(&e).down.store(true, Ordering::SeqCst);
-    let done = unlink(&kept, &e, Some(&hub), ACME).await.unwrap();
+    let done = unlink(&kept, &e, Revoke::By(&hub), ACME).await.unwrap();
     assert_eq!(done.failed.len(), 1);
     assert!(status(&kept, &e, ACME).await.unwrap().stopping);
     let mints = hub.mints().len();
@@ -1145,7 +1145,7 @@ async fn a_new_boss_in_place_of_another_stops_the_old_one_first() {
         &e,
         &hub,
         &at(),
-        Some(&hub),
+        Revoke::By(&hub),
         ACME,
         "bea",
         suggest(),
@@ -1160,9 +1160,19 @@ async fn a_new_boss_in_place_of_another_stops_the_old_one_first() {
     assert_eq!(e.here.grant(ACME).unwrap()["live"], true);
     // The same boss again is refused: it's changed in its sheet.
     assert!(
-        link(&kept, &e, &hub, &at(), None, ACME, "bea", suggest(), never)
-            .await
-            .is_err()
+        link(
+            &kept,
+            &e,
+            &hub,
+            &at(),
+            Revoke::Later,
+            ACME,
+            "bea",
+            suggest(),
+            never
+        )
+        .await
+        .is_err()
     );
 }
 
@@ -1307,4 +1317,127 @@ async fn spent_today_adds_up_every_engine_and_is_unknown_when_one_is_silent() {
     assert_eq!(s.spent_today_usd, None);
     let here = s.engines.iter().find(|x| x.engine == LOCAL_ENGINE).unwrap();
     assert_eq!(here.spent_today_usd, Some(1.25));
+}
+
+/// A Pause that waits on a link under way stops the engines it linked
+/// meanwhile too, not only those linked when it was pressed.
+#[tokio::test]
+async fn a_pause_during_a_link_stops_the_engines_it_linked_meanwhile() {
+    let dir = tempfile::tempdir().unwrap();
+    let kept = dir.path().join(KEPT_FILE);
+    let e = two();
+    let hub = FakeHub::new(HubMode::Takes);
+    devbox(&e).down.store(true, Ordering::SeqCst);
+    linked(dir.path(), &e, &hub, suggest()).await;
+    assert!(devbox(&e).grant(ACME).is_none());
+    devbox(&e).down.store(false, Ordering::SeqCst);
+    // A change under way: devbox is linked while Pause waits for it.
+    let ops = ops_of(&kept, ACME);
+    let held = ops.clone().lock_owned().await;
+    let meanwhile = async {
+        tokio::task::yield_now().await;
+        let entry = load_group(&kept, ACME).await.unwrap();
+        let group = layout_group(&e.here, ACME).await.unwrap();
+        let linked = link_engine(&kept, &e, &hub, &at(), &entry, &group, "devbox", true).await;
+        assert!(matches!(linked, Linked::Yes));
+        drop(held);
+    };
+    let (paused, ()) = tokio::join!(pause(&kept, &e, ACME), meanwhile);
+    assert!(paused.unwrap().failed.is_empty());
+    assert_eq!(devbox(&e).grant(ACME).unwrap()["stopped"], true);
+    assert_eq!(e.here.grant(ACME).unwrap()["stopped"], true);
+    assert!(status(&kept, &e, ACME).await.unwrap().paused);
+}
+
+/// Try again links an engine that failed as the person said: live, even
+/// where a stop was left behind before.
+#[tokio::test]
+async fn try_again_comes_up_live_past_an_old_stop() {
+    let dir = tempfile::tempdir().unwrap();
+    let kept = dir.path().join(KEPT_FILE);
+    let e = two();
+    let hub = FakeHub::new(HubMode::Takes);
+    devbox(&e)
+        .held
+        .lock()
+        .unwrap()
+        .left
+        .insert(ACME.into(), (3, true));
+    devbox(&e).refuse_link.store(true, Ordering::SeqCst);
+    let done = linked(dir.path(), &e, &hub, suggest()).await;
+    assert_eq!(done.failed.len(), 1);
+    devbox(&e).refuse_link.store(false, Ordering::SeqCst);
+    let done = retry(&kept, &e, Some((&hub, &at())), ACME).await.unwrap();
+    assert!(done.failed.is_empty(), "{:?}", done.failed);
+    assert_eq!(devbox(&e).grant(ACME).unwrap()["live"], true);
+}
+
+/// A boss made on the group while the person was asked isn't overwritten.
+#[tokio::test]
+async fn a_boss_made_while_asked_isnt_overwritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let kept = dir.path().join(KEPT_FILE);
+    let e = two();
+    let hub = FakeHub::new(HubMode::Takes);
+    let meanwhile = |_: String, _: String, _: String| -> Answer {
+        let mut k = read_kept(&kept);
+        k.groups
+            .insert(ACME.into(), GroupLink::new(&at(), "bea", &suggest()));
+        write_kept(&kept, &k).unwrap();
+        std::future::ready(Ok(true))
+    };
+    let r = link(
+        &kept,
+        &e,
+        &hub,
+        &at(),
+        Revoke::Later,
+        ACME,
+        "allan",
+        suggest(),
+        meanwhile,
+    )
+    .await;
+    assert!(r.unwrap_err().contains("changed while you were asked"));
+    assert_eq!(read_kept(&kept).groups[ACME].agent, "bea");
+    assert!(e.here.held.lock().unwrap().handed.is_empty());
+}
+
+/// A Stop while the boss's hub can't be reached keeps every token, and
+/// says so; once it is reached, they are revoked.
+#[tokio::test]
+async fn a_stop_without_the_hub_keeps_its_tokens_to_revoke() {
+    let dir = tempfile::tempdir().unwrap();
+    let kept = dir.path().join(KEPT_FILE);
+    let e = two();
+    let hub = FakeHub::new(HubMode::Takes);
+    linked(dir.path(), &e, &hub, suggest()).await;
+    let done = unlink::<_, FakeHub>(&kept, &e, Revoke::Later, ACME)
+        .await
+        .unwrap();
+    assert_eq!(done.failed.len(), 1, "{:?}", done.failed);
+    let left = read_kept(&kept).groups[ACME].clone();
+    assert!(left.engines.is_empty());
+    assert_eq!(left.orphans.len(), 2);
+    assert_eq!(hub.live.lock().unwrap().len(), 2);
+    let done = unlink(&kept, &e, Revoke::By(&hub), ACME).await.unwrap();
+    assert!(done.failed.is_empty(), "{:?}", done.failed);
+    assert!(hub.live.lock().unwrap().is_empty());
+    assert!(!read_kept(&kept).groups.contains_key(ACME));
+}
+
+/// A question asked while the boss's hub can't be reached still names the
+/// host it was linked at.
+#[tokio::test]
+async fn a_question_without_the_hub_names_its_host() {
+    let dir = tempfile::tempdir().unwrap();
+    let kept = dir.path().join(KEPT_FILE);
+    let e = two();
+    let hub = FakeHub::new(HubMode::Takes);
+    linked(dir.path(), &e, &hub, suggest()).await;
+    let seen = Mutex::new(Vec::new());
+    set(&kept, &e, none(), ACME, act(), yes(&seen))
+        .await
+        .unwrap();
+    assert!(seen.lock().unwrap()[0].contains("“Driftwerk” (driftwerk.example)"));
 }

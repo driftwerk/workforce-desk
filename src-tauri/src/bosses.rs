@@ -229,6 +229,10 @@ pub struct GroupLink {
     /// The paired hub's id: the name the grants give it.
     pub hub: String,
     pub hub_label: String,
+    /// The address Desk reached the hub at when it linked the boss: what a
+    /// question names when the hub can't be reached now.
+    #[serde(default)]
+    pub hub_base: String,
     pub agent: String,
     pub choice: Choice,
     /// The person paused it: nothing is renewed, and each engine is sent
@@ -260,6 +264,7 @@ impl GroupLink {
         Self {
             hub: at.id.clone(),
             hub_label: at.label.clone(),
+            hub_base: at.base.clone(),
             agent: agent.to_string(),
             choice: choice.clone(),
             paused: false,
@@ -365,6 +370,9 @@ static OPS: std::sync::Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>> =
 
 fn ops_of(kept_at: &Path, group: &str) -> Arc<tokio::sync::Mutex<()>> {
     let mut ops = OPS.lock().unwrap_or_else(|e| e.into_inner());
+    // Those no change holds or waits on: a group whose record went keeps
+    // none. (Every other holder clones under this lock.)
+    ops.retain(|_, m| Arc::strong_count(m) > 1);
     ops.entry(format!("{}\n{group}", kept_at.display()))
         .or_default()
         .clone()
@@ -803,15 +811,16 @@ async fn engine_key(engine: &impl Engine) -> Result<String, String> {
         .ok_or_else(|| format!("Desk on {} didn't say its key.", engine.name()))
 }
 
-/// Revokes token `id` on the boss's hub. Gone already (404), or Desk's
-/// pairing with the hub ended (401: its tokens went with it), counts as
-/// done.
+/// Revokes token `id` on the boss's hub. Gone already (404) counts as
+/// done; a 401 from a hub Desk is still paired with doesn't (the token is
+/// kept, and revoked later): only a pairing Desk forgot took its tokens
+/// with it ([`Revoke::PairingGone`]).
 async fn revoke(hub: &impl BossHub, id: &str) -> Result<(), String> {
     match hub
         .call("DELETE", &format!("{LINKS_PATH}/{}", seg(id)), None)
         .await
     {
-        Ok((status, _)) if ok(status) || status == 404 || status == 401 => Ok(()),
+        Ok((status, _)) if ok(status) || status == 404 => Ok(()),
         Ok((status, body)) => {
             tracing::warn!(status, "a boss link wasn't revoked; trying again later");
             Err(said(status, &body))
@@ -1326,14 +1335,14 @@ async fn link_engine<E: Engine, H: BossHub>(
 /// Makes `agent` on `at` the boss of group `group_id` at `choice`, once
 /// the person says yes natively (see the module). A group with another
 /// boss on another hub has it stopped first, in the same question;
-/// `old_hub` reaches that boss's hub to revoke its tokens.
+/// `old_hub` says who revokes that boss's tokens ([`Revoke`]).
 #[allow(clippy::too_many_arguments)]
 pub async fn link<E, H>(
     kept_at: &Path,
     engines: &Engines<E>,
     hub: &H,
     at: &HubAt,
-    old_hub: Option<&H>,
+    old_hub: Revoke<'_, H>,
     group_id: &str,
     agent: &str,
     choice: Choice,
@@ -1391,7 +1400,17 @@ where
     }
     let ops = ops_of(kept_at, group_id);
     let _op = ops.lock().await;
-    if replaces.is_some() {
+    // What the person was asked to replace is what is there: another boss
+    // made meanwhile isn't overwritten unasked.
+    let there = load_group(kept_at, group_id).await;
+    let who = |l: &GroupLink| (l.hub.clone(), l.agent.clone());
+    if there.as_ref().map(who) != replaces.as_ref().map(who) && there.is_some() {
+        return Err(format!(
+            "{}'s boss changed while you were asked: open its Boss sheet again.",
+            group.name
+        ));
+    }
+    if there.is_some() {
         let stopped = stop_all(kept_at, engines, old_hub, group_id).await?;
         if !stopped.failed.is_empty() {
             return Err(format!(
@@ -1495,7 +1514,7 @@ where
         let at = HubAt {
             id: link.hub.clone(),
             label: link.hub_label.clone(),
-            base: hub.map_or_else(String::new, |(_, at)| at.base.clone()),
+            base: hub.map_or_else(|| link.hub_base.clone(), |(_, at)| at.base.clone()),
         };
         let question = format!(
             "{}\n\nLet {boss} on {} boss {}?\n\n{}",
@@ -1556,7 +1575,12 @@ pub async fn pause<E: Engine>(
     stops(engines, group_id, &ids).await;
     let ops = ops_of(kept_at, group_id);
     let _op = ops.lock().await;
-    // Again, past any change that was under way.
+    // Again, past any change that was under way: on every engine linked
+    // now, those it linked meanwhile too.
+    let ids: Vec<String> = load_group(kept_at, group_id)
+        .await
+        .map(|l| l.engines.into_keys().collect())
+        .unwrap_or(ids);
     let sent = stops(engines, group_id, &ids).await;
     let mut done = Done::default();
     change_group(kept_at, group_id, |l| {
@@ -1609,7 +1633,7 @@ where
     let at = HubAt {
         id: link.hub.clone(),
         label: link.hub_label.clone(),
-        base: hub.map_or_else(String::new, |(_, at)| at.base.clone()),
+        base: hub.map_or_else(|| link.hub_base.clone(), |(_, at)| at.base.clone()),
     };
     let question = format!(
         "{}\n\nLet {boss} on {} go on bossing {}?\n\n{}",
@@ -1668,12 +1692,11 @@ async fn pause_quietly<E: Engine>(kept_at: &Path, engines: &Engines<E>, group_id
 /// token is revoked, each link taken off its engine and each grant
 /// deleted. What couldn't be done is said, and tried again by keeping
 /// alive (and by Stop pressed again) until it is: nothing else is.
-/// `hub` is none when Desk is no longer paired with the boss's hub: its
-/// tokens went with the pairing.
+/// `hub` says who revokes the tokens ([`Revoke`]).
 pub async fn unlink<E, H>(
     kept_at: &Path,
     engines: &Engines<E>,
-    hub: Option<&H>,
+    hub: Revoke<'_, H>,
     group_id: &str,
 ) -> Result<Done, String>
 where
@@ -1690,13 +1713,31 @@ where
     stop_all(kept_at, engines, hub, group_id).await
 }
 
+/// Who revokes a stopped boss's tokens.
+pub enum Revoke<'a, H> {
+    /// The boss's hub, paired and reached.
+    By(&'a H),
+    /// Desk is no longer paired with it: its tokens went with the pairing.
+    PairingGone,
+    /// Paired, but not reached now: every token is kept, and revoked once
+    /// it is.
+    Later,
+}
+
+impl<'a, H> Revoke<'a, H> {
+    /// Paired and reached, or not reached now.
+    pub fn from(hub: Option<&'a H>) -> Self {
+        hub.map_or(Self::Later, Self::By)
+    }
+}
+
 /// Stop's steps, with the group's changes held: marked stopping, then
 /// each engine stopped, every token revoked, each link taken off and each
 /// grant deleted; what is done is forgotten.
 async fn stop_all<E, H>(
     kept_at: &Path,
     engines: &Engines<E>,
-    hub: Option<&H>,
+    hub: Revoke<'_, H>,
     group_id: &str,
 ) -> Result<Done, String>
 where
@@ -1722,7 +1763,7 @@ where
         .chain(link.orphans.iter().cloned())
         .collect();
     let revoked: Vec<(String, Result<(), String>)> = match hub {
-        Some(h) => {
+        Revoke::By(h) => {
             futures_util::future::join_all(
                 tokens
                     .iter()
@@ -1730,7 +1771,14 @@ where
             )
             .await
         }
-        None => tokens.iter().map(|t| (t.clone(), Ok(()))).collect(),
+        Revoke::PairingGone => tokens.iter().map(|t| (t.clone(), Ok(()))).collect(),
+        Revoke::Later => tokens
+            .iter()
+            .map(|t| {
+                let why = format!("Desk can't reach {} now.", link.hub_label);
+                (t.clone(), Err(why))
+            })
+            .collect(),
     };
     let cleared = futures_util::future::join_all(link.engines.iter().map(|(id, l)| async move {
         let mut problems: Vec<String> = Vec::new();
@@ -1831,7 +1879,14 @@ async fn sync<E, H>(
         return;
     };
     if entry.stopping {
-        match stop_all(kept_at, engines, hub.map(|(h, _)| h), group_id).await {
+        match stop_all(
+            kept_at,
+            engines,
+            Revoke::from(hub.map(|(h, _)| h)),
+            group_id,
+        )
+        .await
+        {
             Ok(d) => *done = d,
             Err(why) => done.fail(&entry.hub_label, why),
         }
@@ -1950,7 +2005,10 @@ async fn sync<E, H>(
             continue;
         }
         let shown = engines.name_of(&id);
-        let why = match link_engine(kept_at, engines, h, at, &entry, &group, &id, resume).await {
+        // One the person linked before, which failed, goes on as they said:
+        // the group isn't paused here.
+        let goes_on = resume || entry.unlinked.contains_key(&id);
+        let why = match link_engine(kept_at, engines, h, at, &entry, &group, &id, goes_on).await {
             Linked::Yes => {
                 done.done.push(shown);
                 continue;
@@ -1996,7 +2054,10 @@ async fn renew<E: Engine, H: BossHub>(
             .map_err(MintError::words)?,
         Err(e) => return Err(e.words()),
     };
-    keep_orphan(kept_at, &group.id, &minted.token_id).await?;
+    if let Err(why) = keep_orphan(kept_at, &group.id, &minted.token_id).await {
+        let _ = revoke(hub, &minted.token_id).await;
+        return Err(why);
+    }
     if let Err(why) = hand(engine, at, &minted, &entry.agent, &group.id).await {
         revoke_orphan(kept_at, hub, &group.id, &minted.token_id).await;
         return Err(why);
@@ -2085,7 +2146,7 @@ pub async fn hub_gone<E: Engine, H: BossHub>(kept_at: &Path, engines: &Engines<E
         .map(|(g, _)| g)
         .collect();
     for g in groups {
-        if let Err(e) = unlink::<E, H>(kept_at, engines, None, &g).await {
+        if let Err(e) = unlink::<E, H>(kept_at, engines, Revoke::PairingGone, &g).await {
             tracing::warn!(error = %e, "a removed hub's boss wasn't stopped everywhere");
         }
     }
@@ -2573,6 +2634,39 @@ pub async fn boss_status(
     Ok(status(&kept_at, &engines, &group).await)
 }
 
+/// Who revokes the tokens of a boss on a paired hub, as the commands
+/// find it ([`Revoke`]).
+enum Revoker<'a> {
+    Reached(PairedHub<'a>),
+    PairingGone,
+    Later,
+}
+
+impl<'a> Revoker<'a> {
+    /// The hub, when Desk reaches it; none, when Desk is no longer paired
+    /// with it; later, otherwise.
+    async fn of(io: &'a HubIo, hub: &str) -> Self {
+        if hub_at(io, hub).await.is_ok() {
+            Self::Reached(PairedHub {
+                io,
+                hub: hub.to_string(),
+            })
+        } else if io.is_paired(hub).await {
+            Self::Later
+        } else {
+            Self::PairingGone
+        }
+    }
+
+    fn revoke(&self) -> Revoke<'_, PairedHub<'a>> {
+        match self {
+            Self::Reached(h) => Revoke::By(h),
+            Self::PairingGone => Revoke::PairingGone,
+            Self::Later => Revoke::Later,
+        }
+    }
+}
+
 /// The paired hub group `group`'s boss is on, when Desk can reach it.
 async fn boss_hub_of(io: &HubIo, kept_at: &Path, group: &str) -> Option<HubAt> {
     let hub = load_group(kept_at, group).await?.hub;
@@ -2597,20 +2691,17 @@ pub async fn boss_link(
     let ids = machine_ids(&local, &kept_at, Some(&group)).await;
     let engines = engines_now(&local, &machines, &ids);
     let paired = PairedHub { io: &io, hub };
-    // The boss it replaces, when it is on a hub Desk still reaches.
-    let old = match boss_hub_of(&io, &kept_at, &group).await {
-        Some(old) => Some(PairedHub {
-            io: &io,
-            hub: old.id,
-        }),
-        None => None,
+    // Who revokes the tokens of the boss it replaces.
+    let old = match load_group(&kept_at, &group).await {
+        Some(l) => Revoker::of(&io, &l.hub).await,
+        None => Revoker::Later,
     };
     link(
         &kept_at,
         &engines,
         &paired,
         &at,
-        old.as_ref(),
+        old.revoke(),
         &group,
         &agent,
         choice,
@@ -2651,7 +2742,12 @@ pub async fn boss_pause(
     let kept_at = kept_path()?;
     let ids = machine_ids(&local, &kept_at, Some(&group)).await;
     let engines = engines_now(&local, &machines, &ids);
-    pause(&kept_at, &engines, &group).await
+    let done = pause(&kept_at, &engines, &group).await?;
+    if !done.failed.is_empty() {
+        // Sent again soon, not in a quarter of an hour.
+        WAKE.notify_one();
+    }
+    Ok(done)
 }
 
 /// Lets group `group`'s paused boss go on ([`resume`]).
@@ -2711,11 +2807,12 @@ pub async fn boss_unlink(
     let ids = machine_ids(&local, &kept_at, Some(&group)).await;
     let engines = engines_now(&local, &machines, &ids);
     // A hub Desk is no longer paired with took its tokens with it.
-    let paired = hub_at(&io, &link.hub).await.ok().map(|at| PairedHub {
-        io: &io,
-        hub: at.id,
-    });
-    unlink(&kept_at, &engines, paired.as_ref(), &group).await
+    let who = Revoker::of(&io, &link.hub).await;
+    let done = unlink(&kept_at, &engines, who.revoke(), &group).await?;
+    if !done.failed.is_empty() {
+        WAKE.notify_one();
+    }
+    Ok(done)
 }
 
 /// Lets every boss on engine `engine` go on after its own pause, once the
@@ -2747,6 +2844,42 @@ static WAKE: tokio::sync::Notify = tokio::sync::Notify::const_new();
 /// The least time between two runs of keeping alive, however often the
 /// sidebar changes.
 const KEEP_AT_MOST_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Desk is about to forget paired hub `hub`: every group whose boss is
+/// there is stopped while the hub can still revoke its tokens. What is
+/// left is stopped once it's forgotten ([`hub_removed`]).
+pub async fn hub_removing(app: &tauri::AppHandle, hub: &str) {
+    use tauri::Manager;
+    let Ok(kept_at) = kept_path() else {
+        return;
+    };
+    if !kept_at.exists() {
+        return;
+    }
+    let groups: Vec<String> = load(&kept_at)
+        .await
+        .groups
+        .into_iter()
+        .filter(|(_, l)| l.hub == hub)
+        .map(|(g, _)| g)
+        .collect();
+    if groups.is_empty() {
+        return;
+    }
+    let io = app.state::<HubIo>();
+    let Revoker::Reached(paired) = Revoker::of(&io, hub).await else {
+        return;
+    };
+    let local = app.state::<Broker>();
+    let machines = app.state::<MachineIo>();
+    let ids = machine_ids(&local, &kept_at, None).await;
+    let engines = engines_now(&local, &machines, &ids);
+    for g in groups {
+        if let Err(e) = unlink(&kept_at, &engines, Revoke::By(&paired), &g).await {
+            tracing::warn!(error = %e, "a boss on a hub being removed wasn't stopped everywhere");
+        }
+    }
+}
 
 /// Desk forgot paired hub `hub`: every group whose boss is there is
 /// stopped ([`hub_gone`]).
@@ -2795,6 +2928,10 @@ pub fn keep_alive(app: tauri::AppHandle) {
                     for h in names {
                         if let Ok(at) = hub_at(&io, &h).await {
                             hubs.insert(h, at);
+                        } else if !io.is_paired(&h).await {
+                            // Forgotten while Desk wasn't looking: its
+                            // tokens went with the pairing.
+                            hub_gone::<_, PairedHub<'_>>(&kept_at, &engines, &h).await;
                         }
                     }
                     hubs
