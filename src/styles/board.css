@@ -1141,6 +1141,12 @@ button.ticket-crumb:hover {
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
+/* Its one paragraph ends where its lines do, cut or not: a paragraph of
+   two lines or fewer kept its margin inside the clamp, and stood 12px
+   further from "Show all of it" than a longer one cut to two. */
+.ticket-clamp .ticket-md p {
+  margin-bottom: 0;
+}
 .ticket-whole {
   display: block;
   margin-top: 4px;
@@ -1311,6 +1317,165 @@ button.ticket-row:not(:disabled):hover {
   align-self: flex-start;
   padding: 4px 8px;
   color: var(--faint);
+}
+/* An epic: how far it is, then its children in groups (EpicDetail). */
+.ticket-epic-progress {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 760px;
+  line-height: 1.4;
+}
+.ticket-epic-line {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+.ticket-epic-pct {
+  font: 800 26px/1 var(--font-display);
+}
+.ticket-epic-due {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--faint);
+}
+.ticket-bar.ticket-bar-epic {
+  width: 100%;
+  height: 10px;
+  border-radius: 5px;
+}
+.ticket-epic-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.ticket-epic-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.ticket-epic-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.ticket-epic-head {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+.ticket-epic-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  /* The mockup's chips: Figtree's own line, 22px high. */
+  line-height: 1.2;
+}
+.ticket-epic-by {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+/* Its own 8px apart, besides the chips' gap. */
+.ticket-epic-hide {
+  margin-left: 14px;
+}
+.ticket-epic-children {
+  container: epic-children / inline-size;
+}
+.ticket-epic-group {
+  display: flex;
+  flex-direction: column;
+}
+/* Short of room, a row keeps its title: its PR goes first, then its
+   priority and points. */
+@container epic-children (max-width: 620px) {
+  .ticket-epic-row .board-pr {
+    display: none;
+  }
+}
+@container epic-children (max-width: 540px) {
+  .ticket-epic-row .ticket-row-pts,
+  .ticket-epic-row .ticket-row-prio {
+    display: none;
+  }
+}
+.ticket-epic-group-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin: 14px 8px 4px;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.ticket-epic-group-n {
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--faint);
+}
+.ticket-epic-row .ticket-row-key {
+  font-size: 11.5px;
+}
+/* The mark at the row's edge: its ring's room overhangs the padding. */
+.ticket-epic-row .ticket-row-who {
+  margin: 0 -3px;
+}
+.ticket-epic-row .ticket-row-who.board-upstream-ring {
+  margin: 0;
+}
+.ticket-row-title-done {
+  color: var(--faint);
+}
+.ticket-row-prio {
+  flex: none;
+  display: inline-grid;
+}
+.ticket-row-pts {
+  flex: none;
+  font-size: 11.5px;
+  color: var(--faint);
+  white-space: nowrap;
+}
+.ticket-tone-blocked {
+  color: var(--blocked);
+}
+.ticket-tone-faint {
+  color: var(--faint);
+}
+.ticket-epic-all-done {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--faint);
+}
+.ticket-epic-more {
+  align-self: flex-start;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--faint);
+}
+/* Its comments and history, folded in the details column. */
+.ticket-activity-fold {
+  font-size: 13px;
+  color: var(--faint);
+}
+.ticket-activity-fold > summary {
+  cursor: pointer;
+}
+.ticket-activity-fold[open] > summary {
+  margin-bottom: 14px;
+}
+.ticket-activity-fold > .ticket-activity {
+  color: var(--text);
 }
 .ticket-session,
 .ticket-person {
@@ -1837,6 +2002,14 @@ button.ticket-row:not(:disabled):hover {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0 28px;
+}
+/* An epic's band has seven facts: its shorter column keeps its rows
+   packed, not spread down the taller one's height. */
+.ticket-band-epic .ticket-facts-cols {
+  align-items: start;
+}
+.ticket-band-epic .ticket-facts-cols > .ticket-facts {
+  align-content: start;
 }
 .ticket-compact .ticket-facts-cols {
   gap: 0 18px;

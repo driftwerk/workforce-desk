@@ -145,7 +145,9 @@ const FILTERS: { id: ActivityFilter; word: string }[] = [
  *  by time; a filter for each, and a box to add yours (to its issue as
  *  you, or kept here on a ticket of your own). In the shortest view, the
  *  newest of it, the rest a click away. */
-export function TicketActivity({ ticket: t, layout = "wide" }: { ticket: Ticket; layout?: Layout }) {
+/** `onCount`: told how many comments and history rows it has, for a fold
+ *  that says so while shut (an epic's). */
+export function TicketActivity({ ticket: t, layout = "wide", onCount }: { ticket: Ticket; layout?: Layout; onCount?: (n: number) => void }) {
   const { comments, remote, problem, setComments } = useComments(t);
   const history = useTicketHistory(t);
   const [filter, setFilter] = useState<ActivityFilter>("all");
@@ -195,6 +197,8 @@ export function TicketActivity({ ticket: t, layout = "wide" }: { ticket: Ticket;
       .catch((e) => setSaid(plainError(e)))
       .finally(() => setSending(false));
   };
+  const total = n.comments + n.history;
+  useEffect(() => onCount?.(total), [onCount, total]);
   const compact = layout === "compact";
   // The shortest view has no History or Only in Desk chip: shrunk to it
   // with one of those on, it shows all again.
