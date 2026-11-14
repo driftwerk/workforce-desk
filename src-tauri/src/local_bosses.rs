@@ -692,6 +692,9 @@ async fn read_wanted(local: &crate::broker::Broker) -> Option<Wanted> {
     (w.grant_version == GRANT_VERSION).then_some(w)
 }
 
+/// Whether a question about a local boss is being asked now.
+static ASKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// What was last brought to the machines, and when every machine was last
 /// visited.
 static LAST: Mutex<Option<(String, Instant)>> = Mutex::new(None);
@@ -747,23 +750,33 @@ async fn once(app: &tauri::AppHandle, woken: bool) {
         .iter()
         .filter_map(|(id, e)| Some((id.clone(), e.as_ref().ok()?.name().to_string())))
         .collect();
-    match ask_one(
-        &kept_at,
-        &wanted,
-        &names,
-        &remote,
-        bosses::native_ask(app.clone()),
-    )
-    .await
-    {
-        Ok(true) => {
-            sync(&bosses_at, &kept_at, &wanted, &engines.machines).await;
-            *LAST.lock().unwrap_or_else(|e| e.into_inner()) = None;
-        }
-        Ok(false) => {}
-        // Another question is open, or one was cancelled lately: later.
-        Err(why) => tracing::debug!(why = %why, "a local boss's question waits"),
+    // Asked on its own, so nothing that narrows waits on the person: one
+    // question at a time, as every boss question is, and none for a while
+    // after a Cancel. A yes is written at once.
+    if ASKING.swap(true, std::sync::atomic::Ordering::SeqCst) {
+        return;
     }
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let said = ask_one(
+            &kept_at,
+            &wanted,
+            &names,
+            &remote,
+            bosses::native_ask(app.clone()),
+        )
+        .await;
+        ASKING.store(false, std::sync::atomic::Ordering::SeqCst);
+        match said {
+            Ok(true) => {
+                *LAST.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                WAKE.notify_one();
+            }
+            Ok(false) => {}
+            // Another question is open, or one was cancelled lately: later.
+            Err(why) => tracing::debug!(why = %why, "a local boss's question waits"),
+        }
+    });
 }
 
 /// Keeps every machine's grants for this computer's group bosses up to
