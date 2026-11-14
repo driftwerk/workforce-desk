@@ -317,101 +317,117 @@
   overflow-wrap: anywhere;
 }
 
-/* An agent setting a connection up, in its chat: the hub's steps, done,
-   under way, waiting on the person, to come; then what is connected. */
-.setup-card,
-.setup-done {
+/* An agent setting a connection up, in its chat: one card that changes
+   in place. The one thing to do now, or what came of it; amber while it
+   waits on the person. */
+.setup-card {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 8px;
   margin-top: 10px;
   padding: 14px 16px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
   background: var(--surface);
   max-width: 720px;
+  scroll-margin: 16px;
 }
-.setup-done {
-  gap: 6px;
-  padding: 12px 14px;
+.setup-card.setup-needs {
+  border-color: var(--blocked);
+  background: var(--blocked-soft);
 }
-.setup-done p {
+.setup-card p {
   margin: 0;
 }
 .setup-head {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   flex-wrap: wrap;
 }
-.setup-head > :last-child {
+.setup-head b {
+  font-size: 15px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.setup-dots {
+  display: flex;
+  gap: 4px;
   margin-left: auto;
 }
-.setup-steps {
-  list-style: none;
-  margin: 0;
-  padding: 0;
+.setup-dots i {
+  width: 18px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--border);
+}
+.setup-dots i.done {
+  background: var(--done);
+}
+.setup-dots i.on {
+  background: var(--signal);
+}
+.setup-needs .setup-dots i.on {
+  background: var(--blocked);
+}
+.setup-spin {
+  flex: none;
+  box-sizing: border-box;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  border-top-color: var(--signal);
+  animation: setup-spin 0.9s linear infinite;
+}
+@keyframes setup-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .setup-spin {
+    animation: none;
+  }
+}
+.setup-detail {
+  overflow-wrap: anywhere;
+}
+.setup-link {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.setup-paste {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  font-size: 13.5px;
+  gap: 6px;
 }
-.setup-step {
+.setup-paste-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: 10px;
 }
-.setup-mark {
-  flex: none;
-  box-sizing: border-box;
-  width: 18px;
-  height: 18px;
-  border-radius: 50%;
-  display: grid;
-  place-items: center;
-  font-size: 11px;
-  font-weight: 700;
-  border: 1px solid var(--faint);
-}
-.setup-step-done .setup-mark {
-  border: 0;
-  background: var(--done);
-  color: var(--bg);
-}
-.setup-step-failed {
-  color: var(--blocked);
-}
-.setup-step-failed .setup-mark {
-  border: 0;
-  background: var(--blocked);
-  color: var(--on-blocked);
-}
-.setup-step-current .setup-mark {
-  border: 2px solid var(--signal);
-}
-.setup-step-todo {
-  color: var(--faint);
-}
-.setup-step-waiting {
-  align-items: flex-start;
-  padding: 10px 12px;
-  border: 1px solid var(--blocked);
-  border-radius: var(--radius);
-  background: var(--blocked-soft);
-}
-.setup-step-waiting .setup-mark {
-  border: 2px solid var(--blocked);
-}
-.setup-waiting {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+.setup-paste-row input {
+  flex: 1 1 260px;
   min-width: 0;
+  min-height: 38px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  outline: none;
+}
+.setup-paste-row input:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .setup-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  align-items: center;
+  gap: 10px;
   margin-top: 4px;
 }
 
@@ -423,9 +439,4 @@
 .conn-add .ability-select {
   height: 40px;
   padding: 0 10px;
-}
-/* What the agent said about a step: quoted, apart from Desk's own words. */
-.setup-note {
-  color: var(--text);
-  overflow-wrap: anywhere;
 }

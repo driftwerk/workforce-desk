@@ -165,12 +165,15 @@ export function selectOption(selector: string, value: string): boolean {
  *  `/settings/apikeys`); the element must show to the person (laid out,
  *  visible, not see-through, not a hidden input); never an editable field,
  *  a password-like field (by type, autocomplete, id or name), or anything
- *  in a form with a password field. */
+ *  in a form with a password field. With no `selector`, the element is
+ *  found by `shape`, the service's key pattern: the one key shown whole on
+ *  the page, in an element's text or a read-only field. */
 export function readKey(
-  selector: string,
+  selector: string | null,
   origin: string,
   paths: string[],
   max: number,
+  shape: string | null = null,
 ): { value: string; origin: string; path: string } | { refused: string } {
   const here = { origin: location.origin, path: location.pathname };
   const under = (path: string, prefix: string) => {
@@ -178,27 +181,83 @@ export function readKey(
     return p === "" || path === p || path.startsWith(p + "/");
   };
   if (here.origin !== origin || !paths.some((p) => under(here.path, p))) return { refused: "not a key page" };
-  const el = document.querySelector(selector) as HTMLElement | null;
-  if (!el) return { refused: "missing" };
-  const field = el.tagName === "INPUT" || el.tagName === "TEXTAREA" ? (el as HTMLInputElement) : null;
-  if (field && !field.readOnly) return { refused: "an editable field" };
-  const type = (el.getAttribute("type") || "").toLowerCase();
-  const auto = (el.getAttribute("autocomplete") || "").toLowerCase();
-  const named = `${el.id} ${el.getAttribute("name") || ""}`;
-  if (type === "password" || auto.includes("password") || /pass/i.test(named)) return { refused: "a password field" };
-  const form = el.closest("form");
-  if (form && form.querySelector('input[type="password" i]')) return { refused: "in a form with a password" };
-  // It shows to the person: nothing hidden is read, field or text.
-  if (type === "hidden") return { refused: "hidden" };
-  const r = typeof el.getBoundingClientRect === "function" ? el.getBoundingClientRect() : null;
-  if (r && (r.width === 0 || r.height === 0)) return { refused: "hidden" };
-  for (let at: Element | null = el; at; at = at.parentElement) {
-    const style = getComputedStyle(at);
-    if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || Number(style.opacity) === 0) return { refused: "hidden" };
+  const fieldOf = (el: Element) => (el.tagName === "INPUT" || el.tagName === "TEXTAREA" ? (el as HTMLInputElement) : null);
+  /** What `el` shows, if it may be read. */
+  const read = (el: HTMLElement): { value: string } | { refused: string } => {
+    const field = fieldOf(el);
+    if (field && !field.readOnly) return { refused: "an editable field" };
+    const type = (el.getAttribute("type") || "").toLowerCase();
+    const auto = (el.getAttribute("autocomplete") || "").toLowerCase();
+    const named = `${el.id} ${el.getAttribute("name") || ""}`;
+    if (type === "password" || auto.includes("password") || /pass/i.test(named)) return { refused: "a password field" };
+    const form = el.closest("form");
+    if (form && form.querySelector('input[type="password" i]')) return { refused: "in a form with a password" };
+    // It shows to the person: nothing hidden is read, field or text.
+    if (type === "hidden") return { refused: "hidden" };
+    const r = typeof el.getBoundingClientRect === "function" ? el.getBoundingClientRect() : null;
+    if (r && (r.width === 0 || r.height === 0)) return { refused: "hidden" };
+    for (let at: Element | null = el; at; at = at.parentElement) {
+      const style = getComputedStyle(at);
+      if (style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || Number(style.opacity) === 0) return { refused: "hidden" };
+    }
+    const value = (field ? field.value : (el.innerText ?? el.textContent ?? "")).trim().slice(0, max);
+    if (!value) return { refused: "empty" };
+    return { value };
+  };
+  let el: HTMLElement | null = null;
+  if (selector) {
+    el = document.querySelector(selector) as HTMLElement | null;
+    if (!el) return { refused: "missing" };
+  } else {
+    let whole: RegExp;
+    try {
+      whole = new RegExp(`^(?:${shape ?? ""})$`);
+    } catch {
+      return { refused: "no key shape" };
+    }
+    if (!shape) return { refused: "no key shape" };
+    // Every element showing a whole key, deepest first: a key in <code>
+    // inside a <div> is the <code>'s.
+    // A shape with no prefix of its own (Jira's: any long run of
+    // characters) is looked for only where keys are shown, read-only
+    // fields and code, and never in an address or an email.
+    const broad = shape.startsWith("[!#-&(-~]");
+    const found = new Map<string, HTMLElement>();
+    for (const at of Array.from(document.body.querySelectorAll("*")) as HTMLElement[]) {
+      if (at.isContentEditable) continue;
+      const field = fieldOf(at);
+      if (field && !field.readOnly) continue;
+      if (broad && !field && !["CODE", "PRE", "KBD", "SAMP"].includes(at.tagName)) continue;
+      const text = (field ? field.value : (at.textContent ?? "")).trim();
+      if (text.length < 8 || text.length > max || !whole.test(text)) continue;
+      if (broad && (text.includes("@") || text.includes("://"))) continue;
+      const shown = read(at);
+      if (!("value" in shown) || !whole.test(shown.value)) continue;
+      const before = found.get(shown.value);
+      if (!before || before.contains(at)) found.set(shown.value, at);
+    }
+    if (found.size === 0) return { refused: "no key shown on the page" };
+    if (found.size > 1) return { refused: "several keys shown: give the selector of the new one" };
+    el = found.values().next().value as HTMLElement;
   }
-  const value = (field ? field.value : (el.innerText ?? el.textContent ?? "")).trim().slice(0, max);
-  if (!value) return { refused: "empty" };
-  return { value, origin: here.origin, path: here.path };
+  const got = read(el);
+  if ("refused" in got) return got;
+  return { value: got.value, origin: here.origin, path: here.path };
+}
+
+/** Whether the page asks for a password: a visible password field. */
+export function asksPassword(): boolean {
+  for (const el of Array.from(document.querySelectorAll('input[type="password" i]')) as HTMLElement[]) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) continue;
+    let shown = true;
+    for (let at: Element | null = el; at; at = at.parentElement) {
+      const style = getComputedStyle(at);
+      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) shown = false;
+    }
+    if (shown) return true;
+  }
+  return false;
 }
 
 /** Whether the page is on one of `pages` now: read with the call that

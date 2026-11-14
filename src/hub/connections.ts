@@ -155,6 +155,33 @@ export interface SetupStep {
   note: string | null;
 }
 
+/** What a setup's card shows now, as the hub decides it. */
+export type SetupNowKind = "working" | "offer" | "code" | "sign_in" | "connected" | "failed" | "ended";
+
+/** The card's one button. */
+export type SetupAction = "use_cli" | "open_code" | "show_page" | "new_code" | "other_way" | "retry" | "paste_token" | "open_connections";
+
+/** The one thing a setup's card shows now: the hub's words, never the
+ *  agent's. */
+export interface SetupNow {
+  kind: SetupNowKind;
+  title: string;
+  detail: string | null;
+  /** GitHub's code to approve, and where. */
+  code: string | null;
+  url: string | null;
+  expiresAt: string | null;
+  action: SetupAction | null;
+  /** A quiet second choice. */
+  other: "other_way" | null;
+  /** GitHub: the page a token of the person's own is made on, filled in;
+   *  set while they may paste one on the card instead. */
+  paste?: string | null;
+}
+
+/** What the person chooses on a setup's card. */
+export type SetupChoice = "use-cli" | "other-way" | "new-code";
+
 /** An agent setting a connection up itself, as the hub keeps it: the card
  *  the chat shows. */
 export interface Setup {
@@ -167,7 +194,15 @@ export interface Setup {
   site: string | null;
   steps: SetupStep[];
   startedAt: string;
+  /** When the agent last asked for it: its message shows the card. */
+  askedAt?: string;
   connected: { connection: string; account: string; onFor: string | null; write: boolean | null } | null;
+  way?: "cli" | "device" | "browser" | "token";
+  now?: SetupNow;
+  /** A newer setup of the service took over: never shown. */
+  ended?: "replaced" | null;
+  write?: boolean;
+  forWhom?: string;
 }
 
 export interface ConnectionsApi {
@@ -185,6 +220,10 @@ export interface ConnectionsApi {
   setPicks(agent: string, change: PicksChange): Promise<ServicePicks[]>;
   setups(agent?: string): Promise<Setup[]>;
   signedIn(setup: string): Promise<Setup>;
+  choose(setup: string, choice: SetupChoice): Promise<Setup>;
+  /** A token the person pasted on the card: straight to the hub's vault,
+   *  never through the chat. */
+  pasteToken(setup: string, token: string): Promise<Setup>;
 }
 
 const path = (id: string, connection?: string) =>
@@ -221,6 +260,10 @@ export const connectionsOf = (hub: HubRef): ConnectionsApi => ({
       .setups ?? [],
   signedIn: async (setup) =>
     (await hubCall<{ setup: Setup }>(hub, "POST", `/api/desk/connection-setups/${encodeURIComponent(setup)}/signed-in`, {})).setup,
+  pasteToken: async (setup, token) =>
+    (await hubCall<{ setup: Setup }>(hub, "POST", `/api/desk/connection-setups/${encodeURIComponent(setup)}/token`, { token })).setup,
+  choose: async (setup, choice) =>
+    (await hubCall<{ setup: Setup }>(hub, "POST", `/api/desk/connection-setups/${encodeURIComponent(setup)}/${choice}`, {})).setup,
 });
 
 /** "Allan and Ben" */

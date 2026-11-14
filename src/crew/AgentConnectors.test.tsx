@@ -67,6 +67,8 @@ const api = (services: ServicePicks[], over: Partial<ConnectionsApi> = {}): Conn
   setPicks: vi.fn(async () => services),
   setups: vi.fn(async () => []),
   signedIn: vi.fn(),
+  choose: vi.fn(),
+  pasteToken: vi.fn(),
   ...over,
 });
 

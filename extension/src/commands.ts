@@ -4,7 +4,7 @@
 // scripts or the Web Store.
 
 import type { DeskTabs } from "./desk";
-import { clickOn, fillField, focused, hrefNow, onKeyPage, present, pressKey, readKey, readPage, selectOption, setFiles, shownOf, typeText } from "./page";
+import { asksPassword, clickOn, fillField, focused, hrefNow, onKeyPage, present, pressKey, readKey, readPage, selectOption, setFiles, shownOf, typeText } from "./page";
 import { MAX_HTML, MAX_KEY, MAX_TEXT, MAX_UPLOAD_BYTES, type Command } from "./protocol";
 
 /** The parts of Chrome's API calls use, so tests can stand in. */
@@ -85,8 +85,13 @@ export async function perform(c: Command, tabs: DeskTabs, exec: Exec): Promise<u
       await exec.navigate(tab, c.url, NAVIGATION_MS);
       return exec.where(tab);
     }
-    case "where":
-      return exec.where(tab);
+    case "where": {
+      const at = await exec.where(tab);
+      if (!c.password) return at;
+      // Whether the page asks for a password, where Desk may look.
+      const password = workable(at.url) ? await exec.run(tab, asksPassword, []).catch(() => false) : false;
+      return { ...at, password: password === true };
+    }
     case "read": {
       await here();
       return exec.run(tab, readPage, [c.what, MAX_TEXT, MAX_HTML]);
@@ -163,7 +168,7 @@ export async function perform(c: Command, tabs: DeskTabs, exec: Exec): Promise<u
       });
     case "capture_key": {
       await here();
-      const read = await exec.run(tab, readKey, [c.selector, c.origin, c.paths, MAX_KEY]);
+      const read = await exec.run(tab, readKey, [c.selector ?? null, c.origin, c.paths, MAX_KEY, c.shape ?? null]);
       if ("refused" in read) throw new Fail(`Desk didn't read a key there: ${read.refused}.`);
       return read;
     }

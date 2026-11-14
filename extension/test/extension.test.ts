@@ -5,7 +5,7 @@ import { Fail, perform, workable, type Exec } from "../src/commands";
 import { DeskTabs, type ChromeTabs, type Kept } from "../src/desk";
 import { labelOf } from "../src/identity";
 import { Link, type Port } from "../src/link";
-import { clickOn, fillField, onKeyPage, pressKey, readKey, readPage, selectOption, setFiles, shownOf, typeText } from "../src/page";
+import { asksPassword, clickOn, fillField, onKeyPage, pressKey, readKey, readPage, selectOption, setFiles, shownOf, typeText } from "../src/page";
 import { PROOF_PREFIX, PROTOCOL, REVISION, fromHub, type Command, type ToHub } from "../src/protocol";
 import { upToDate, type Reloader } from "../src/update";
 
@@ -660,6 +660,50 @@ describe("reading a new key", () => {
     expect(readKey("#k", "https://evil.example", [at], 512)).toEqual({ refused: "not a key page" });
     expect(readKey("#k", origin, ["/elsewhere"], 512)).toEqual({ refused: "not a key page" });
     expect(readKey("#k", origin, [at], 4)).toMatchObject({ value: "lin_" });
+  });
+
+  it("finds the one key shown on the page itself, by the service's shape", () => {
+    const shape = "(?:github_pat_|ghp_)[!#-&(-~]{9,4085}";
+    const sized = () => {
+      for (const el of Array.from(document.body.querySelectorAll("*"))) (el as HTMLElement).getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect;
+    };
+    // GitHub's new token: shown in <code> inside a flash, beside a copy
+    // button; the deepest element showing it is read.
+    document.body.innerHTML = `<div class="flash"><p>Make sure to copy it now.</p><div><code id="new">github_pat_11ABCDEFG0123456789_abcdefXYZ</code></div><clipboard-copy value="github_pat_11ABCDEFG0123456789_abcdefXYZ">Copy</clipboard-copy></div>`;
+    sized();
+    expect(readKey(null, origin, [at], 512, shape)).toEqual({ value: "github_pat_11ABCDEFG0123456789_abcdefXYZ", origin, path: at });
+    // A key typed into an editable field is never one shown by the service.
+    document.body.innerHTML = `<input id="e" value="ghp_typedbytheagent0123456789">`;
+    sized();
+    expect(readKey(null, origin, [at], 512, shape)).toEqual({ refused: "no key shown on the page" });
+    // Hidden, or in a form with a password: not read.
+    document.body.innerHTML = `<div style="display:none"><code>ghp_hidden0123456789abcdef</code></div><form><input readonly value="ghp_inform0123456789abcdef"><input type="password"></form>`;
+    sized();
+    expect(readKey(null, origin, [at], 512, shape)).toEqual({ refused: "no key shown on the page" });
+    // Two different keys: it asks which.
+    document.body.innerHTML = `<code>ghp_first0123456789abcdef</code><code>ghp_second0123456789abcdef</code>`;
+    sized();
+    expect(readKey(null, origin, [at], 512, shape)).toMatchObject({ refused: expect.stringContaining("several keys") });
+    expect(readKey(null, origin, [at], 512, null)).toEqual({ refused: "no key shape" });
+    expect(readKey(null, "https://evil.example", [at], 512, shape)).toEqual({ refused: "not a key page" });
+    // A shape with no prefix (Jira's) is looked for only in read-only
+    // fields and code, never in text, an address or an email.
+    const broad = "[!#-&(-~]{24,4096}";
+    document.body.innerHTML = `<p>signed-in-as-someone-with-a-long-name</p><code>https://id.atlassian.com/manage-profile</code><code>sarah.long.name@acme.example.com</code><span contenteditable="true">ATATTtypedbyagent0123456789</span><input readonly value="ATATT3xFfGF0abcdefghijklmnop0123">`;
+    sized();
+    expect(readKey(null, origin, [at], 512, broad)).toEqual({ value: "ATATT3xFfGF0abcdefghijklmnop0123", origin, path: at });
+  });
+
+  it("says when the page asks for a password", async () => {
+    document.body.innerHTML = `<form><input type="password"></form>`;
+    for (const el of Array.from(document.body.querySelectorAll("*"))) (el as HTMLElement).getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect;
+    expect(asksPassword()).toBe(true);
+    const exec = execOn("https://github.com/settings/personal-access-tokens/new");
+    const tabs = new DeskTabs(new FakeChrome());
+    expect(await perform({ cmd: "where", session: "s", password: true }, tabs, exec)).toMatchObject({ password: true });
+    expect(await perform({ cmd: "where", session: "s" }, tabs, exec)).not.toHaveProperty("password");
+    document.body.innerHTML = `<input type="password" style="display:none">`;
+    expect(asksPassword()).toBe(false);
   });
 
   it("never reads an editable field, a password field, or a field in a form with a password", () => {

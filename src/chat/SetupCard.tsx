@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { FileHome } from "../attachments/Attachments";
 import { browserOf } from "../hub/browser";
 import { HubError } from "../hub/client";
-import { connectionsOf, type ConnectionsApi, type Setup, type SetupStep } from "../hub/connections";
+import { connectionsOf, type ConnectionsApi, type Setup, type SetupAction, type SetupChoice, type SetupNow } from "../hub/connections";
+import { openUrl } from "../platform";
 import { useUi } from "../shell/ui";
 import { useLive } from "../ui/useLive";
 import { useChat } from "./store";
@@ -19,17 +20,72 @@ export const SETUP_LIFE_MS = 60 * 60_000;
 /** How long a turn's setups are waited for before the hub lists any:
  *  one the hub refused never shows. */
 const FIRST_SHOW_MS = 60_000;
-/** Times sending "I'm signed in" is tried while the chat reconnects. */
+/** How long a sign-in is watched for before the card also offers "Already
+ *  signed in?", should Desk not see it. */
+export const SIGN_IN_ESCAPE_MS = 90_000;
+/** Times a message to the agent is tried while the chat reconnects. */
 const SEND_TRIES = 20;
 const SEND_EVERY_MS = 150;
 
-/** Whether a setup has nothing left to show changing. */
-const settled = (s: Setup): boolean =>
-  (!!s.connected?.onFor || s.steps.every((x) => x.state === "done")) || s.steps.some((x) => x.state === "failed");
+/** What a hub from before `now` shows: the waiting step, else working. */
+const nowOf = (s: Setup): SetupNow => {
+  if (s.now) return s.now;
+  const base = { detail: null, code: null, url: null, expiresAt: null, action: null, other: null } as const;
+  if (s.connected?.onFor) return { ...base, kind: "connected", title: `${s.serviceName} connected as ${s.connected.account}` };
+  if (s.steps.some((x) => x.state === "failed")) return { ...base, kind: "failed", title: `${s.serviceName} didn’t connect` };
+  if (s.steps.some((x) => x.state === "waiting")) return { ...base, kind: "sign_in", title: `Sign in to ${s.serviceName} in Desk’s window`, action: "show_page" };
+  return { ...base, kind: "working", title: `Setting up ${s.serviceName}` };
+};
 
-/** The setups an agent's message started (`count` of them, between
- *  `since` and `until`), as the hub keeps them: never what the agent
- *  wrote. Shown while they run, and once they are done. */
+/** Whether a setup has nothing left to show changing. */
+const settled = (s: Setup): boolean => s.ended != null || ["connected", "failed", "ended"].includes(nowOf(s).kind);
+
+/** What the card asks of the person now. */
+const NEEDS_YOU = new Set(["offer", "code", "sign_in", "failed"]);
+
+/* Which message shows each setup: the newest that asked for it, so one
+   setup is one card, where the person is looking. */
+const claims = new Map<string, Map<symbol, number>>();
+const listeners = new Set<() => void>();
+let version = 0;
+const changed = () => {
+  version += 1;
+  for (const l of listeners) l();
+};
+const claim = (anchor: symbol, since: number, ids: string[]) => {
+  let moved = false;
+  for (const [id, by] of claims) {
+    if (!ids.includes(id) && by.delete(anchor)) moved = true;
+    if (by.size === 0) claims.delete(id);
+  }
+  for (const id of ids) {
+    const by = claims.get(id) ?? new Map<symbol, number>();
+    if (by.get(anchor) !== since) {
+      by.set(anchor, since);
+      moved = true;
+    }
+    claims.set(id, by);
+  }
+  if (moved) changed();
+};
+const ownerOf = (id: string): symbol | undefined => {
+  let best: [symbol, number] | undefined;
+  for (const [anchor, since] of claims.get(id) ?? []) if (!best || since > best[1]) best = [anchor, since];
+  return best?.[0];
+};
+const useClaims = () =>
+  useSyncExternalStore(
+    (l) => {
+      listeners.add(l);
+      return () => listeners.delete(l);
+    },
+    () => version,
+  );
+
+/** The setups an agent's message started or asked for again (`count` of
+ *  them, between `since` and `until`), as the hub keeps them: never what
+ *  the agent wrote. One setup is one card: a newer message that asked for
+ *  it shows it instead, and one a newer setup replaced shows nowhere. */
 export function SetupCards({
   origin,
   since,
@@ -57,6 +113,10 @@ export function SetupCards({
   );
   const [setups, setSetups] = useState<Setup[] | null>(null);
   const live = useLive();
+  const anchor = useRef(Symbol("setups")).current;
+  useClaims();
+
+  useEffect(() => () => claim(anchor, 0, []), [anchor]);
 
   useEffect(() => {
     if (!api) return;
@@ -64,6 +124,10 @@ export function SetupCards({
     let timer: ReturnType<typeof setTimeout> | undefined;
     const from = Date.parse(since) - SKEW_MS;
     const to = until ? Date.parse(until) + SKEW_MS : Infinity;
+    const within = (at: string | undefined) => {
+      const t = at ? Date.parse(at) : NaN;
+      return t >= from && t <= to;
+    };
     // Past this the hub keeps none of them: an hour from the turn's start,
     // until it lists them, then from the last still under way.
     let gone = from + SKEW_MS + SETUP_LIFE_MS + SKEW_MS;
@@ -76,13 +140,11 @@ export function SetupCards({
         if (stop || !live.current) return;
         failures = 0;
         const mine = all
-          .filter((s) => {
-            const t = Date.parse(s.startedAt);
-            return t >= from && t <= to;
-          })
+          .filter((s) => within(s.startedAt) || within(s.askedAt))
           .sort((a, b) => Date.parse(a.startedAt) - Date.parse(b.startedAt))
           .slice(0, count);
         setSetups(mine);
+        claim(anchor, Date.parse(since), mine.filter((s) => s.ended == null).map((s) => s.id));
         const running = mine.filter((s) => !settled(s)).map((s) => Date.parse(s.startedAt));
         if (running.length > 0) gone = Math.max(gone, Math.max(...running) + SETUP_LIFE_MS + SKEW_MS);
         // Done: every one shown has settled, and the rest the turn started
@@ -104,12 +166,14 @@ export function SetupCards({
       stop = true;
       if (timer) clearTimeout(timer);
     };
-  }, [api, origin.agent, since, until, count]);
+  }, [api, origin.agent, since, until, count, anchor]);
 
-  if (!api || !setups || setups.length === 0) return null;
+  if (!api || !setups) return null;
+  const shown = setups.filter((s) => s.ended == null && ownerOf(s.id) === anchor);
+  if (shown.length === 0) return null;
   return (
     <>
-      {setups.map((s) => (
+      {shown.map((s) => (
         <SetupCard
           key={s.id}
           setup={s}
@@ -123,16 +187,29 @@ export function SetupCards({
   );
 }
 
-const ICON: Record<SetupStep["state"], string> = {
-  done: "✓",
-  failed: "!",
-  current: "",
-  waiting: "",
-  todo: "",
+/** What each of the card's buttons says. */
+const LABEL: Record<SetupAction, string> = {
+  use_cli: "Use it",
+  open_code: "Copy code and open GitHub",
+  show_page: "Show the page",
+  new_code: "Get a new code",
+  other_way: "Sign in another way",
+  retry: "Try again",
+  paste_token: "Paste a token",
+  open_connections: "Open Connections",
 };
 
-/** One setup: its steps, done, under way, waiting on the person, to come;
- *  and, once it is on, what is connected. */
+/** "in 14 min", while a code lasts. */
+const expiresIn = (at: string | null, now: number): string | null => {
+  const t = at ? Date.parse(at) : NaN;
+  if (Number.isNaN(t)) return null;
+  const min = Math.ceil((t - now) / 60_000);
+  return min > 0 ? `The code expires in ${min} min.` : null;
+};
+
+/** One setup, as one card that changes in place: the one thing to do now
+ *  (use a sign-in on this computer, approve a code, sign in in Desk's window),
+ *  then what came of it. Nothing on it is the agent's words. */
 export function SetupCard({
   setup: s,
   api,
@@ -148,14 +225,70 @@ export function SetupCard({
 }) {
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  /** The hub has it signed in, but the agent wasn't told. */
-  const [untold, setUntold] = useState(false);
+  const [copied, setCopied] = useState(false);
+  /** The field a token of the person's own is pasted in: open or not. */
+  const [pasting, setPasting] = useState(false);
+  const [token, setToken] = useState("");
   const live = useLive();
+  const card = useRef<HTMLElement>(null);
   const named = useChat((c) => c.roster.find((a) => a.hubId === origin.hub && a.id === origin.agent)?.name);
-  const agentName = named ?? "The agent";
+  const now = nowOf(s);
   const title = `${s.serviceName} · ${s.name}`;
-  const at = s.steps.findIndex((x) => x.state !== "done");
   const n = s.steps.length;
+  const done = s.steps.filter((x) => x.state === "done").length;
+  const needsYou = NEEDS_YOU.has(now.kind);
+
+  // When it starts needing the person, it comes into view.
+  const kindSeen = useRef<string | null>(null);
+  useEffect(() => {
+    if (needsYou && kindSeen.current !== now.kind && kindSeen.current !== null) {
+      card.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+    }
+    kindSeen.current = now.kind;
+  }, [needsYou, now.kind]);
+
+  // A sign-in Desk hasn't seen for a while: "Already signed in?" too.
+  const [waitingSince, setWaitingSince] = useState<number | null>(null);
+  const [clock, setClock] = useState(() => Date.now());
+  useEffect(() => {
+    if (now.kind !== "sign_in" && now.kind !== "code") {
+      setWaitingSince(null);
+      return;
+    }
+    setWaitingSince((w) => w ?? Date.now());
+    const t = setInterval(() => setClock(Date.now()), 15_000);
+    return () => clearInterval(t);
+  }, [now.kind]);
+  const escape = now.kind === "sign_in" && waitingSince !== null && clock - waitingSince >= SIGN_IN_ESCAPE_MS;
+
+  /** Tells the agent `text`, trying again while its chat reconnects. */
+  const tell = async (text: string): Promise<boolean> => {
+    for (let i = 0; i < SEND_TRIES; i++) {
+      // Gone from the screen while it waited: nothing is sent unseen.
+      if (i > 0 && !live.current) return false;
+      if (useChat.getState().send(`${origin.hub}/${origin.agent}`, text)) return true;
+      await new Promise((r) => setTimeout(r, SEND_EVERY_MS));
+    }
+    return false;
+  };
+
+  const ended = (e: unknown) =>
+    e instanceof HubError && (e.status === 404 || e.status === 409)
+      ? "That setup has ended. Ask again to start over."
+      : "Desk couldn’t be reached just now. Try again in a moment.";
+
+  const choose = async (choice: SetupChoice) => {
+    setBusy(true);
+    setProblem(null);
+    try {
+      const next = await api.choose(s.id, choice);
+      if (live.current) onChange(next);
+    } catch (e) {
+      if (live.current) setProblem(ended(e));
+    } finally {
+      if (live.current) setBusy(false);
+    }
+  };
 
   /** Desk's browser to the front, on the sign-in page; where it isn't on
    *  screen, Settings → Browser, where it is turned on and its pages show. */
@@ -164,145 +297,195 @@ export function SetupCard({
     if (!shown) useUi.getState().openSettings("browser");
   };
 
-  /** Tells the agent, trying again while its chat reconnects. */
-  const tell = async (): Promise<boolean> => {
-    for (let n = 0; n < SEND_TRIES; n++) {
-      // Gone from the screen while it waited: nothing is sent unseen.
-      if (n > 0 && !live.current) return false;
-      if (useChat.getState().send(`${origin.hub}/${origin.agent}`, SIGNED_IN)) return true;
-      await new Promise((r) => setTimeout(r, SEND_EVERY_MS));
+  const openCode = async () => {
+    if (now.code) {
+      await navigator.clipboard?.writeText(now.code).then(
+        () => setCopied(true),
+        () => undefined,
+      );
     }
-    return false;
+    if (now.url) openUrl(now.url);
   };
 
+  const act = (a: SetupAction) => {
+    switch (a) {
+      case "use_cli":
+        return void choose("use-cli");
+      case "other_way":
+        return void choose("other-way");
+      case "new_code":
+        return void choose("new-code");
+      case "open_code":
+        return void openCode();
+      case "show_page":
+        return void show();
+      case "paste_token":
+        return void startPaste(false);
+      case "open_connections":
+        return void useUi.getState().openSettings("connections");
+      case "retry":
+        return void (async () => {
+          setBusy(true);
+          const told = await tell(`Please try setting up ${s.serviceName} again.`);
+          if (!live.current) return;
+          setBusy(false);
+          if (!told) setProblem(`Desk couldn’t reach ${named ?? "the agent"} just now. Try again in a moment.`);
+        })();
+    }
+  };
+
+  /** Opens GitHub's token page, filled in, and the field to paste it in. */
+  const startPaste = (open: boolean) => {
+    setProblem(null);
+    setPasting(true);
+    if (open && now.paste) openUrl(now.paste);
+  };
+
+  /** The pasted token goes to the hub alone: never into the chat. */
+  const paste = async () => {
+    const given = token.trim();
+    if (!given) return;
+    setBusy(true);
+    setProblem(null);
+    setToken("");
+    try {
+      const next = await api.pasteToken(s.id, given);
+      if (!live.current) return;
+      onChange(next);
+      setPasting(false);
+    } catch (e) {
+      if (!live.current) return;
+      setProblem(e instanceof HubError && e.status === 400 ? e.message : ended(e));
+    } finally {
+      if (live.current) setBusy(false);
+    }
+  };
+
+  /** The person says they're signed in, where Desk didn't see it. */
   const signedIn = async () => {
     setBusy(true);
     setProblem(null);
     try {
       onChange(await api.signedIn(s.id));
+      // The agent waiting sees it; one whose turn ended is told.
+      if (!(await tell(SIGNED_IN)) && live.current) setProblem(`Desk couldn’t tell ${named ?? "the agent"} you’re signed in. Try again in a moment.`);
     } catch (e) {
-      // The hub may have taken it though its answer was lost: it says.
-      const now = await api
-        .setups(origin.agent)
-        .then((all) => all.find((x) => x.id === s.id))
-        .catch(() => undefined);
-      if (!live.current) return;
-      if (now?.steps.some((x) => x.id === "sign_in" && x.state === "done")) {
-        onChange(now);
-        setUntold(!(await tell()));
-        setBusy(false);
-        return;
-      }
-      setProblem(
-        e instanceof HubError && (e.status === 404 || e.status === 409)
-          ? "That setup has ended. Ask again to start over."
-          : "Desk couldn’t be reached just now. Try again in a moment.",
-      );
-      setBusy(false);
-      return;
+      if (live.current) setProblem(ended(e));
+    } finally {
+      if (live.current) setBusy(false);
     }
-    const told = await tell();
-    if (!live.current) return;
-    setUntold(!told);
-    setBusy(false);
   };
 
-  const tellAgain = async () => {
-    setBusy(true);
-    const told = await tell();
-    if (!live.current) return;
-    setUntold(!told);
-    setBusy(false);
-  };
-
+  const primary = now.kind === "failed" || now.action === "use_cli" || now.action === "open_code" || now.action === "new_code";
+  const expiry = now.kind === "code" ? expiresIn(now.expiresAt, clock) : null;
   return (
-    <>
-      <section className="setup-card" aria-label={`Setting up ${title}`}>
-        <div className="setup-head">
-          <b className="display">Setting up {title}</b>
-          <span className="small faint">{at === -1 ? "done" : `step ${at + 1} of ${n}`}</span>
-        </div>
-        <ol className="setup-steps">
-          {s.steps.map((x) =>
-            x.state === "waiting" ? (
-              <li key={x.id} className="setup-step setup-step-waiting">
-                <span className="setup-mark" aria-hidden="true" />
-                <span className="setup-waiting">
-                  <b>{x.label}</b>
-                  {/* Desk's own words: never replaced by what the agent wrote. */}
-                  <span className="small muted">{WAITING_SAYS}</span>
-                  {x.note && (
-                    <span className="small setup-note">
-                      <span className="faint">{agentName} says:</span> “{x.note}”
-                    </span>
-                  )}
-                  <span className="setup-actions">
-                    <button type="button" className="btn btn-sm btn-blocked" onClick={() => void show()}>
-                      Show the sign-in page
-                    </button>
-                    <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void signedIn()}>
-                      Already signed in
-                    </button>
-                  </span>
-                </span>
-              </li>
-            ) : (
-              <li key={x.id} className={`setup-step setup-step-${x.state}`}>
-                <span className="setup-mark" aria-hidden="true">
-                  {ICON[x.state]}
-                </span>
-                <span>
-                  {x.label}
-                  {x.note && x.state !== "todo" && <span className={`small ${x.state === "failed" ? "state-blocked" : "muted"}`}> · {x.note}</span>}
-                </span>
-              </li>
-            ),
+    <section ref={card} className={`setup-card setup-${now.kind}${needsYou ? " setup-needs" : ""}`} aria-label={`Setting up ${title}`}>
+      <div className="setup-head">
+        {now.kind === "working" && <span className="setup-spin" aria-hidden="true" />}
+        {now.kind === "connected" && <span className="conn-dot conn-dot-on" aria-hidden="true" />}
+        <b className={`display${now.kind === "failed" ? " state-blocked" : ""}`} role={needsYou ? "status" : undefined}>
+          {now.title}
+        </b>
+        {now.kind !== "connected" && now.kind !== "failed" && n > 1 && (
+          <span className="setup-dots" aria-label={`step ${Math.min(done + 1, n)} of ${n}`}>
+            {s.steps.map((x) => (
+              <i key={x.id} className={x.state === "done" ? "done" : x.state === "todo" ? "" : "on"} />
+            ))}
+          </span>
+        )}
+      </div>
+      {now.code && <p className="conn-code mono">{now.code}</p>}
+      {(now.detail || expiry) && (
+        <p className="small muted setup-detail">
+          {now.detail}
+          {expiry && ` ${expiry}`}
+          {now.kind === "connected" && (
+            <>
+              {" · "}
+              <button type="button" className="link small setup-link" onClick={() => useUi.getState().openSettings("connections")}>
+                Open in Connections
+              </button>
+            </>
           )}
-        </ol>
-        {problem && (
-          <p className="small state-blocked" role="alert">
-            {problem}
-          </p>
-        )}
-        {untold && (
-          <p className="small state-blocked" role="alert">
-            Desk couldn’t tell {named ?? "the agent"} you’re signed in.{" "}
-            <button type="button" className="link small" disabled={busy} onClick={() => void tellAgain()}>
-              Tell {named ?? "the agent"}
-            </button>
-          </p>
-        )}
-        {s.steps.some((x) => x.state === "failed") && (
-          <p className="small state-blocked">Nothing was kept. Ask the agent to try again, or connect it yourself in Settings → Connections.</p>
-        )}
-      </section>
-      {s.connected?.onFor && (
-        <section className="setup-done" aria-label={`${title} is connected`}>
-          <div className="setup-head">
-            <span className="conn-dot conn-dot-on" aria-hidden="true" />
-            <b>{title} is connected</b>
-            <span className="small faint">
-              {s.connected.onFor} uses it · {s.connected.write ? "read and write" : "read only"}
-            </span>
-          </div>
-          <p className="small muted">
-            Signed in as {s.connected.account}. Saved in the vault on this computer, never in a file.{" "}
-            <button type="button" className="link small" onClick={() => useUi.getState().openSettings("connections")}>
-              Open in Connections
-            </button>
-          </p>
-        </section>
+        </p>
       )}
-    </>
+      {pasting && now.paste != null && (
+        <form
+          className="setup-paste"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void paste();
+          }}
+        >
+          <label className="small muted" htmlFor={`token-${s.id}`}>
+            On GitHub’s page, under Repository access choose All repositories, then Generate token. Paste the token here: it goes straight to the vault on this computer, never into the chat.
+          </label>
+          <span className="setup-paste-row">
+            <input
+              id={`token-${s.id}`}
+              className="mono"
+              type="password"
+              autoFocus
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="github_pat_…"
+              value={token}
+              disabled={busy}
+              onChange={(e) => setToken(e.target.value)}
+            />
+            <button type="submit" className="btn btn-approve" disabled={busy || !token.trim()}>
+              {busy ? "Checking…" : "Connect"}
+            </button>
+            <button type="button" className="link small" disabled={busy} onClick={() => (setPasting(false), setToken(""))}>
+              Cancel
+            </button>
+          </span>
+        </form>
+      )}
+      {!pasting && (now.action || now.other || escape || now.paste) && (
+        <div className="setup-actions">
+          {now.action && now.action !== "paste_token" && (
+            <button type="button" className={primary ? "btn btn-approve" : "btn"} disabled={busy} onClick={() => act(now.action!)}>
+              {busy && now.action === "use_cli"
+                ? "Checking…"
+                : now.action === "open_code" && copied
+                  ? "Copied · open GitHub again"
+                  : LABEL[now.action]}
+            </button>
+          )}
+          {(now.paste || now.action === "paste_token") && (
+            <button
+              type="button"
+              className={now.action === "paste_token" ? "btn btn-approve" : "btn"}
+              disabled={busy}
+              onClick={() => startPaste(now.action !== "paste_token")}
+            >
+              {LABEL.paste_token}
+            </button>
+          )}
+          {now.other && (
+            <button type="button" className="link small" disabled={busy} onClick={() => act(now.other!)}>
+              {LABEL[now.other]}
+            </button>
+          )}
+          {escape && (
+            <button type="button" className="link small" disabled={busy} onClick={() => void signedIn()}>
+              Already signed in?
+            </button>
+          )}
+        </div>
+      )}
+      {problem && (
+        <p className="small state-blocked" role="alert">
+          {problem}
+        </p>
+      )}
+    </section>
   );
 }
 
 /** What Desk tells the agent once the person says they're signed in. */
 export const SIGNED_IN = "I’m signed in.";
-
-/** What Desk says while a step waits on the person to sign in. */
-export const WAITING_SAYS =
-  "Your password stays with you: Desk never reads or types it. The page is open in your browser, and the agent carries on the moment you’re in.";
 
 /** How many setups a turn's tools started. */
 export const setupsStarted = (tools: readonly { name?: string; tool?: string }[] | undefined): number =>
