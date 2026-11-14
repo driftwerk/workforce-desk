@@ -1695,6 +1695,10 @@ export interface TicketExternal {
   assignee?: SyncAssignee | null;
   /** What the issue says of itself besides its words: shown, never pushed. */
   details?: TicketDetails;
+  /** Its pull requests, branches, commits and other links there, read
+   *  when it opens; absent from an older hub, or where the tool is
+   *  missing. */
+  dev?: TicketDev;
 }
 
 /** A synced ticket's issue's priority, labels, project and due date there,
@@ -1724,7 +1728,7 @@ export interface TicketDetails {
   /** The sprint (Jira) or cycle (Linear) it is in. */
   sprint?: SprintRef;
   /** How many of its sub-tasks or sub-issues are done. */
-  subItems?: { done: number; total: number };
+  subItems?: Progress;
   links?: IssueLink[];
   components?: string[];
   fixVersions?: string[];
@@ -1735,6 +1739,97 @@ export interface TicketDetails {
   /** How many comments it has there, when the listing says. */
   comments?: number;
   prs?: PrSummary;
+  /** Its children there: a Jira story's sub-tasks, a Jira epic's issues,
+   *  or a Linear issue's sub-issues. */
+  children?: TicketChild[];
+  /** An epic's children's points: those done, of all of them. */
+  childPoints?: Progress;
+  /** How many of an epic's children are blocked there. */
+  childBlocked?: number;
+  /** As on the issue itself, when the hub keeps it with the details. */
+  dev?: TicketDev;
+}
+
+/** How many of some things are done, and (`started`) under way and not
+ *  done. */
+export interface Progress {
+  done: number;
+  total: number;
+  started?: number;
+}
+
+/** One of an issue's children, kept small: never its words. */
+export interface TicketChild {
+  key: string;
+  title: string;
+  /** Its type there (Jira), and the type's level (-1 a sub-task). */
+  kind?: string;
+  kindLevel?: number;
+  /** Its state's name there, and the state's kind: Linear's state type
+   *  (`started`), or Jira's status category (`new`, `indeterminate`,
+   *  `done`). */
+  state?: string;
+  stateKind?: string;
+  done: boolean;
+  started: boolean;
+  /** Who has it there, by name. */
+  assignee?: string;
+  priorityRank?: number;
+  points?: number;
+  prs?: PrSummary;
+}
+
+/** An issue's development there: Jira's GitHub app (dev-status) or
+ *  Linear's GitHub and GitLab attachments, and its other links. */
+export interface TicketDev {
+  prs: DevPr[];
+  branches: DevBranch[];
+  commits?: { count: number; latest?: string };
+  links: RemoteLink[];
+  readAt: string;
+}
+
+export interface DevPr {
+  number?: number;
+  /** `https` only. */
+  url: string;
+  title: string;
+  state: "open" | "review" | "changes" | "merged" | "declined" | "draft";
+  checks?: { passed: number; total: number; state: "pass" | "run" | "fail" };
+  author?: string;
+  repo?: string;
+  updated?: string;
+}
+
+export interface DevBranch {
+  name: string;
+  url?: string;
+  repo?: string;
+}
+
+/** A link from an issue to a page elsewhere: Confluence, Figma, a host. */
+export interface RemoteLink {
+  title: string;
+  /** `https` only. */
+  url: string;
+  /** "Confluence", "Figma", the host. */
+  app?: string;
+  /** The relation, as the remote says it: "page", "mentioned in". */
+  words?: string;
+}
+
+/** Something that happened to an issue there, read from Jira's changelog
+ *  or Linear's history: by someone there, by GitHub, or by Desk for the
+ *  person. A GitHub event about a PR or a branch names it in `field`
+ *  (`#5850`, or the branch) and what became of it in `to`. */
+export interface HistoryEvent {
+  at: string;
+  actor?: string;
+  by: "remote" | "github" | "desk";
+  kind: "created" | "state" | "assignee" | "priority" | "sprint" | "points" | "parent" | "link" | "field";
+  field?: string;
+  from?: string;
+  to?: string;
 }
 
 /** Another issue a ticket's issue points at. */
@@ -1812,6 +1907,8 @@ export interface TicketComment {
   editedAt?: string;
   /** On a synced ticket, it stays in Desk: a session's or an agent's note. */
   onlyHere: boolean;
+  /** The comment it answers, on Linear: replies nest one level. */
+  parent?: string;
 }
 
 /** A hub the local hub may sync boards through (`GET /api/desk/sync-hubs`). */

@@ -1029,8 +1029,37 @@ describe("the board, synced", () => {
     useBoard.setState({ boards: { [ACME.id]: synced() }, tickets: { [t.id]: t }, open: t.id });
     render(<OpenTicket />);
     expect(screen.getByRole("button", { name: "Open in Jira" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "github.com/acme/web/pull/12" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /#12/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /alert/ })).toBeNull();
+  });
+
+  it("says beside Desk's state what its issue calls it, faint, and stacks the view under 760px", async () => {
+    const t = ticket(8, { key: "ACME-8", state: "doing", external: ext("ACME-8", { details: { remoteState: "In Progress", kind: "Story" } }) });
+    useDesk.setState({ hub: { ticketHistory: async () => ({ events: [], next: null }), ledger: async () => ({ rows: [], next: null }) } as never });
+    useBoard.setState({ boards: { [ACME.id]: synced() }, tickets: { [t.id]: t }, open: t.id });
+    const view = render(<OpenTicket />);
+    // Wide: two columns, the word there with where it's said.
+    expect(document.querySelector(".ticket-view.ticket-wide")).not.toBeNull();
+    const state = screen.getByRole("combobox", { name: "State" }).closest("dd")!;
+    expect(state.querySelector(".ticket-there")?.textContent).toBe("In Progress on Jira");
+    view.unmount();
+    // Measured at 700px: one column, the facts in a band under its title.
+    const was = HTMLElement.prototype.getBoundingClientRect;
+    HTMLElement.prototype.getBoundingClientRect = function () {
+      return { ...was.call(this), width: this.classList.contains("ticket-body") ? 700 : 0 } as DOMRect;
+    };
+    vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
+    try {
+      render(<OpenTicket />);
+      await waitFor(() => expect(document.querySelector(".ticket-view.ticket-stacked")).not.toBeNull());
+      expect(document.querySelector(".ticket-side")).toBeNull();
+      expect(screen.getByRole("complementary", { name: "Details" }).classList.contains("ticket-band")).toBe(true);
+      const band = screen.getByRole("combobox", { name: "State" }).closest("dd")!;
+      expect(band.querySelector(".ticket-there")?.textContent).toBe("In Progress");
+    } finally {
+      HTMLElement.prototype.getBoundingClientRect = was;
+      vi.unstubAllGlobals();
+    }
   });
 
   it("offers linking from the board's menu, and unlinking once linked", async () => {
