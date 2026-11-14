@@ -122,7 +122,8 @@ impl Cli {
 /// or holds anything but files, folders and links (a device, a fifo). The
 /// links and kinds are read from `tar tv`, whose lines GNU tar and bsdtar
 /// both begin with the entry's kind (`-`, `d`, `l`, `h`, …) and end with
-/// ` -> target` for a symbolic link and ` link to target` for a hard one.
+/// ` -> target` for a symbolic link and ` link to target` for a hard one
+/// (read in the C locale, where GNU tar doesn't translate them).
 fn devin_unpack(manifest: &str, bundles: &str) -> String {
     // Over HTTPS, each stays HTTPS through every redirect.
     let https_of = |url: &str| match url.starts_with("https://") {
@@ -164,11 +165,11 @@ if [ ! -x "$dir/bin/devin" ]; then
   if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum "$tmp/bundle.tar.gz" | cut -d' ' -f1)
   else got=$(shasum -a 256 "$tmp/bundle.tar.gz" | cut -d' ' -f1); fi
   [ "$got" = "$sha" ] || {{ echo "Devin's download didn't match its checksum, so Desk didn't install it."; exit 1; }}
-  tar tzf "$tmp/bundle.tar.gz" > "$tmp/list" || {{ echo "Devin's download isn't one Desk can read."; exit 1; }}
+  LC_ALL=C tar tzf "$tmp/bundle.tar.gz" > "$tmp/list" || {{ echo "Devin's download isn't one Desk can read."; exit 1; }}
   if grep -Eq '^/|(^|/)\.\.(/|$)' "$tmp/list"; then
     echo "Devin's download names files outside its own folder, so Desk didn't install it."; exit 1
   fi
-  tar tvzf "$tmp/bundle.tar.gz" > "$tmp/long" || {{ echo "Devin's download isn't one Desk can read."; exit 1; }}
+  LC_ALL=C tar tvzf "$tmp/bundle.tar.gz" > "$tmp/long" || {{ echo "Devin's download isn't one Desk can read."; exit 1; }}
   if grep -Eqv '^[-dlh]' "$tmp/long"; then
     echo "Devin's download holds something that isn't a file, folder or link, so Desk didn't install it."; exit 1
   fi
