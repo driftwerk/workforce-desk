@@ -394,7 +394,7 @@ export function NewSession({
 
   const badModel = model && !isModelName(model, engine) ? model : null;
   const blocked: Blocked | null = badModel && !busy
-    ? { words: `“${badModel}” can’t be a model’s name: letters, digits and - _ . : / [ ] @, starting with a letter or digit.` }
+    ? { words: `“${badModel}” can’t be a model’s name: letters, digits and ${engine === "devin" ? "- _ . : /" : "- _ . : / [ ] @"}, starting with a letter or digit.` }
     : whyNotStart({
     hub: !!hub,
     folder,
