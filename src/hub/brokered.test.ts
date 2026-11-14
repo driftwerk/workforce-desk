@@ -22,7 +22,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { brokered, BridgedSocket } from "./broker";
-import { DeskHub, HubError } from "./client";
+import { DeskHub, HubError, OLDER_ENGINE } from "./client";
 import { useDesk } from "./store";
 import type { Body, DeskSocket, DeskTransport } from "./transport";
 
@@ -222,7 +222,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
 };
 
 /** The DeskHub members that aren't requests of their own. */
-const HELPERS = new Set(["t", "request", "call", "desk", "text", "putText", "constructor"]);
+const HELPERS = new Set(["t", "person", "asPerson", "request", "call", "desk", "text", "putText", "constructor"]);
 
 const publicMembers = (h: DeskHub): string[] =>
   [...Object.keys(h), ...Object.getOwnPropertyNames(Object.getPrototypeOf(h))].filter((k) => !HELPERS.has(k)).sort();
@@ -272,6 +272,44 @@ describe("what DeskHub asks of the local hub", () => {
     }
     asking = "http";
     await expect(`${JSON.stringify(recorded, null, 2)}\n`).toMatchFileSnapshot("./brokered-requests.json");
+  });
+});
+
+describe("an engine's own sign-in", () => {
+  it("goes as the person, by their paired Desk, never through the broker", async () => {
+    const { transport, recorded } = recording();
+    const sent: string[] = [];
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push(`${init?.method ?? "GET"} ${String(input)}`);
+      return new Response(JSON.stringify({ id: "cx1", engine: "codex", state: "starting" }), { headers: { "content-type": "application/json" } });
+    });
+    const hub = new DeskHub(transport, () => ({ id: "local", url: "http://127.0.0.1:9" }));
+    await hub.startEngineSignIn("codex");
+    await hub.engineSignIn("cx1");
+    await hub.sendEngineSignInToken("cx1", "t");
+    await hub.cancelEngineSignIn("cx1");
+    expect(recorded).toEqual([]);
+    expect(sent).toEqual([
+      "POST http://127.0.0.1:9/api/desk/engines/sign-ins",
+      "GET http://127.0.0.1:9/api/desk/engines/sign-ins/cx1",
+      "POST http://127.0.0.1:9/api/desk/engines/sign-ins/cx1/token",
+      "DELETE http://127.0.0.1:9/api/desk/engines/sign-ins/cx1",
+    ]);
+  });
+
+  it("says plainly that an older engine's hub refused it, and never tries the hub's token", async () => {
+    const { transport, recorded } = recording();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({ error: "not allowed" }), { status: 403, headers: { "content-type": "application/json" } }));
+    const hub = new DeskHub(transport, () => ({ id: "machine:box", url: "http://127.0.0.1:9" }));
+    await expect(hub.startEngineSignIn("codex")).rejects.toMatchObject({ status: 403, message: OLDER_ENGINE });
+    expect(recorded).toEqual([]);
+  });
+
+  it("is refused here until Desk has paired with the engine's hub", async () => {
+    const { transport, recorded } = recording();
+    const hub = new DeskHub(transport);
+    await expect(hub.startEngineSignIn("devin")).rejects.toMatchObject({ status: 503 });
+    expect(recorded).toEqual([]);
   });
 });
 
