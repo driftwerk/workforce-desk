@@ -28,6 +28,14 @@
 //!   `deadline` for it, less a margin, or [`Timing::carry_for`].
 //! - **Capped:** a call or an answer over [`MOST_BODY`] is never carried.
 //!
+//! - **A plan's sessions on a machine** (`desk.sessions`,
+//!   `desk.session_start`, queued by the hub's own plan runner for a plan
+//!   the person approved, never by a boss's tool) go as New session's own
+//!   requests: `GET` and `POST /api/desk/sessions` on that machine, with
+//!   Desk's plugin folder there in the start's environment. A start is sent
+//!   once: when it may have reached the machine but no answer came, its
+//!   outcome isn't known, and the hub finds the session there by its name.
+//!
 //! These routes are on none of the lists the page's requests are checked
 //! against (see [`crate::broker::routes::relay_local`]).
 
@@ -60,6 +68,19 @@ const MARGIN: Duration = Duration::from_secs(2);
 
 /// The statuses a machine answers with (the hub's `ServedStatus`).
 const STATUSES: &[&str] = &["ok", "suggested", "refused"];
+
+/// A plan's sessions on a machine, as the hub's plan runner asks for them.
+const SESSIONS: &str = "desk.sessions";
+/// A plan's ticket's session started on a machine.
+const SESSION_START: &str = "desk.session_start";
+/// What a plan's start may say, as New session says it: nothing else goes.
+const START_FIELDS: &[&str] = &[
+    "engine", "name", "cwd", "goal", "prompt", "view", "worktree", "model",
+];
+/// The most of a session's last reply read back.
+const MOST_REPLY: usize = 2000;
+/// The largest list of a machine's sessions read.
+const MOST_SESSIONS: usize = 8 * 1024 * 1024;
 
 /// How long things take.
 #[derive(Debug, Clone, Copy)]
@@ -116,6 +137,15 @@ pub trait Ends: Send + Sync + 'static {
         machine: &MachineId,
         body: Vec<u8>,
     ) -> impl Future<Output = Result<Answer, Unanswered>> + Send;
+    /// `machine`'s sessions in Desk (`GET /api/desk/sessions` there), or
+    /// with `start`, that session started (`POST`), as New session does.
+    fn sessions(
+        &self,
+        machine: &MachineId,
+        start: Option<Vec<u8>>,
+    ) -> impl Future<Output = Result<Answer, Unanswered>> + Send;
+    /// Desk's Claude Code plugin folder on `machine`, when it can say.
+    fn plugin_dir(&self, machine: &MachineId) -> impl Future<Output = Option<String>> + Send;
 }
 
 /// One call as this computer's hub queued it. All but `id`, `machine` and
@@ -314,6 +344,95 @@ async fn carry<E: Ends>(ends: &E, call: &Call, machine: &MachineId, timing: Timi
     }
 }
 
+/// A session as a machine lists it, as much as a plan reads: its id,
+/// names, folder, state and last reply (capped); none without an id.
+fn session_of(v: &Value) -> Option<Value> {
+    let id = v.get("id")?.as_str()?;
+    let text = |k: &str| {
+        v.get(k)
+            .filter(|x| x.is_string())
+            .cloned()
+            .unwrap_or(Value::Null)
+    };
+    let reply = v
+        .get("lastReply")
+        .and_then(Value::as_str)
+        .map(|r| r.chars().take(MOST_REPLY).collect::<String>());
+    Some(json!({
+        "id": id,
+        "name": text("name"),
+        "displayName": text("displayName"),
+        "cwd": text("cwd"),
+        "state": text("state"),
+        "lastReply": reply,
+    }))
+}
+
+/// Why a machine refused one of Desk's own requests, briefly.
+fn refusal(name: &str, r: &Answer) -> Outcome {
+    refused(error_of(r).unwrap_or_else(|| format!("{name} refused it ({})", r.status)))
+}
+
+/// A plan's call on `machine`'s sessions (`tool`, one of [`SESSIONS`] and
+/// [`SESSION_START`]) made there as New session makes it. A start is sent
+/// once.
+async fn carry_desk<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &str) -> Outcome {
+    let name = call.machine.as_str();
+    if tool == SESSIONS {
+        let r = match ends.sessions(machine, None).await {
+            Ok(r) => r,
+            Err(_) => return unreached(name),
+        };
+        if r.status != 200 {
+            return refusal(name, &r);
+        }
+        let Some(listed) = serde_json::from_str::<Value>(&r.body).ok().and_then(|v| {
+            v.as_array()
+                .map(|l| l.iter().filter_map(session_of).collect::<Vec<_>>())
+        }) else {
+            return refused(format!("{name}'s sessions couldn't be read"));
+        };
+        let answer = json!({"status": "ok", "body": listed});
+        if answer.to_string().len() > MOST_BODY {
+            return refused(format!("{name} has too many sessions to read at once"));
+        }
+        return Outcome::Answer(answer);
+    }
+    let Some(given) = call.input.as_object() else {
+        return refused("That start couldn't be read.".to_string());
+    };
+    let mut start: serde_json::Map<String, Value> = START_FIELDS
+        .iter()
+        .filter_map(|k| given.get(*k).map(|v| ((*k).to_string(), v.clone())))
+        .collect();
+    if let Some(dir) = ends.plugin_dir(machine).await {
+        start.insert("env".into(), json!({"CLAUDE_CODE_PLUGIN_DIRS": dir}));
+    }
+    let Ok(body) = serde_json::to_vec(&start) else {
+        return unreached(name);
+    };
+    if body.len() > MOST_BODY {
+        return refused(format!("That start is too large to send to {name}."));
+    }
+    match ends.sessions(machine, Some(body)).await {
+        Ok(r) if (200..300).contains(&r.status) => {
+            match serde_json::from_str::<Value>(&r.body)
+                .ok()
+                .as_ref()
+                .and_then(session_of)
+            {
+                Some(s) => Outcome::Answer(json!({"status": "ok", "body": s})),
+                None => Outcome::Unknown(format!("{name}'s answer to a start couldn't be read")),
+            }
+        }
+        // Refused there: nothing was started.
+        Ok(r) if (400..500).contains(&r.status) && r.status != 408 => refusal(name, &r),
+        Ok(r) => Outcome::Unknown(format!("{name} answered {}", r.status)),
+        Err(Unanswered::NotSent(_)) => unreached(name),
+        Err(Unanswered::MaybeSent(why)) => Outcome::Unknown(why),
+    }
+}
+
 /// `answer` posted for call `id`: until it is taken, or no one waits for
 /// it, each post within `post_try` and all within `post_for`.
 async fn post<E: Ends>(ends: &E, id: &str, answer: &Value, timing: Timing) {
@@ -395,7 +514,13 @@ async fn carry_in_turn<E: Ends>(
             "Desk is carrying too many calls just now. Try again in a moment.".to_string(),
         );
     };
-    tokio::time::timeout_at(until, carry(ends, call, &machine, timing))
+    let carried = async {
+        match call.tool.as_str() {
+            Some(t @ (SESSIONS | SESSION_START)) => carry_desk(ends, call, &machine, t).await,
+            _ => carry(ends, call, &machine, timing).await,
+        }
+    };
+    tokio::time::timeout_at(until, carried)
         .await
         .unwrap_or_else(|_| Outcome::Unknown("no answer in time".into()))
 }
@@ -549,8 +674,44 @@ impl Ends for Desk {
                 .broker(&machine)
                 .map_err(Unanswered::NotSent)?;
             broker
-                .relay_machine("POST", "/api/desk/crew/served", body, MOST_BODY)
+                .relay_machine("POST", "/api/desk/crew/served", Some(body), MOST_BODY)
                 .await
+        }
+    }
+
+    fn sessions(
+        &self,
+        machine: &MachineId,
+        start: Option<Vec<u8>>,
+    ) -> impl Future<Output = Result<Answer, Unanswered>> + Send {
+        let machine = machine.as_str().to_string();
+        async move {
+            use tauri::Manager;
+            let broker = self
+                .0
+                .state::<crate::machines::MachineIo>()
+                .broker(&machine)
+                .map_err(Unanswered::NotSent)?;
+            let method = if start.is_some() { "POST" } else { "GET" };
+            broker
+                .relay_machine(method, "/api/desk/sessions", start, MOST_SESSIONS)
+                .await
+        }
+    }
+
+    fn plugin_dir(&self, machine: &MachineId) -> impl Future<Output = Option<String>> + Send {
+        use tauri::Manager;
+        let link = self
+            .0
+            .state::<crate::machines::MachineIo>()
+            .link(machine.as_str())
+            .ok();
+        async move {
+            let link = link?;
+            tauri::async_runtime::spawn_blocking(move || link.plugin_dir().ok())
+                .await
+                .ok()
+                .flatten()
         }
     }
 }
@@ -605,6 +766,11 @@ mod tests {
         /// What this computer's hub answers each post, in turn; 204 after.
         posts: Mutex<VecDeque<Does>>,
         answers: Option<tokio::sync::mpsc::UnboundedSender<(String, Value)>>,
+        /// What each machine's sessions route does, in turn, and what it
+        /// was sent (`None` for a listing).
+        desk: Mutex<VecDeque<Does>>,
+        desk_sent: Mutex<Vec<(String, Option<Value>)>>,
+        plugin: Option<String>,
     }
 
     impl Fake {
@@ -706,6 +872,191 @@ mod tests {
                 }
             }
         }
+
+        fn sessions(
+            &self,
+            machine: &MachineId,
+            start: Option<Vec<u8>>,
+        ) -> impl Future<Output = Result<Answer, Unanswered>> + Send {
+            let start = start.map(|b| serde_json::from_slice::<Value>(&b).unwrap());
+            self.desk_sent
+                .lock()
+                .unwrap()
+                .push((machine.as_str().to_string(), start));
+            let does = self.desk.lock().unwrap().pop_front();
+            async move {
+                match does {
+                    Some(Does::Says(s, b)) => ok(s, b),
+                    Some(Does::Fails(u)) => Err(u),
+                    Some(Does::Hangs) => std::future::pending().await,
+                    None => Err(Unanswered::NotSent("nothing there".into())),
+                }
+            }
+        }
+
+        fn plugin_dir(&self, _: &MachineId) -> impl Future<Output = Option<String>> + Send {
+            std::future::ready(self.plugin.clone())
+        }
+    }
+
+    fn desk_call(id: &str, tool: &str, input: Value) -> Value {
+        json!({
+            "id": id,
+            "machine": "devbox",
+            "group": "acme",
+            "tool": tool,
+            "input": input,
+            "boss": "local:sarah",
+            "linkId": Value::Null,
+            "level": "act",
+        })
+    }
+
+    fn with_desk(
+        does: Vec<Does>,
+        plugin: Option<&str>,
+    ) -> (
+        Arc<Fake>,
+        tokio::sync::mpsc::UnboundedReceiver<(String, Value)>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let fake = Fake {
+            machines: [("devbox".to_string(), Mutex::new(VecDeque::new()))].into(),
+            answers: Some(tx),
+            desk: Mutex::new(does.into()),
+            plugin: plugin.map(str::to_string),
+            ..Fake::default()
+        };
+        (Arc::new(fake), rx)
+    }
+
+    const SESSION: &str = "1a2b3c4d-0b0a-4909-8807-0605040302cc";
+
+    /// A plan's start goes to the machine's own sessions route, as New
+    /// session sends it: its own fields alone, with Desk's plugin folder
+    /// there; the session it made is posted back, as much as a plan reads.
+    #[tokio::test]
+    async fn a_plans_start_goes_to_the_machines_sessions_with_its_plugin_folder() {
+        let made = json!({
+            "id": SESSION, "name": "VEL-3", "displayName": null, "cwd": "/home/dev/vellev",
+            "state": "starting", "lastReply": null, "engine": "claude", "pending": {"x": 1},
+        });
+        let (fake, mut rx) = with_desk(
+            vec![Does::Says(200, made)],
+            Some("/home/dev/.local/share/Desk/bin/current/claude-plugin"),
+        );
+        let input = json!({
+            "engine": "claude", "name": "VEL-3", "cwd": "/home/dev/vellev", "goal": "g",
+            "prompt": "p", "model": "opus", "worktree": "vel-3",
+            "env": {"EVIL": "1"}, "account": null, "group": "g1",
+        });
+        let stop = start(&fake.polled(vec![desk_call(A, "desk.session_start", input)]));
+        let (id, answer) = next(&mut rx).await;
+        assert_eq!(id, A);
+        assert_eq!(
+            answer,
+            json!({"status": "ok", "body": {
+                "id": SESSION, "name": "VEL-3", "displayName": null,
+                "cwd": "/home/dev/vellev", "state": "starting", "lastReply": null,
+            }})
+        );
+        let sent = fake.desk_sent.lock().unwrap().clone();
+        assert_eq!(
+            sent,
+            vec![(
+                "devbox".to_string(),
+                Some(json!({
+                    "engine": "claude", "name": "VEL-3", "cwd": "/home/dev/vellev", "goal": "g",
+                    "prompt": "p", "model": "opus", "worktree": "vel-3",
+                    "env": {"CLAUDE_CODE_PLUGIN_DIRS": "/home/dev/.local/share/Desk/bin/current/claude-plugin"},
+                }))
+            )]
+        );
+        // Never through the crew's own route.
+        assert!(fake.sent().is_empty());
+        let _ = stop.send(true);
+    }
+
+    /// A start is sent once: refused there, it is said; maybe there but
+    /// unanswered, nothing is posted and it isn't sent again.
+    #[tokio::test]
+    async fn a_plans_start_is_sent_once() {
+        let (fake, mut rx) = with_desk(
+            vec![
+                Does::Says(400, json!({"error": "There's no folder /home/dev/nope."})),
+                Does::Fails(Unanswered::MaybeSent("cut off".into())),
+                Does::Says(502, json!({})),
+            ],
+            None,
+        );
+        let input = json!({"engine": "codex", "name": "VEL-1", "cwd": "/home/dev/nope"});
+        let stop = start(&fake.polled(vec![desk_call(A, "desk.session_start", input.clone())]));
+        assert_eq!(
+            next(&mut rx).await,
+            (
+                A.to_string(),
+                json!({"status": "refused", "body": {"error": "There's no folder /home/dev/nope."}})
+            )
+        );
+        let _ = stop.send(true);
+        // Cut off, or a gateway's error: maybe started, so not sent again.
+        for _ in 0..2 {
+            let stop = start(&fake.polled(vec![desk_call(B, "desk.session_start", input.clone())]));
+            none_in(&mut rx, 300).await;
+            let _ = stop.send(true);
+        }
+        // Each start went once, with no plugin folder to give.
+        let sent = fake.desk_sent.lock().unwrap().clone();
+        assert_eq!(sent.len(), 3);
+        assert!(
+            sent.iter()
+                .all(|(_, b)| b.as_ref().is_some_and(|b| b.get("env").is_none()))
+        );
+    }
+
+    /// A plan's listing reads the machine's sessions, each as much as a
+    /// plan reads, its last reply capped; a machine that can't be reached
+    /// is said.
+    #[tokio::test]
+    async fn a_plans_listing_reads_the_machines_sessions_briefly() {
+        let long = "x".repeat(MOST_REPLY + 50);
+        let (fake, mut rx) = with_desk(
+            vec![
+                Does::Says(
+                    200,
+                    json!([
+                        {"id": SESSION, "name": "VEL-3", "cwd": "/home/dev/vellev", "state": "idle",
+                         "lastReply": long, "goal": "secret-ish", "pending": null},
+                        {"name": "no id"},
+                    ]),
+                ),
+                Does::Fails(Unanswered::NotSent("down".into())),
+            ],
+            None,
+        );
+        let stop = start(&fake.polled(vec![desk_call(A, "desk.sessions", json!({}))]));
+        let (id, answer) = next(&mut rx).await;
+        assert_eq!(id, A);
+        assert_eq!(answer["status"], "ok");
+        let listed = answer["body"].as_array().unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0]["state"], "idle");
+        assert_eq!(listed[0]["lastReply"].as_str().unwrap().len(), MOST_REPLY);
+        assert!(listed[0].get("goal").is_none());
+        assert_eq!(
+            fake.desk_sent.lock().unwrap()[0],
+            ("devbox".to_string(), None)
+        );
+        let _ = stop.send(true);
+        let stop = start(&fake.polled(vec![desk_call(B, "desk.sessions", json!({}))]));
+        assert_eq!(
+            next(&mut rx).await,
+            (
+                B.to_string(),
+                json!({"status": "refused", "body": {"error": "devbox can't be reached"}})
+            )
+        );
+        let _ = stop.send(true);
     }
 
     fn call(id: &str, machine: &str) -> Value {

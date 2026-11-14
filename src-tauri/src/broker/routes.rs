@@ -338,7 +338,12 @@ const RELAY_LOCAL: &[Route] = &[
     route("GET", "/api/desk/crew/relay"),
     route("POST", "/api/desk/crew/relay/{}"),
 ];
-const RELAY_MACHINE: &[Route] = &[route("POST", "/api/desk/crew/served")];
+/// And a plan's sessions on a machine, as New session's own requests.
+const RELAY_MACHINE: &[Route] = &[
+    route("POST", "/api/desk/crew/served"),
+    route("GET", "/api/desk/sessions"),
+    route("POST", "/api/desk/sessions"),
+];
 
 /// `method target` as one of the relay's requests to this computer's hub.
 pub fn relay_local(method: &str, target: &str) -> Result<Allowed, Refused> {
@@ -812,6 +817,8 @@ mod tests {
         assert!(relay_local("GET", "/api/desk/crew/relay").is_ok());
         assert!(relay_local("POST", &relay).is_ok());
         assert!(relay_machine("POST", "/api/desk/crew/served").is_ok());
+        assert!(relay_machine("GET", "/api/desk/sessions").is_ok());
+        assert!(relay_machine("POST", "/api/desk/sessions").is_ok());
         for (method, target) in [
             ("POST", "/api/desk/crew/relay"),
             ("GET", relay.as_str()),
@@ -822,6 +829,8 @@ mod tests {
                 "/api/desk/accounts/0f0e0d0c-0b0a-4909-8807-060504030201/hand-over",
             ),
             ("GET", "/api/desk/engine-key"),
+            ("GET", "/api/desk/sessions"),
+            ("POST", "/api/desk/sessions"),
         ] {
             assert!(
                 relay_local(method, target).is_err(),
@@ -833,7 +842,16 @@ mod tests {
             ("POST", "/api/desk/crew/served?token=x"),
             ("GET", "/api/desk/crew/relay"),
             ("POST", relay.as_str()),
-            ("GET", "/api/desk/sessions"),
+            ("GET", "/api/desk/sessions?token=x"),
+            (
+                "GET",
+                "/api/desk/sessions/0f0e0d0c-0b0a-4909-8807-060504030201",
+            ),
+            ("DELETE", "/api/desk/sessions"),
+            (
+                "POST",
+                "/api/desk/sessions/0f0e0d0c-0b0a-4909-8807-060504030201/prompt",
+            ),
         ] {
             assert!(
                 relay_machine(method, target).is_err(),
