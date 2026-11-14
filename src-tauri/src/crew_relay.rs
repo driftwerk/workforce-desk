@@ -155,19 +155,20 @@ impl Call {
     }
 
     /// How long it may be carried from `now`: until the hub's deadline less
-    /// [`MARGIN`], else `carry_for`; `None` when too little is left to
+    /// [`MARGIN`], at most `carry_for`; `None` when too little is left to
     /// send it at all.
     fn time(&self, carry_for: Duration, now: SystemTime) -> Option<Duration> {
-        let Some(at) = self
-            .deadline
-            .as_deref()
-            .and_then(|d| chrono::DateTime::parse_from_rfc3339(d).ok())
-        else {
+        let Some(deadline) = self.deadline.as_deref() else {
+            return Some(carry_for);
+        };
+        let Ok(at) = chrono::DateTime::parse_from_rfc3339(deadline) else {
+            tracing::warn!(id = %self.id, "a relayed call's deadline couldn't be read");
             return Some(carry_for);
         };
         let at = SystemTime::from(at.with_timezone(&chrono::Utc));
         let left = at.duration_since(now).unwrap_or_default();
-        (left >= LEAST_LEFT).then(|| left - MARGIN)
+        // Never past `carry_for`, whatever this computer's clock does.
+        (left >= LEAST_LEFT).then(|| (left - MARGIN).min(carry_for))
     }
 }
 
@@ -724,9 +725,27 @@ mod tests {
     }
 
     fn start(fake: &Arc<Fake>) -> watch::Sender<bool> {
+        start_with(fake, quick())
+    }
+
+    fn start_with(fake: &Arc<Fake>, timing: Timing) -> watch::Sender<bool> {
         let (tx, rx) = watch::channel(false);
-        tokio::spawn(run(Arc::clone(fake), rx, quick()));
+        tokio::spawn(run(Arc::clone(fake), rx, timing));
         tx
+    }
+
+    /// Calls carried for 3 s, and the time of one with [`waits`]' deadline
+    /// (1.6 s): one waiting runs out before those it waits on.
+    fn longer() -> Timing {
+        Timing {
+            carry_for: Duration::from_secs(3),
+            ..quick()
+        }
+    }
+
+    fn waits() -> String {
+        chrono::DateTime::<chrono::Utc>::from(SystemTime::now() + Duration::from_millis(3600))
+            .to_rfc3339()
     }
 
     async fn next(
@@ -971,20 +990,20 @@ mod tests {
         let ids: Vec<String> = (0..6)
             .map(|i| format!("0f0e0d0c-0b0a-4909-8807-06050403020{i}"))
             .collect();
-        // The first it takes have long; those after wait theirs out first.
+        // Those after the first it takes run out of time first.
         let mut calls: Vec<Value> = ids
             .iter()
             .enumerate()
             .map(|(i, id)| {
                 let mut c = call(id, "slow");
-                if i < MOST_PER_MACHINE {
-                    c["deadline"] = json!(in_secs(20));
+                if i >= MOST_PER_MACHINE {
+                    c["deadline"] = json!(waits());
                 }
                 c
             })
             .collect();
         calls.push(call(A, "fast"));
-        let _stop = start(&fake.polled(calls).polled(vec![call(B, "fast")]));
+        let _stop = start_with(&fake.polled(calls).polled(vec![call(B, "fast")]), longer());
         // The fast machine's come first, while the slow one's wait.
         let mut fast = [next(&mut rx).await, next(&mut rx).await];
         fast.sort_by(|a, b| a.0.cmp(&b.0));
@@ -1027,14 +1046,14 @@ mod tests {
             .map(|i| {
                 let id = format!("0f0e0d0c-0b0a-4909-8807-06050403020{i}");
                 let mut c = call(&id, &format!("m{}", i % 3 + 1));
-                // Those carried have long; the last waits its out first.
-                if i < MOST_IN_FLIGHT {
-                    c["deadline"] = json!(in_secs(20));
+                // The last runs out of time before those it waits on.
+                if i >= MOST_IN_FLIGHT {
+                    c["deadline"] = json!(waits());
                 }
                 c
             })
             .collect();
-        let _stop = start(&fake.polled(calls));
+        let _stop = start_with(&fake.polled(calls), longer());
         let (_, a) = next(&mut rx).await;
         assert_eq!(a["status"], "refused");
         assert!(
@@ -1102,8 +1121,8 @@ mod tests {
                 .unwrap()
                 .contains("no time left")
         );
-        // B's time is about 2 s (4 s less the margin), longer than
-        // `carry_for`: it is still being tried after it.
+        // B's time is its deadline less the margin (about 2 s), held to
+        // `carry_for` (1 s).
         tokio::time::sleep(Duration::from_millis(1300)).await;
         assert_eq!(fake.sent().len(), 1, "only B was sent");
         assert_eq!(fake.sent()[0].1["id"], B);
@@ -1130,6 +1149,11 @@ mod tests {
             with(Some(&in10)).time(carry_for, now),
             Some(Duration::from_secs(8))
         );
+        // Far off, or this computer's clock stepped back: held to
+        // `carry_for`.
+        let far =
+            chrono::DateTime::<chrono::Utc>::from(now + Duration::from_secs(3600)).to_rfc3339();
+        assert_eq!(with(Some(&far)).time(carry_for, now), Some(carry_for));
         let in2 = chrono::DateTime::<chrono::Utc>::from(now + Duration::from_secs(2)).to_rfc3339();
         assert_eq!(with(Some(&in2)).time(carry_for, now), None);
         let past = chrono::DateTime::<chrono::Utc>::from(now - Duration::from_secs(5)).to_rfc3339();
