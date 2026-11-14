@@ -98,6 +98,8 @@ const HTTP: &[Route] = &[
     route("PUT", "/api/desk/tickets/{}/needs/{}"),
     route("DELETE", "/api/desk/tickets/{}/needs/{}"),
     route("POST", "/api/desk/tickets/{}/assign"),
+    // What a session started for it on a machine is named and told.
+    with_query("GET", "/api/desk/tickets/{}/start-text", &["machine"]),
     // Keep or drop a ticket whose issue left its board's import filter.
     route("POST", "/api/desk/tickets/{}/left-filter"),
     with_query("GET", "/api/desk/tickets/{}/history", &["before"]),

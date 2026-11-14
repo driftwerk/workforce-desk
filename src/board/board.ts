@@ -391,3 +391,28 @@ export const startDefaults = (
   const any = newest(Object.keys(sessions));
   return { cwd: any?.cwd ?? "", engine: any?.engine ?? null };
 };
+
+/** Where a ticket's session starts, as the ticket and the board's last start
+ *  say: the ticket's own machine, folder, engine and model when a plan gave it
+ *  them, else the board's last start's (machine and model too), else this
+ *  computer. The folder is that machine's own path. */
+export interface StartOn {
+  machine: string;
+  /** A folder on `machine` to start with; "" is nothing to go by. */
+  folder: string;
+  engine: string | null;
+  model: string | null;
+}
+export const startOn = (
+  plan: { machine?: string | null; folder?: string | null; engine?: string | null; model?: string | null } | null | undefined,
+  stored: { cwd: string; engine: string; machine?: string; model?: string } | null,
+  local: { cwd: string; engine: string | null },
+): StartOn => {
+  if (plan?.machine) return { machine: plan.machine, folder: plan.folder ?? "", engine: plan.engine ?? null, model: plan.model ?? null };
+  if (plan?.model || plan?.folder) {
+    return { machine: "local", folder: plan.folder ?? local.cwd, engine: plan.engine ?? local.engine, model: plan.model ?? null };
+  }
+  if (stored?.machine) return { machine: stored.machine, folder: stored.cwd, engine: stored.engine, model: stored.model ?? null };
+  const engine = local.engine;
+  return { machine: "local", folder: local.cwd, engine, model: stored?.model && stored.engine === engine ? stored.model : null };
+};

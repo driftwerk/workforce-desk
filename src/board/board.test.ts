@@ -22,6 +22,7 @@ import {
   settled,
   snoozed,
   spendOf,
+  startOn,
 } from "./board";
 import { API, WEB, ticket } from "./testing";
 
@@ -232,5 +233,25 @@ describe("the board's plan filter", () => {
     // With the other filters: p2's one ticket isn't pinned.
     expect(columns(tickets, { ...everything, plan: new Set(["t1"]), filter: "pinned" }).flatMap((c) => ids(c.cards))).toEqual([]);
     expect(columns(tickets, { ...everything, plan: null }).flatMap((c) => ids(c.cards))).toHaveLength(3);
+  });
+});
+
+describe("where a ticket's session starts", () => {
+  const local = { cwd: "/w/api", engine: "codex" };
+  it("is the ticket's own machine, folder and model when its plan gave it them", () => {
+    expect(startOn({ machine: "devbox", folder: "/home/dev/w", engine: "claude", model: "opus" }, { cwd: "/x", engine: "codex", machine: "other" }, local)).toEqual({
+      machine: "devbox",
+      folder: "/home/dev/w",
+      engine: "claude",
+      model: "opus",
+    });
+  });
+  it("is the board's last start, machine and model too, when the ticket says nothing", () => {
+    expect(startOn(null, { cwd: "~/w", engine: "claude", machine: "devbox", model: "sonnet" }, local)).toEqual({ machine: "devbox", folder: "~/w", engine: "claude", model: "sonnet" });
+  });
+  it("is this computer, with the model of a last start that was here for the same engine", () => {
+    expect(startOn(null, { cwd: "/w/api", engine: "codex", model: "gpt-5" }, local)).toEqual({ machine: "local", folder: "/w/api", engine: "codex", model: "gpt-5" });
+    expect(startOn(null, { cwd: "/w/api", engine: "claude", model: "opus" }, local).model).toBeNull();
+    expect(startOn(null, null, local).machine).toBe("local");
   });
 });
