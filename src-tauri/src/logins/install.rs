@@ -1068,12 +1068,13 @@ mod tests {
     #[test]
     fn devins_installer_runs_with_no_terminal_to_ask_on() {
         let mut command = std::process::Command::new("/bin/sh");
-        command.args(["-c", "(exec 3</dev/tty) 2>/dev/null && echo has-tty || echo no-tty; ps -o sid= -p $$; echo $$"]);
+        command.args(["-c", "(exec 3</dev/tty) 2>/dev/null && echo has-tty || echo no-tty; ps -o pgid= -p $$; echo $$"]);
         detach(&mut command);
         let out = command.stdin(Stdio::null()).output().unwrap();
         let said = String::from_utf8_lossy(&out.stdout);
         let lines: Vec<&str> = said.lines().map(str::trim).collect();
         assert_eq!(lines[0], "no-tty", "{said}");
+        // A session's leader leads its group too (macOS's ps has no `sid`).
         assert_eq!(lines[1], lines[2], "it leads a session of its own: {said}");
     }
 
