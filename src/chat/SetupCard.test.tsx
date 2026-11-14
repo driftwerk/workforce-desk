@@ -322,7 +322,7 @@ it("offers a token of the person's own beside the primary action, pasted on the 
     fireEvent.click(screen.getByRole("button", { name: "Paste a token" }));
   });
   expect(opened).toEqual([PAGE]);
-  const field = screen.getByLabelText(/Paste the token GitHub shows you/) as HTMLInputElement;
+  const field = screen.getByLabelText(/choose All repositories/) as HTMLInputElement;
   expect(field.type).toBe("password");
   expect(field.autocomplete).toBe("off");
   fireEvent.change(field, { target: { value: " github_pat_secretvalue " } });
@@ -332,7 +332,7 @@ it("offers a token of the person's own beside the primary action, pasted on the 
   expect(a.pasteToken).toHaveBeenCalledWith("s1", "github_pat_secretvalue");
   expect(sent).toEqual([]);
   expect(screen.getByText("GitHub connected as sarah")).toBeTruthy();
-  expect(screen.queryByLabelText(/Paste the token/)).toBeNull();
+  expect(screen.queryByLabelText(/Paste the token here/)).toBeNull();
   expect(document.body.innerHTML).not.toContain("github_pat_secretvalue");
 });
 
@@ -345,10 +345,10 @@ it("says what was wrong with a pasted token, and keeps nothing of it on screen",
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "Paste a token" }));
   });
-  fireEvent.change(screen.getByLabelText(/Paste the token/), { target: { value: "hunter2" } });
+  fireEvent.change(screen.getByLabelText(/Paste the token here/), { target: { value: "hunter2" } });
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
   });
   expect(screen.getByRole("alert").textContent).toMatch(/doesn't look like a GitHub token/);
-  expect((screen.getByLabelText(/Paste the token/) as HTMLInputElement).value).toBe("");
+  expect((screen.getByLabelText(/Paste the token here/) as HTMLInputElement).value).toBe("");
 });

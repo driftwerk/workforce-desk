@@ -197,7 +197,7 @@ export interface Setup {
   /** When the agent last asked for it: its message shows the card. */
   askedAt?: string;
   connected: { connection: string; account: string; onFor: string | null; write: boolean | null } | null;
-  way?: "cli" | "device" | "browser";
+  way?: "cli" | "device" | "browser" | "token";
   now?: SetupNow;
   /** A newer setup of the service took over: never shown. */
   ended?: "replaced" | null;

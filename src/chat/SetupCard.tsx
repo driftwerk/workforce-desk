@@ -415,13 +415,14 @@ export function SetupCard({
           }}
         >
           <label className="small muted" htmlFor={`token-${s.id}`}>
-            Paste the token GitHub shows you. It goes straight to the vault on this computer, never into the chat.
+            On GitHub’s page, under Repository access choose All repositories, then Generate token. Paste the token here: it goes straight to the vault on this computer, never into the chat.
           </label>
           <span className="setup-paste-row">
             <input
               id={`token-${s.id}`}
               className="mono"
               type="password"
+              autoFocus
               autoComplete="off"
               spellCheck={false}
               placeholder="github_pat_…"
@@ -442,7 +443,11 @@ export function SetupCard({
         <div className="setup-actions">
           {now.action && now.action !== "paste_token" && (
             <button type="button" className={primary ? "btn btn-approve" : "btn"} disabled={busy} onClick={() => act(now.action!)}>
-              {now.action === "open_code" && copied ? "Copied · open GitHub again" : LABEL[now.action]}
+              {busy && now.action === "use_cli"
+                ? "Checking…"
+                : now.action === "open_code" && copied
+                  ? "Copied · open GitHub again"
+                  : LABEL[now.action]}
             </button>
           )}
           {(now.paste || now.action === "paste_token") && (

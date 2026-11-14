@@ -411,6 +411,17 @@
 .setup-paste-row input {
   flex: 1 1 260px;
   min-width: 0;
+  min-height: 38px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+  outline: none;
+}
+.setup-paste-row input:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .setup-actions {
   display: flex;

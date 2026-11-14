@@ -218,12 +218,19 @@ export function readKey(
     if (!shape) return { refused: "no key shape" };
     // Every element showing a whole key, deepest first: a key in <code>
     // inside a <div> is the <code>'s.
+    // A shape with no prefix of its own (Jira's: any long run of
+    // characters) is looked for only where keys are shown, read-only
+    // fields and code, and never in an address or an email.
+    const broad = shape.startsWith("[");
     const found = new Map<string, HTMLElement>();
     for (const at of Array.from(document.body.querySelectorAll("*")) as HTMLElement[]) {
+      if (at.isContentEditable) continue;
       const field = fieldOf(at);
       if (field && !field.readOnly) continue;
+      if (broad && !field && !["CODE", "PRE", "KBD", "SAMP"].includes(at.tagName)) continue;
       const text = (field ? field.value : (at.textContent ?? "")).trim();
       if (text.length < 8 || text.length > max || !whole.test(text)) continue;
+      if (broad && (text.includes("@") || text.includes("://"))) continue;
       const shown = read(at);
       if (!("value" in shown) || !whole.test(shown.value)) continue;
       const before = found.get(shown.value);
@@ -236,6 +243,21 @@ export function readKey(
   const got = read(el);
   if ("refused" in got) return got;
   return { value: got.value, origin: here.origin, path: here.path };
+}
+
+/** Whether the page asks for a password: a visible password field. */
+export function asksPassword(): boolean {
+  for (const el of Array.from(document.querySelectorAll('input[type="password" i]')) as HTMLElement[]) {
+    const r = el.getBoundingClientRect();
+    if (r.width === 0 || r.height === 0) continue;
+    let shown = true;
+    for (let at: Element | null = el; at; at = at.parentElement) {
+      const style = getComputedStyle(at);
+      if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) shown = false;
+    }
+    if (shown) return true;
+  }
+  return false;
 }
 
 /** Whether the page is on one of `pages` now: read with the call that
