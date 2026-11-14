@@ -513,7 +513,12 @@ describe("bringing an unpacked build up to date", () => {
   class FakeReloader implements Reloader {
     stored: number | null = null;
     reloads = 0;
+    /** The rebuilt files on disk: a newer revision than any build here. */
+    disk: number | null = 99;
     constructor(public install: string) {}
+    async onDisk() {
+      return this.disk;
+    }
     async installType() {
       return this.install;
     }
@@ -565,6 +570,20 @@ describe("bringing an unpacked build up to date", () => {
     // A Desk expecting newer still gets its one reload.
     await connect(r, 2, 3);
     expect(r.reloads).toBe(2);
+  });
+
+  it("waits, without spending its one try, while the files on disk aren't rebuilt yet", async () => {
+    const r = new FakeReloader("development");
+    for (const disk of [null, 1]) {
+      r.disk = disk;
+      expect(await connect(r, 1, 2)).toEqual([{ type: "updating", revision: 2, outcome: "unbuilt" }]);
+    }
+    expect(r.reloads).toBe(0);
+    expect(r.stored).toBeNull();
+    // The build finished: the next connection reloads into it.
+    r.disk = 2;
+    expect(await connect(r, 1, 2)).toEqual([{ type: "updating", revision: 2, outcome: "reloading" }]);
+    expect(r.reloads).toBe(1);
   });
 
   it("never reloads a Web Store install", async () => {

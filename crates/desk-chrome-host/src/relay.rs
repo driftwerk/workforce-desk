@@ -268,8 +268,19 @@ async fn relay(hub: impl Fn() -> Result<Option<Hub>> + Send + Sync + 'static) ->
         {
             continue;
         }
+        // The hub may stay up through an install that replaced this
+        // program: it looks now and then, not only when the hub drops.
+        let mut look = tokio::time::interval(Duration::from_secs(30));
+        look.tick().await;
         loop {
             tokio::select! {
+                _ = look.tick() => {
+                    if me.replaced() {
+                        tracing::info!("Desk was updated since Chrome started this relay: it steps aside so Chrome starts the new one");
+                        let _ = to_hub.send(Message::Close(None)).await;
+                        return 0;
+                    }
+                }
                 frame = chrome_rx.recv() => match frame {
                     Some(f) => {
                         if is_hello(&f) {

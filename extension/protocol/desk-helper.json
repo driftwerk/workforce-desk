@@ -8,6 +8,7 @@
     "hello": { "type": "hello", "protocol": 1, "revision": 2, "version": "0.1.0", "key": "<the profile's P-256 public key, raw, base64>", "label": "1A2B-3C4D-5E6F-7A8B" },
     "reloading": { "type": "updating", "revision": 2, "outcome": "reloading" },
     "store": { "type": "updating", "revision": 2, "outcome": "store" },
+    "unbuilt": { "type": "updating", "revision": 2, "outcome": "unbuilt" },
     "tried": { "type": "updating", "revision": 2, "outcome": "tried" }
   },
   "commands": ["capture", "capture_key", "click", "close", "fill", "front", "hand_over", "navigate", "open", "press", "read", "select", "shown", "stop", "type", "upload", "wait", "where"]

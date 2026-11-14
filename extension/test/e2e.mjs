@@ -238,6 +238,14 @@ async function main() {
   // A Desk Helper built after this extension: the unpacked build reloads
   // itself from disk, once, and Chrome starts it again by itself.
   const newer = helper.revision + 1;
+  // Not rebuilt yet: it waits, and keeps its one try.
+  send({ type: "expects", revision: newer });
+  const waits = await next();
+  expect(waits.type === "updating" && waits.outcome === "unbuilt", "an older unpacked build waits while its folder isn't rebuilt");
+  // Rebuilt (as far as it can tell): it reloads into it.
+  const onDisk = join(dist, "revision.json");
+  const built = readFileSync(onDisk, "utf8");
+  writeFileSync(onDisk, JSON.stringify({ revision: newer }));
   send({ type: "expects", revision: newer });
   const told = await next();
   expect(told.type === "updating" && told.revision === newer && told.outcome === "reloading", "an older unpacked build says it's reloading itself");
@@ -247,6 +255,7 @@ async function main() {
   back.send({ type: "expects", revision: newer });
   const second = await back.next();
   expect(second.type === "updating" && second.outcome === "tried", "the same old files after a reload are said, not reloaded again");
+  writeFileSync(onDisk, built);
   clearTimeout(timer);
   await finish(0);
 }

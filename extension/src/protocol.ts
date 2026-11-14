@@ -134,12 +134,13 @@ export interface Expects {
 
 /** The extension, to Desk Helper alone (it isn't relayed): what it did
  *  about being older than Desk expects. `reloading`: it reloads itself from
- *  disk now; `store`: a Web Store install, which Chrome updates; `tried`:
- *  it reloaded once for this revision already and is still older. */
+ *  disk now; `store`: a Web Store install, which Chrome updates; `unbuilt`:
+ *  the files on disk aren't that revision yet, so it waits; `tried`: it
+ *  reloaded once for this revision already and is still older. */
 export interface Updating {
   type: "updating";
   revision: number;
-  outcome: "reloading" | "store" | "tried";
+  outcome: "reloading" | "store" | "unbuilt" | "tried";
 }
 
 export type FromHub = Challenge | Ready | Waiting | Refused | Status | Call | Expects;

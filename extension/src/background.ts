@@ -154,6 +154,12 @@ const reloader: Reloader = {
   installType: async () => (chrome.management?.getSelf ? (await chrome.management.getSelf()).installType : "unknown"),
   reloadedFor: async () => ((await chrome.storage.local.get(RELOADED_FOR))[RELOADED_FOR] as number | undefined) ?? null,
   remember: (revision) => chrome.storage.local.set({ [RELOADED_FOR]: revision }),
+  // An unpacked extension's files are read from its folder as they are now.
+  onDisk: async () => {
+    const r = await fetch(chrome.runtime.getURL("revision.json"), { cache: "no-store" });
+    const n = r.ok ? ((await r.json()) as { revision?: unknown }).revision : null;
+    return Number.isSafeInteger(n) ? (n as number) : null;
+  },
   reload: () => {
     console.info(`Desk expects a newer extension than this one (revision ${REVISION}): reloading it from disk.`);
     chrome.runtime.reload();
