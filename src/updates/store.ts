@@ -75,15 +75,34 @@ export const isWorking = (s: Session): boolean =>
   s.live &&
   (["starting", "working", "blocked", "asking"].includes(s.state) || (s.background?.count ?? 0) > 0 || s.caps?.state === "none" || s.origin === "external");
 
-/** `a` older than `b`, by their numbered parts (`0.2.10` after `0.2.9`). */
+/** `a` older than `b`, by semver: their numbered parts (`0.2.10` after
+ *  `0.2.9`), and a pre-release before its release (`1.2.3-rc.1` before
+ *  `1.2.3`), its dot-separated identifiers compared one by one: numbers as
+ *  numbers (`rc.2` before `rc.10`), numbers before words, words as text, and
+ *  the shorter before the longer when all it has is the same
+ *  (`alpha` before `alpha.1`). Build metadata (`+…`) and a leading `v` are ignored. */
 export const olderThan = (a: string, b: string): boolean => {
-  const parts = (v: string) => v.split(/[.+-]/).map((p) => Number.parseInt(p, 10)).map((n) => (Number.isNaN(n) ? 0 : n));
-  const [x, y] = [parts(a), parts(b)];
-  for (let i = 0; i < Math.max(x.length, y.length); i++) {
-    const d = (x[i] ?? 0) - (y[i] ?? 0);
+  const split = (v: string) => {
+    const [core, ...rest] = v.trim().replace(/^v/i, "").split("+")[0]!.split("-");
+    const nums = core!.split(".").map((p) => (Number.isNaN(Number.parseInt(p, 10)) ? 0 : Number.parseInt(p, 10)));
+    return { nums, pre: rest.length ? rest.join("-").split(".") : null };
+  };
+  const [x, y] = [split(a), split(b)];
+  for (let i = 0; i < Math.max(x.nums.length, y.nums.length); i++) {
+    const d = (x.nums[i] ?? 0) - (y.nums[i] ?? 0);
     if (d !== 0) return d < 0;
   }
-  return false;
+  // Same numbers: one with a pre-release is before the one without.
+  if (!x.pre || !y.pre) return !!x.pre && !y.pre;
+  const numeric = (id: string) => /^\d+$/.test(id);
+  for (let i = 0; i < Math.min(x.pre.length, y.pre.length); i++) {
+    const [p, q] = [x.pre[i]!, y.pre[i]!];
+    if (p === q) continue;
+    if (numeric(p) && numeric(q)) return Number(p) < Number(q);
+    if (numeric(p) !== numeric(q)) return numeric(p);
+    return p < q;
+  }
+  return x.pre.length < y.pre.length;
 };
 /** One that can't be resumed if its CLI stops. */
 export const cantResume = (s: Session): boolean => s.caps?.resume === "none";

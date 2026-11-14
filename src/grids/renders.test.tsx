@@ -1,4 +1,5 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
@@ -10,9 +11,13 @@ import { MAIN_GRID } from "./model";
 import type { GridStorage } from "./storage";
 import { createGrid, deliver, layOut, startGrids, useGrids } from "./store";
 import { useTerminals } from "./terminals";
+import { SidebarGroups } from "../groups/SidebarGroups";
+import { useSettings } from "../settings/store";
+import { EMPTY_LAYOUT } from "../groups/model";
+import { STATE_LABEL } from "../session/words";
 
 const counts = { dm: 0 };
-// How often each grid's sidebar row was drawn.
+// How often each sidebar row (a grid's, an item's) was drawn.
 const rowDraws: Record<string, number> = {};
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
@@ -23,7 +28,7 @@ vi.mock("../groups/rows", async (orig) => {
   return {
     ...m,
     SortRow: (p: Parameters<typeof m.SortRow>[0]) => {
-      if (p.type === "grid") rowDraws[p.id] = (rowDraws[p.id] ?? 0) + 1;
+      rowDraws[p.id] = (rowDraws[p.id] ?? 0) + 1;
       return <m.SortRow {...p} />;
     },
   };
@@ -83,6 +88,33 @@ it("leaves a pane's conversation alone when another session changes or another a
   expect(counts.dm).toBe(0);
 });
 
+// Each pane's menu offers this computer's sessions newest first, with
+// where each stands: read as it opens, so a session no pane shows moving
+// (its state, its turn) draws no pane again.
+it("draws no pane again when a session it doesn't show moves", () => {
+  layOut(MAIN_GRID, "quarters");
+  deliver(MAIN_GRID, { kind: "agent", agent: "local/allan" });
+  deliver(MAIN_GRID, { kind: "session", sessionId: "s0" });
+  deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+  deliver(MAIN_GRID, { kind: "session", sessionId: "s2" });
+  let draws = 0;
+  render(
+    <Profiler id="grid" onRender={() => draws++}>
+      <GridsMain />
+    </Profiler>,
+  );
+  draws = 0;
+  let n = 0;
+  for (const state of ["working", "idle", "starting", "working", "blocked"] as const)
+    act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s5: { ...s.sessions.s5!, state, updatedAt: new Date(Date.UTC(2026, 9, 29, 10, 0, n++)).toISOString() } } })));
+  expect(draws).toBe(0);
+  // Opened now, Replace says where it stands now.
+  fireEvent.click(within(screen.getByRole("region", { name: "task-0" })).getByRole("button", { name: "Pane options" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Replace" }));
+  const s5 = within(screen.getByRole("menu", { name: "Replace" })).getByRole("menuitem", { name: /^task-5/ });
+  expect(s5.textContent).toContain(STATE_LABEL.blocked);
+});
+
 // Every grid's row is in the sidebar whatever the main area shows, so a
 // session's event, a word an agent streams, a room's message or a need on
 // the Floor draws again only the row of the grid it's in, and only when
@@ -131,4 +163,31 @@ it("draws a grid's sidebar row again only for what that row says", async () => {
   expect(rowDraws[other]).toBeGreaterThan(0);
   expect(rowDraws[MAIN_GRID]).toBeGreaterThan(0);
   act(() => useFloor.setState({ hubs: {} }));
+});
+
+// The sidebar lists every session: one's event (its state, its turn), or
+// another opening, draws again only the rows whose words or marks change,
+// not every row for every event.
+it("draws a session's sidebar row again only for what that row shows", () => {
+  useSettings.setState({ loaded: true, groups: [], ungrouped: EMPTY_LAYOUT.ungrouped, sessionNames: {} });
+  render(<SidebarGroups />);
+  expect(screen.getByRole("button", { name: /task-0/ })).toBeTruthy();
+  for (const k of Object.keys(rowDraws)) delete rowDraws[k];
+  let n = 0;
+  for (const state of ["blocked", "working", "idle", "working"] as const)
+    act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s5: { ...s.sessions.s5!, state, updatedAt: new Date(Date.UTC(2026, 9, 29, 10, 0, n++)).toISOString() } } })));
+  expect(rowDraws["session:s5"]).toBeGreaterThan(0);
+  // And it says the newest: blocked, then working again.
+  const dot = () => document.querySelector('[data-item="session:s5"] .dot')!.className;
+  act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s5: { ...s.sessions.s5!, state: "blocked" } } })));
+  expect(dot()).toContain("dot-blocked");
+  act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s5: { ...s.sessions.s5!, state: "working" } } })));
+  expect(dot()).not.toContain("dot-blocked");
+  for (const id of ["s0", "s1", "s2", "s3", "s4"]) expect(rowDraws[`session:${id}`] ?? 0).toBe(0);
+  expect(rowDraws["agent:local/allan"] ?? 0).toBe(0);
+  // Opening one lights its row, and only its.
+  for (const k of Object.keys(rowDraws)) delete rowDraws[k];
+  act(() => useDesk.setState({ openId: "s2" }));
+  expect(rowDraws["session:s2"]).toBeGreaterThan(0);
+  for (const id of ["s0", "s1", "s3", "s4", "s5"]) expect(rowDraws[`session:${id}`] ?? 0).toBe(0);
 });

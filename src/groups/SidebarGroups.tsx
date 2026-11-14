@@ -1,6 +1,6 @@
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/react";
 import { useShallow } from "zustand/react/shallow";
-import { useCallback, useEffect, useId, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
@@ -123,6 +123,27 @@ const machineOfRow = (item: Exclude<Item, { kind: "agent" }>): MachineId => (ite
 /** A session row's dot: how it is, or the idle ring when its machine can't
  *  say. */
 const dotOf = (item: Exclude<Item, { kind: "agent" }>, away = false): string => (item.kind === "away" || away ? "idle" : lookOf(item.session));
+
+/** The same item: what its row shows is read from these, which the stores
+ *  keep as they are until they change. */
+const sameItem = (a: Item, b: Item): boolean =>
+  a.key === b.key &&
+  (a.kind === "agent"
+    ? b.kind === "agent" && a.agent === b.agent
+    : a.kind === "session"
+      ? b.kind === "session" && a.session === b.session
+      : b.kind === "away" && a.machine === b.machine && a.seen === b.seen);
+
+/** What an item's row does, by its key. */
+interface RowActions {
+  open: (key: ItemKey) => void;
+  startRename: (key: ItemKey) => void;
+  rename: (key: ItemKey, name: string | null) => void;
+  nudge: (key: ItemKey, by: -1 | 1) => void;
+  menu: (key: ItemKey, at: { x: number; y: number }, from: HTMLElement | null) => void;
+  remove: (key: ItemKey) => void;
+  hover: (key: ItemKey, over: boolean) => void;
+}
 
 type Editing = { kind: "group"; id: string } | { kind: "session"; key: ItemKey } | null;
 
@@ -489,6 +510,46 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     return `${engine}${where} · ${away ?? (item.kind === "session" ? statusOf(item.session, STATE) : "")}`;
   };
 
+  // What the rows do: one set of functions for as long as the sidebar is
+  // here, each doing what it does now, so a row is drawn again only when
+  // what it shows changes, not for every session's event.
+  const latest = useRef<RowActions | null>(null);
+  useLayoutEffect(() => {
+    latest.current = {
+      open: (key) => {
+        hover(null);
+        const item = items.get(key);
+        if (item && !justDragged.current) openItem(item);
+      },
+      startRename: (key) => {
+        const item = items.get(key);
+        if (item) startRename(item);
+      },
+      rename: (key, name) => {
+        setEditing(null);
+        const item = items.get(key);
+        if (name !== null && item?.kind === "session") nameSession(sessionKey(item.session), name, item.session.name);
+        focusNext.current = key;
+      },
+      nudge: (key, by) => nudge(key, by),
+      menu: (key, at, from) => setMenu({ kind: "item", key, at, from }),
+      remove: (key) => {
+        const item = items.get(key);
+        if (item?.kind === "session") lifecycleActions(item.session).at(-1)!.run();
+      },
+      hover: (key, over) => hover(over ? key : null),
+    };
+  });
+  const [rowActions] = useState<RowActions>(() => ({
+    open: (key) => latest.current?.open(key),
+    startRename: (key) => latest.current?.startRename(key),
+    rename: (key, name) => latest.current?.rename(key, name),
+    nudge: (key, by) => latest.current?.nudge(key, by),
+    menu: (key, at, from) => latest.current?.menu(key, at, from),
+    remove: (key) => latest.current?.remove(key),
+    hover: (key, over) => latest.current?.hover(key, over),
+  }));
+
   const itemMenu = (key: ItemKey): MenuEntry[] => {
     const item = items.get(key);
     if (!item) return [];
@@ -765,20 +826,8 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
                   title={item.kind === "agent" ? titleOf(item) : `${nameOf(item)} · ${titleOf(item)}`}
                   editing={editing?.kind === "session" && editing.key === key}
                   register={register}
-                  onOpen={() => {
-                    hover(null);
-                    if (!justDragged.current) openItem(item);
-                  }}
-                  onStartRename={() => startRename(item)}
-                  onRename={(name) => {
-                    setEditing(null);
-                    if (name !== null && item.kind === "session") nameSession(sessionKey(item.session), name, item.session.name);
-                    focusNext.current = key;
-                  }}
-                  onNudge={(by) => nudge(key, by)}
-                  onMenu={(at, from) => setMenu({ kind: "item", key, at, from })}
-                  onRemove={item.kind === "session" && !awayWord(machineOf(item.session)) ? () => lifecycleActions(item.session).at(-1)!.run() : undefined}
-                  onHover={(over) => hover(over ? key : null)}
+                  actions={rowActions}
+                  removable={item.kind === "session" && !awayWord(machineOf(item.session))}
                 />
               );
             })}
@@ -1037,7 +1086,16 @@ function GroupSection({
   );
 }
 
-function ItemRow({
+/** An item's row, drawn again only when what it shows changes: its item
+ *  (the session, agent or last sighting the stores keep), its badge's
+ *  number or dot, or its words and marks. */
+const ItemRow = memo(ItemRowOf, (a, b) =>
+  (Object.keys(a) as (keyof typeof a)[]).every((k) =>
+    k === "item" ? sameItem(a.item, b.item) : k === "badge" ? a.badge.count === b.badge.count && a.badge.dot === b.badge.dot : Object.is(a[k], b[k]),
+  ) && Object.keys(a).length === Object.keys(b).length,
+);
+
+function ItemRowOf({
   item,
   name,
   badge,
@@ -1051,13 +1109,8 @@ function ItemRow({
   title,
   editing,
   register,
-  onOpen,
-  onStartRename,
-  onRename,
-  onNudge,
-  onMenu,
-  onRemove,
-  onHover,
+  actions,
+  removable,
 }: {
   item: Item;
   name: string;
@@ -1076,15 +1129,12 @@ function ItemRow({
   title: string;
   editing: boolean;
   register: (id: string, el: HTMLElement | null) => void;
-  onOpen: () => void;
-  onStartRename: () => void;
-  onRename: (name: string | null) => void;
-  onNudge: (by: -1 | 1) => void;
-  onMenu: (at: { x: number; y: number }, from: HTMLElement | null) => void;
-  /** Delete or Backspace on it: asks before removing it. */
-  onRemove?: () => void;
-  onHover: (over: boolean) => void;
+  /** The same on every draw: what the row does, by its key. */
+  actions: RowActions;
+  /** Delete or Backspace on it asks before removing it. */
+  removable: boolean;
 }) {
+  const key = item.key;
   const session = item.kind === "session" ? item.session : null;
   // A boss and the board are this computer's hub's.
   const local = !!session && machineOf(session) === LOCAL;
@@ -1100,7 +1150,7 @@ function ItemRow({
       lineBefore={lineBefore}
       on={on}
       className={lit ? "in-focus" : ""}
-      editing={editing && session ? <RenameField label={`Rename ${name}`} initial={name} mono onDone={onRename} /> : null}
+      editing={editing && session ? <RenameField label={`Rename ${name}`} initial={name} mono onDone={(n) => actions.rename(key, n)} /> : null}
       lead={item.kind === "agent" ? <AgentMark agent={agentKey(item.agent)} name={name} size="sm" /> : <span className={`dot dot-${dotOf(item, away)}`} aria-hidden="true" />}
       name={name}
       nameClass={item.kind === "agent" ? "display" : "mono"}
@@ -1115,12 +1165,12 @@ function ItemRow({
       describedBy={says ? `${hint} ${markId}` : hint}
       data={{ "data-item": item.key }}
       register={(el) => register(item.key, el)}
-      onOpen={onOpen}
-      onStartRename={session && !away ? onStartRename : undefined}
-      onNudge={onNudge}
-      onMenu={onMenu}
-      onRemove={onRemove}
-      onHover={onHover}
+      onOpen={() => actions.open(key)}
+      onStartRename={session && !away ? () => actions.startRename(key) : undefined}
+      onNudge={(by) => actions.nudge(key, by)}
+      onMenu={(at, from) => actions.menu(key, at, from)}
+      onRemove={removable ? () => actions.remove(key) : undefined}
+      onHover={(over) => actions.hover(key, over)}
     >
       {/* One group, so the marks keep together at the row's end when they wrap. */}
       <span className="gi-trail">

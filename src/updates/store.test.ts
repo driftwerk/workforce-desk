@@ -36,4 +36,25 @@ describe("what holds a restart, and which version catches up", () => {
     expect(olderThan("0.3.0", "0.3.0")).toBe(false);
     expect(olderThan("0.3", "0.3.1")).toBe(true);
   });
+
+  it("orders pre-releases as semver does", async () => {
+    const { olderThan } = await import("./store");
+    const before = (a: string, b: string) => {
+      expect(olderThan(a, b), `${a} < ${b}`).toBe(true);
+      expect(olderThan(b, a), `${b} !< ${a}`).toBe(false);
+    };
+    before("1.2.3-rc.2", "1.2.3-rc.10");
+    before("1.2.3-rc.1", "1.2.3");
+    before("1.2.3-1", "1.2.3-alpha");
+    before("1.2.3-alpha", "1.2.3-alpha.1");
+    before("1.2.3-alpha.1", "1.2.3-alpha.beta");
+    before("1.2.3-alpha", "1.2.3-beta");
+    before("1.2.3-rc.1", "1.2.4-alpha");
+    expect(olderThan("1.2.3-rc.1", "1.2.3-rc.1")).toBe(false);
+    // Build metadata is no part of the order.
+    expect(olderThan("1.2.3+a", "1.2.3+b")).toBe(false);
+    expect(olderThan("v1.2.3", "1.2.4")).toBe(true);
+    expect(olderThan("1.2.3", "v1.2.3")).toBe(false);
+    expect(olderThan("1.2.3-rc.1+a", "1.2.3-rc.1+b")).toBe(false);
+  });
 });

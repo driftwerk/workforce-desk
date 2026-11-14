@@ -85,6 +85,11 @@ impl HubSecrets {
             .map(Self)
     }
 
+    /// Replaces `secret`'s value, for one changed since [`HubSecrets::load`].
+    pub fn set(&mut self, secret: Secret, value: String) {
+        self.0.insert(secret.env(), value);
+    }
+
     pub fn get(&self, secret: Secret) -> &str {
         // `load` holds every one of `Secret::ALL`.
         &self.0[secret.env()]

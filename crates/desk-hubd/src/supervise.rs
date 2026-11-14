@@ -17,7 +17,7 @@ use tokio::process::{Child, Command};
 use tokio::signal::unix::{SignalKind, signal};
 
 use crate::handover::HubSecrets;
-use crate::{bootstrap, commands, config, holder, memory, model, moving};
+use crate::{bootstrap, commands, config, holder, memory, model, moving, rotate};
 
 const HEALTHY_AFTER: Duration = Duration::from_secs(300);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
@@ -211,7 +211,12 @@ fn postgres_settings(paths: &Paths, port: u16, password: String) -> Settings {
     }
 }
 
-async fn start_postgres(paths: &Paths, port: u16, password: String) -> Result<PostgreSQL> {
+async fn start_postgres(
+    paths: &Paths,
+    port: u16,
+    password: String,
+    keys: &Secrets,
+) -> Result<(PostgreSQL, String)> {
     // Never one found running: it isn't this helper's to start over or stop.
     if let Some(pg) = postgres_running(paths) {
         eyre::bail!(
@@ -219,7 +224,7 @@ async fn start_postgres(paths: &Paths, port: u16, password: String) -> Result<Po
             pg.pid
         );
     }
-    let settings = postgres_settings(paths, port, password);
+    let settings = postgres_settings(paths, port, password.clone());
     // A first initdb that didn't finish leaves a data directory that looks
     // made but isn't; the marker says to start it over.
     let first_run = paths.hub().join("postgres.initializing");
@@ -249,14 +254,35 @@ async fn start_postgres(paths: &Paths, port: u16, password: String) -> Result<Po
     forget_postgres_password(&password_file);
     setup.context("installing Postgres")?;
     pg.start().await.context("starting Postgres")?;
-    let pg = std::mem::ManuallyDrop::into_inner(pg);
     let _ = std::fs::remove_file(&first_run);
+    // Before anything signs in: an install from before the password was kept
+    // out of readable places has it changed, once; one cut off in the middle
+    // of that finds which password the database holds.
+    let database = rotate::Local {
+        port,
+        user: config::DATABASE_USER,
+    };
+    let now = rotate::run(
+        &paths.hub().join(rotate::MARKER),
+        keys,
+        &database,
+        password.clone(),
+    )
+    .await;
+    let pg = if now == password {
+        std::mem::ManuallyDrop::into_inner(pg)
+    } else {
+        // The handle that started the server is left as it is (never
+        // dropped, which would stop it); the one with the password the
+        // database takes now is the one that signs in and stops it.
+        PostgreSQL::new(postgres_settings(paths, port, now.clone()))
+    };
     for db in [config::DATABASE, memory::DATABASE] {
         if !pg.database_exists(db).await? {
             pg.create_database(db).await?;
         }
     }
-    Ok(pg)
+    Ok((pg, now))
 }
 
 /// Removes Postgres's password file. Only initdb reads it, and setup writes
@@ -869,13 +895,15 @@ async fn run_helper(
         env = with_plugin_dir(env, &plugin.to_string_lossy());
     }
     let person = bootstrap::Named::from_env(&process_env);
-    let secrets = HubSecrets::load(&keys)?;
-    let pg = start_postgres(
+    let mut secrets = HubSecrets::load(&keys)?;
+    let (pg, password) = start_postgres(
         &paths,
         ports.postgres,
         secrets.get(Secret::PostgresPassword).to_owned(),
+        &keys,
     )
     .await?;
+    secrets.set(Secret::PostgresPassword, password);
 
     let node = match &store {
         _ if machine => None,
@@ -1474,9 +1502,14 @@ mod tests {
         )
         .unwrap();
         assert!(
-            start_postgres(&paths, 54001, "pw-fixture".into())
-                .await
-                .is_err()
+            start_postgres(
+                &paths,
+                54001,
+                "pw-fixture".into(),
+                &Secrets::of(&paths, KeyStore::File)
+            )
+            .await
+            .is_err()
         );
         let calls = std::fs::read_to_string(&log).unwrap();
         assert!(calls.contains("start"), "{calls}");
@@ -1709,10 +1742,15 @@ mod tests {
         let paths = Paths::at(dir.path().join("Desk"));
         let log = fake_postgres_install(&paths);
         let pg = Fake::postgres(&paths, &paths);
-        let err = start_postgres(&paths, 54001, "pw-fixture".into())
-            .await
-            .unwrap_err()
-            .to_string();
+        let err = start_postgres(
+            &paths,
+            54001,
+            "pw-fixture".into(),
+            &Secrets::of(&paths, KeyStore::File),
+        )
+        .await
+        .unwrap_err()
+        .to_string();
         assert!(err.contains("already running"), "{err}");
         assert!(!log.exists(), "pg_ctl was run");
         assert!(pg.running());

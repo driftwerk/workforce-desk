@@ -105,6 +105,8 @@ export interface Machine {
   progress?: string | null;
   /** An update to this Desk's version under way, or the one that stopped. */
   update?: UpdateRun | null;
+  /** Desk is being uninstalled from it now. */
+  removing?: boolean;
 }
 
 const KINDS = new Set(["adding", "connecting", "ready", "unreachable", "updating", "newer", "failed"]);
@@ -185,7 +187,8 @@ const readMore = (o: Record<string, unknown>): Partial<Machine> => {
     shownKey: shown && str(shown.fingerprint) ? { kind: str(shown.kind) ?? "", fingerprint: str(shown.fingerprint)!, trustedAt: null } : null,
     progress: str(o.progress),
     update: readUpdate(o.update),
-  };
+    removing: o.removing === true ? true : null,
+  } as Partial<Machine>;
   // Only what it said: a machine listed without them reads as before.
   return Object.fromEntries(Object.entries(more).filter(([, v]) => v !== null)) as Partial<Machine>;
 };
