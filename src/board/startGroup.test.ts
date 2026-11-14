@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UNGROUPED, type Layout } from "../groups/model";
-import { boardStartGroup, lastBoardGroup, rememberBoardGroup } from "./startGroup";
+import { boardStartGroup, lastBoardGroup, lastBoardStart, rememberBoardGroup, rememberBoardStart } from "./startGroup";
 import { sessionNameFor } from "./board";
 
 const layout: Layout = {
@@ -36,5 +36,15 @@ describe("a ticket's session name", () => {
     expect(sessionNameFor({ key: "ACM-12", title: "Fix the flaky payment test on the checkout page" })).toBe("ACM-12 Fix the flaky");
     expect(sessionNameFor({ key: null, title: "Tidy up" })).toBe("Tidy up");
     expect(sessionNameFor({ key: "ACM-1", title: "Supercalifragilisticexpialidocious-unbelievably-long-single-word" }).length).toBeLessThanOrEqual(41);
+  });
+});
+
+describe("a board's last start", () => {
+  beforeEach(() => localStorage.clear());
+  it("remembers the machine and model too, and an older one without them", () => {
+    rememberBoardStart("b1", { cwd: "~/w", engine: "claude", machine: "devbox", model: "opus" });
+    expect(lastBoardStart("b1")).toEqual({ cwd: "~/w", engine: "claude", machine: "devbox", model: "opus" });
+    rememberBoardStart("b1", { cwd: "/w", engine: "codex" });
+    expect(lastBoardStart("b1")).toEqual({ cwd: "/w", engine: "codex" });
   });
 });

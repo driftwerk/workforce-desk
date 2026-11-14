@@ -2065,7 +2065,20 @@ export interface TicketMove {
 }
 
 /** Whom a ticket goes to; null takes it off whoever has it. */
-export type AssignTo = { session: string } | { agent: string } | { newSession: { path: string; engine: Engine } } | null;
+export type AssignTo =
+  | { session: string }
+  | { agent: string }
+  | { newSession: { path: string; engine: Engine; model?: string } }
+  /** A session Desk started on one of the person's machines for the ticket. */
+  | { machineSession: { machine: string; id: string; name: string } }
+  | null;
+
+/** What a session started for a ticket on a machine is named and told. */
+export interface TicketStartText {
+  name: string;
+  goal: string;
+  prompt: string;
+}
 
 // ── A boss's plans: a goal broken into tickets, approved before it runs ──
 

@@ -45,6 +45,7 @@ import type {
   TicketMove,
   TicketState,
   AssignTo,
+  TicketStartText,
   NewSession,
   NewTerminal,
   Overview,
@@ -761,6 +762,9 @@ export class DeskHub {
   needTicket = (id: string, other: string, needs: boolean): Promise<Ticket> =>
     this.call(needs ? "PUT" : "DELETE", `/api/desk/tickets/${encodeURIComponent(id)}/needs/${encodeURIComponent(other)}`);
   /** Gives a ticket to a session, an agent or a new session, as you. */
+  /** What a session started for the ticket on `machine` is named and told
+   *  (hubs with the `ticket-start-on` feature). */
+  ticketStartText = (id: string, machine: string): Promise<TicketStartText> => this.call("GET", `/api/desk/tickets/${encodeURIComponent(id)}/start-text?machine=${encodeURIComponent(machine)}`);
   assignTicket = (id: string, to: AssignTo): Promise<Ticket> => this.call("POST", `/api/desk/tickets/${encodeURIComponent(id)}/assign`, { to });
   /** A ticket on its board's Left-the-filter shelf: kept here, unsynced
    *  for good, or dropped (its issue is never touched). */

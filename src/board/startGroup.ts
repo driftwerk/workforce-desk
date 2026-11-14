@@ -32,13 +32,23 @@ export const boardStartGroup = (layout: Layout, boardGroup: string | null | unde
 export interface StartDefault {
   cwd: string;
   engine: string;
+  /** Where it ran: a machine's id; absent is this computer. */
+  machine?: string;
+  /** The model it ran; absent is the engine's own. */
+  model?: string;
 }
 const startKey = (board: string) => `desk.board.start.${board}`;
 
 export const lastBoardStart = (board: string): StartDefault | null => {
   try {
     const v = JSON.parse(window.localStorage.getItem(startKey(board)) ?? "null") as Partial<StartDefault> | null;
-    return v && typeof v.cwd === "string" && typeof v.engine === "string" ? { cwd: v.cwd, engine: v.engine } : null;
+    if (!v || typeof v.cwd !== "string" || typeof v.engine !== "string") return null;
+    return {
+      cwd: v.cwd,
+      engine: v.engine,
+      ...(typeof v.machine === "string" && v.machine ? { machine: v.machine } : {}),
+      ...(typeof v.model === "string" && v.model ? { model: v.model } : {}),
+    };
   } catch {
     return null;
   }

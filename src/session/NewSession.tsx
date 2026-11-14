@@ -30,7 +30,7 @@ import { branchFor, choicesFor, lastFolder, nameFromGoal, remember, type Choices
 const nameFrom = (path: string): string => path.split("/").filter(Boolean).pop() ?? "session";
 
 /** A machine's plugin folder, for its sessions' Claude Code. */
-const machineEnv = async (native: Pick<MachineNative, "pluginDir">, machine: MachineId): Promise<Record<string, string>> => {
+export const machineEnv = async (native: Pick<MachineNative, "pluginDir">, machine: MachineId): Promise<Record<string, string>> => {
   const dir = await native.pluginDir(machine).catch(() => null);
   return dir ? { CLAUDE_CODE_PLUGIN_DIRS: dir } : {};
 };
