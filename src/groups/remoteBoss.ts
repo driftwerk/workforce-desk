@@ -37,12 +37,18 @@ export const FIRST_CHOICE: BossChoice = { level: "suggest", sees: "replies", bud
 export interface BossEngine {
   engine: string;
   name: string;
+  /** Whether a link is held there; when not, `problem` says why. */
+  linked: boolean;
   sessions: number;
   /** Whether its grant serves the boss now; null when it couldn't be read. */
   live: boolean | null;
   /** Why not, in the engine's words. */
   why: string | null;
-  expiresAt: string;
+  /** Every boss there is paused by its own `desk-helper bosses stop`. */
+  enginePaused: boolean;
+  /** It took its stop since the group was paused. */
+  stopped: boolean;
+  expiresAt: string | null;
   reachedAt: string | null;
   problem: string | null;
   /** Other groups there the same boss runs below Act fully: "Atlas (suggest)". */
@@ -57,7 +63,14 @@ export interface RemoteBoss {
   /** `<hub>/<agent>`, as the engines name it. */
   party: string;
   choice: BossChoice;
+  /** Paused, and every engine took its stop. */
   paused: boolean;
+  /** Paused, but not every engine has taken its stop yet. */
+  pausing: boolean;
+  /** Stopped, but not every engine is clear yet. */
+  stopping: boolean;
+  /** The group's sessions the boss doesn't run until the person says so. */
+  waiting: number;
   engines: BossEngine[];
 }
 
@@ -85,12 +98,17 @@ const sent = (c: BossChoice) => ({ level: c.level, sees: c.sees, budgetUsdPerDay
 export const remoteBosses = {
   offer: (hub: string) => call<BossOffer>("boss_offer", { hub }),
   status: (group: string) => call<RemoteBoss | null>("boss_status", { group }),
-  list: () => call<Record<string, RemoteBoss>>("boss_list", {}),
   link: (group: string, hub: string, agent: string, choice: BossChoice) => call<BossDone>("boss_link", { group, hub, agent, choice: sent(choice) }),
   set: (group: string, choice: BossChoice) => call<BossDone>("boss_set", { group, choice: sent(choice) }),
   pause: (group: string) => call<BossDone>("boss_pause", { group }),
   resume: (group: string) => call<BossDone>("boss_resume", { group }),
   unlink: (group: string) => call<BossDone>("boss_unlink", { group }),
+  /** Try again: linked where it failed, as the person last said. */
+  retry: (group: string) => call<BossDone>("boss_retry", { group }),
+  /** Lets every boss on an engine go on after its own pause (asked natively). */
+  unpauseEngine: (group: string, engine: string) => call<BossDone>("boss_unpause_engine", { group, engine }),
+  /** The sidebar changed: the native side brings the grants up to date soon. */
+  layoutChanged: () => invoke<void>("boss_layout_changed").catch(() => {}),
 };
 
 export const LEVEL_NAME: Record<BossLevel, string> = {
@@ -130,8 +148,11 @@ export const notInForce = (b: RemoteBoss | null, choice: BossChoice, boss: strin
   if (choice.budgetUsdPerDay > MAX_BUDGET_USD) return `A daily budget is at most $${MAX_BUDGET_USD.toLocaleString("en-US")}.`;
   if (choice.sees === "status") return `Act fully needs ${boss} to see replies.`;
   if (!b) return null;
-  if (b.paused) return `${boss} is paused: nothing is decided until you let ${boss} go on.`;
+  if (b.stopping) return `${boss} is being stopped: Desk is clearing the last of it.`;
+  if (b.paused || b.pausing) return `${boss} is paused: nothing is decided until you let ${boss} go on.`;
   for (const e of b.engines) {
+    if (!e.linked) return `${boss} isn’t linked on ${e.name}: ${(e.problem ?? "Try it again").replace(/\.$/, "")}.`;
+    if (e.enginePaused) return `Every boss on ${e.name} was paused there: let them go on from this sheet.`;
     if (e.problem) return `Desk couldn’t reach ${e.name}: ${e.problem.replace(/\.$/, "")}.`;
     if (e.live === false) return e.why ?? `${boss} isn’t served on ${e.name} now.`;
     if (e.belowFull.length)
@@ -143,11 +164,14 @@ export const notInForce = (b: RemoteBoss | null, choice: BossChoice, boss: strin
 
 /** Where an engine stands, for its row: its words and its dot. */
 export const engineState = (e: BossEngine, boss: string): { text: string; dot: "done" | "blocked" | "idle" } => {
-  const until = new Date(e.expiresAt).toLocaleDateString([], { day: "numeric", month: "short" });
   const sessions = `${e.sessions} ${e.sessions === 1 ? "session" : "sessions"}`;
-  if (e.problem) return { text: `${sessions} · not reached: ${e.problem}`, dot: "blocked" };
+  const time = (at: string) => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  if (!e.linked) return { text: `${sessions} · not linked: ${e.problem ?? "try it again"}`, dot: "blocked" };
+  if (e.problem) return { text: `${sessions} · not reached${e.reachedAt ? ` since ${time(e.reachedAt)}` : ""}: ${e.problem}`, dot: "blocked" };
+  if (e.enginePaused) return { text: `${sessions} · every boss there is paused`, dot: "idle" };
   if (e.live === false) return { text: `${sessions} · ${e.why ?? `${boss} isn’t served here now`}`, dot: "idle" };
-  return { text: `${sessions} · linked until ${until}`, dot: "done" };
+  const until = e.expiresAt ? new Date(e.expiresAt).toLocaleDateString([], { day: "numeric", month: "short" }) : null;
+  return { text: until ? `${sessions} · linked until ${until}` : sessions, dot: "done" };
 };
 
 /** What a change did, said once: what failed, by engine. */

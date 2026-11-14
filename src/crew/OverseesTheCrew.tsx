@@ -52,7 +52,7 @@ const ALWAYS_YOURS = [
 type Change = (o: Oversight) => Oversight;
 
 /** What's typed in a field, and the problem with it if it can't be used. */
-interface Typed {
+export interface Typed {
   text: string;
   problem: string | null;
 }
@@ -810,7 +810,7 @@ function Check({
   );
 }
 
-function Problem({ id, text }: { id: string; text: string }) {
+export function Problem({ id, text }: { id: string; text: string }) {
   return (
     <span id={id} className="oversee-problem small state-blocked" role="alert">
       {text}
@@ -818,9 +818,9 @@ function Problem({ id, text }: { id: string; text: string }) {
   );
 }
 
-/** A minutes, time or count field: saved on Enter or leaving it; what's
- *  wrong with what's typed is said under it. */
-function Num({
+/** A minutes, time, count or money field: saved on Enter or leaving it;
+ *  what's wrong with what's typed is said under it. */
+export function Num({
   label,
   value,
   onChange,
@@ -829,6 +829,8 @@ function Num({
   unit,
   time = false,
   narrow = false,
+  decimal = false,
+  autoFocus = false,
   problemId,
 }: {
   label: string;
@@ -841,6 +843,9 @@ function Num({
   unit?: string;
   time?: boolean;
   narrow?: boolean;
+  /** Takes cents. */
+  decimal?: boolean;
+  autoFocus?: boolean;
 }) {
   const id = problemId;
   return (
@@ -848,7 +853,8 @@ function Num({
       <input
         className={`num ${narrow ? "num-narrow" : ""}`}
         aria-label={label}
-        inputMode={time ? "text" : "numeric"}
+        inputMode={time ? "text" : decimal ? "decimal" : "numeric"}
+        data-autofocus={autoFocus || undefined}
         placeholder={time ? "09:00" : undefined}
         value={value.text}
         disabled={disabled}

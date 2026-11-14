@@ -48,6 +48,7 @@ import { SessionTicketChip } from "../board/TicketChip";
 import { chargeChoices } from "../crew/charge";
 import { useBoss, useCharge, useCharges } from "../crew/chargeStore";
 import { BossSheet } from "./BossSheet";
+import { remoteBosses } from "./remoteBoss";
 import { below, DragChip, isMenuKey, MoreIcon, PLUGINS, SENSORS, SortRow, step, type Operation } from "./rows";
 import {
   collapseGroup,
@@ -180,6 +181,15 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   const localHub = useDesk((s) => s.hub);
   // Moves the hub previews need the hub to keep the groups.
   const keptOnHub = useHubLayout((s) => s.layout !== null);
+  // A session that joins or leaves a group with a boss on another hub is
+  // granted or taken out soon, not at the next renewal.
+  useEffect(
+    () =>
+      useHubLayout.subscribe((now, was) => {
+        if (now.layout && now.layout !== was.layout) void remoteBosses.layoutChanged();
+      }),
+    [],
+  );
   const [drop, setDrop] = useState<Drop | null>(null);
   const [dragging, setDragging] = useState<{ kind: "item" | "group"; id: string } | null>(null);
   const [said, setSaid] = useState("");

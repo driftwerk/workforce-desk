@@ -10,6 +10,8 @@ import { agentKey, type Agent } from "../chat/types";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
 import { thisComputer, thisComputerLower } from "../machines/words";
+import { Num, Problem } from "../crew/OverseesTheCrew";
+import { usd } from "../crew/oversight";
 import { useOverview } from "../overview/store";
 import { useHost } from "../shell/host";
 import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
@@ -170,6 +172,9 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
   const save = (c: BossChoice = choice) => run(async () => after(await remoteBosses.set(group, c), "Saved."));
   const pause = () => run(async () => after(await remoteBosses.pause(group), `${bossName} is paused in ${name}.`));
   const resume = () => run(async () => after(await remoteBosses.resume(group), `${bossName} goes on in ${name}.`));
+  const retry = () => run(async () => after(await remoteBosses.retry(group), `${bossName} is linked everywhere in ${name}.`));
+  const unpauseEngine = (engine: string) =>
+    run(async () => after(await remoteBosses.unpauseEngine(group, engine), "The bosses there go on."));
   const stop = () =>
     run(async () => {
       const d = await remoteBosses.unlink(group);
@@ -224,9 +229,9 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
         )}
       >
         <div className="dialog-scroll move-body">
-          <fieldset className="move-field">
-            <legend>Who runs {name}</legend>
-            <div className="move-opts" role="radiogroup" aria-label={`Who runs ${name}`}>
+          <div className="oversee-part">
+            <h3 id={`${ids}-who`}>Who runs {name}</h3>
+            <div className="move-opts" role="radiogroup" aria-labelledby={`${ids}-who`}>
               {options.map((o) => {
                 const key = o.who.kind === "desk" ? "desk" : agentKey(o.who.agent);
                 const agent = o.who.kind === "desk" ? null : o.who.agent;
@@ -256,22 +261,21 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
                   </label>
                 );
               })}
-            </div>
-          </fieldset>
-
-          {hubRows.length > 0 && (
-            <div className="oversee-card">
+              {/* A hub that offers no bosses: said in its place, never picked. */}
               {hubRows.map((h) => (
-                <div key={h.id} className="oversee-row">
-                  <span className="dot" aria-hidden="true" />
-                  <span className="oversee-check-text">
-                    <b>{h.label}</b>
-                    <span className="oversee-sub">{h.why}</span>
+                <label key={`hub-${h.id}`} className="move-opt">
+                  <input type="radio" name={`${ids}-who`} disabled checked={false} onChange={() => {}} />
+                  <span className="move-opt-lead" aria-hidden="true">
+                    <Mark name={h.label} size="sm" />
                   </span>
-                </div>
+                  <span className="move-opt-main">
+                    <span>{h.label}</span>
+                    <span className="move-opt-sub">{h.why}</span>
+                  </span>
+                </label>
               ))}
             </div>
-          )}
+          </div>
 
           {remote && (
             <>
@@ -288,12 +292,20 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
                       tabIndex={choice.level === l ? 0 : -1}
                       disabled={busy}
                       onClick={() => pickLevel(l)}
-                      onKeyDown={(e) => radioKeys(e, BOSS_LEVELS, BOSS_LEVELS.indexOf(choice.level), (x) => (x === "full" ? undefined : pickLevel(x)))}
+                      onKeyDown={(e) => {
+                        // Enter or Space on Act fully opens its sheet, as
+                        // arrowing onto it does.
+                        if ((e.key === "Enter" || e.key === " ") && l === "full") {
+                          e.preventDefault();
+                          return pickLevel(l);
+                        }
+                        radioKeys(e, BOSS_LEVELS, BOSS_LEVELS.indexOf(choice.level), pickLevel);
+                      }}
                     >
                       <b>{LEVEL_NAME[l]}</b>
                       <span>{levelSays(l, bossName)}</span>
                       {i === 3 && choice.level === "full" && choice.budgetUsdPerDay !== null && (
-                        <span className="mono">${choice.budgetUsdPerDay} a day</span>
+                        <span className="mono">{usd(choice.budgetUsdPerDay)} a day</span>
                       )}
                     </button>
                   ))}
@@ -322,18 +334,52 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
                   <div className="oversee-card">
                     {status.engines.map((e) => {
                       const s = engineState(e, bossName);
+                      const where = e.engine === "local" ? thisComputer(platform) : e.name;
                       return (
                         <div key={e.engine} className="oversee-row">
                           <span className={`dot dot-${s.dot}`} aria-hidden="true" />
                           <span className="oversee-check-text">
-                            <b>{e.engine === "local" ? thisComputer(platform) : e.name}</b>
+                            <b>{where}</b>
                             <span className="oversee-sub">{s.text}</span>
                           </span>
+                          {!status.stopping && !status.paused && !status.pausing && (!e.linked || e.problem) && (
+                            <button type="button" className="btn btn-sm" disabled={busy} onClick={retry}>
+                              Try {where} again
+                            </button>
+                          )}
+                          {e.enginePaused && (
+                            <button type="button" className="btn btn-sm" disabled={busy} onClick={() => unpauseEngine(e.engine)}>
+                              Let {where}’s bosses go on
+                            </button>
+                          )}
                         </div>
                       );
                     })}
                   </div>
                   {status.paused && <span className="oversee-sub">{bossName} is paused: nothing is decided or done in {name} until {bossName} goes on.</span>}
+                  {status.pausing && (
+                    <span className="oversee-sub">
+                      {bossName} is paused where Desk reached; Desk sends the pause again until every engine has it. Nothing is renewed meanwhile.
+                    </span>
+                  )}
+                  {status.stopping && (
+                    <span className="oversee-sub">{bossName} is stopped; Desk is clearing the last of it, and links nothing again.</span>
+                  )}
+                </div>
+              )}
+
+              {linkedHere && status && status.waiting > 0 && !status.stopping && (
+                <div className="oversee-why" role="status">
+                  <p className="small">
+                    <b className="state-blocked">
+                      {status.waiting} {status.waiting === 1 ? "session waits" : "sessions wait"} for you.
+                    </b>{" "}
+                    {status.waiting === 1 ? "It" : "They"} joined {name} after you let {bossName} run its sessions: {bossName} runs{" "}
+                    {status.waiting === 1 ? "it" : "them"} once you say so.
+                  </p>
+                  <button type="button" className="btn btn-sm" disabled={busy} onClick={() => save(status.choice)}>
+                    Let {bossName} run {status.waiting === 1 ? "it" : "them"}
+                  </button>
                 </div>
               )}
             </>
@@ -352,17 +398,17 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
         <footer className="dialog-foot">
           {linkedHere && status && !changed && (
             <>
-              {status.paused ? (
+              {status.stopping ? null : status.paused ? (
                 <button type="button" className="btn btn-sm" disabled={busy} onClick={resume}>
                   Let {bossName} go on
                 </button>
               ) : (
                 <button type="button" className="btn btn-sm" disabled={busy} onClick={pause}>
-                  Pause {bossName}
+                  {status.pausing ? `Pause ${bossName} again` : `Pause ${bossName}`}
                 </button>
               )}
-              <button type="button" className="btn btn-sm" disabled={busy} onClick={stop}>
-                Stop {bossName}
+              <button type="button" className="btn btn-sm btn-danger" disabled={busy} onClick={stop}>
+                {status.stopping ? `Stop ${bossName} again` : `Stop ${bossName}`}
               </button>
             </>
           )}
@@ -392,7 +438,7 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
           busy={busy}
           linked={!!linkedHere}
           onClose={() => setFull(false)}
-          onPause={linkedHere ? (status?.paused ? resume : pause) : undefined}
+          onPause={linkedHere && !status?.stopping ? (status?.paused ? resume : pause) : undefined}
           paused={!!status?.paused}
           onStop={linkedHere ? () => void stop().then(() => setFull(false)) : undefined}
           onUse={(c) => {
@@ -407,6 +453,17 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
 }
 
 function SeesChips({ value, disabled, onChange, needsReplies = false }: { value: BossSees; disabled: boolean; onChange: (s: BossSees) => void; needsReplies?: boolean }) {
+  const open = BOSS_SEES.filter((s) => !(needsReplies && s === "status"));
+  /** Arrows move among those it may be, and focus follows. */
+  const keys = (e: React.KeyboardEvent) => {
+    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const next = open[(Math.max(open.indexOf(value), 0) + step + open.length) % open.length]!;
+    onChange(next);
+    const group = (e.currentTarget as HTMLElement).closest('[role="radiogroup"]');
+    requestAnimationFrame(() => group?.querySelectorAll<HTMLElement>('[role="radio"]')[BOSS_SEES.indexOf(next)]?.focus());
+  };
   return (
     <div className="chip-row" role="radiogroup" aria-label="What it sees">
       {BOSS_SEES.map((s) => {
@@ -418,10 +475,11 @@ function SeesChips({ value, disabled, onChange, needsReplies = false }: { value:
             role="radio"
             className="chip-btn"
             aria-checked={value === s}
-            aria-pressed={value === s}
             aria-disabled={off || undefined}
+            tabIndex={value === s ? 0 : -1}
             disabled={disabled}
             onClick={() => !off && onChange(s)}
+            onKeyDown={keys}
           >
             {SEES_NAME[s]}
           </button>
@@ -464,10 +522,17 @@ export function ActFullySheet({
   const ids = useId();
   const [budget, setBudget] = useState(choice.budgetUsdPerDay !== null ? String(choice.budgetUsdPerDay) : "");
   const [sees, setSees] = useState<BossSees>(choice.sees === "status" ? "replies" : choice.sees);
-  const usd = budget.trim() === "" ? null : Number(budget);
-  const bad = usd === null ? "Act fully needs a daily budget." : !Number.isFinite(usd) || usd <= 0 || usd > MAX_BUDGET_USD ? `An amount above $0 and up to $${MAX_BUDGET_USD.toLocaleString("en-US")}.` : null;
-  const next: BossChoice = { level: "full", sees, budgetUsdPerDay: bad ? null : usd };
+  const typed = budget.trim() === "" ? null : Number(budget);
+  const bad =
+    typed === null
+      ? "Act fully needs a daily budget."
+      : !Number.isFinite(typed) || typed <= 0 || typed > MAX_BUDGET_USD
+        ? `An amount above $0 and up to ${usd(MAX_BUDGET_USD)}.`
+        : null;
+  const next: BossChoice = { level: "full", sees, budgetUsdPerDay: bad ? null : typed };
   const on = choice.level === "full";
+  const shown = bad && budget !== "" ? bad : null;
+  const usdNow = on ? choice.budgetUsdPerDay : null;
   const why = notInForce(on ? status : null, next, boss, waits);
   return (
     <Dialog
@@ -494,33 +559,33 @@ export function ActFullySheet({
         )}
         <div className="oversee-card">
           <div className="oversee-row">
-            <span className="oversee-check-text">
-              <b>Daily budget</b>
-              <span className="oversee-sub">Needed. Real money a day: what API keys and Bedrock are billed for. Your Claude and ChatGPT plans aren’t counted.</span>
-            </span>
-            <span className="oversee-num">
-              <input
-                className="num"
-                inputMode="decimal"
-                aria-label="Daily budget in US dollars"
-                aria-invalid={!!bad && budget !== ""}
-                aria-describedby={bad ? `${ids}-bad` : undefined}
-                value={budget}
-                onChange={(e) => setBudget(e.target.value)}
-                data-autofocus
-              />
-              <span className="oversee-sub">USD a day</span>
-            </span>
-            {bad && budget !== "" && (
-              <span id={`${ids}-bad`} className="oversee-problem small state-blocked" role="alert">
-                {bad}
+            <span className="oversee-check">
+              <span className="oversee-check-text">
+                <b>Daily budget</b>
+                <span className="oversee-sub">
+                  Needed. Real money a day: what API keys and Bedrock are billed for. Your Claude and ChatGPT plans aren’t counted.
+                  {usdNow !== null && ` Now ${usd(usdNow)} a day.`}
+                </span>
               </span>
-            )}
+            </span>
+            <Num
+              problemId={`${ids}-bad`}
+              label="Daily budget in US dollars"
+              value={{ text: budget, problem: shown }}
+              onChange={setBudget}
+              onCommit={() => {}}
+              unit="USD a day"
+              decimal
+              autoFocus
+            />
+            {shown && <Problem id={`${ids}-bad`} text={shown} />}
           </div>
           <div className="oversee-row">
-            <span className="oversee-check-text">
-              <b>What {boss} sees</b>
-              <span className="oversee-sub">Act fully needs replies</span>
+            <span className="oversee-check">
+              <span className="oversee-check-text">
+                <b>What {boss} sees</b>
+                <span className="oversee-sub">Act fully needs replies</span>
+              </span>
             </span>
             <SeesChips value={sees} disabled={busy} needsReplies onChange={setSees} />
           </div>
@@ -529,12 +594,12 @@ export function ActFullySheet({
       </div>
       <footer className="dialog-foot">
         {onPause && (
-          <button type="button" className="link small" disabled={busy} onClick={onPause}>
+          <button type="button" className="btn btn-sm" disabled={busy} onClick={onPause}>
             {paused ? `Let ${boss} go on` : `Pause ${boss}`}
           </button>
         )}
         {onStop && (
-          <button type="button" className="link small" disabled={busy} onClick={onStop}>
+          <button type="button" className="btn btn-sm btn-danger" disabled={busy} onClick={onStop}>
             Stop {boss}
           </button>
         )}

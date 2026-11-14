@@ -5,7 +5,7 @@ import type { Agent, HubAccount } from "../chat/types";
 import { useOverview } from "../overview/store";
 import { BossSheet } from "./BossSheet";
 import { useHubLayout } from "./hubLayout";
-import { fullLine, notInForce, type BossChoice, type RemoteBoss } from "./remoteBoss";
+import { fullLine, notInForce, type BossChoice, type BossEngine, type RemoteBoss } from "./remoteBoss";
 
 const calls = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("../platform", async (original) => ({ ...(await original<typeof import("../platform")>()), invoke: calls.invoke }));
@@ -20,6 +20,22 @@ const HUBS: HubAccount[] = [
 const agent = (hubId: string, id: string, name: string): Agent => ({ hubId, id, name, model: null, provider: null, isDefault: false });
 const ROSTER = [agent("local", "desk", "Desk"), agent("local", "sarah", "Sarah"), agent("driftwerk", "allan", "Allan"), agent("atlas", "ada", "Ada")];
 
+const engine = (id: string, name: string, sessions: number, over: Partial<BossEngine> = {}): BossEngine => ({
+  engine: id,
+  name,
+  linked: true,
+  sessions,
+  live: true,
+  why: null,
+  enginePaused: false,
+  stopped: false,
+  expiresAt: "2026-12-14T00:00:00Z",
+  reachedAt: null,
+  problem: null,
+  belowFull: [],
+  ...over,
+});
+
 const FULL: BossChoice = { level: "full", sees: "replies", budgetUsdPerDay: 40 };
 const linked = (choice: BossChoice, over: Partial<RemoteBoss> = {}): RemoteBoss => ({
   hub: "driftwerk",
@@ -28,10 +44,10 @@ const linked = (choice: BossChoice, over: Partial<RemoteBoss> = {}): RemoteBoss 
   party: "driftwerk/allan",
   choice,
   paused: false,
-  engines: [
-    { engine: "local", name: "this Mac", sessions: 2, live: true, why: null, expiresAt: "2026-12-14T00:00:00Z", reachedAt: null, problem: null, belowFull: [] },
-    { engine: "devbox", name: "devbox", sessions: 4, live: true, why: null, expiresAt: "2026-12-14T00:00:00Z", reachedAt: null, problem: null, belowFull: [] },
-  ],
+  pausing: false,
+  stopping: false,
+  waiting: 0,
+  engines: [engine("local", "this computer", 2), engine("devbox", "devbox", 4)],
   ...over,
 });
 
@@ -46,7 +62,9 @@ const answers = (cmd: string, args?: Record<string, unknown>): unknown => {
     case "boss_set":
     case "boss_pause":
     case "boss_unlink":
-      return { cancelled: false, done: ["this Mac"], failed: [] };
+    case "boss_retry":
+    case "boss_unpause_engine":
+      return { cancelled: false, done: ["devbox"], failed: [] };
     default:
       return undefined;
   }
@@ -121,8 +139,68 @@ describe("a group's Boss sheet", () => {
     status = linked({ level: "suggest", sees: "replies", budgetUsdPerDay: null });
     await open();
     expect(await screen.findByText("This Mac")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Try .* again/ })).toBeNull();
     expect(screen.getAllByText(/linked until/)).toHaveLength(2);
     await act(async () => {});
+  });
+});
+
+describe("what the sheet offers as the boss stands", () => {
+  it("offers Try again on an engine not linked, and letting an engine's own pause go", async () => {
+    status = linked({ level: "suggest", sees: "replies", budgetUsdPerDay: null });
+    status.engines[1] = engine("devbox", "devbox", 4, { linked: false, expiresAt: null, problem: "devbox can't be reached now." });
+    status.engines[0] = { ...status.engines[0]!, enginePaused: true };
+    await open();
+    fireEvent.click(await screen.findByRole("button", { name: "Try devbox again" }));
+    await waitFor(() => expect(calls.invoke).toHaveBeenCalledWith("boss_retry", { group: "acme" }));
+    fireEvent.click(screen.getByRole("button", { name: "Let This Mac’s bosses go on" }));
+    await waitFor(() => expect(calls.invoke).toHaveBeenCalledWith("boss_unpause_engine", { group: "acme", engine: "local" }));
+  });
+
+  it("says sessions wait on the person, and asks natively to let the boss run them", async () => {
+    status = { ...linked({ level: "act", sees: "replies", budgetUsdPerDay: null }), waiting: 2 };
+    await open();
+    expect(await screen.findByText("2 sessions wait for you.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Let Allan run them" }));
+    await waitFor(() => expect(calls.invoke).toHaveBeenCalledWith("boss_set", { group: "acme", choice: { level: "act", sees: "replies", budgetUsdPerDay: null } }));
+  });
+
+  it("keeps Pause on offer until every engine has it, and Stop until it's clear", async () => {
+    status = { ...linked({ level: "suggest", sees: "replies", budgetUsdPerDay: null }), paused: false, pausing: true };
+    await open();
+    expect(await screen.findByRole("button", { name: "Pause Allan again" })).toBeTruthy();
+    cleanup();
+    status = { ...linked({ level: "suggest", sees: "replies", budgetUsdPerDay: null }), paused: true, stopping: true };
+    await open();
+    expect(await screen.findByRole("button", { name: "Stop Allan again" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Let Allan go on" })).toBeNull();
+  });
+
+  it("opens Act fully from the keyboard, and moves Sees by arrows past what it can't be", async () => {
+    status = linked({ level: "act", sees: "replies", budgetUsdPerDay: null });
+    await open();
+    const act = await screen.findByRole("radio", { name: /Act within Desk/ });
+    act.focus();
+    fireEvent.keyDown(act, { key: "ArrowRight" });
+    const sheet = await screen.findByRole("dialog", { name: "Let Allan act fully in Acme?" });
+    const replies = within(sheet).getByRole("radio", { name: "Status and replies" });
+    expect(replies.getAttribute("aria-checked")).toBe("true");
+    expect(replies.hasAttribute("aria-pressed")).toBe(false);
+    fireEvent.keyDown(replies, { key: "ArrowRight" });
+    expect(within(sheet).getByRole("radio", { name: "Everything" }).getAttribute("aria-checked")).toBe("true");
+    fireEvent.keyDown(within(sheet).getByRole("radio", { name: "Everything" }), { key: "ArrowRight" });
+    // Past Status, which Act fully can't be.
+    expect(within(sheet).getByRole("radio", { name: "Status and replies" }).getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("offers another hub's agent in place of the boss there is, through one native question", async () => {
+    status = linked({ level: "suggest", sees: "replies", budgetUsdPerDay: null });
+    useChat.setState({ hubs: HUBS, roster: [...ROSTER, agent("driftwerk", "bea", "Bea")] });
+    await open();
+    fireEvent.click(await screen.findByLabelText(/Bea/));
+    fireEvent.click(screen.getByRole("button", { name: "Make Bea Acme’s boss" }));
+    await waitFor(() => expect(calls.invoke).toHaveBeenCalledWith("boss_link", expect.objectContaining({ agent: "bea" })));
+    expect(calls.invoke).not.toHaveBeenCalledWith("boss_unlink", expect.anything());
   });
 });
 
@@ -136,8 +214,8 @@ describe("why Act fully isn't in force", () => {
     stopped.engines[1] = { ...stopped.engines[1]!, live: false, why: "Acme's boss was stopped on this machine." };
     expect(notInForce(stopped, FULL, "Allan")).toBe("Acme's boss was stopped on this machine.");
     const other = linked(FULL);
-    other.engines[0] = { ...other.engines[0]!, belowFull: ["Atlas (suggest)"] };
-    expect(notInForce(other, FULL, "Allan")).toMatch(/also runs Atlas \(suggest\) on this Mac/);
+    other.engines[0] = { ...other.engines[0]!, belowFull: ["Atlas (Suggest)"] };
+    expect(notInForce(other, FULL, "Allan")).toMatch(/also runs Atlas \(Suggest\) on this computer/);
     expect(notInForce(linked(FULL), FULL, "Allan", ["Allan isn't connected, so this is yours."])).toBe("Allan isn't connected, so this is yours.");
     expect(notInForce(linked(FULL), { ...FULL, level: "act" }, "Allan")).toBeNull();
   });
