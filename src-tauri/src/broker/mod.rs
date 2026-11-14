@@ -352,7 +352,7 @@ impl Broker {
         &self,
         method: &str,
         target: &str,
-        body: Vec<u8>,
+        body: Option<Vec<u8>>,
         most: usize,
     ) -> Result<Answer, Unanswered> {
         if self.machine.is_none() {
@@ -362,7 +362,7 @@ impl Broker {
         }
         let allowed = routes::relay_machine(method, target)
             .map_err(|e| Unanswered::NotSent(e.to_string()))?;
-        self.send_capped(allowed, Some(json(body)), most).await
+        self.send_capped(allowed, body.map(json), most).await
     }
 
     async fn send_allowed(
@@ -1406,7 +1406,7 @@ mod tests {
         let (url, mut seen) = hub(vec![OK_JSON]).await;
         let local = broker_at(&url, vec![]);
         let e = local
-            .relay_machine("POST", "/api/desk/crew/served", b"{}".to_vec(), 1024)
+            .relay_machine("POST", "/api/desk/crew/served", Some(b"{}".to_vec()), 1024)
             .await
             .unwrap_err();
         assert!(matches!(e, Unanswered::NotSent(_)), "{e:?}");
@@ -1486,13 +1486,13 @@ mod tests {
     async fn the_relay_says_whether_a_call_may_have_arrived() {
         let gone = gone_address();
         let e = machine_broker(&fake_machine(&gone))
-            .relay_machine("POST", "/api/desk/crew/served", b"{}".to_vec(), 1024)
+            .relay_machine("POST", "/api/desk/crew/served", Some(b"{}".to_vec()), 1024)
             .await
             .unwrap_err();
         assert!(matches!(e, Unanswered::NotSent(_)), "{e:?}");
         let (dropped, took) = hub_that_drops().await;
         let e = machine_broker(&fake_machine(&dropped))
-            .relay_machine("POST", "/api/desk/crew/served", b"{}".to_vec(), 1024)
+            .relay_machine("POST", "/api/desk/crew/served", Some(b"{}".to_vec()), 1024)
             .await
             .unwrap_err();
         assert!(matches!(e, Unanswered::MaybeSent(_)), "{e:?}");
@@ -1504,7 +1504,7 @@ mod tests {
         const BIG: &str = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 10\r\nconnection: close\r\n\r\n0123456789";
         let (url, _seen) = hub(vec![BIG]).await;
         let e = machine_broker(&fake_machine(&url))
-            .relay_machine("POST", "/api/desk/crew/served", b"{}".to_vec(), 9)
+            .relay_machine("POST", "/api/desk/crew/served", Some(b"{}".to_vec()), 9)
             .await
             .unwrap_err();
         assert_eq!(
