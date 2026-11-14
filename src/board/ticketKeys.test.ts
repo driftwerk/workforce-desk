@@ -26,4 +26,21 @@ describe("ticket keys in a comment", () => {
   it("keeps going after a fence closes", () => {
     expect(linkTicketKeys("~~~\nPLT-2554\n~~~\nPLT-2554", known)).toBe(`~~~\nPLT-2554\n~~~\n${link}`);
   });
+
+  it("leaves reference links whole", () => {
+    const md = ["See [PLT-2554] for it.", "", `[PLT-2554]: https://x.test/browse/PLT-2554 "PLT-2554"`].join("\n");
+    expect(linkTicketKeys(md, known)).toBe(md);
+  });
+  it("links a key in emphasis, and leaves HTML tags alone", () => {
+    expect(linkTicketKeys("_PLT-2554_ and *PLT-2554*", known)).toBe(`_${link}_ and *${link}*`);
+    expect(linkTicketKeys(`<abbr title="PLT-2554">x</abbr>`, known)).toBe(`<abbr title="PLT-2554">x</abbr>`);
+  });
+  it("reads a long hostile line in linear time", () => {
+    for (const run of ["[", "![", "<", "<a", "`", "PLT-1 "]) {
+      const line = run.repeat(Math.ceil(100_000 / run.length));
+      const start = performance.now();
+      linkTicketKeys(line, known);
+      expect(performance.now() - start).toBeLessThan(250);
+    }
+  });
 });

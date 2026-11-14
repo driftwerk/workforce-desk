@@ -334,17 +334,30 @@ function CommentRow({
   );
 }
 
+/** Each board's ticket keys and ids, built once per change of the tickets
+ *  and shared by every comment. */
+const keysByBoard = new WeakMap<object, Map<string, Map<string, string>>>();
+const boardKeys = (tickets: Record<string, Ticket>, board: string): Map<string, string> => {
+  let boards = keysByBoard.get(tickets);
+  if (!boards) keysByBoard.set(tickets, (boards = new Map()));
+  let ids = boards.get(board);
+  if (!ids) {
+    ids = new Map();
+    for (const o of Object.values(tickets)) {
+      const key = o.board === board ? (o.external?.key ?? o.key) : null;
+      if (key) ids.set(key, o.id);
+    }
+    boards.set(board, ids);
+  }
+  return ids;
+};
+
 /** A comment's text with each key of a ticket on the same board made a
  *  link to it, so it's drawn as that ticket's chip. */
 function useKeyedBody(text: string, board: string): string {
   const tickets = useBoard((s) => s.tickets);
   return useMemo(() => {
-    const ids = new Map<string, string>();
-    for (const o of Object.values(tickets)) {
-      if (o.board !== board) continue;
-      const key = o.external?.key ?? o.key;
-      if (key) ids.set(key, o.id);
-    }
+    const ids = boardKeys(tickets, board);
     return ids.size ? linkTicketKeys(text, (k) => ids.get(k)) : text;
   }, [text, board, tickets]);
 }

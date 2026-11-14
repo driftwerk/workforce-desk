@@ -21,6 +21,7 @@ export function IssueChip({ id, children }: { id: string; children: ReactNode })
   const done = t.state === "done" || d?.stateKind === "completed";
   return (
     <button type="button" className="ticket-issue-chip" onClick={() => open(t.id)} title={t.title} aria-label={`Open ${key}: ${t.title}, ${state}`}>
+      {/* A Desk ticket has no type of its own: drawn as a sub-task, as the mockup draws it. */}
       {d?.kind || d?.stateKind ? <IssueGlyph details={d} size={12} /> : <TypeGlyph kind="Sub-task" level={-1} size={12} />}
       <span className="ticket-issue-chip-key">{key}</span>
       {said && <span className="ticket-issue-chip-text">{said}</span>}

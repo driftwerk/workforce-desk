@@ -6,12 +6,16 @@ import { ticketLink } from "../shell/links";
 // left as written.
 
 /** A key: a project's letters, a dash, a number; not inside a word, an
- *  address or a longer key. */
-const KEY = /(?<![\w/#.-])([A-Z][A-Z0-9]{1,9}-\d{1,7})(?![\w-])/g;
+ *  address, a longer key, or a reference link's own brackets. Underscores
+ *  around it (emphasis) are fine. */
+const KEY = /(?<![A-Za-z0-9/#.\[-])([A-Z][A-Z0-9]{1,9}-\d{1,7})(?![A-Za-z0-9\]-])/g;
 
 /** What on a line is never rewritten: code spans, links and images, autolinks
  *  and bare addresses. */
-const KEEP = /(`+)[\s\S]*?\1|!?\[[^\]\n]*\]\([^)\n]*\)|!?\[[^\]\n]*\]\[[^\]\n]*\]|<[^>\s]+>|\b(?:https?|desk):\/\/[^\s<>"']+/gi;
+const KEEP = /(`+)[\s\S]*?\1|!?\[[^[\]\n]*\]\([^()\n]*\)|!?\[[^[\]\n]*\]\[[^[\]\n]*\]|<\/?[A-Za-z][^<>\n]*>|<[^<>\s]+>|\b(?:https?|desk):\/\/[^\s<>"']+/gi;
+
+/** A reference link's definition: `[name]: address "title"`. */
+const DEFINITION = /^ {0,3}\[[^[\]\n]+\]:/;
 
 /** A fence's opening line: three or more backticks or tildes. */
 const FENCE = /^ {0,3}(`{3,}|~{3,})/;
@@ -39,6 +43,7 @@ export const linkTicketKeys = (md: string, idOf: (key: string) => string | undef
       }
       // Indented code: four spaces or a tab in, and not a list's own line.
       if (/^( {4}|\t)/.test(line) && !/^\s*([-*+]|\d+[.)])\s/.test(line)) return line;
+      if (DEFINITION.test(line)) return line;
       let out = "";
       let at = 0;
       for (const m of line.matchAll(KEEP)) {
