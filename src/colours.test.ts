@@ -35,6 +35,8 @@ const ALLOWED: { file: string; snippet: string; why: string }[] = [
     why: "the editor's label for a terminal colour, not a colour",
   })),
   { file: "settings/voiceCatalog.ts", snippet: 'id: "coral", name: "Coral"', why: "a voice's name" },
+  { file: "board/ticketDirectives.tsx", snippet: '"danger", "purple", "neutral"]', why: "the hub's tone names, mapped to tokens in board.css" },
+  { file: "styles/board.css", snippet: "stroke='black' stroke-width='1.6'", why: "a mask's shape; its colour is never drawn" },
   ...["#111210", "#0E1822", "#1A1423", "#FBFAF7", "#F6F6F1", "#FFFFFF", "#EEF2F6", "#D4FF3A", "#FF9F6B", "#7DD3FC", "#C4B5FD", "#FF6B9A", "#161714", "#3F5A06", "#1F5FBF", "#B4440F", "#5B45C9", "#B02A5B", "#1B1C18"].map(
     (hex) => ({ file: "settings/editing.ts", snippet: `hex: "${hex}"`, why: "the editor's swatches: colours offered to set a theme's background or signal" }),
   ),

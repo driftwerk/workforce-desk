@@ -317,15 +317,60 @@ export { markText } from "../ui/Mark";
 
 // ── The description ────────────────────────────────────────────────────
 
+/** A container Desk draws, opening (`:::panel{tone=info}`,
+ *  `::::details[Title]`), and a closing fence. Others (Linear's or
+ *  Docusaurus's `:::tip`) read as words, so they aren't containers here. */
+const CONTAINER_OPEN = /^\s*(:{3,})(panel|details)(?![A-Za-z0-9_-])/i;
+const CONTAINER_CLOSE = /^\s*(:{3,})\s*$/;
+
+/** Each line's containers, as a renderer reads them: a closing fence ends
+ *  the innermost one only when it has at least that one's colons. Calls
+ *  `line` with each line, whether it is a fence, and the containers it's in
+ *  (each a collapsible or not). */
+const walkContainers = (body: string, line: (l: string, i: number, fence: boolean, open: readonly boolean[]) => void): void => {
+  const open: { colons: number; details: boolean }[] = [];
+  let fenced = false;
+  body.split("\n").forEach((l, i) => {
+    if (/^\s*(```|~~~)/.test(l)) fenced = !fenced;
+    else if (!fenced) {
+      const o = CONTAINER_OPEN.exec(l);
+      if (o) {
+        open.push({ colons: o[1]!.length, details: o[2]!.toLowerCase() === "details" });
+        return line(l, i, true, open.map((c) => c.details));
+      }
+      const c = CONTAINER_CLOSE.exec(l);
+      if (c && open.length && c[1]!.length >= open[open.length - 1]!.colons) {
+        const was = open.map((x) => x.details);
+        open.pop();
+        return line(l, i, true, was);
+      }
+    }
+    line(l, i, false, open.map((c) => c.details));
+  });
+};
+
+/** A description with its panels' fence lines gone, so their words read as
+ *  paragraphs, and its collapsibles gone whole: they're closed until
+ *  clicked, so no preview shows what's in them. */
+export const unfenced = (body: string): string => {
+  const out: string[] = [];
+  walkContainers(body, (l, _i, fence, open) => {
+    if (!fence && !open.includes(true)) out.push(l);
+  });
+  return out.join("\n");
+};
+
 /** A description cut to its first `keep` sections (a heading and what's
  *  under it), and how many more it has. Fenced code is never cut into. */
 export const foldSections = (body: string, keep = 2): { shown: string; more: number } => {
   const lines = body.split("\n");
   const starts: number[] = [];
   let fenced = false;
-  lines.forEach((l, i) => {
+  // Inside a panel or a collapsible (`:::` … `:::`), a heading is its own:
+  // never where the description is cut.
+  walkContainers(body, (l, i, fence, open) => {
     if (/^\s*(```|~~~)/.test(l)) fenced = !fenced;
-    else if (!fenced && /^#{1,6}\s/.test(l)) starts.push(i);
+    else if (!fenced && !fence && !open.length && /^#{1,6}\s/.test(l)) starts.push(i);
   });
   // Words before the first heading are a section of their own; blank lines
   // alone aren't.
@@ -337,7 +382,7 @@ export const foldSections = (body: string, keep = 2): { shown: string; more: num
 /** A description's first paragraph, for the shortest view: no heading.
  *  One with no paragraph of words (only headings or code) is all of it. */
 export const firstParagraph = (body: string): string =>
-  body
+  unfenced(body)
     .split(/\n\s*\n/)
     .map((b) => b.trim())
     .find((b) => b && !/^#{1,6}\s/.test(b) && !/^(```|~~~)/.test(b)) ?? body;
