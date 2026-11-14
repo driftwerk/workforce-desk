@@ -119,6 +119,8 @@ describe("a group's Boss sheet", () => {
     const sheet = await screen.findByRole("dialog", { name: "Let Allan act fully in Acme?" });
     expect(within(sheet).getAllByText(fullLine("Allan"))).toHaveLength(1);
     expect(sheet.querySelectorAll(".oversee-never")).toHaveLength(1);
+    // Pause and Stop stay in the Boss sheet's footer until Act fully is in force.
+    expect(within(sheet).queryByRole("button", { name: "Pause Allan" })).toBeNull();
     // A budget is needed; Status can't be picked.
     const turnOn = within(sheet).getByRole("button", { name: "Turn on Act fully" }) as HTMLButtonElement;
     expect(turnOn.disabled).toBe(true);
@@ -182,6 +184,7 @@ describe("what the sheet offers as the boss stands", () => {
     fireEvent.click(screen.getByRole("radio", { name: /Act fully/ }));
     const sheet = await screen.findByRole("dialog", { name: "Allan acts fully in Acme" });
     expect(within(sheet).getByText("Spent today: $12.50 of $40.00")).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Pause Allan" })).toBeTruthy();
     cleanup();
     status = linked(FULL);
     await open();

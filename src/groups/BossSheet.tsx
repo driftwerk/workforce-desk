@@ -547,6 +547,8 @@ export function ActFullySheet({
   const shown = bad && budget !== "" ? bad : null;
   const usdNow = on ? choice.budgetUsdPerDay : null;
   const why = notInForce(on ? status : null, next, boss, waits);
+  // Until it is, the Boss sheet's own footer has Pause and Stop.
+  const inForce = on && linked && !why;
   return (
     <Dialog
       onClose={onClose}
@@ -580,7 +582,7 @@ export function ActFullySheet({
                   {usdNow !== null && ` Now ${usd(usdNow)} a day.`}
                 </span>
                 {on && linked && status && (
-                  <span className="oversee-sub mono" role="status">
+                  <span className="oversee-sub" role="status">
                     {spentToday(status)}
                     {status.spentTodayUsd !== null && usdNow !== null && ` of ${usd(usdNow)}`}
                   </span>
@@ -612,12 +614,12 @@ export function ActFullySheet({
         <div className="oversee-never">{fullLine(boss)}</div>
       </div>
       <footer className="dialog-foot">
-        {onPause && (
+        {inForce && onPause && (
           <button type="button" className="btn btn-sm" disabled={busy} onClick={onPause}>
             {paused ? `Let ${boss} go on` : `Pause ${boss}`}
           </button>
         )}
-        {onStop && (
+        {inForce && onStop && (
           <button type="button" className="btn btn-sm btn-danger" disabled={busy} onClick={onStop}>
             Stop {boss}
           </button>
