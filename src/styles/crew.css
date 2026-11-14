@@ -983,9 +983,12 @@ button.card-icon:hover:not(:disabled) {
   white-space: nowrap;
 }
 /* ── What they see (Sees) ─────────────────────────────────────────────────
-   Rows divided by hairlines, no box around them. */
-.sees-intro {
-  margin: -6px 0 0;
+   Rows divided by hairlines, no box around them: the choices are `.pick`s
+   flattened as How they work's are. */
+.sees-head {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
 }
 .sees-rows {
   display: flex;
@@ -998,7 +1001,7 @@ button.card-icon:hover:not(:disabled) {
   border-top: 1px solid var(--border);
 }
 .sees-rows > .ability-row {
-  padding: 12px 0;
+  padding: 14px 0;
 }
 .sees-rows .seg {
   background: var(--sunken);
@@ -1008,49 +1011,37 @@ button.card-icon:hover:not(:disabled) {
 }
 .sees-mode {
   display: flex;
-  align-items: baseline;
+  align-items: center;
   gap: 12px;
-  padding: 11px 0;
 }
-.sees-mode-pick {
+.sees-mode .pick {
   flex: 1;
   min-width: 0;
-  display: grid;
-  grid-template-columns: auto minmax(120px, 190px) minmax(0, 1fr);
-  align-items: baseline;
-  column-gap: 12px;
-  row-gap: 2px;
-  cursor: pointer;
-  color: var(--text);
+  padding: 14px 8px 14px 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
 }
-.sees-mode-pick input {
-  margin: 0;
-  align-self: center;
+.sees-mode .pick:hover,
+.sees-mode .pick[aria-checked="true"] {
+  background: none;
 }
-.sees-mode-pick b {
-  font-weight: 600;
-  font-size: 15px;
+.sees-mode .pick:hover .radio-ring {
+  border-color: var(--muted);
 }
-.sees-mode-desc {
-  font-size: 13px;
-  color: var(--muted);
-  line-height: 1.45;
-  overflow-wrap: anywhere;
+.sees-mode .pick[aria-checked="true"]:hover .radio-ring {
+  border-color: var(--signal);
 }
 .sees-change {
   flex: none;
-  color: var(--signal);
 }
-.sees-change:hover {
+/* Its links in the signal's text colour, as Appearance's are (`.link-signal`,
+   which lives with Settings' own styles). */
+.sees .link {
+  color: var(--signal-soft-text);
+}
+.sees .link:hover {
   color: var(--text);
-}
-@media (max-width: 760px) {
-  .sees-mode-pick {
-    grid-template-columns: auto minmax(0, 1fr);
-  }
-  .sees-mode-desc {
-    grid-column: 2;
-  }
 }
 .sees-foot {
   display: flex;
@@ -1060,11 +1051,10 @@ button.card-icon:hover:not(:disabled) {
 .sees-foot p {
   margin: 0;
 }
-.sees-foot .link {
-  color: var(--signal);
-}
-.sees-foot .link:hover {
-  color: var(--text);
+.sees-log {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 .sees-log-list {
   list-style: none;
@@ -1076,20 +1066,26 @@ button.card-icon:hover:not(:disabled) {
   display: flex;
   justify-content: space-between;
   gap: 12px;
-  padding: 7px 0;
+  padding: 8px 0;
   border-top: 1px solid var(--border);
   color: var(--text);
 }
-.sees-log {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-}
 .sees-pick {
+  flex: 1;
+  min-height: 0;
   gap: 14px;
 }
 .sees-pick-filter {
   width: 100%;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  border-radius: var(--radius-sm);
+  padding: 10px 12px;
+  outline: none;
+}
+.sees-pick-filter:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
 }
 .sees-pick-kind {
   margin: 0;
@@ -1099,12 +1095,17 @@ button.card-icon:hover:not(:disabled) {
 }
 .sees-pick-row {
   display: flex;
+  flex-wrap: wrap;
   align-items: baseline;
-  gap: 10px;
-  padding: 8px 0;
+  column-gap: 10px;
+  row-gap: 2px;
+  padding: 10px 6px;
   border-top: 1px solid var(--border);
   cursor: pointer;
   color: var(--text);
+}
+.sees-pick-row:hover {
+  background: color-mix(in srgb, var(--text) 5%, transparent);
 }
 .sees-pick-row input {
   margin: 0;
@@ -1112,7 +1113,7 @@ button.card-icon:hover:not(:disabled) {
   align-self: center;
 }
 .sees-pick-name {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   overflow-wrap: anywhere;
 }

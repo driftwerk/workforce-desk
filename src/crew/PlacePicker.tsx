@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useBoard } from "../board/store";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { kindOf, PLACE_KINDS, type Place } from "./places";
@@ -22,7 +22,6 @@ export function PlacePicker({
   onUse: (places: string[]) => void;
   onClose: () => void;
 }) {
-  const ids = useId();
   const [picked, setPicked] = useState<Set<string>>(() => new Set(initial.filter((p) => kindOf(p))));
   const [filter, setFilter] = useState("");
   const boardsKnown = useBoard((s) => Object.keys(s.boards).length > 0);
@@ -32,18 +31,19 @@ export function PlacePicker({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Picked before but not listed now: kept listed, so they can be unticked
+  // and ticked again.
+  const [gone] = useState<Place[]>(() =>
+    initial.filter((p) => kindOf(p) && !places.has(p)).map((p) => ({ place: p, kind: kindOf(p)!, name: "One that’s gone", sub: "picked before" })),
+  );
   const words = filter.trim().toLowerCase();
   const shown = useMemo(() => {
-    const all = [...places.values()];
-    // Picked ones that aren't listed now, so they can be unticked.
-    for (const p of picked) if (!places.has(p)) all.push({ place: p, kind: kindOf(p)!, name: "One that’s gone", sub: "picked before" });
+    const all = [...places.values(), ...gone];
     return PLACE_KINDS.map((k) => ({
       ...k,
       items: all.filter((p) => p.kind === k.kind && (!words || p.name.toLowerCase().includes(words) || (p.sub ?? "").toLowerCase().includes(words))),
     })).filter((k) => k.items.length > 0);
-    // `picked` only adds the gone ones; a tick doesn't reorder the list.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [places, words]);
+  }, [places, gone, words]);
 
   const toggle = (p: string) =>
     setPicked((was) => {
@@ -73,7 +73,7 @@ export function PlacePicker({
       <div className="dialog-scroll sees-pick">
         <input
           type="search"
-          className="sees-pick-filter"
+          className="sees-pick-filter field-input"
           placeholder="Filter"
           aria-label="Filter places"
           data-autofocus
@@ -86,18 +86,9 @@ export function PlacePicker({
             <legend className="move-legend">{k.title}</legend>
             {k.items.map((p) => (
               <label key={p.place} className="sees-pick-row">
-                <input
-                  type="checkbox"
-                  checked={picked.has(p.place)}
-                  onChange={() => toggle(p.place)}
-                  aria-describedby={p.sub ? `${ids}-${p.place}` : undefined}
-                />
+                <input type="checkbox" checked={picked.has(p.place)} onChange={() => toggle(p.place)} />
                 <span className="sees-pick-name">{p.name}</span>
-                {p.sub && (
-                  <span id={`${ids}-${p.place}`} className="sees-pick-sub">
-                    {p.sub}
-                  </span>
-                )}
+                {p.sub && <span className="sees-pick-sub">{p.sub}</span>}
               </label>
             ))}
           </fieldset>

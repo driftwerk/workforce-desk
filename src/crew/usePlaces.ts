@@ -39,7 +39,7 @@ export function usePlaces(self: string): Map<string, Place> {
         place: `session:${key}`,
         kind: "session",
         name: names[key] ?? s.name,
-        sub: machine === LOCAL ? undefined : `on ${machineName(machine)}`,
+        sub: machine === LOCAL ? undefined : `on ${machineName(machine)} · not shared yet`,
       });
     }
     for (const a of roster) {

@@ -31,18 +31,34 @@ const digestSub = (d: KnowsDigest, name: string): string =>
       ? `Once a morning, when something changed since the last.`
       : `None: ${name} looks with their tools when you ask.`;
 
-/** The agent ids its hub canonicalised when linked, by Desk's key for it:
- *  the rule is kept by that id, and the link is made once a run. */
+/** Each agent elsewhere's rule key as its hub names it (`<hub>/<id>`,
+ *  case and all), by Desk's key for it: from the link made this run, else
+ *  the rule kept before (a link made in an earlier run). The link is made
+ *  once a run. */
 const linked = new Map<string, string>();
+const known = new Map<string, string>();
 
-/** For tests: forgets the links made. */
-export const forgetLinks = () => linked.clear();
+/** For tests: forgets the links made and the keys found. */
+export const forgetLinks = () => {
+  linked.clear();
+  known.clear();
+};
+
+/** Whether `next` shares less than `was`: transcripts turned off, or a
+ *  place no longer covered. Only then is the person asked about what the
+ *  agent already holds. */
+export const narrows = (was: Pick<KnowsRule, "places" | "transcripts">, next: Pick<KnowsRule, "places" | "transcripts">): boolean => {
+  if (was.transcripts && !next.transcripts) return true;
+  if (next.places.includes("all")) return false;
+  if (was.places.includes("all")) return true;
+  return was.places.some((p) => !next.places.includes(p));
+};
 
 type Status = { state: "idle" | "saving" } | { state: "failed"; problem: string };
 
 /** What the agent holds that the rule no longer covers, while the person
  *  is asked what becomes of it. */
-type Asking = { held: KnowsHeld; why: "narrowed" | "earlier" };
+type Asking = { held: KnowsHeld; why: "narrowed" | "transcripts" | "earlier" };
 
 /** A refusal of a rule's route in the person's words. */
 const said = (e: unknown): string => {
@@ -63,7 +79,7 @@ const n = (x: number): string => x.toLocaleString("en-GB");
 /** What an agent holds, counted: "1,032 transcript exchanges from 14
  *  sessions", "40 items, 12 of them transcript exchanges, from 2 sessions". */
 export const heldSaid = (h: KnowsHeld): string => {
-  const all = h.transcripts === h.items;
+  const all = h.transcripts === h.items && h.items > 0;
   const what = all
     ? `${n(h.items)} transcript ${h.items === 1 ? "exchange" : "exchanges"}`
     : `${n(h.items)} ${h.items === 1 ? "item" : "items"}${h.transcripts > 0 ? `, ${n(h.transcripts)} of them transcript exchanges,` : ""}`;
@@ -76,7 +92,7 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
   const name = agent.name;
   const remote = !(hub?.local ?? false);
   const self = agentKey(agent);
-  const keyOf = useCallback((): string => (remote ? `${agent.hubId}/${linked.get(self) ?? agent.id}` : self), [remote, agent.hubId, agent.id, self]);
+  const keyOf = useCallback((): string => (remote ? (linked.get(self) ?? known.get(self) ?? self) : self), [remote, self]);
   const places = usePlaces(self);
   const machines = useMachines((s) => s.machines);
   const [view, setView] = useState<KnowsView | null>(null);
@@ -87,6 +103,12 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
   const [showLog, setShowLog] = useState(false);
   const [log, setLog] = useState<KnowsLogEntry[] | null>(null);
   const writes = useRef<Promise<unknown>>(Promise.resolve());
+  /** The rule as the hub last said it: what a refused change goes back to. */
+  const confirmed = useRef<KnowsView | null>(null);
+  /** Bumped by each change, so an older read doesn't undo a newer one. */
+  const seq = useRef(0);
+  const logShown = useRef(false);
+  logShown.current = showLog;
 
   const api = useCallback(() => {
     const h = localAccount();
@@ -96,15 +118,25 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
   const read = useCallback(async () => {
     const k = api();
     if (!k) return setLoad({ problem: "Desk isn’t ready just now; try again in a moment." });
+    const n = seq.current;
     try {
+      // An agent elsewhere linked in an earlier run: its rule is kept by
+      // the id its hub gave, which may differ in case from the roster's.
+      if (remote && !linked.has(self) && !known.has(self)) {
+        const kept = (await k.rules()).find((r) => r.agent.toLowerCase() === self.toLowerCase());
+        if (kept) known.set(self, kept.agent);
+      }
       const v = await k.rule(keyOf());
+      if (n !== seq.current) return;
+      confirmed.current = v;
       setView(v);
       setLoad("ok");
     } catch (e) {
+      if (n !== seq.current) return;
       if (e instanceof HubError && (e.status === 404 || e.status === 405)) setLoad("missing");
       else setLoad({ problem: said(e) });
     }
-  }, [api, keyOf]);
+  }, [api, keyOf, remote, self]);
 
   useEffect(() => {
     setView(null);
@@ -153,34 +185,41 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
       setStatus({ state: "failed", problem: refusedSaid(r.error, name, where) });
       return false;
     }
-    linked.set(self, r.agent);
+    linked.set(self, r.kind === "local" ? `local/${r.agent}` : `${agent.hubId}/${r.agent}`);
     return true;
   };
 
   /** Keeps `next`, one write after another. A rule that shares nothing
-   *  with an agent elsewhere needs no link. */
+   *  with an agent elsewhere needs no link: it is kept by the key read
+   *  (the one an earlier link gave, when there was one). */
   const save = (next: Pick<KnowsRule, "places" | "transcripts" | "digest">) => {
     const k = api();
     if (!k || !view) return;
-    const before = view;
-    const was = before.heldOutside.items;
-    setView({ ...before, rule: { ...before.rule, ...next } });
+    const was = view.rule;
+    const n = ++seq.current;
+    setView({ ...view, rule: { ...view.rule, ...next } });
     setStatus({ state: "saving" });
     const nothing = next.places.length === 0 && !next.transcripts && next.digest === "off";
     writes.current = writes.current.then(async () => {
-      if (!nothing && !(await link())) {
-        setView(before);
-        return;
-      }
+      const back = () => {
+        if (n === seq.current && confirmed.current) setView(confirmed.current);
+      };
+      if (!nothing && !(await link())) return back();
       try {
         const changed = await k.setRule(keyOf(), next);
-        setView((v) => (v ? { ...v, rule: changed.rule, heldOutside: changed.heldOutside } : v));
-        setStatus({ state: "idle" });
-        if (changed.heldOutside.items > was) setAsking({ held: changed.heldOutside, why: "narrowed" });
-        void read();
-        if (showLog) void readLog();
+        if (n === seq.current) setStatus({ state: "idle" });
+        if (narrows(was, next) && changed.heldOutside.items > 0)
+          setAsking({
+            held: changed.heldOutside,
+            why:
+              was.transcripts && !next.transcripts && modeOf(was.places) === modeOf(next.places) && was.places.join() === next.places.join()
+                ? "transcripts"
+                : "narrowed",
+          });
+        await read();
+        if (logShown.current) await readLog();
       } catch (e) {
-        setView(before);
+        back();
         setStatus({ state: "failed", problem: said(e) });
       }
     });
@@ -197,25 +236,36 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
       } catch (e) {
         setStatus({ state: "failed", problem: said(e) });
       }
-      void read();
-      if (showLog) void readLog();
+      await read();
+      if (logShown.current) await readLog();
     });
   };
 
-  if (load === "missing") return null;
   const rule = view?.rule;
   const mode: SeesMode | null = rule ? modeOf(rule.places) : null;
   const chosen = rule && mode === "chosen" ? placesSaid(rule.places, places) : null;
-  const ready = !!rule && status.state !== "saving";
   const modes: { id: SeesMode; name: string; desc: string }[] = [
     { id: "all", name: "Everything", desc: "Every session, board and decision, every group included" },
     { id: "chosen", name: "Chosen places", desc: chosen || "Groups, boards, grids, sessions or agents you pick" },
     { id: "own", name: "Only their own work", desc: "The sessions they run and their own decisions" },
   ];
+  const at = Math.max(
+    0,
+    modes.findIndex((m) => m.id === mode),
+  );
   const pick = (m: SeesMode) => {
     if (!rule || m === mode) return;
     if (m === "chosen") return setPicking(true);
     save({ places: m === "all" ? ["all"] : [], transcripts: rule.transcripts, digest: rule.digest });
+  };
+  /** Arrows move between the choices; Space, Enter or a click picks one,
+   *  so moving through them never changes what is shared. */
+  const moveKeys = (e: React.KeyboardEvent<HTMLButtonElement>, i: number) => {
+    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
+    if (!step) return;
+    e.preventDefault();
+    const buttons = e.currentTarget.closest("[role=radiogroup]")?.querySelectorAll<HTMLButtonElement>("button[role=radio]");
+    buttons?.[(i + step + modes.length) % modes.length]?.focus();
   };
   const shared = (view?.sharedToday ?? []).filter((s) => s.items > 0);
   const elsewhere = machines.filter((m) => m.id !== "local").map((m) => m.name);
@@ -223,8 +273,14 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
 
   return (
     <section id="sees" className="agent-section sees" aria-labelledby={head}>
-      <h2 id={head}>What they see</h2>
-      <p className="oversee-sub sees-intro">Read-only: what {name} knows of your work in Desk. It doesn’t let them act.</p>
+      <div className="sees-head">
+        <h2 id={head}>What they see</h2>
+        <span className="oversee-sub">
+          {load === "missing"
+            ? "This needs a newer Desk on this computer: update Desk to set it."
+            : `Read-only: what ${name} knows of your work in Desk. It doesn’t let them act.`}
+        </span>
+      </div>
       {load === "loading" && <p className="small faint">…</p>}
       {typeof load === "object" && (
         <p className="small state-blocked" role="alert">
@@ -234,16 +290,26 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
       {rule && (
         <>
           <div className="sees-rows">
-            <div className="sees-modes" role="radiogroup" aria-labelledby={head}>
-              {modes.map((m) => (
+            <div className="sees-modes" role="radiogroup" aria-label={`What ${name} sees`}>
+              {modes.map((m, i) => (
                 <div key={m.id} className="sees-mode">
-                  <label className="sees-mode-pick">
-                    <input type="radio" name={`${ids}-mode`} checked={mode === m.id} disabled={!ready} onChange={() => pick(m.id)} />
-                    <b>{m.name}</b>
-                    <span className="sees-mode-desc">{m.desc}</span>
-                  </label>
+                  <button
+                    type="button"
+                    role="radio"
+                    className="pick"
+                    aria-checked={mode === m.id}
+                    tabIndex={i === at ? 0 : -1}
+                    onClick={() => pick(m.id)}
+                    onKeyDown={(e) => moveKeys(e, i)}
+                  >
+                    <span className="radio-ring" aria-hidden="true" />
+                    <span className="pick-text">
+                      <b>{m.name}</b>
+                      <span>{m.desc}</span>
+                    </span>
+                  </button>
                   {m.id === "chosen" && (
-                    <button type="button" className="link small sees-change" disabled={!ready} onClick={() => setPicking(true)}>
+                    <button type="button" className="link small sees-change" onClick={() => setPicking(true)}>
                       {mode === "chosen" ? "Change…" : "Choose…"}
                     </button>
                   )}
@@ -261,7 +327,6 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
                 className="switch"
                 aria-checked={rule.transcripts}
                 aria-labelledby={`${ids}-transcripts`}
-                disabled={!ready}
                 onClick={() => save({ places: rule.places, transcripts: !rule.transcripts, digest: rule.digest })}
               >
                 <span className="switch-knob" />
@@ -283,7 +348,6 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
                       role="radio"
                       aria-checked={rule.digest === d.id}
                       tabIndex={i === now ? 0 : -1}
-                      disabled={!ready}
                       onClick={() => set(d.id)}
                       onKeyDown={(e) => radioKeys(e, DIGESTS, now, (n) => set(n.id))}
                     >
@@ -337,46 +401,39 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
           onClose={() => setPicking(false)}
         />
       )}
-      {asking && <KeepOrDelete name={name} asking={asking} transcriptsOff={!!rule && !rule.transcripts} onChoose={choose} />}
+      {asking && <KeepOrDelete name={name} asking={asking} onChoose={choose} onCancel={() => setAsking(null)} />}
     </section>
   );
 }
 
-/** Asks what becomes of what the agent holds outside its rule. Keep is
- *  focused, and Escape or a click outside keeps it: nothing is lost by
- *  not answering. */
-function KeepOrDelete({
-  name,
-  asking,
-  transcriptsOff,
-  onChoose,
-}: {
-  name: string;
-  asking: Asking;
-  transcriptsOff: boolean;
-  onChoose: (c: "delete" | "keep") => void;
-}) {
+/** Asks what becomes of what the agent holds outside its rule. After a
+ *  narrowing, Keep is focused and Escape or a click outside keeps it (and
+ *  is logged): nothing is lost by not answering. Asked again later from
+ *  "Delete them…", closing it changes nothing. */
+function KeepOrDelete({ name, asking, onChoose, onCancel }: { name: string; asking: Asking; onChoose: (c: "delete" | "keep") => void; onCancel: () => void }) {
   const { held, why } = asking;
+  const later = why === "earlier";
+  const close = later ? onCancel : () => onChoose("keep");
   const what =
-    why === "narrowed"
-      ? transcriptsOff && held.transcripts === held.items
-        ? `Desk stopped sharing transcripts with ${name}.`
-        : `Desk stopped sharing some of your work with ${name}.`
-      : `Desk no longer shares this with ${name}.`;
+    why === "transcripts"
+      ? `Desk stopped sharing transcripts with ${name}.`
+      : why === "narrowed"
+        ? `Desk stopped sharing some of your work with ${name}.`
+        : `Desk no longer shares this with ${name}.`;
   return (
     <Dialog
-      onClose={() => onChoose("keep")}
+      onClose={close}
       title={(id) => (
         <header className="dialog-head">
           <span className="dialog-title">
             <h1 id={id} className="display-lg">
-              {name} keeps what Desk already shared?
+              {later ? `Delete what ${name} holds?` : `${name} keeps what Desk already shared?`}
             </h1>
             <p className="small">
-              {what} {name} holds {heldSaid(held)}. Nothing more of it is shared either way.
+              {what} They hold {heldSaid(held)}. Nothing more of it is shared either way.
             </p>
           </span>
-          <CloseButton onClose={() => onChoose("keep")} />
+          <CloseButton onClose={close} />
         </header>
       )}
     >
@@ -385,9 +442,15 @@ function KeepOrDelete({
         <button type="button" className="btn btn-danger" onClick={() => onChoose("delete")}>
           Delete them
         </button>
-        <button type="button" className="btn btn-signal" data-autofocus onClick={() => onChoose("keep")}>
-          Keep what they have
-        </button>
+        {later ? (
+          <button type="button" className="btn btn-ghost" data-autofocus onClick={onCancel}>
+            Cancel
+          </button>
+        ) : (
+          <button type="button" className="btn btn-signal" data-autofocus onClick={() => onChoose("keep")}>
+            Keep what they have
+          </button>
+        )}
       </footer>
     </Dialog>
   );
@@ -395,12 +458,12 @@ function KeepOrDelete({
 
 const LOG_SAID: Record<string, (d: Record<string, unknown>) => string> = {
   rule: () => "Changed what they see",
-  delete: (d) => `Deleted ${num(d.items)} items they held`,
-  keep: (d) => `Kept ${num(d.items)} items they held`,
+  delete: (d) => `Deleted ${items(d.items)} they held`,
+  keep: (d) => `Kept ${items(d.items)} they held`,
   stop: () => "Stopped sharing",
 };
 
-const num = (x: unknown): string => (typeof x === "number" ? x.toLocaleString("en-GB") : "the");
+const items = (x: unknown): string => (typeof x === "number" ? `${n(x)} ${x === 1 ? "item" : "items"}` : "the items");
 
 /** What was shared today by kind, and the rule's log: counts and places,
  *  never content. */

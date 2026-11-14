@@ -4,6 +4,7 @@ import { useChat } from "../chat/store";
 import type { Agent, HubAccount } from "../chat/types";
 import type { KnowsHeld, KnowsRule, KnowsView } from "../hub/knows";
 import { placesSaid } from "./places";
+import { narrows } from "./WhatTheySee";
 import { forgetLinks, WhatTheySee } from "./WhatTheySee";
 
 const api = {
@@ -44,9 +45,12 @@ let kept: KnowsView;
 beforeEach(() => {
   forgetLinks();
   here.linker = true;
+  linkKnows.mockReset();
+  linkKnows.mockResolvedValue({ kind: "kept", agent: "allan" });
   vi.clearAllMocks();
   kept = viewOf(ruleOf("local/ledger"));
   api.rule.mockImplementation(() => Promise.resolve(kept));
+  api.rules.mockImplementation(() => Promise.resolve([kept.rule]));
   api.setRule.mockImplementation((agent: string, b: { places: string[]; transcripts: boolean; digest: KnowsRule["digest"] }) => {
     kept = viewOf(ruleOf(agent, b), kept.heldOutside);
     return Promise.resolve({ rule: kept.rule, heldOutside: kept.heldOutside });
@@ -66,11 +70,11 @@ describe("What they see", () => {
   it("is set to everything, with the rest of the rule as it was", async () => {
     kept = viewOf(ruleOf("local/ledger", { transcripts: true, digest: "live" }));
     await show();
-    expect((screen.getByRole("radio", { name: /Only their own work/ }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole("radio", { name: /Only their own work/ }).getAttribute("aria-checked")).toBe("true");
     fireEvent.click(screen.getByRole("radio", { name: /Everything/ }));
     await waitFor(() => expect(api.setRule).toHaveBeenCalledWith("local/ledger", { places: ["all"], transcripts: true, digest: "live" }));
     expect(linkKnows).not.toHaveBeenCalled();
-    await waitFor(() => expect((screen.getByRole("radio", { name: /Everything/ }) as HTMLInputElement).checked).toBe(true));
+    await waitFor(() => expect(screen.getByRole("radio", { name: /Everything/ }).getAttribute("aria-checked")).toBe("true"));
   });
 
   it("turns transcripts on and picks the digest", async () => {
@@ -91,9 +95,7 @@ describe("What they see", () => {
     await show();
     fireEvent.click(screen.getByRole("switch", { name: "Include transcripts" }));
     const dialog = await screen.findByRole("dialog", { name: "Ledger keeps what Desk already shared?" });
-    expect(dialog.textContent).toContain(
-      "Desk stopped sharing transcripts with Ledger. Ledger holds 1,032 transcript exchanges from 14 sessions.",
-    );
+    expect(dialog.textContent).toContain("Desk stopped sharing transcripts with Ledger. They hold 1,032 transcript exchanges from 14 sessions.");
     await waitFor(() => expect(document.activeElement).toBe(within(dialog).getByRole("button", { name: "Keep what they have" })));
     fireEvent.keyDown(dialog, { key: "Escape" });
     await waitFor(() => expect(api.choose).toHaveBeenCalledWith("local/ledger", "keep"));
@@ -131,7 +133,7 @@ describe("What they see", () => {
     fireEvent.click(screen.getByRole("radio", { name: /Everything/ }));
     expect((await screen.findByRole("alert")).textContent).toContain("Driftwerk’s admin has turned this off.");
     expect(api.setRule).not.toHaveBeenCalled();
-    expect((screen.getByRole("radio", { name: /Only their own work/ }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole("radio", { name: /Only their own work/ }).getAttribute("aria-checked")).toBe("true");
 
     linkKnows.mockResolvedValue({ kind: "notAllowed", status: 403, error: "That agent doesn't take Desk work here." });
     fireEvent.click(screen.getByRole("radio", { name: /Everything/ }));
@@ -147,6 +149,49 @@ describe("What they see", () => {
     expect(api.setRule).not.toHaveBeenCalled();
   });
 
+  it("after a restart, reads an agent elsewhere's rule by the id its hub gave", async () => {
+    kept = viewOf(ruleOf("dw/allan", { places: ["all"], transcripts: true }));
+    api.rule.mockImplementation((agent: string) => Promise.resolve(agent === "dw/allan" ? kept : viewOf(ruleOf(agent))));
+    await show(allan, driftwerk);
+    await waitFor(() => expect(screen.getByRole("radio", { name: /Everything/ }).getAttribute("aria-checked")).toBe("true"));
+    expect(api.rule).toHaveBeenCalledWith("dw/allan");
+    // Turned all off, it is the rule that shares that is changed.
+    fireEvent.click(screen.getByRole("radio", { name: /Only their own work/ }));
+    fireEvent.click(screen.getByRole("switch", { name: "Include transcripts" }));
+    await waitFor(() => expect(api.setRule).toHaveBeenCalledTimes(2));
+    expect(api.setRule.mock.calls.every(([agent]) => agent === "dw/allan")).toBe(true);
+  });
+
+  it("moves between the choices with the arrows without changing what is shared", async () => {
+    await show();
+    const own = screen.getByRole("radio", { name: /Only their own work/ });
+    own.focus();
+    fireEvent.keyDown(own, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(screen.getByRole("radio", { name: /Chosen places/ }));
+    fireEvent.keyDown(document.activeElement!, { key: "ArrowUp" });
+    expect(document.activeElement).toBe(screen.getByRole("radio", { name: /Everything/ }));
+    expect(api.setRule).not.toHaveBeenCalled();
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("changes nothing when a later delete is cancelled", async () => {
+    kept = viewOf(ruleOf("local/ledger"), { items: 3, transcripts: 0, sessions: 1, by_kind: { account: 3 } });
+    await show();
+    fireEvent.click(await screen.findByRole("button", { name: "Delete them…" }));
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(api.choose).not.toHaveBeenCalled();
+  });
+
+  it("doesn't ask when a change shares more", async () => {
+    kept = viewOf(ruleOf("local/ledger"), { items: 40, transcripts: 0, sessions: 1, by_kind: { account: 40 } });
+    await show();
+    fireEvent.click(screen.getByRole("radio", { name: /Everything/ }));
+    await waitFor(() => expect(api.setRule).toHaveBeenCalled());
+    await waitFor(() => expect(api.rule).toHaveBeenCalledTimes(2));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("picks places from a filtered list", async () => {
     await show();
     fireEvent.click(screen.getByRole("button", { name: "Choose…" }));
@@ -157,6 +202,18 @@ describe("What they see", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: "Use these" }));
     await waitFor(() => expect(api.setRule).toHaveBeenCalledWith("local/ledger", { places: ["agent:dw/Allan"], transcripts: false, digest: "off" }));
     expect(await screen.findByText("Allan")).toBeTruthy();
+  });
+});
+
+describe("narrows", () => {
+  it("is a change that shares less", () => {
+    const r = (places: string[], transcripts = false) => ({ places, transcripts });
+    expect(narrows(r(["all"], true), r(["all"], false))).toBe(true);
+    expect(narrows(r(["all"]), r(["group:a"]))).toBe(true);
+    expect(narrows(r(["group:a", "group:b"]), r(["group:b"]))).toBe(true);
+    expect(narrows(r(["group:a"]), r([]))).toBe(true);
+    expect(narrows(r(["group:a"]), r(["group:a", "group:b"]))).toBe(false);
+    expect(narrows(r([]), r(["all"], true))).toBe(false);
   });
 });
 
