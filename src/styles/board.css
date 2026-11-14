@@ -729,7 +729,7 @@ button.ticket-chip:hover {
   padding: 8px 28px;
   border-bottom: 1px solid var(--border);
   flex: none;
-  max-height: 55vh;
+  max-height: 65vh;
   overflow-y: auto;
   /* A shadow at an edge with more to scroll to, so a card's foot (its
      Approve) is never out of sight unsaid. */
@@ -753,6 +753,18 @@ button.ticket-chip:hover {
 }
 .board-plan-card .plancard {
   max-width: 900px;
+  /* Not clipped: its foot sticks to the band's bottom (below). */
+  overflow: visible;
+}
+/* However long the plan, its foot (counts, Drop, Edit, Pause, Approve and
+   start) stays in sight at the band's bottom while its tickets scroll. */
+.board-plan-card .pc-foot {
+  position: sticky;
+  bottom: -8px;
+  z-index: 1;
+  background: var(--raised);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  box-shadow: 0 -6px 12px -8px var(--lift);
 }
 
 /* ── Sync with Linear or Jira ───────────────────────────────────────────── */
