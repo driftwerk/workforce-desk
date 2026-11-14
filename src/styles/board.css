@@ -1899,9 +1899,11 @@ button.ticket-row:not(:disabled):hover {
 .ticket-md .ticket-expand-body > :last-child {
   margin-bottom: 0;
 }
+/* A picture in the text is a thumbnail, as wide as the mockup's at most;
+   clicking opens it whole. */
 .ticket-md .ticket-md-picture {
   display: inline-block;
-  max-width: 100%;
+  max-width: min(100%, 260px);
   margin: 0;
   padding: 0;
   overflow: hidden;

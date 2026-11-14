@@ -57,19 +57,16 @@ export const FileIcon = ({ size = 12 }: { size?: number }) => (
 );
 
 /** A panel's icon, by its tone. */
+const INFO_ICON = (
+  <>
+    <circle cx="8" cy="8" r="6" />
+    <path d="M8 7.2v3.6M8 5h.01" />
+  </>
+);
+
 const PANEL_ICON: Record<Tone, ReactNode> = {
-  info: (
-    <>
-      <circle cx="8" cy="8" r="6" />
-      <path d="M8 7.2v3.6M8 5h.01" />
-    </>
-  ),
-  neutral: (
-    <>
-      <circle cx="8" cy="8" r="6" />
-      <path d="M8 7.2v3.6M8 5h.01" />
-    </>
-  ),
+  info: INFO_ICON,
+  neutral: INFO_ICON,
   warning: (
     <>
       <path d="M8 2.2 14 13H2z" />
@@ -135,26 +132,27 @@ const standing = (d: Directive, inline: ReactNode): ReactNode =>
   );
 
 /** A directive in a ticket's text, drawn: every name the hub writes, in
- *  every form, whatever its label; one it isn't is never asked for. */
+ *  every form; a bare one with nothing to say reads as written, and one it
+ *  isn't is never asked for. */
 export const ticketDirective = (d: Directive): ReactNode => {
   const said = d.labelText.trim();
   switch (d.name) {
+    // The hub always says who and what: a bare `:status` or `:date` with
+    // nothing to say is someone's prose (a code symbol, say), read as written.
     case "mention":
-      return standing(d, <span className="ticket-mention">@{said.replace(/^@/, "") || "someone"}</span>);
+      return said ? standing(d, <span className="ticket-mention">@{said.replace(/^@/, "")}</span>) : null;
     case "status":
-      return standing(d, said ? <span className={`ticket-lozenge tone-${toneOf(d.attributes.tone)}`}>{said}</span> : <></>);
+      return said ? standing(d, <span className={`ticket-lozenge tone-${toneOf(d.attributes.tone)}`}>{said}</span>) : null;
     case "date":
-      return standing(
-        d,
-        said ? (
-          <span className="ticket-inline-chip ticket-date">
-            <CalendarIcon />
-            {dateWords(said)}
-          </span>
-        ) : (
-          <></>
-        ),
-      );
+      return said
+        ? standing(
+            d,
+            <span className="ticket-inline-chip ticket-date">
+              <CalendarIcon />
+              {dateWords(said)}
+            </span>,
+          )
+        : null;
     case "panel": {
       if (d.kind !== "container") return standing(d, d.label);
       const tone = toneOf(d.attributes.tone);

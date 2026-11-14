@@ -123,13 +123,19 @@ describe("a synced description's directives", () => {
 });
 
 describe("every name the hub writes is drawn, whatever its form", () => {
-  it("never shows a hub directive's syntax", () => {
-    const { container } = body(":mention[] and :panel[a note] and :details[more] and :status[]{tone=info} :date[]\n\n::status[Done]{tone=success}\n\n:::date\nInside.\n:::");
+  it("never shows the syntax of a directive as the hub writes it", () => {
+    const { container } = body(":mention[Richard Lucas] and :panel[a note] and :details[more] and :status[Doing]{tone=info} :date[2026-11-30]\n\n::status[Done]{tone=success}");
     expect(container.textContent).not.toMatch(/:(mention|panel|details|status|date)/);
-    expect(container.querySelector(".ticket-mention")?.textContent).toBe("@someone");
-    expect(container.querySelector(".ticket-lozenge")?.textContent).toBe("Done");
+    expect(container.querySelector(".ticket-mention")?.textContent).toBe("@Richard Lucas");
+    expect([...container.querySelectorAll(".ticket-lozenge")].map((e) => e.textContent)).toEqual(["Doing", "Done"]);
+    expect(container.querySelector(".ticket-date")).not.toBeNull();
     expect(container.textContent).toContain("a note");
-    expect(container.textContent).toContain("Inside.");
+  });
+
+  it("reads a bare name with nothing to say as written: someone's prose, not the hub's", () => {
+    const { container } = body("Run :status to check it. Field :date is due. Ask :mention then. validates :status, presence: true");
+    expect(container.querySelector(".ticket-md p")?.textContent).toBe("Run :status to check it. Field :date is due. Ask :mention then. validates :status, presence: true");
+    expect(container.querySelector(".ticket-mention, .ticket-lozenge, .ticket-date")).toBeNull();
   });
 
   it("leaves addresses after a colon linked as before", () => {
