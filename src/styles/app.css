@@ -4300,6 +4300,7 @@ body.line-resizing * {
 .chip-btn[aria-disabled="true"] {
   color: var(--faint);
   cursor: default;
+  opacity: 0.45;
 }
 .folder-suggestions {
   list-style: none;
