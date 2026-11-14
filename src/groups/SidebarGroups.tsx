@@ -47,6 +47,7 @@ import { ChargeBadge } from "../crew/ChargeBadge";
 import { SessionTicketChip } from "../board/TicketChip";
 import { chargeChoices } from "../crew/charge";
 import { useBoss, useCharge, useCharges } from "../crew/chargeStore";
+import { grantBossOf, useGrantBosses } from "../crew/grantBoss";
 import { BossSheet } from "./BossSheet";
 import { remoteBosses } from "./remoteBoss";
 import { below, DragChip, isMenuKey, MoreIcon, PLUGINS, SENSORS, SortRow, step, type Operation } from "./rows";
@@ -236,6 +237,13 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     if (el) rows.current.set(id, el);
     else rows.current.delete(id);
   }, []);
+
+  // Each group's boss on another hub, read so its sessions' menus can hand
+  // them to it.
+  const groupIds = groups.map((g) => g.id).join("\n");
+  useEffect(() => {
+    for (const id of groupIds.split("\n")) if (id) useGrantBosses.getState().ensure(id);
+  }, [groupIds]);
 
   // After a move from the keyboard, focus stays on what moved, wherever it
   // was drawn again.
@@ -523,6 +531,20 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
         : [];
     // A boss and the board are this computer's hub's: not for a machine's.
     const here = item.kind !== "session" || machineOf(item.session) === LOCAL;
+    // Who runs a session: the boss its group's grant names on another hub,
+    // wherever it runs; else this computer's, for its own.
+    const sessionCharge = (session: Session, local: boolean): MenuEntry[] => {
+      const by = grantBossOf(layout, session) ?? (local ? boss : null);
+      const key = sessionKey(session);
+      if (!by && !local) return [];
+      return chargeChoices(session, useCharges.getState().bySession[key], by).map(
+        (c): MenuEntry => ({
+          kind: "item",
+          label: c.label,
+          onSelect: () => void useCharges.getState().act(key, c.verb, by).catch(useDesk.getState().fail),
+        }),
+      );
+    };
     return [
       ...(item.kind === "session" ? [{ kind: "item" as const, label: "Rename", kbd: "F2", onSelect: () => startRename(item) }] : []),
       moving,
@@ -543,13 +565,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
         ? [
             ...sessionActions(item.session).map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
             ...(canHandOff(item.session) ? [{ kind: "item" as const, label: "Continue in…", onSelect: () => askHandoff({ id: item.session.id }) }] : []),
-            ...(here ? chargeChoices(item.session, useCharges.getState().bySession[item.session.id], boss) : []).map(
-              (c): MenuEntry => ({
-                kind: "item",
-                label: c.label,
-                onSelect: () => void useCharges.getState().act(item.session.id, c.verb).catch(useDesk.getState().fail),
-              }),
-            ),
+            ...sessionCharge(item.session, here),
             { kind: "separator" as const },
             ...lifecycleActions(item.session).map(
               (a): MenuEntry => ({ kind: "item", label: a.label, kbd: a.label === "End session…" ? undefined : "⌫", onSelect: a.run }),
