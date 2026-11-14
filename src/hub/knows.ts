@@ -91,3 +91,26 @@ export const setKnowsLinker = (f: typeof linkKnows | null) => {
 };
 
 export const knowsLinker = (): typeof linkKnows | null => linker;
+
+/** Tells the person's machines what agent `agent` on hub `hub` sees of
+ *  them now, after its rule changed: with `choice` when it narrowed and the
+ *  person said what to do with what the agent holds (Sees K7). Quiet when
+ *  it can't: Desk tells them again every few minutes. */
+export const tellMachines = async (hub: string, agent: string, choice?: "keep" | "delete"): Promise<void> => {
+  if (!inTauri) return;
+  try {
+    await invoke("knows_machines", { hub, agent, choice: choice ?? null });
+  } catch {
+    // Told again on Desk's next pass.
+  }
+};
+
+/** What tells the machines in this window: the one above in the main
+ *  window, which sets it (`shell/App.tsx`); none in a grid's. */
+let teller: typeof tellMachines | null = null;
+
+export const setKnowsTeller = (f: typeof tellMachines | null) => {
+  teller = f;
+};
+
+export const knowsTeller = (): typeof tellMachines | null => teller;

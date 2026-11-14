@@ -9,7 +9,7 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { agentKey, type Agent, type HubAccount } from "../chat/types";
 import { HubError } from "../hub/client";
 import { useMachines } from "../hub/engines";
-import { knowsLinker, knowsOf, type KnowsDigest, type KnowsHeld, type KnowsLogEntry, type KnowsRule, type KnowsView } from "../hub/knows";
+import { knowsLinker, knowsOf, knowsTeller, type KnowsDigest, type KnowsHeld, type KnowsLogEntry, type KnowsRule, type KnowsView } from "../hub/knows";
 import { localAccount } from "../groups/move";
 import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
@@ -93,7 +93,9 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
   const remote = !(hub?.local ?? false);
   const self = agentKey(agent);
   const keyOf = useCallback((): string => (remote ? (linked.get(self) ?? known.get(self) ?? self) : self), [remote, self]);
-  const places = usePlaces(self);
+  // An agent elsewhere is shared with from the person's machines too
+  // (Sees K7); one on this computer's hub isn't yet.
+  const places = usePlaces(self, remote);
   const machines = useMachines((s) => s.machines);
   const [view, setView] = useState<KnowsView | null>(null);
   const [load, setLoad] = useState<"loading" | "ok" | "missing" | { problem: string }>("loading");
@@ -208,6 +210,7 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
       if (!nothing && !(await link())) return back();
       try {
         const changed = await k.setRule(keyOf(), next);
+        tell();
         if (n === seq.current) setStatus({ state: "idle" });
         // Asked only when it now holds more outside the rule than before:
         // what was kept earlier was asked about then.
@@ -229,6 +232,14 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
     });
   };
 
+  /** Tells the machines this rule's part for them now, with the person's
+   *  choice when there was one: an agent elsewhere's alone. */
+  const tell = (choice?: "delete" | "keep") => {
+    const t = knowsTeller();
+    const at = keyOf().indexOf("/");
+    if (remote && t && at > 0) void t(keyOf().slice(0, at), keyOf().slice(at + 1), choice);
+  };
+
   const choose = (choice: "delete" | "keep") => {
     const k = api();
     setAsking(null);
@@ -237,6 +248,7 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
       try {
         await k.choose(keyOf(), choice);
         setStatus({ state: "idle" });
+        tell(choice);
       } catch (e) {
         setStatus({ state: "failed", problem: said(e) });
       }
@@ -272,7 +284,8 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
     buttons?.[(i + step + modes.length) % modes.length]?.focus();
   };
   const shared = (view?.sharedToday ?? []).filter((s) => s.items > 0);
-  const elsewhere = machines.filter((m) => m.id !== "local").map((m) => m.name);
+  // Machines share with an agent elsewhere; with one here, not yet.
+  const elsewhere = remote ? [] : machines.filter((m) => m.id !== "local").map((m) => m.name);
   const held = view?.heldOutside;
 
   return (
