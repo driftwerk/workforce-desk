@@ -375,6 +375,19 @@ const MARKS = ["#C9B8FF", "#FFC98A", "#A8D8FF", "#A6EBC9", "#FFB3C7", "#E8DDB5"]
 const SERIES_LIGHT = ["#2A78D6", "#EB6834", "#1BAF7A", "#EDA100", "#E87BA4", "#008300", "#6250D6", "#E34948"] as const;
 const SERIES_DARK = ["#3987E5", "#D95926", "#199E70", "#C98500", "#D55181", "#008300", "#9085E9", "#E66767"] as const;
 
+/** The series a person's mark on the board is filled with, read with
+ *  `onSeriesMark`: the six slots both built-in themes' series read text on
+ *  (the fourth and sixth don't, by day and by night). */
+export const SERIES_MARK_TOKENS = ["series1", "series2", "series3", "series5", "series7", "series8"] as const satisfies readonly Token[];
+const SERIES_MARK_SLOTS = SERIES_MARK_TOKENS.map((t) => Number(t.slice(6)) - 1);
+
+/** Ink or white on the board's marks: whichever reads better on the worst
+ *  of the theme's series slots they're filled with. */
+const onSeriesMarkOf = (fills: readonly string[]): string => {
+  const worst = (ink: string) => Math.min(...fills.map((f) => contrast(ink, f)));
+  return worst(INK) >= worst("#FFFFFF") ? INK : "#FFFFFF";
+};
+
 const surround = (c: Omit<Palette, Follower | Surround> & Partial<Palette>, dark: boolean): Record<Surround, string> => {
   const series = dark ? SERIES_DARK : SERIES_LIGHT;
   return {
@@ -385,7 +398,7 @@ const surround = (c: Omit<Palette, Follower | Surround> & Partial<Palette>, dark
     lift: TRANSPARENT,
     logoDot: c.signal,
     onMark: INK,
-    onSeriesMark: dark ? INK : "#FFFFFF",
+    onSeriesMark: onSeriesMarkOf(SERIES_MARK_TOKENS.map((t, i) => c[t] ?? series[SERIES_MARK_SLOTS[i]!]!)),
     ...(Object.fromEntries(MARKS.map((m, i) => [`mark${i + 1}`, m])) as Record<`mark${1 | 2 | 3 | 4 | 5 | 6}`, string>),
     ...(Object.fromEntries(series.map((s, i) => [`series${i + 1}`, s])) as Record<`series${1 | 2 | 3 | 4 | 5 | 6 | 7 | 8}`, string>),
     buttonFill: TRANSPARENT,
@@ -537,10 +550,6 @@ export const MARK_TOKENS = ["mark1", "mark2", "mark3", "mark4", "mark5", "mark6"
 /** An engine's mark (Claude Code's, Codex's). */
 export const ENGINE_MARK: Token = "mark6";
 
-/** The series a person's mark on the board is filled with, read with
- *  `onSeriesMark`: the six slots both built-in themes' series read text on
- *  (the fourth and sixth don't, by day and by night). */
-export const SERIES_MARK_TOKENS = ["series1", "series2", "series3", "series5", "series7", "series8"] as const satisfies readonly Token[];
 
 /** The mark token `name` is drawn in, of `tokens`: the same one for a name
  *  every time. */

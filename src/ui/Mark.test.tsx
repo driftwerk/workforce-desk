@@ -1,7 +1,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { markFor, MARK_TOKENS, SERIES_MARK_TOKENS, tokenVar } from "../theme/tokens";
-import { Mark } from "./Mark";
+import { Mark, markText } from "./Mark";
 
 afterEach(cleanup);
 
@@ -32,8 +32,24 @@ describe("a mark's fill", () => {
     expect(face(container).style.background).toBe(tokenVar(markFor("Kai Moreno", SERIES_MARK_TOKENS)));
   });
 
+  it("keeps a person's picture round on the board", () => {
+    const { container } = render(<Mark name="Ana Diaz" size="xs" person tone="series" src="data:image/png;base64,AA==" />);
+    expect(container.querySelector(".mark")!.className).toContain("mark-person");
+    expect(container.querySelector("img")).toBeTruthy();
+  });
+
   it("spreads names over the same slots in both lists", () => {
     for (const name of ["Kingsley", "Matt", "Richard Lucas", "Pia", "atlas"])
       expect(SERIES_MARK_TOKENS.indexOf(markFor(name, SERIES_MARK_TOKENS) as never)).toBe(MARK_TOKENS.indexOf(markFor(name) as never));
+  });
+});
+
+describe("the board's initials", () => {
+  it("take whole graphemes, never half an emoji", () => {
+    expect(markText("Richard Lucas", false)).toBe("RL");
+    expect(markText("brisk-otter", true)).toBe("bo");
+    expect(markText("🦊 Fox", false)).toBe("🦊F");
+    expect(markText("𝒜da 👩‍💻", false)).toBe("𝒜👩‍💻");
+    expect(markText("  ", false)).toBe("?");
   });
 });

@@ -19,7 +19,8 @@ export const initialsFor = (name: string, engine?: string): string =>
  *  Lucas), a session's word starts in small letters (`bo` for brisk-otter). */
 export const markText = (name: string, agent: boolean): string => {
   const words = name.trim().split(agent ? /[\s\-_]+/ : /\s+/).filter(Boolean);
-  const two = words.length > 1 ? words[0]![0]! + words.at(-1)![0]! : (words[0]?.[0] ?? "?");
+  const first = (w: string | undefined) => (w && firstGrapheme(w)) ?? "";
+  const two = (words.length > 1 ? first(words[0]) + first(words.at(-1)) : first(words[0])) || "?";
   return agent ? two.toLowerCase() : two.toUpperCase();
 };
 
@@ -29,12 +30,12 @@ export type MarkSize = "xs" | "sm" | "md" | "lg" | "xl";
  *  board) a chart series colour, read with `onSeriesMark`. */
 export type MarkTone = "mark" | "series";
 
-
 /** Who or what something is at a glance: their picture where they have one,
  *  else their letter, in the ring that says what they're doing. Agents and
  *  sessions are rounded squares; people are round, but on the board, where
  *  a person's mark is filled in a series colour (`tone="series"`), a rounded
- *  square as the board's design draws them, with the board's initials. */
+ *  square as the board's design draws them, with the board's initials (a
+ *  picture stays round). */
 export function Mark({
   name,
   engine,
@@ -66,7 +67,7 @@ export function Mark({
     ? { background: tokenVar(markFor(name, SERIES_MARK_TOKENS)), color: tokenVar("onSeriesMark") }
     : { background: tokenVar(engine ? ENGINE_MARK : markFor(name)) };
   return (
-    <span className={`mark mark-${size} ${person && !series ? "mark-person" : ""} ${state ? (RING[state] ?? "") : ""}`}>
+    <span className={`mark mark-${size} ${person && (!series || picture) ? "mark-person" : ""} ${state ? (RING[state] ?? "") : ""}`}>
       <span className="mark-face" style={picture ? undefined : face}>
         {picture ? <img src={picture} alt="" draggable={false} onError={() => setBroken(picture)} /> : series ? markText(you ? (name.trim().split(/\s+/)[0] ?? name) : name, false) : initialsFor(name, engine)}
       </span>
