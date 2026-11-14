@@ -2,9 +2,18 @@
 // Desk Helper over native messaging, and Desk Helper relays it, frame for
 // frame, to the local hub's `/ws/desk/chrome`. `protocol/v1.json` holds a
 // sample of every message; the extension's tests and the hub's read it, so
-// the two can't drift.
+// the two can't drift. What Desk Helper and the extension say to each
+// other alone (the extension's revision, and its reloading itself) is in
+// `protocol/desk-helper.json`, which Desk Helper is built with.
+
+import { revision } from "../protocol/desk-helper.json";
 
 export const PROTOCOL = 1;
+
+/** This build's revision, stamped in from `protocol/desk-helper.json`:
+ *  Desk Helper says the one it was built with, and an unpacked build older
+ *  than that reloads itself from disk. */
+export const REVISION: number = revision;
 
 /** What the signature over a challenge covers: this prefix, then the nonce. */
 export const PROOF_PREFIX = "desk-chrome-v1:";
@@ -21,6 +30,9 @@ export const MAX_UPLOAD_BYTES = 700_000;
 export interface Hello {
   type: "hello";
   protocol: number;
+  /** This build's [`REVISION`]; hubs and Desk Helpers that don't know it
+   *  ignore it. */
+  revision: number;
   version: string;
   /** Who it is: its public key (P-256, raw, base64), made once per profile. */
   key: string;
@@ -113,8 +125,25 @@ export interface Event {
   session?: string;
 }
 
-export type FromHub = Challenge | Ready | Waiting | Refused | Status | Call;
-export type ToHub = Hello | Proof | Result | Event;
+/** Desk Helper, on each hello: the revision it was built with. Never the
+ *  hub's; a Desk Helper older than this has nothing to say. */
+export interface Expects {
+  type: "expects";
+  revision: number;
+}
+
+/** The extension, to Desk Helper alone (it isn't relayed): what it did
+ *  about being older than Desk expects. `reloading`: it reloads itself from
+ *  disk now; `store`: a Web Store install, which Chrome updates; `tried`:
+ *  it reloaded once for this revision already and is still older. */
+export interface Updating {
+  type: "updating";
+  revision: number;
+  outcome: "reloading" | "store" | "tried";
+}
+
+export type FromHub = Challenge | Ready | Waiting | Refused | Status | Call | Expects;
+export type ToHub = Hello | Proof | Result | Event | Updating;
 
 /** Whether `m` reads as a message from the hub (Desk Helper relays only
  *  what the hub sent, but nothing is taken on trust). */
@@ -131,6 +160,8 @@ export const fromHub = (m: unknown): FromHub | null => {
       return typeof (m as Waiting).why === "string" ? (m as Waiting | Refused) : null;
     case "status":
       return m as Status;
+    case "expects":
+      return Number.isSafeInteger((m as Expects).revision) ? (m as Expects) : null;
     case "call": {
       const c = m as Call;
       return Number.isSafeInteger(c.id) && typeof c.cmd === "string" ? c : null;

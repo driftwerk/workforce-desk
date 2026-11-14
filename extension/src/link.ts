@@ -6,7 +6,8 @@
 import { perform, Fail, type Exec } from "./commands";
 import type { DeskTabs } from "./desk";
 import type { Identity } from "./identity";
-import { PROTOCOL, fromHub, type Status, type ToHub } from "./protocol";
+import { PROTOCOL, REVISION, fromHub, type Status, type ToHub } from "./protocol";
+import { upToDate, type Reloader } from "./update";
 
 /** Desk Helper's native messaging host. */
 export const HOST = "xyz.driftwerk.desk";
@@ -39,6 +40,10 @@ export class Link {
     private readonly exec: Exec,
     private readonly version: string,
     private readonly later: (f: () => void, ms: number) => void,
+    /** How this build reloads itself when Desk expects a newer one; none
+     *  means it never does. */
+    private readonly reloader: Reloader | null = null,
+    private readonly revision: number = REVISION,
   ) {}
 
   onChange(f: (s: LinkState) => void): void {
@@ -65,7 +70,7 @@ export class Link {
       this.retry = Math.min(this.retry * 2, 60_000);
     });
     port.onMessage((raw) => void this.take(raw, me, port));
-    port.post({ type: "hello", protocol: PROTOCOL, version: this.version, key: me.publicKey, label: me.label });
+    port.post({ type: "hello", protocol: PROTOCOL, revision: this.revision, version: this.version, key: me.publicKey, label: me.label });
   }
 
   private async take(raw: unknown, me: Identity, port: Port): Promise<void> {
@@ -89,6 +94,21 @@ export class Link {
       case "status":
         this.set({ activity: m.activity });
         return;
+      case "expects": {
+        if (!this.reloader) return;
+        const outcome = await upToDate(m.revision, this.revision, this.reloader);
+        if (outcome === "current") return;
+        // Desk Helper logs it; it isn't relayed to the hub.
+        port.post({ type: "updating", revision: m.revision, outcome });
+        if (outcome !== "reloading") return;
+        // Desk's window would be left behind: what names it goes with the
+        // reload (`storage.session`). Nothing is asked of it yet.
+        await this.tabs.stop().catch(() => 0);
+        // A moment for the message to reach Desk Helper first.
+        const reloader = this.reloader;
+        this.later(() => reloader.reload(), 250);
+        return;
+      }
       case "call": {
         if (this.state.state !== "ready") {
           port.post({ type: "result", id: m.id, ok: false, error: "This Chrome isn't confirmed in Desk yet." });
