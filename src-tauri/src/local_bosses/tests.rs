@@ -522,3 +522,25 @@ fn only_a_grant_for_a_boss_here_with_nothing_wider_is_carried() {
     assert!(!bad(|g| g.group = "ungrouped".into()));
     assert!(!bad(|g| g.group = "a/b".into()));
 }
+
+#[tokio::test]
+async fn a_step_passed_over_while_its_group_is_changed_is_said_to_wait() {
+    let f = files();
+    let devbox = Machine::new("devbox");
+    let w = wanted(&[("devbox", vec![acme(&[S1], "act")], &[S1])]);
+    say(&f, &w, true).await;
+    sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    let none = wanted(&[("devbox", vec![], &[S1])]);
+    let ops = bosses::ops_of(&f.bosses, "acme");
+    let held = ops.lock().await;
+    let s = sync(&f.bosses, &f.kept, &none, &on(&[&devbox])).await;
+    assert_eq!(s.waiting, 1);
+    assert!(
+        devbox.grant("acme").is_some(),
+        "not while the group is changed"
+    );
+    drop(held);
+    let s = sync(&f.bosses, &f.kept, &none, &on(&[&devbox])).await;
+    assert_eq!(s.waiting, 0);
+    assert!(devbox.grant("acme").is_none());
+}

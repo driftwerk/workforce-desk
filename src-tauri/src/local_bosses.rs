@@ -451,6 +451,9 @@ pub struct Synced {
     pub narrowed: bool,
     pub written: usize,
     pub failed: Vec<(String, String)>,
+    /// Steps passed over while their group was being changed: tried again
+    /// at the next poll.
+    pub waiting: usize,
 }
 
 /// One step on one machine.
@@ -592,8 +595,10 @@ async fn run(
 ) {
     for (group, step) in steps {
         let ops = bosses::ops_of(bosses_at, group);
-        // A change to the group under way: next time.
+        // A change to the group under way: at the next poll, not at the
+        // next visit.
         let Ok(_op) = ops.try_lock() else {
+            out.waiting += 1;
             continue;
         };
         let remote = bosses::load(bosses_at).await.groups.contains_key(group);
@@ -742,7 +747,7 @@ async fn once(app: &tauri::AppHandle, woken: bool) {
         for (machine, why) in &synced.failed {
             tracing::warn!(machine = %machine, why = %why, "a local boss's machine grant wasn't brought up to date; trying again");
         }
-        let all_done = synced.failed.is_empty();
+        let all_done = synced.failed.is_empty() && synced.waiting == 0;
         *LAST.lock().unwrap_or_else(|e| e.into_inner()) = all_done.then(|| (now, Instant::now()));
     }
     let names: BTreeMap<String, String> = engines
