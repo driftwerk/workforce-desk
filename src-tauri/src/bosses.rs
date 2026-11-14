@@ -2118,6 +2118,10 @@ pub struct EngineStatus {
     /// without a budget, by name and level: Act fully needs all of them at
     /// it.
     pub below_full: Vec<String>,
+    /// Real money the boss spent on the group here today, at Act fully, as
+    /// the engine's ledger has it (`spentTodayUsd`); none below Act fully,
+    /// or from a hub too old to say it.
+    pub spent_today_usd: Option<f64>,
 }
 
 /// A group's boss on another hub, as the page shows it: never a token.
@@ -2138,6 +2142,9 @@ pub struct Status {
     pub stopping: bool,
     /// The group's sessions the boss doesn't run until the person says so.
     pub waiting: usize,
+    /// Real money the boss spent on the group today, every engine at Act
+    /// fully added up; none when one of them didn't say ("not known").
+    pub spent_today_usd: Option<f64>,
     pub engines: Vec<EngineStatus>,
 }
 
@@ -2171,6 +2178,7 @@ pub async fn status<E: Engine>(
             reached_at: e.reached_at,
             problem: e.problem.clone(),
             below_full: Vec::new(),
+            spent_today_usd: None,
         };
         match engines.get(id) {
             Ok(engine) => match engine.call("GET", "/api/desk/grants", None).await {
@@ -2181,6 +2189,9 @@ pub async fn status<E: Engine>(
                         if g["group"] == group_id {
                             s.live = g["live"].as_bool();
                             s.why = g["why"].as_str().map(str::to_string);
+                            s.spent_today_usd = g["spentTodayUsd"]
+                                .as_f64()
+                                .filter(|u| u.is_finite() && *u >= 0.0);
                         } else if g["boss"] == boss_key.as_str()
                             && g["live"] == true
                             && (g["level"] != "full"
@@ -2225,9 +2236,20 @@ pub async fn status<E: Engine>(
             reached_at: None,
             problem: Some(n.why.clone()),
             below_full: Vec::new(),
+            spent_today_usd: None,
         });
     }
     let all_stopped = l.engines.values().all(|e| e.stopped);
+    // Known only when every engine holding a link at Act fully says it.
+    let spent_today_usd = (l.choice.level == Level::Full)
+        .then(|| {
+            shown
+                .iter()
+                .filter(|s| s.linked)
+                .map(|s| s.spent_today_usd)
+                .sum::<Option<f64>>()
+        })
+        .flatten();
     Some(Status {
         hub: l.hub.clone(),
         hub_label: l.hub_label.clone(),
@@ -2238,6 +2260,7 @@ pub async fn status<E: Engine>(
         pausing: l.paused && !l.stopping && !all_stopped,
         stopping: l.stopping,
         waiting: group.as_ref().map_or(0, |g| l.waiting(g)),
+        spent_today_usd,
         engines: shown,
     })
 }

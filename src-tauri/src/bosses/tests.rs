@@ -79,6 +79,9 @@ struct Held {
     asked: Vec<(String, String)>,
     born: Vec<String>,
     paused: bool,
+    /// What the ledger says the boss spent today, at Act fully; none from
+    /// a hub too old to say it.
+    spent: Option<f64>,
 }
 
 struct FakeEngine {
@@ -233,6 +236,9 @@ impl Engine for FakeEngine {
                         "grants": h.grants.values().map(|g| {
                             let mut g = g.clone();
                             g["born"] = json!(h.born);
+                            if let (Some(u), true) = (h.spent, g["level"] == "full") {
+                                g["spentTodayUsd"] = json!(u);
+                            }
                             g
                         }).collect::<Vec<_>>(),
                         "left": left,
@@ -1275,4 +1281,30 @@ fn a_question_at_a_time_and_quiet_after_a_cancel() {
     gate.answered(false);
     drop(asking);
     assert!(gate.start().unwrap_err().contains("cancelled"));
+}
+
+/// What the boss spent today at Act fully is every engine's added up, and
+/// not known when one of them doesn't say (a hub older than the field).
+#[tokio::test]
+async fn spent_today_adds_up_every_engine_and_is_unknown_when_one_is_silent() {
+    let dir = tempfile::tempdir().unwrap();
+    let kept = dir.path().join(KEPT_FILE);
+    let e = two();
+    let hub = FakeHub::new(HubMode::Takes);
+    e.here.held.lock().unwrap().spent = Some(1.25);
+    devbox(&e).held.lock().unwrap().spent = Some(2.5);
+    linked(dir.path(), &e, &hub, suggest()).await;
+    assert_eq!(status(&kept, &e, ACME).await.unwrap().spent_today_usd, None);
+    let seen = Mutex::new(Vec::new());
+    let done = set(&kept, &e, none(), ACME, full(40.0), yes(&seen))
+        .await
+        .unwrap();
+    assert!(done.failed.is_empty(), "{:?}", done.failed);
+    let s = status(&kept, &e, ACME).await.unwrap();
+    assert_eq!(s.spent_today_usd, Some(3.75));
+    devbox(&e).held.lock().unwrap().spent = None;
+    let s = status(&kept, &e, ACME).await.unwrap();
+    assert_eq!(s.spent_today_usd, None);
+    let here = s.engines.iter().find(|x| x.engine == LOCAL_ENGINE).unwrap();
+    assert_eq!(here.spent_today_usd, Some(1.25));
 }
