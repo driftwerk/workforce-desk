@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DAY, NIGHT } from "./builtin";
-import { contrast, contrastChecks, derive, type Palette, type Token } from "./tokens";
+import { contrast, contrastChecks, derive, SERIES_MARK_TOKENS, type Palette, type Token } from "./tokens";
 
 /** Every text/ground pair the Day design lists (designs: tokens.md, "Key
  *  ratios"), with its bar: 4.5 for text, 3 for what is seen but not read. */
@@ -46,6 +46,7 @@ const PAIRS: [fg: Token, bg: Token, bar: number][] = [
   ["onMark", "mark4", 4.5],
   ["onMark", "mark5", 4.5],
   ["onMark", "mark6", 4.5],
+  ...SERIES_MARK_TOKENS.map((m): [Token, Token, number] => ["onSeriesMark", m, 4.5]),
   ["idle", "surface", 3],
   ["logoDot", "surface", 1.5],
   ...([1, 2, 3, 4, 5, 6, 7, 8] as const).flatMap((n) => [[`series${n}`, "bg", 3] as [Token, Token, number], [`series${n}`, "sunken", 3] as [Token, Token, number]]),

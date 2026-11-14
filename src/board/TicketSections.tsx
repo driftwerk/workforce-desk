@@ -171,7 +171,7 @@ function Who({ name, me }: { name?: string; me?: string | null }) {
     return <span className="board-upstream-ring ticket-row-who" title="No one has it" aria-label="Unassigned" />;
   return (
     <span className="ticket-row-who" title={me && name === me ? "You" : name}>
-      <Mark name={name} size="xs" person />
+      <Mark name={name} size="xs" person tone="series" />
     </span>
   );
 }
@@ -339,7 +339,7 @@ export function SessionName({ id }: { id: string }) {
 export function Person({ name, me }: { name: string; me?: string | null }) {
   return (
     <span className="ticket-person">
-      <Mark name={name} size="xs" person />
+      <Mark name={name} size="xs" person tone="series" />
       {me && name === me ? "You" : name}
     </span>
   );

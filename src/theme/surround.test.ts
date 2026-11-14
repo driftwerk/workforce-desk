@@ -35,6 +35,8 @@ describe("themes from before the new tokens", () => {
       const c = derive(spec).colors;
       expect([c.shadow, c.lift, c.edge, c.onMark], spec.id).toEqual(["#00000059", "#00000000", "#00000000", "#161714"]);
       expect(c.logoDot, spec.id).toBe(c.signal);
+      // A board mark's initials: ink on a dark theme's series, white on a light one's.
+      expect(c.onSeriesMark, spec.id).toBe(derive(spec).dark ? "#161714" : "#FFFFFF");
       expect([c.mark1, c.mark2, c.mark3, c.mark4, c.mark5, c.mark6]).toEqual(["#C9B8FF", "#FFC98A", "#A8D8FF", "#A6EBC9", "#FFB3C7", "#E8DDB5"]);
       // Buttons transparent, answer buttons in the signal, no glow or rings,
       // a working ticket's edge the border, settings cards raised.

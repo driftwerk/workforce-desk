@@ -1,7 +1,7 @@
 import { useState } from "react";
 import type { Look } from "../floor/background";
 import { useAgentImage, useYou } from "../pictures/who";
-import { ENGINE_MARK, markFor, tokenVar } from "../theme/tokens";
+import { ENGINE_MARK, markFor, SERIES_MARK_TOKENS, tokenVar } from "../theme/tokens";
 import { firstGrapheme } from "./graphemes";
 
 const RING: Partial<Record<Look, string>> = {
@@ -17,9 +17,22 @@ export const initialsFor = (name: string, engine?: string): string =>
 
 export type MarkSize = "xs" | "sm" | "md" | "lg" | "xl";
 
+/** What a mark is filled with: Desk's pastel marks, or (a person on the
+ *  board) a chart series colour, read with `onSeriesMark`. */
+export type MarkTone = "mark" | "series";
+
+/** The face of a person's mark on the board: a series colour, by name, and
+ *  the ink that reads on it. */
+export const seriesFace = (name: string): { background: string; color: string } => ({
+  background: tokenVar(markFor(name, SERIES_MARK_TOKENS)),
+  color: tokenVar("onSeriesMark"),
+});
+
 /** Who or what something is at a glance: their picture where they have one,
  *  else their letter, in the ring that says what they're doing. Agents and
- *  sessions are rounded squares; people are round. */
+ *  sessions are rounded squares; people are round, but on the board, where
+ *  a person's mark is filled in a series colour (`tone="series"`), a rounded
+ *  square as the board's design draws them. */
 export function Mark({
   name,
   engine,
@@ -27,6 +40,7 @@ export function Mark({
   size = "md",
   src,
   person = false,
+  tone = "mark",
 }: {
   name: string;
   engine?: string;
@@ -35,12 +49,15 @@ export function Mark({
   /** Their picture; the letter shows without one, or if it won't load. */
   src?: string | null;
   person?: boolean;
+  tone?: MarkTone;
 }) {
   const [broken, setBroken] = useState<string | null>(null);
   const picture = src && src !== broken ? src : null;
+  const series = tone === "series" && !engine;
+  const face = series ? seriesFace(name) : { background: tokenVar(engine ? ENGINE_MARK : markFor(name)) };
   return (
-    <span className={`mark mark-${size} ${person ? "mark-person" : ""} ${state ? (RING[state] ?? "") : ""}`}>
-      <span className="mark-face" style={picture ? undefined : { background: tokenVar(engine ? ENGINE_MARK : markFor(name)) }}>
+    <span className={`mark mark-${size} ${person && !series ? "mark-person" : ""} ${state ? (RING[state] ?? "") : ""}`}>
+      <span className="mark-face" style={picture ? undefined : face}>
         {picture ? <img src={picture} alt="" draggable={false} onError={() => setBroken(picture)} /> : initialsFor(name, engine)}
       </span>
     </span>

@@ -1647,6 +1647,14 @@ button.ticket-row:not(:disabled):hover {
   height: 22px;
   font-size: 10.5px;
 }
+/* A person's is filled in their series colour (seriesFace), a rounded
+   square as their marks are across the board. */
+.ticket-comment-person .ticket-comment-mark {
+  border-radius: 9px;
+}
+.ticket-comment-person.is-reply .ticket-comment-mark {
+  border-radius: 7px;
+}
 .ticket-comment-main {
   min-width: 0;
   flex: 1;
