@@ -74,7 +74,10 @@ export function ModelSelect({
       disabled={disabled}
       onChange={(e) => {
         const v = e.target.value;
-        if (v === OTHER) setTyping(known ? "" : (value ?? ""));
+        if (v === OTHER) {
+          cancelled.current = false;
+          setTyping(known ? "" : (value ?? ""));
+        }
         else onChange(v || null);
       }}
     >

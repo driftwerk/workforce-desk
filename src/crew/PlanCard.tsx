@@ -1026,7 +1026,7 @@ function PlanEditor({
         <button type="button" className="btn btn-ghost" onClick={() => {
             setDefault(firstFolder);
             const last = draft[draft.length - 1];
-            onChange([...draft, { title: "", engine: firstEngine, folder: firstFolder, machine: last?.machine ?? null, model: modelOn(firstEngine, last?.model), needs: [] }]);
+            onChange([...draft, { title: "", engine: firstEngine, folder: firstFolder, machine: last?.machine ?? null, model: last?.engine === firstEngine ? (last.model ?? null) : null, needs: [] }]);
           }}>
           Add a ticket
         </button>
