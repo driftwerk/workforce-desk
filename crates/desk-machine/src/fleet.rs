@@ -301,6 +301,9 @@ pub struct Listed {
     pub progress: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub update: Option<UpdateRun>,
+    /// Desk is being uninstalled from it now (said only while it is).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub removing: bool,
 }
 
 /// A step of adding a machine, as the page's checklist shows it.
@@ -833,6 +836,7 @@ impl Fleet {
                 shown_key: r.now.shown_key.clone(),
                 progress: r.now.progress.clone(),
                 update: r.now.update.clone(),
+                removing: r.removing,
             })
             .collect()
     }
@@ -2376,7 +2380,7 @@ impl Fleet {
         let same_place = |s: &ssh::Settings| {
             s.hostname == theirs.hostname && s.port == theirs.port && s.user == theirs.user
         };
-        let mut entries = entry::read(&file);
+        let mut entries = entry::read(&file)?;
         let mut stale: Option<String> = None;
         // One made before for this target: used again while it still goes
         // to the same address, as the same account, forwarding nothing
@@ -2858,6 +2862,8 @@ impl Fleet {
                     r.busy = true;
                     r.removing = true;
                     r.cancel.store(false, std::sync::atomic::Ordering::SeqCst);
+                    drop(rows);
+                    self.host.changed();
                     break;
                 }
             }
@@ -2874,6 +2880,7 @@ impl Fleet {
                     r.removing = false;
                     r.cancel.store(false, std::sync::atomic::Ordering::SeqCst);
                 }
+                self.0.host.changed();
             }
         }
         let held = Held(self, id);
@@ -3280,9 +3287,10 @@ mod tests {
             }),
             progress: None,
             update: None,
+            removing: false,
         };
         assert_eq!(
-            serde_json::to_value(row).unwrap(),
+            serde_json::to_value(row.clone()).unwrap(),
             serde_json::json!({
                 "id": "devbox", "name": "devbox", "target": "dev@devbox", "version": "0.3.0",
                 "system": {"os": "Ubuntu 24.04", "arch": "x86_64", "glibc": "2.39"}, "state": "unreachable",
@@ -3292,6 +3300,15 @@ mod tests {
                 "hostKey": {"kind": "ED25519", "fingerprint": "SHA256:k3Vq", "trustedAt": 4},
                 "shownKey": {"kind": "ED25519", "fingerprint": "SHA256:x9Zp"}
             })
+        );
+        // Said only while Desk is being uninstalled from it.
+        let removing = Listed {
+            removing: true,
+            ..row
+        };
+        assert_eq!(
+            serde_json::to_value(removing).unwrap()["removing"],
+            serde_json::json!(true)
         );
         let event = SetupEvent {
             machine: "devbox".into(),

@@ -188,11 +188,22 @@ pub fn file_text(entries: &[Entry], user_config: &Path) -> String {
     out
 }
 
-/// Reads Desk's file at `file`; none there is no entries.
-pub fn read(file: &Path) -> Vec<Entry> {
-    std::fs::read_to_string(file)
-        .map(|t| entries(&t))
-        .unwrap_or_default()
+/// Reads Desk's file at `file`; none there is no entries. A file that is
+/// there but can't be read (or isn't text) is an error, never no entries:
+/// writing over it would lose every entry in it.
+pub fn read(file: &Path) -> Result<Vec<Entry>, String> {
+    match std::fs::read_to_string(file) {
+        Ok(text) => Ok(entries(&text)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Vec::new()),
+        Err(e) => {
+            tracing::warn!(error = %e, "couldn't read Desk's SSH entries");
+            Err(format!(
+                "Desk couldn't read its SSH entries in {}, so it left them as they are. \
+                 Remove that file and Desk writes it afresh.",
+                file.display()
+            ))
+        }
+    }
 }
 
 /// Writes Desk's file at `file` with `entries` (its folder private, the
@@ -234,7 +245,7 @@ pub fn add(
     user_config: &Path,
 ) -> Result<(), String> {
     let _one = CHANGING.lock().unwrap_or_else(|e| e.into_inner());
-    let mut all = read(file);
+    let mut all = read(file)?;
     all.retain(|e| e.alias != new.alias && Some(e.alias.as_str()) != replaces);
     all.push(new);
     write(file, &all, user_config)
@@ -243,7 +254,7 @@ pub fn add(
 /// Takes entry `alias` out of Desk's file at `file`, when it is there.
 pub fn remove(file: &Path, alias: &str, user_config: &Path) -> Result<(), String> {
     let _one = CHANGING.lock().unwrap_or_else(|e| e.into_inner());
-    let all = read(file);
+    let all = read(file)?;
     if !all.iter().any(|e| e.alias == alias) {
         return Ok(());
     }
@@ -326,7 +337,7 @@ mod tests {
         assert!(text.ends_with(
             "Match all\nInclude \"/home/k/.ssh/config\"\nInclude /etc/ssh/ssh_config\n"
         ));
-        assert_eq!(read(&file), [a.clone(), b.clone()]);
+        assert_eq!(read(&file).unwrap(), [a.clone(), b.clone()]);
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -335,8 +346,31 @@ mod tests {
             assert_eq!(mode(&file), 0o600);
         }
         remove(&file, "desk-m-a-1", mine).unwrap();
-        assert_eq!(read(&file), [b]);
+        assert_eq!(read(&file).unwrap(), [b]);
         remove(&file, "desk-m-gone", mine).unwrap();
+    }
+
+    #[test]
+    fn no_file_is_no_entries_but_one_that_cant_be_read_is_an_error_and_is_left_alone() {
+        let dir = tempfile::tempdir().unwrap();
+        let mine = Path::new("/home/k/.ssh/config");
+        assert_eq!(read(&dir.path().join("none")).unwrap(), []);
+        // Not text: it can't be read as entries.
+        let file = dir.path().join("config");
+        std::fs::write(&file, [0xff, 0xfe, 0x00, 0x80]).unwrap();
+        assert!(read(&file).is_err());
+        let new = Entry {
+            alias: "desk-m-a-1".into(),
+            target: "a".into(),
+            text: block("desk-m-a-1", "a", &["hostname 10.0.0.1".into()]),
+        };
+        assert!(add(&file, new, None, mine).is_err());
+        assert!(remove(&file, "desk-m-a-1", mine).is_err());
+        assert_eq!(std::fs::read(&file).unwrap(), [0xff, 0xfe, 0x00, 0x80]);
+        // A folder where the file should be is not "missing" either.
+        let as_dir = dir.path().join("folder");
+        std::fs::create_dir(&as_dir).unwrap();
+        assert!(read(&as_dir).is_err());
     }
 
     /// With the real ssh: through Desk's file, the entry reaches the machine
