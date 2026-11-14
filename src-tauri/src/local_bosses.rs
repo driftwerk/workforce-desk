@@ -15,10 +15,11 @@
 //!   first runs the group's machine sessions (the design's migration
 //!   question): "Oversee this group" never said machines, and a boss made
 //!   before this didn't reach them. A yes holds for the sessions the
-//!   person puts in the group from then on, as at home; a no holds until a
-//!   machine session the person wasn't asked about joins it. What is kept
-//!   (`local_bosses.json`, private) is each group's answer, and nothing
-//!   else.
+//!   person puts in the group from then on, as at home, up to the level it
+//!   was asked at: a higher one asks again. A no holds until a machine
+//!   session the person wasn't asked about joins the group, or the boss's
+//!   level or switches change at home. What is kept (`local_bosses.json`,
+//!   private) is each group's answer, and nothing else.
 //! - **Never a group bossed from another hub** ([`crate::bosses`]'s): not
 //!   one Desk linked such a boss for, nor one whose grant on the machine
 //!   names such a boss. One boss per group. Only grants naming a boss here
@@ -31,8 +32,13 @@
 //!   what it will be ([`meet`]). Then what is wanted is written. So a
 //!   session moving between two groups is out of one before it is in the
 //!   other, and a new boss is never written over the old one's.
-//! - **Never resumed**: a grant a machine or Desk stopped stays stopped,
-//!   and the engine's own pause stays; only the person lets them go on.
+//! - **A stop is lifted only by the person's yes**: one Desk made before
+//!   their yes for the group goes with the first write after it; one made
+//!   on the machine itself (`desk-helper bosses stop`) never does, and is
+//!   said in the log. The engine's own pause is never touched.
+//! - **A day at a time**: each grant is written to last 24 hours (or the
+//!   machine's own most, when less), so one left behind while Desk was
+//!   closed soon ends by itself.
 //! - **Kept alive** while Desk is open ([`keep_alive`]): the hub is read
 //!   every [`POLL_EVERY`], and soon after the sidebar changes; each machine
 //!   is written when what it should hold changed, and every [`KEEP_EVERY`]
@@ -268,7 +274,17 @@ pub struct Said {
     pub yes: bool,
     /// The machine sessions (`<machine>/<id>`) they were asked about.
     pub sessions: Vec<String>,
+    /// The level and switches they were asked about: a yes holds up to that
+    /// level; a no, while both stay as they were.
+    #[serde(default = "watch")]
+    pub level: String,
+    #[serde(default)]
+    pub act: Value,
     pub at: DateTime<Utc>,
+}
+
+fn watch() -> String {
+    "watch".into()
 }
 
 /// Every group's answer, by group id.
@@ -307,17 +323,48 @@ pub enum Consent {
     Ask,
 }
 
-/// What `kept` says of `agent` running `sessions`, group `group`'s machine
-/// sessions now: a yes for this boss holds; a no holds while it covers
-/// every one of them; else the person is asked.
-pub fn consent(kept: &Kept, group: &str, agent: &str, sessions: &BTreeSet<String>) -> Consent {
+/// What `kept` says of group `group`'s boss running its machine sessions
+/// as `a` has them now:
+/// - a yes for this boss holds up to the level it was asked at (the
+///   sessions the person puts in the group later are its, as at home);
+/// - a no holds while every session, the level and the switches are as
+///   they were asked about, so changing the boss's settings at home asks
+///   again;
+/// - else the person is asked.
+fn consent(kept: &Kept, group: &str, a: &Asked) -> Consent {
+    let rank = |l: &str| level_rank(&json!(l)).unwrap_or(0);
     match kept.groups.get(group) {
-        Some(s) if s.agent == agent && s.yes => Consent::Yes,
-        Some(s) if s.agent == agent && sessions.iter().all(|x| s.sessions.contains(x)) => {
+        Some(s) if s.agent != a.agent => Consent::Ask,
+        Some(s) if s.yes && rank(&a.level) <= rank(&s.level) => Consent::Yes,
+        Some(s)
+            if !s.yes
+                && s.level == a.level
+                && s.act == a.act
+                && a.flat().iter().all(|x| s.sessions.contains(x)) =>
+        {
             Consent::No
         }
         _ => Consent::Ask,
     }
+}
+
+/// When the person last said yes to group `group`'s boss here, and the
+/// level they said it at, if they did: what is written is never above it,
+/// while a higher one waits on them being asked again.
+fn yes_of<'k>(kept: &'k Kept, group: &str, a: &Asked) -> Option<(DateTime<Utc>, &'k str)> {
+    kept.groups
+        .get(group)
+        .filter(|s| s.yes && s.agent == a.agent)
+        .map(|s| (s.at, s.level.as_str()))
+}
+
+/// `grant` with its level no higher than `said`.
+fn at_most(mut grant: Value, said: &str) -> Value {
+    let said = json!(said);
+    if level_rank(&said).unwrap_or(0) < level_rank(&grant["level"]).unwrap_or(0) {
+        grant["level"] = said;
+    }
+    grant
 }
 
 /// Each group's machine sessions in `wanted`, by group: who would run
@@ -329,6 +376,7 @@ struct Asked {
     agent_name: String,
     group_name: String,
     level: String,
+    act: Value,
     sessions: BTreeMap<String, BTreeSet<String>>,
 }
 
@@ -341,6 +389,7 @@ fn by_group(wanted: &Wanted) -> BTreeMap<String, Asked> {
                 agent_name: g.agent_name.clone(),
                 group_name: g.grant["name"].as_str().unwrap_or(&g.group).to_string(),
                 level: g.grant["level"].as_str().unwrap_or("watch").to_string(),
+                act: g.grant["act"].clone(),
                 sessions: BTreeMap::new(),
             });
             if a.agent != g.agent {
@@ -363,12 +412,14 @@ impl Asked {
             .collect()
     }
 
+    /// The boss as a native question names it: quoted, as every name the
+    /// page can set is ([`bosses::quoted`]).
     fn boss(&self) -> String {
-        bosses::capital(if self.agent_name.trim().is_empty() {
+        bosses::quoted(&bosses::capital(if self.agent_name.trim().is_empty() {
             &self.agent
         } else {
             &self.agent_name
-        })
+        }))
     }
 }
 
@@ -419,9 +470,10 @@ pub async fn ask_one(
         let _one = KEPT.lock().await;
         read_kept(kept_at)
     };
-    let Some((group, a)) = by_group(wanted).into_iter().find(|(g, a)| {
-        !remote.contains(g) && consent(&kept, g, &a.agent, &a.flat()) == Consent::Ask
-    }) else {
+    let Some((group, a)) = by_group(wanted)
+        .into_iter()
+        .find(|(g, a)| !remote.contains(g) && consent(&kept, g, a) == Consent::Ask)
+    else {
         return Ok(false);
     };
     let (title, body, yes) = question(&a, names);
@@ -433,6 +485,8 @@ pub async fn ask_one(
             agent: a.agent.clone(),
             yes: said,
             sessions: a.flat().into_iter().collect(),
+            level: a.level.clone(),
+            act: a.act.clone(),
             at: Utc::now(),
         },
     )
@@ -450,18 +504,28 @@ pub struct Synced {
     /// now be written where it couldn't be.
     pub narrowed: bool,
     pub written: usize,
+    /// Each machine (by id) that couldn't be brought up to date, and why.
     pub failed: Vec<(String, String)>,
-    /// Steps passed over while their group was being changed: tried again
-    /// at the next poll.
-    pub waiting: usize,
+    /// The machines with a step passed over while its group was being
+    /// changed: visited again at the next poll.
+    pub waiting: BTreeSet<String>,
+    /// The groups, by machine id, whose grant there was stopped on the
+    /// machine itself: never lifted from here.
+    pub stopped_there: BTreeSet<(String, String)>,
 }
 
 /// One step on one machine.
 #[derive(Debug, Clone, PartialEq)]
 enum Step {
     Delete,
-    Write(Value),
+    /// A grant to write, and when the person last said yes to it: a stop
+    /// Desk made before then is lifted with it. None for what only narrows.
+    Write(Value, Option<DateTime<Utc>>),
 }
+
+/// How long each grant written lasts: a day, so one left behind while Desk
+/// was closed ends soon. A machine that gives less is written its own.
+const GRANT_HOURS: u32 = 24;
 
 /// Steps, each with its group.
 type Steps = Vec<(String, Step)>;
@@ -486,22 +550,75 @@ async fn held_on(engine: &impl Engine) -> Result<BTreeMap<String, Value>, String
         .collect())
 }
 
+/// The machine's revision for `group` (its grant's, or what a deleted one
+/// left; 0 for none), its grant, and the stop it holds (the grant's, or
+/// the one a deleted grant left).
+async fn held_one(engine: &impl Engine, group: &str) -> Result<(i64, Value, Value), String> {
+    let a = engine.call("GET", "/api/desk/grants", None).await?;
+    if !bosses::ok(a.status) {
+        return Err(format!(
+            "Desk on {} didn't say its grants: {}",
+            engine.name(),
+            bosses::said(a.status, a.body.as_bytes())
+        ));
+    }
+    let v: Value = serde_json::from_str(&a.body)
+        .map_err(|_| format!("Desk on {} didn't say its grants.", engine.name()))?;
+    let held = v["grants"]
+        .as_array()
+        .and_then(|gs| gs.iter().find(|g| g["group"] == group))
+        .cloned()
+        .unwrap_or(Value::Null);
+    let left = &v["left"][group];
+    let have = held["revision"]
+        .as_i64()
+        .or_else(|| left["revision"].as_i64())
+        .unwrap_or(0);
+    let stop = match held.is_null() {
+        true => left["stopped"].clone(),
+        false => held["stopped"].clone(),
+    };
+    Ok((have, held, stop))
+}
+
+/// Whether `stop` is lifted by a yes at `yes`: one Desk made before it,
+/// never one made on the machine.
+fn lifted(stop: &Value, yes: Option<DateTime<Utc>>) -> bool {
+    let at = stop["at"]
+        .as_str()
+        .and_then(|t| t.parse::<DateTime<Utc>>().ok());
+    stop["from"] == "desk" && matches!((at, yes), (Some(at), Some(yes)) if at < yes)
+}
+
+/// What a write did.
+#[derive(Debug, Default, PartialEq)]
+struct Wrote {
+    written: bool,
+    /// The machine itself stopped the grant: it stays stopped.
+    stopped_there: bool,
+}
+
 /// Writes `says` as `group`'s grant on `engine`, once the machine's copy is
 /// read again and is still one this writes: the same revision when it
 /// says nothing new and is past half its life (a renewal), nothing when it
-/// isn't, else one past what the machine has. Never a resume. Whether it
-/// was written.
+/// isn't, else one past what the machine has. A stop Desk made before the
+/// person's yes (`yes`) is lifted with it; one made on the machine never is.
 async fn write(
     engine: &impl Engine,
     group: &str,
     says: &Value,
     listed: &BTreeSet<String>,
-) -> Result<bool, String> {
-    for tries in 1..=2 {
-        let (have, held) = bosses::revision_on(engine, group).await?;
+    yes: Option<DateTime<Utc>>,
+) -> Result<Wrote, String> {
+    let mut hours = Some(GRANT_HOURS);
+    let mut conflicts = 0;
+    loop {
+        let (have, held, stop) = held_one(engine, group).await?;
         if !held.is_null() && !ours(&held) {
-            return Ok(false);
+            return Ok(Wrote::default());
         }
+        let stopped_there = stop["from"] == "machine";
+        let resume = lifted(&stop, yes);
         let members = members_of(says);
         // Born there in the group, and listed elsewhere now: taken out.
         let leaving: Vec<String> = held["born"]
@@ -512,13 +629,22 @@ async fn write(
             .filter(|s| listed.contains(*s) && !members.contains(*s))
             .map(str::to_string)
             .collect();
-        let same = !held.is_null() && leaving.is_empty() && says_same(&held, says);
+        let same = !held.is_null() && !resume && leaving.is_empty() && says_same(&held, says);
         if same && !renewal_due(&held, Utc::now()) {
-            return Ok(false);
+            return Ok(Wrote {
+                written: false,
+                stopped_there,
+            });
         }
         let mut body = says.clone();
         body["revision"] = json!(if same { have } else { have + 1 });
         body["leaving"] = json!(leaving);
+        if let Some(h) = hours {
+            body["hours"] = json!(h);
+        }
+        if resume {
+            body["resume"] = json!(true);
+        }
         let body = Zeroizing::new(body.to_string());
         let a = engine
             .call(
@@ -528,9 +654,24 @@ async fn write(
             )
             .await?;
         if bosses::ok(a.status) {
-            return Ok(true);
+            if resume {
+                tracing::info!(group = %group, machine = %engine.id(), "a stop Desk made before the person's yes was lifted");
+            }
+            return Ok(Wrote {
+                written: true,
+                stopped_there,
+            });
         }
-        if a.status == 409 && tries < 2 {
+        // A machine that gives a grant less than a day: its own length.
+        if a.status == 400
+            && hours.is_some()
+            && bosses::said(a.status, a.body.as_bytes()).contains("hours")
+        {
+            hours = None;
+            continue;
+        }
+        if a.status == 409 && conflicts == 0 {
+            conflicts += 1;
             continue;
         }
         return Err(format!(
@@ -539,7 +680,6 @@ async fn write(
             bosses::said(a.status, a.body.as_bytes())
         ));
     }
-    unreachable!("the loop returns")
 }
 
 /// Deletes `group`'s grant on `engine`, once the machine's copy is read
@@ -557,17 +697,17 @@ async fn delete(engine: &impl Engine, group: &str) -> Result<bool, String> {
 /// as no more than both first ([`meet`]); then what is wanted.
 fn plan(
     held: &BTreeMap<String, Value>,
-    wanted: &BTreeMap<String, Value>,
+    wanted: &BTreeMap<String, (Value, DateTime<Utc>)>,
     remote: &BTreeSet<String>,
 ) -> (Steps, Steps) {
     let mut first = Vec::new();
     for (group, h) in held.iter().filter(|(_, h)| ours(h)) {
         match wanted.get(group) {
-            Some(w) if !remote.contains(group) => {
+            Some((w, _)) if !remote.contains(group) => {
                 // What narrows is written now; what then widens, after.
                 let m = meet(h, w);
                 if !says_same(h, &m) {
-                    first.push((group.clone(), Step::Write(m)));
+                    first.push((group.clone(), Step::Write(m, None)));
                 }
             }
             _ => first.push((group.clone(), Step::Delete)),
@@ -577,7 +717,7 @@ fn plan(
         .iter()
         .filter(|(g, _)| !remote.contains(*g))
         .filter(|(g, _)| held.get(*g).is_none_or(ours))
-        .map(|(g, w)| (g.clone(), Step::Write(w.clone())))
+        .map(|(g, (w, yes))| (g.clone(), Step::Write(w.clone(), Some(*yes))))
         .collect();
     (first, then)
 }
@@ -598,22 +738,29 @@ async fn run(
         // A change to the group under way: at the next poll, not at the
         // next visit.
         let Ok(_op) = ops.try_lock() else {
-            out.waiting += 1;
+            out.waiting.insert(engine.id().to_string());
             continue;
         };
         let remote = bosses::load(bosses_at).await.groups.contains_key(group);
         let done = match step {
-            Step::Delete => delete(engine, group).await,
-            Step::Write(_) if remote => delete(engine, group).await,
-            Step::Write(says) => write(engine, group, says, listed).await,
+            Step::Write(says, yes) if !remote => write(engine, group, says, listed, *yes).await,
+            _ => delete(engine, group).await.map(|written| Wrote {
+                written,
+                stopped_there: false,
+            }),
         };
         match done {
-            Ok(true) => {
-                out.written += 1;
-                out.narrowed |= narrowing || matches!(step, Step::Delete) || remote;
+            Ok(w) => {
+                if w.stopped_there {
+                    out.stopped_there
+                        .insert((engine.id().to_string(), group.clone()));
+                }
+                if w.written {
+                    out.written += 1;
+                    out.narrowed |= narrowing || !matches!(step, Step::Write(..)) || remote;
+                }
             }
-            Ok(false) => {}
-            Err(why) => out.failed.push((engine.name().to_string(), why)),
+            Err(why) => out.failed.push((engine.id().to_string(), why)),
         }
     }
 }
@@ -646,22 +793,20 @@ pub async fn sync<E: Engine>(
         let held = match held_on(engine).await {
             Ok(h) => h,
             Err(why) => {
-                out.failed.push((engine.name().to_string(), why));
+                out.failed.push((id.clone(), why));
                 continue;
             }
         };
         let mw = wanted.machines.get(id);
-        let desired: BTreeMap<String, Value> = mw
+        let desired: BTreeMap<String, (Value, DateTime<Utc>)> = mw
             .into_iter()
             .flat_map(|m| m.grants.iter())
             .filter(|g| carried(g))
-            .filter(|g| {
-                groups.get(&g.group).is_some_and(|a| {
-                    a.agent == g.agent
-                        && consent(&kept, &g.group, &a.agent, &a.flat()) == Consent::Yes
-                })
+            .filter_map(|g| {
+                let a = groups.get(&g.group).filter(|a| a.agent == g.agent)?;
+                let (yes, level) = yes_of(&kept, &g.group, a)?;
+                Some((g.group.clone(), (at_most(g.grant.clone(), level), yes)))
             })
-            .map(|g| (g.group.clone(), g.grant.clone()))
             .collect();
         let listed: BTreeSet<String> = mw
             .map(|m| m.listed.iter().cloned().collect())
@@ -700,13 +845,32 @@ async fn read_wanted(local: &crate::broker::Broker) -> Option<Wanted> {
 /// Whether a question about a local boss is being asked now.
 static ASKING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// What was last brought to the machines, and when every machine was last
-/// visited.
-static LAST: Mutex<Option<(String, Instant)>> = Mutex::new(None);
+/// What was last brought to each machine (by id), and when.
+static LAST: Mutex<BTreeMap<String, (String, Instant)>> = Mutex::new(BTreeMap::new());
+
+/// What was last said of each machine's trouble, so it is said once, when
+/// it changes.
+static SAID: Mutex<BTreeMap<String, String>> = Mutex::new(BTreeMap::new());
+
+/// Says `why` of `key` once, when it changes; nothing when it is gone.
+fn say_once(key: &str, why: Option<&str>, say: impl FnOnce(&str)) {
+    let mut said = SAID.lock().unwrap_or_else(|e| e.into_inner());
+    match why {
+        Some(w) if said.get(key).map(String::as_str) != Some(w) => {
+            say(w);
+            said.insert(key.to_string(), w.to_string());
+        }
+        Some(_) => {}
+        None => {
+            said.remove(key);
+        }
+    }
+}
 
 /// One run: the hub read; each machine visited when what it should hold
-/// changed, when woken, or every [`KEEP_EVERY`]; then the person asked
-/// about one group they haven't answered for.
+/// changed, when woken, or every [`KEEP_EVERY`] (one that can't be reached
+/// holds up no other); then the person asked about one group they haven't
+/// answered for.
 async fn once(app: &tauri::AppHandle, woken: bool) {
     use tauri::Manager;
     let local = app.state::<crate::broker::Broker>();
@@ -723,37 +887,58 @@ async fn once(app: &tauri::AppHandle, woken: bool) {
         let _one = KEPT.lock().await;
         read_kept(&kept_at)
     };
-    let now = format!(
-        "{}\n{:?}\n{:?}\n{:?}",
-        serde_json::to_string(&wanted).unwrap_or_default(),
-        remote,
-        kept,
-        ids
-    );
-    let due = {
-        let last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-        woken
-            || last
-                .as_ref()
-                .is_none_or(|(was, at)| *was != now || at.elapsed() >= KEEP_EVERY)
+    let common = format!("{remote:?}\n{kept:?}");
+    let digest = |id: &str| {
+        format!(
+            "{}\n{common}",
+            serde_json::to_string(&wanted.machines.get(id)).unwrap_or_default()
+        )
     };
-    let engines = bosses::engines_now(&local, &machines, &ids);
-    if due {
+    let due: Vec<String> = {
+        let last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        ids.iter()
+            .filter(|id| {
+                woken
+                    || last
+                        .get(id.as_str())
+                        .is_none_or(|(was, at)| *was != digest(id) || at.elapsed() >= KEEP_EVERY)
+            })
+            .cloned()
+            .collect()
+    };
+    if !due.is_empty() {
+        let engines = bosses::engines_now(&local, &machines, &due);
         let synced = sync(&bosses_at, &kept_at, &wanted, &engines.machines).await;
         if synced.narrowed {
             // A boss on another hub refused before may fit now.
             bosses::WAKE.notify_one();
         }
-        for (machine, why) in &synced.failed {
-            tracing::warn!(machine = %machine, why = %why, "a local boss's machine grant wasn't brought up to date; trying again");
+        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+        for id in &due {
+            let why = synced
+                .failed
+                .iter()
+                .find(|(m, _)| m == id)
+                .map(|(_, w)| w.as_str());
+            say_once(id, why, |w| {
+                tracing::warn!(machine = %id, why = %w, "a local boss's machine grants weren't brought up to date; trying again");
+            });
+            if why.is_some() || synced.waiting.contains(id) {
+                last.remove(id);
+            } else {
+                last.insert(id.clone(), (digest(id), Instant::now()));
+            }
         }
-        let all_done = synced.failed.is_empty() && synced.waiting == 0;
-        *LAST.lock().unwrap_or_else(|e| e.into_inner()) = all_done.then(|| (now, Instant::now()));
+        drop(last);
+        for (id, group) in &synced.stopped_there {
+            say_once(&format!("stop {id}/{group}"), Some("stopped"), |_| {
+                tracing::warn!(machine = %id, group = %group, "a local boss's grant was stopped on the machine itself: it stays stopped until the person lets it go on there");
+            });
+        }
     }
-    let names: BTreeMap<String, String> = engines
-        .machines
+    let names: BTreeMap<String, String> = ids
         .iter()
-        .filter_map(|(id, e)| Some((id.clone(), e.as_ref().ok()?.name().to_string())))
+        .filter_map(|id| Some((id.clone(), machines.link(id).ok()?.machine().name.clone())))
         .collect();
     // Asked on its own, so nothing that narrows waits on the person: one
     // question at a time, as every boss question is, and none for a while
@@ -774,7 +959,7 @@ async fn once(app: &tauri::AppHandle, woken: bool) {
         ASKING.store(false, std::sync::atomic::Ordering::SeqCst);
         match said {
             Ok(true) => {
-                *LAST.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                LAST.lock().unwrap_or_else(|e| e.into_inner()).clear();
                 WAKE.notify_one();
             }
             Ok(false) => {}

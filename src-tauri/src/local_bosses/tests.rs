@@ -15,8 +15,10 @@ const S3: &str = "33333333-3333-4333-8333-333333333333";
 #[derive(Default)]
 struct Held {
     grants: BTreeMap<String, Value>,
-    left: BTreeMap<String, (i64, bool)>,
+    left: BTreeMap<String, (i64, Value)>,
     asked: Vec<(String, String, Option<Value>)>,
+    /// The most hours this machine gives a grant.
+    most_hours: Option<u64>,
 }
 
 struct Machine {
@@ -34,10 +36,10 @@ impl Machine {
     fn grant(&self, g: &str) -> Option<Value> {
         self.held.lock().unwrap().grants.get(g).cloned()
     }
-    fn hold(&self, group: &str, body: Value, stopped: bool) {
+    fn hold(&self, group: &str, body: Value, stopped: Value) {
         let mut v = body;
         v["group"] = json!(group);
-        v["stopped"] = json!(stopped);
+        v["stopped"] = stopped;
         v["born"] = json!([]);
         v["issuedAt"] = json!(Utc::now());
         v["expiresAt"] = json!(Utc::now() + chrono::Duration::hours(72));
@@ -105,8 +107,7 @@ impl Engine for Machine {
             }
             ("PUT", ["api", "desk", "grants", g]) => {
                 let b = body.unwrap();
-                assert!(b.get("resume").is_none(), "never a resume: {b}");
-                assert!(b.get("hours").is_none(), "{b}");
+                let resume = b["resume"] == true;
                 let rev = b["revision"].as_i64().unwrap();
                 let old = h.grants.get(*g).cloned();
                 let have = old
@@ -119,18 +120,34 @@ impl Engine for Machine {
                     other != g && members_of(o).intersection(&members).next().is_some()
                 });
                 let same = old.as_ref().is_some_and(|o| says_same(o, &b));
-                if rev < have || taken || (rev == have && !same) || (old.is_none() && rev <= have) {
+                let too_long =
+                    matches!((b["hours"].as_u64(), h.most_hours), (Some(a), Some(m)) if a > m);
+                if too_long {
+                    answer(
+                        400,
+                        json!({"error": "this engine lets a grant last 1 to 12 hours, not 24"}),
+                    )
+                } else if rev < have
+                    || taken
+                    || (rev == have && (!same || resume))
+                    || (old.is_none() && rev <= have)
+                {
                     answer(409, json!({"error": "no"}))
                 } else {
-                    let stopped = old
-                        .as_ref()
-                        .map(|o| o["stopped"] == true)
-                        .or(h.left.get(*g).map(|(_, s)| *s))
-                        .unwrap_or(false);
+                    let stopped = match resume {
+                        true => Value::Null,
+                        false => old
+                            .as_ref()
+                            .map(|o| o["stopped"].clone())
+                            .or(h.left.get(*g).map(|(_, s)| s.clone()))
+                            .unwrap_or(Value::Null),
+                    };
                     let mut v = b.clone();
-                    v.as_object_mut().unwrap().remove("leaving");
+                    for k in ["leaving", "hours", "resume"] {
+                        v.as_object_mut().unwrap().remove(k);
+                    }
                     v["group"] = json!(g);
-                    v["stopped"] = json!(stopped);
+                    v["stopped"] = stopped;
                     v["born"] = json!([]);
                     v["issuedAt"] = json!(Utc::now());
                     v["expiresAt"] = json!(Utc::now() + chrono::Duration::hours(72));
@@ -140,7 +157,7 @@ impl Engine for Machine {
             }
             ("DELETE", ["api", "desk", "grants", g]) => match h.grants.remove(*g) {
                 Some(o) => {
-                    let stopped = o["stopped"] == true;
+                    let stopped = o["stopped"].clone();
                     h.left
                         .insert((*g).to_string(), (o["revision"].as_i64().unwrap(), stopped));
                     answer(204, Value::Null)
@@ -244,13 +261,14 @@ async fn nothing_is_written_until_the_person_says_yes_and_then_exactly_what_the_
     assert!(devbox.writes().is_empty(), "not asked yet");
 
     let (title, body, yes) = say(&f, &w, true).await.expect("asked");
-    assert!(title.contains("Sarah"), "{title}");
+    assert!(title.contains("“Sarah”"), "the boss's name quoted: {title}");
+    assert!(body.starts_with("“Sarah” oversees"), "{body}");
     assert!(
         body.contains("2 sessions") && body.contains("“devbox”") && body.contains("“Acme”"),
         "{body}"
     );
     assert!(body.contains("acting within Desk"), "{body}");
-    assert!(yes.contains("Sarah"));
+    assert!(yes.contains("“Sarah”"), "{yes}");
     // Asked once: a yes holds.
     assert!(say(&f, &w, true).await.is_none());
 
@@ -259,6 +277,9 @@ async fn nothing_is_written_until_the_person_says_yes_and_then_exactly_what_the_
     let g = devbox.grant("acme").unwrap();
     assert_eq!(content(&g), content(&acme(&[S1, S2], "act").grant));
     assert_eq!(g["revision"], 1);
+    let put = devbox.writes().last().unwrap().2.clone().unwrap();
+    assert_eq!(put["hours"], 24, "a day at a time");
+    assert!(put.get("resume").is_none(), "nothing to lift: {put}");
     // Nothing new: nothing written, until it is past half its life.
     devbox.forget_asked();
     sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
@@ -325,7 +346,7 @@ async fn a_group_bossed_from_another_hub_is_never_written() {
     let allan = json!({"grantVersion": 1, "revision": 3, "name": "Acme", "boss": "remote:driftwerk/allan",
                        "level": "suggest", "sees": "replies", "recall": false, "folders": [], "repos": [],
                        "members": [S1], "act": {}});
-    devbox.hold("acme", allan.clone(), false);
+    devbox.hold("acme", allan.clone(), Value::Null);
     sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
     assert!(devbox.writes().is_empty(), "{:?}", devbox.writes());
     assert_eq!(
@@ -366,21 +387,34 @@ async fn a_group_bossed_from_another_hub_is_never_written() {
     assert_eq!(asked, Ok(false));
 }
 
+fn stop(from: &str, at: DateTime<Utc>) -> Value {
+    json!({"at": at, "from": from})
+}
+
 #[tokio::test]
-async fn a_boss_taken_off_has_its_grant_deleted_and_a_stop_is_never_resumed() {
+async fn a_boss_taken_off_has_its_grant_deleted_and_a_machine_s_stop_is_never_lifted() {
     let f = files();
     let devbox = Machine::new("devbox");
     let w = wanted(&[("devbox", vec![acme(&[S1], "act")], &[S1])]);
     say(&f, &w, true).await;
     sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
-    // The machine stopped it: it stays stopped through what is written.
-    devbox.held.lock().unwrap().grants.get_mut("acme").unwrap()["stopped"] = json!(true);
+    // The machine stopped it: it stays stopped through what is written,
+    // and is said.
+    let there = stop("machine", Utc::now());
+    devbox.held.lock().unwrap().grants.get_mut("acme").unwrap()["stopped"] = there.clone();
     let lower = wanted(&[("devbox", vec![acme(&[S1], "watch")], &[S1])]);
-    sync(&f.bosses, &f.kept, &lower, &on(&[&devbox])).await;
+    let s = sync(&f.bosses, &f.kept, &lower, &on(&[&devbox])).await;
     let g = devbox.grant("acme").unwrap();
-    assert_eq!(
-        (&g["level"], &g["stopped"]),
-        (&json!("watch"), &json!(true))
+    assert_eq!((&g["level"], &g["stopped"]), (&json!("watch"), &there));
+    assert!(
+        s.stopped_there
+            .contains(&("devbox".to_string(), "acme".to_string()))
+    );
+    assert!(
+        devbox
+            .writes()
+            .iter()
+            .all(|(_, _, b)| b.as_ref().is_none_or(|b| b.get("resume").is_none()))
     );
 
     // The hub wants nothing for it any more (the boss taken off, the group
@@ -389,16 +423,108 @@ async fn a_boss_taken_off_has_its_grant_deleted_and_a_stop_is_never_resumed() {
     let s = sync(&f.bosses, &f.kept, &none, &on(&[&devbox])).await;
     assert!(devbox.grant("acme").is_none());
     assert!(s.narrowed);
-    // A machine the hub doesn't name at all is cleared too.
+    // Written again past its floor, the machine's stop is kept, even after
+    // a fresh yes.
+    say_fresh(&f, &w).await;
     sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
-    assert!(devbox.grant("acme").is_some(), "written past its floor");
     assert_eq!(
         devbox.grant("acme").unwrap()["stopped"],
-        true,
+        there,
         "its stop kept"
     );
+    // A machine the hub doesn't name at all is cleared too.
     sync(&f.bosses, &f.kept, &wanted(&[]), &on(&[&devbox])).await;
     assert!(devbox.grant("acme").is_none());
+}
+
+/// Says yes afresh, as if the person had been asked again.
+async fn say_fresh(f: &Files, w: &Wanted) {
+    let mut kept = read_kept(&f.kept);
+    kept.groups.remove("acme");
+    std::fs::write(&f.kept, serde_json::to_string(&kept).unwrap()).unwrap();
+    say(f, w, true).await.expect("asked again");
+}
+
+#[tokio::test]
+async fn a_stop_desk_made_before_the_persons_yes_is_lifted_with_it_and_one_after_isnt() {
+    let f = files();
+    let devbox = Machine::new("devbox");
+    let w = wanted(&[("devbox", vec![acme(&[S1], "act")], &[S1])]);
+    // A remote boss of Acme was stopped in Desk, and its grant deleted.
+    let before = Utc::now() - chrono::Duration::minutes(5);
+    devbox
+        .held
+        .lock()
+        .unwrap()
+        .left
+        .insert("acme".into(), (4, stop("desk", before)));
+    say(&f, &w, true).await;
+    sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    let g = devbox.grant("acme").unwrap();
+    assert_eq!(g["stopped"], Value::Null, "lifted by the yes");
+    assert_eq!(g["revision"], 5);
+    let put = devbox.writes().last().unwrap().2.clone().unwrap();
+    assert_eq!(put["resume"], true);
+
+    // Stopped in Desk after the yes: it stays stopped.
+    let after = stop("desk", Utc::now() + chrono::Duration::seconds(1));
+    devbox.held.lock().unwrap().grants.get_mut("acme").unwrap()["stopped"] = after.clone();
+    let lower = wanted(&[("devbox", vec![acme(&[S1], "watch")], &[S1])]);
+    sync(&f.bosses, &f.kept, &lower, &on(&[&devbox])).await;
+    let g = devbox.grant("acme").unwrap();
+    assert_eq!((&g["level"], &g["stopped"]), (&json!("watch"), &after));
+}
+
+#[tokio::test]
+async fn a_higher_level_than_the_one_said_yes_to_asks_again() {
+    let f = files();
+    let devbox = Machine::new("devbox");
+    let watching = wanted(&[("devbox", vec![acme(&[S1], "watch")], &[S1])]);
+    say(&f, &watching, true).await.expect("asked");
+    sync(&f.bosses, &f.kept, &watching, &on(&[&devbox])).await;
+    assert_eq!(devbox.grant("acme").unwrap()["level"], "watch");
+    // Raised to Act at home: kept at Watch until the person says more.
+    let acting = wanted(&[("devbox", vec![acme(&[S1], "act")], &[S1])]);
+    sync(&f.bosses, &f.kept, &acting, &on(&[&devbox])).await;
+    assert_eq!(devbox.grant("acme").unwrap()["level"], "watch");
+    let (_, body, _) = say(&f, &acting, true).await.expect("asked again");
+    assert!(body.contains("acting within Desk"), "{body}");
+    sync(&f.bosses, &f.kept, &acting, &on(&[&devbox])).await;
+    assert_eq!(devbox.grant("acme").unwrap()["level"], "act");
+    // Lowered, nothing is asked.
+    assert!(say(&f, &watching, true).await.is_none());
+}
+
+#[tokio::test]
+async fn a_no_is_asked_again_once_the_bosss_level_or_switches_change_at_home() {
+    let f = files();
+    let w = wanted(&[("devbox", vec![acme(&[S1], "act")], &[S1])]);
+    say(&f, &w, false).await.expect("asked");
+    assert!(say(&f, &w, false).await.is_none());
+    let lower = wanted(&[("devbox", vec![acme(&[S1], "suggest")], &[S1])]);
+    assert!(say(&f, &lower, false).await.is_some(), "its level changed");
+    let mut switched = acme(&[S1], "suggest");
+    switched.grant["act"]["interrupt"] = json!(false);
+    let switched = wanted(&[("devbox", vec![switched], &[S1])]);
+    assert!(
+        say(&f, &switched, false).await.is_some(),
+        "its switches changed"
+    );
+    assert!(say(&f, &switched, false).await.is_none());
+}
+
+#[tokio::test]
+async fn a_machine_that_gives_less_than_a_day_is_written_its_own_length() {
+    let f = files();
+    let devbox = Machine::new("devbox");
+    devbox.held.lock().unwrap().most_hours = Some(12);
+    let w = wanted(&[("devbox", vec![acme(&[S1], "act")], &[S1])]);
+    say(&f, &w, true).await;
+    let s = sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    assert_eq!(s.failed, vec![]);
+    assert!(devbox.grant("acme").is_some());
+    let put = devbox.writes().last().unwrap().2.clone().unwrap();
+    assert!(put.get("hours").is_none(), "{put}");
 }
 
 #[tokio::test]
@@ -534,13 +660,13 @@ async fn a_step_passed_over_while_its_group_is_changed_is_said_to_wait() {
     let ops = bosses::ops_of(&f.bosses, "acme");
     let held = ops.lock().await;
     let s = sync(&f.bosses, &f.kept, &none, &on(&[&devbox])).await;
-    assert_eq!(s.waiting, 1);
+    assert_eq!(s.waiting, BTreeSet::from(["devbox".to_string()]));
     assert!(
         devbox.grant("acme").is_some(),
         "not while the group is changed"
     );
     drop(held);
     let s = sync(&f.bosses, &f.kept, &none, &on(&[&devbox])).await;
-    assert_eq!(s.waiting, 0);
+    assert!(s.waiting.is_empty());
     assert!(devbox.grant("acme").is_none());
 }
