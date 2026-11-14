@@ -1,5 +1,6 @@
 mod attachments;
 mod badge;
+mod bosses;
 mod broker;
 mod chrome_host;
 #[cfg(test)]
@@ -13,6 +14,7 @@ mod grid_windows;
 mod helper;
 mod hub_io;
 mod hubs;
+mod knows_machines;
 mod links;
 mod logins;
 mod machine_accounts;
@@ -217,12 +219,23 @@ async fn hubs_list(
 /// Forgets a paired hub and its token. (A hub is paired, and its token
 /// kept, by `hub_io::pair_collect`: the page never holds one to hand over.)
 #[tauri::command]
-fn hubs_remove(app: State<'_, App>, io: State<'_, hub_io::HubIo>, id: String) -> CommandResult<()> {
+async fn hubs_remove(
+    handle: tauri::AppHandle,
+    app: State<'_, App>,
+    io: State<'_, hub_io::HubIo>,
+    id: String,
+) -> CommandResult<()> {
     if hubs::machine_of(&id).is_some() {
         return Err("A machine is removed from Settings → Machines.".into());
     }
+    // Its agents' links are revoked while Desk can still ask it to.
+    bosses::hub_removing(&handle, &id).await?;
     let removed = hubs::remove(&app.paths, &id).map_err(text);
     io.forget();
+    // Its agents boss nothing here any more: their groups are stopped.
+    if removed.is_ok() {
+        bosses::hub_removed(handle, id);
+    }
     removed
 }
 
@@ -1066,6 +1079,30 @@ pub fn run() {
                 backend.clone(),
                 Arc::clone(&machines),
             ));
+            // What agents on other hubs see of the person's machines
+            // (Sees K7): told when a rule changes, and every few minutes.
+            let knows = Arc::new(knows_machines::KnowsMachines::default());
+            app.manage(Arc::clone(&knows));
+            app.manage(Arc::clone(&machines));
+            {
+                let (handle, machines) = (app.handle().clone(), Arc::clone(&machines));
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(knows_machines::EVERY).await;
+                        let list = {
+                            let machines = Arc::clone(&machines);
+                            tauri::async_runtime::spawn_blocking(move || {
+                                knows_machines::machines_of(&machines)
+                            })
+                            .await
+                            .unwrap_or_default()
+                        };
+                        if let Some(io) = handle.try_state::<hub_io::HubIo>() {
+                            knows.sync_all(&io, &list).await;
+                        }
+                    }
+                });
+            }
             app.manage(machines::MachineIo::new(
                 Arc::clone(&machines),
                 Arc::clone(&sockets),
@@ -1100,6 +1137,8 @@ pub fn run() {
                 Arc::new(pair_gate::NativeConfirm(app.handle().clone())),
             ));
             app.manage(sockets);
+            // A group's boss on another hub: its grants and links renewed.
+            bosses::keep_alive(app.handle().clone());
             // A local boss's calls on its group's machine sessions, carried
             // to each machine while Desk is open.
             app.manage(crew_relay::start(app.handle().clone()));
@@ -1191,6 +1230,17 @@ pub fn run() {
             hub_io::hub_fetch,
             hub_io::board_sync_mint,
             hub_io::knows_link,
+            bosses::boss_offer,
+            bosses::boss_status,
+            bosses::boss_link,
+            bosses::boss_set,
+            bosses::boss_pause,
+            bosses::boss_resume,
+            bosses::boss_unlink,
+            bosses::boss_retry,
+            bosses::boss_unpause_engine,
+            bosses::boss_layout_changed,
+            knows_machines::knows_machines,
             hub_io::hub_socket_open,
             hub_io::pair_request,
             hub_io::pair_collect,
