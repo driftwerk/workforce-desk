@@ -125,7 +125,11 @@ impl Engine for Machine {
                 if too_long {
                     answer(
                         400,
-                        json!({"error": "this engine lets a grant last 1 to 12 hours, not 24"}),
+                        json!({
+                            "error": "this engine lets a grant last 1 to 12 hours, not 24",
+                            "code": "grant_too_long",
+                            "mostHours": h.most_hours,
+                        }),
                     )
                 } else if rev < have
                     || taken
@@ -466,13 +470,28 @@ async fn a_stop_desk_made_before_the_persons_yes_is_lifted_with_it_and_one_after
     let put = devbox.writes().last().unwrap().2.clone().unwrap();
     assert_eq!(put["resume"], true);
 
-    // Stopped in Desk after the yes: it stays stopped.
-    let after = stop("desk", Utc::now() + chrono::Duration::seconds(1));
+    // Stopped in Desk after the yes: it stays stopped, and the person is
+    // asked again.
+    let after = stop("desk", Utc::now());
     devbox.held.lock().unwrap().grants.get_mut("acme").unwrap()["stopped"] = after.clone();
     let lower = wanted(&[("devbox", vec![acme(&[S1], "watch")], &[S1])]);
-    sync(&f.bosses, &f.kept, &lower, &on(&[&devbox])).await;
+    let s = sync(&f.bosses, &f.kept, &lower, &on(&[&devbox])).await;
+    assert!(s.stopped_since_yes.contains_key("acme"));
     let g = devbox.grant("acme").unwrap();
     assert_eq!((&g["level"], &g["stopped"]), (&json!("watch"), &after));
+    // A Cancel leaves it stopped and isn't asked again.
+    say(&f, &lower, false).await.expect("asked again");
+    sync(&f.bosses, &f.kept, &lower, &on(&[&devbox])).await;
+    assert_eq!(devbox.grant("acme").unwrap()["stopped"], after);
+    assert!(say(&f, &lower, true).await.is_none());
+
+    // Stopped again; this time the fresh yes lifts it.
+    let again = stop("desk", Utc::now());
+    devbox.held.lock().unwrap().grants.get_mut("acme").unwrap()["stopped"] = again;
+    sync(&f.bosses, &f.kept, &lower, &on(&[&devbox])).await;
+    say(&f, &lower, true).await.expect("asked again");
+    sync(&f.bosses, &f.kept, &lower, &on(&[&devbox])).await;
+    assert_eq!(devbox.grant("acme").unwrap()["stopped"], Value::Null);
 }
 
 #[tokio::test]
@@ -483,7 +502,14 @@ async fn a_higher_level_than_the_one_said_yes_to_asks_again() {
     say(&f, &watching, true).await.expect("asked");
     sync(&f.bosses, &f.kept, &watching, &on(&[&devbox])).await;
     assert_eq!(devbox.grant("acme").unwrap()["level"], "watch");
-    // Raised to Act at home: kept at Watch until the person says more.
+    // Raised to Suggest at home and Cancelled: kept at Watch, as said yes
+    // to, and not asked again.
+    let suggesting = wanted(&[("devbox", vec![acme(&[S1], "suggest")], &[S1])]);
+    say(&f, &suggesting, false).await.expect("asked again");
+    sync(&f.bosses, &f.kept, &suggesting, &on(&[&devbox])).await;
+    assert_eq!(devbox.grant("acme").unwrap()["level"], "watch");
+    assert!(say(&f, &suggesting, true).await.is_none());
+    // Raised to Act: kept at Watch until the person says more.
     let acting = wanted(&[("devbox", vec![acme(&[S1], "act")], &[S1])]);
     sync(&f.bosses, &f.kept, &acting, &on(&[&devbox])).await;
     assert_eq!(devbox.grant("acme").unwrap()["level"], "watch");
@@ -493,6 +519,21 @@ async fn a_higher_level_than_the_one_said_yes_to_asks_again() {
     assert_eq!(devbox.grant("acme").unwrap()["level"], "act");
     // Lowered, nothing is asked.
     assert!(say(&f, &watching, true).await.is_none());
+}
+
+#[tokio::test]
+async fn act_fully_or_a_budget_from_the_hub_is_carried_as_act_with_no_budget() {
+    let f = files();
+    let devbox = Machine::new("devbox");
+    let mut full = acme(&[S1], "full");
+    full.grant["act"]["budget_usd_per_day"] = json!(20);
+    let w = wanted(&[("devbox", vec![full], &[S1])]);
+    say(&f, &w, true).await.expect("asked");
+    sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    let g = devbox.grant("acme").unwrap();
+    assert_eq!(g["level"], "act");
+    assert!(g["act"].get("budget_usd_per_day").is_none(), "{g}");
+    assert_eq!(g["act"]["parallel"], 4);
 }
 
 #[tokio::test]
@@ -524,7 +565,7 @@ async fn a_machine_that_gives_less_than_a_day_is_written_its_own_length() {
     assert_eq!(s.failed, vec![]);
     assert!(devbox.grant("acme").is_some());
     let put = devbox.writes().last().unwrap().2.clone().unwrap();
-    assert!(put.get("hours").is_none(), "{put}");
+    assert_eq!(put["hours"], 12, "{put}");
 }
 
 #[tokio::test]

@@ -281,6 +281,35 @@ pub struct Said {
     #[serde(default)]
     pub act: Value,
     pub at: DateTime<Utc>,
+    /// The last yes for this boss, kept apart from a later no: a Cancel
+    /// on a question for a higher level leaves the grant at what was said
+    /// yes to.
+    #[serde(default)]
+    pub last_yes: Option<Yes>,
+    /// Desk stopped the grant after the last yes: the person is asked
+    /// again, and a fresh yes lifts the stop.
+    #[serde(default)]
+    pub ask_again: bool,
+}
+
+/// A yes: the level it was said to, and when.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Yes {
+    pub level: String,
+    pub at: DateTime<Utc>,
+}
+
+impl Said {
+    /// The last yes for this boss, if there is one.
+    fn yes_said(&self) -> Option<Yes> {
+        self.last_yes.clone().or_else(|| {
+            self.yes.then(|| Yes {
+                level: self.level.clone(),
+                at: self.at,
+            })
+        })
+    }
 }
 
 fn watch() -> String {
@@ -325,8 +354,10 @@ pub enum Consent {
 
 /// What `kept` says of group `group`'s boss running its machine sessions
 /// as `a` has them now:
-/// - a yes for this boss holds up to the level it was asked at (the
-///   sessions the person puts in the group later are its, as at home);
+/// - a stop Desk made after the last yes asks again;
+/// - the last yes for this boss holds up to the level it was asked at
+///   (the sessions the person puts in the group later are its, as at
+///   home), whatever no came after it for a higher level;
 /// - a no holds while every session, the level and the switches are as
 ///   they were asked about, so changing the boss's settings at home asks
 ///   again;
@@ -334,8 +365,13 @@ pub enum Consent {
 fn consent(kept: &Kept, group: &str, a: &Asked) -> Consent {
     let rank = |l: &str| level_rank(&json!(l)).unwrap_or(0);
     match kept.groups.get(group) {
-        Some(s) if s.agent != a.agent => Consent::Ask,
-        Some(s) if s.yes && rank(&a.level) <= rank(&s.level) => Consent::Yes,
+        Some(s) if s.agent != a.agent || s.ask_again => Consent::Ask,
+        Some(s)
+            if s.yes_said()
+                .is_some_and(|y| rank(&a.level) <= rank(&y.level)) =>
+        {
+            Consent::Yes
+        }
         Some(s)
             if !s.yes
                 && s.level == a.level
@@ -351,11 +387,21 @@ fn consent(kept: &Kept, group: &str, a: &Asked) -> Consent {
 /// When the person last said yes to group `group`'s boss here, and the
 /// level they said it at, if they did: what is written is never above it,
 /// while a higher one waits on them being asked again.
-fn yes_of<'k>(kept: &'k Kept, group: &str, a: &Asked) -> Option<(DateTime<Utc>, &'k str)> {
+fn yes_of(kept: &Kept, group: &str, a: &Asked) -> Option<Yes> {
     kept.groups
         .get(group)
-        .filter(|s| s.yes && s.agent == a.agent)
-        .map(|s| (s.at, s.level.as_str()))
+        .filter(|s| s.agent == a.agent)
+        .and_then(Said::yes_said)
+}
+
+/// `grant` as Desk carries it to a machine: no higher than Act, and no
+/// budget, whatever the hub says (Act fully isn't given to machines yet).
+fn capped(grant: Value) -> Value {
+    let mut grant = at_most(grant, "act");
+    if let Some(act) = grant["act"].as_object_mut() {
+        act.remove("budget_usd_per_day");
+    }
+    grant
 }
 
 /// `grant` with its level no higher than `said`.
@@ -478,6 +524,18 @@ pub async fn ask_one(
     };
     let (title, body, yes) = question(&a, names);
     let said = ask(title, body, yes).await?;
+    let at = Utc::now();
+    let last_yes = match said {
+        true => Some(Yes {
+            level: a.level.clone(),
+            at,
+        }),
+        false => kept
+            .groups
+            .get(&group)
+            .filter(|s| s.agent == a.agent)
+            .and_then(Said::yes_said),
+    };
     keep_said(
         kept_at,
         &group,
@@ -487,7 +545,9 @@ pub async fn ask_one(
             sessions: a.flat().into_iter().collect(),
             level: a.level.clone(),
             act: a.act.clone(),
-            at: Utc::now(),
+            at,
+            last_yes,
+            ask_again: false,
         },
     )
     .await?;
@@ -512,6 +572,9 @@ pub struct Synced {
     /// The groups, by machine id, whose grant there was stopped on the
     /// machine itself: never lifted from here.
     pub stopped_there: BTreeSet<(String, String)>,
+    /// The groups whose grant somewhere Desk stopped after the person's
+    /// last yes, with the stop's time: the person is asked again.
+    pub stopped_since_yes: BTreeMap<String, DateTime<Utc>>,
 }
 
 /// One step on one machine.
@@ -526,6 +589,10 @@ enum Step {
 /// How long each grant written lasts: a day, so one left behind while Desk
 /// was closed ends soon. A machine that gives less is written its own.
 const GRANT_HOURS: u32 = 24;
+
+/// The `code` an engine refuses a grant longer than it gives with, saying
+/// the most it gives as `mostHours`.
+const GRANT_TOO_LONG: &str = "grant_too_long";
 
 /// Steps, each with its group.
 type Steps = Vec<(String, Step)>;
@@ -596,6 +663,16 @@ struct Wrote {
     written: bool,
     /// The machine itself stopped the grant: it stays stopped.
     stopped_there: bool,
+    /// When Desk stopped it, after the person's yes: asked again.
+    stopped_since_yes: Option<DateTime<Utc>>,
+}
+
+/// When `stop`, one Desk made, was made at or after the yes at `yes`.
+fn desk_stop_since(stop: &Value, yes: Option<DateTime<Utc>>) -> Option<DateTime<Utc>> {
+    let at = stop["at"]
+        .as_str()
+        .and_then(|t| t.parse::<DateTime<Utc>>().ok())?;
+    (stop["from"] == "desk" && yes.is_some_and(|y| at >= y)).then_some(at)
 }
 
 /// Writes `says` as `group`'s grant on `engine`, once the machine's copy is
@@ -611,6 +688,7 @@ async fn write(
     yes: Option<DateTime<Utc>>,
 ) -> Result<Wrote, String> {
     let mut hours = Some(GRANT_HOURS);
+    let mut shortened = false;
     let mut conflicts = 0;
     loop {
         let (have, held, stop) = held_one(engine, group).await?;
@@ -618,6 +696,7 @@ async fn write(
             return Ok(Wrote::default());
         }
         let stopped_there = stop["from"] == "machine";
+        let stopped_since_yes = desk_stop_since(&stop, yes);
         let resume = lifted(&stop, yes);
         let members = members_of(says);
         // Born there in the group, and listed elsewhere now: taken out.
@@ -634,6 +713,7 @@ async fn write(
             return Ok(Wrote {
                 written: false,
                 stopped_there,
+                stopped_since_yes,
             });
         }
         let mut body = says.clone();
@@ -660,15 +740,20 @@ async fn write(
             return Ok(Wrote {
                 written: true,
                 stopped_there,
+                stopped_since_yes,
             });
         }
-        // A machine that gives a grant less than a day: its own length.
-        if a.status == 400
-            && hours.is_some()
-            && bosses::said(a.status, a.body.as_bytes()).contains("hours")
-        {
-            hours = None;
-            continue;
+        // A machine that gives a grant less than a day: the most it gives.
+        if a.status == 400 && !shortened {
+            let said: Value = serde_json::from_str(&a.body).unwrap_or_default();
+            if said["code"] == GRANT_TOO_LONG {
+                shortened = true;
+                hours = said["mostHours"]
+                    .as_u64()
+                    .and_then(|h| u32::try_from(h).ok())
+                    .filter(|h| (1..GRANT_HOURS).contains(h));
+                continue;
+            }
         }
         if a.status == 409 && conflicts == 0 {
             conflicts += 1;
@@ -746,7 +831,7 @@ async fn run(
             Step::Write(says, yes) if !remote => write(engine, group, says, listed, *yes).await,
             _ => delete(engine, group).await.map(|written| Wrote {
                 written,
-                stopped_there: false,
+                ..Wrote::default()
             }),
         };
         match done {
@@ -754,6 +839,9 @@ async fn run(
                 if w.stopped_there {
                     out.stopped_there
                         .insert((engine.id().to_string(), group.clone()));
+                }
+                if let Some(at) = w.stopped_since_yes {
+                    out.stopped_since_yes.insert(group.clone(), at);
                 }
                 if w.written {
                     out.written += 1;
@@ -804,8 +892,9 @@ pub async fn sync<E: Engine>(
             .filter(|g| carried(g))
             .filter_map(|g| {
                 let a = groups.get(&g.group).filter(|a| a.agent == g.agent)?;
-                let (yes, level) = yes_of(&kept, &g.group, a)?;
-                Some((g.group.clone(), (at_most(g.grant.clone(), level), yes)))
+                let yes = yes_of(&kept, &g.group, a)?;
+                let grant = at_most(capped(g.grant.clone()), &yes.level);
+                Some((g.group.clone(), (grant, yes.at)))
             })
             .collect();
         let listed: BTreeSet<String> = mw
@@ -820,7 +909,29 @@ pub async fn sync<E: Engine>(
     for (engine, listed, _, then) in &plans {
         run(bosses_at, *engine, then, listed, &mut out, false).await;
     }
+    for (group, at) in &out.stopped_since_yes {
+        if let Err(why) = ask_again(kept_at, group, *at).await {
+            tracing::warn!(group = %group, why = %why, "a local boss stopped in Desk couldn't be asked about again");
+        }
+    }
     out
+}
+
+/// Has the person asked again about group `group`'s boss, stopped in Desk
+/// at `stop` after their last yes, unless they have answered since.
+async fn ask_again(kept_at: &Path, group: &str, stop: DateTime<Utc>) -> Result<(), String> {
+    let said = {
+        let _one = KEPT.lock().await;
+        read_kept(kept_at).groups.get(group).cloned()
+    };
+    let Some(mut said) = said else {
+        return Ok(());
+    };
+    if said.ask_again || said.at > stop {
+        return Ok(());
+    }
+    said.ask_again = true;
+    keep_said(kept_at, group, said).await
 }
 
 // ── The native side's wiring ────────────────────────────────────────────
