@@ -149,6 +149,28 @@ pub struct NativeAnswer {
     pub body: zeroize::Zeroizing<String>,
 }
 
+/// Why a request got no answer: whether the hub may have had it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Unanswered {
+    /// Nothing reached the hub: it did nothing.
+    NotSent(String),
+    /// The hub may have had it, and done it.
+    MaybeSent(String),
+}
+
+impl Unanswered {
+    pub fn said(self) -> String {
+        match self {
+            Self::NotSent(s) | Self::MaybeSent(s) => s,
+        }
+    }
+}
+
+/// A body of JSON.
+fn json(bytes: Vec<u8>) -> (String, Vec<u8>) {
+    ("application/json".to_string(), bytes)
+}
+
 impl Broker {
     /// The broker for `backend`'s hub; none until Windows has one. Its
     /// sockets are kept with every other hub socket the page holds.
@@ -284,23 +306,78 @@ impl Broker {
         })
     }
 
+    /// A boss's relayed call taken from, or its answer posted to, this
+    /// computer's hub ([`routes::relay_local`]): the native side's alone,
+    /// never a machine's, its answer read up to `most` bytes.
+    pub async fn relay_local(
+        &self,
+        method: &str,
+        target: &str,
+        body: Option<Vec<u8>>,
+        most: usize,
+    ) -> Result<Answer, Unanswered> {
+        if self.machine.is_some() {
+            return Err(Unanswered::NotSent(
+                "Desk takes relayed calls from its own helper alone.".into(),
+            ));
+        }
+        let allowed =
+            routes::relay_local(method, target).map_err(|e| Unanswered::NotSent(e.to_string()))?;
+        self.send_capped(allowed, body.map(json), most).await
+    }
+
+    /// A boss's relayed call sent to this machine's hub
+    /// ([`routes::relay_machine`]): the native side's alone, never this
+    /// computer's, its answer read up to `most` bytes.
+    pub async fn relay_machine(
+        &self,
+        method: &str,
+        target: &str,
+        body: Vec<u8>,
+        most: usize,
+    ) -> Result<Answer, Unanswered> {
+        if self.machine.is_none() {
+            return Err(Unanswered::NotSent(
+                "Desk relays a boss's calls to its machines alone.".into(),
+            ));
+        }
+        let allowed = routes::relay_machine(method, target)
+            .map_err(|e| Unanswered::NotSent(e.to_string()))?;
+        self.send_capped(allowed, Some(json(body)), most).await
+    }
+
     async fn send_allowed(
         &self,
         allowed: routes::Allowed,
         body: Option<(String, Vec<u8>)>,
     ) -> Result<Answer, String> {
+        self.send_capped(allowed, body, usize::MAX)
+            .await
+            .map_err(Unanswered::said)
+    }
+
+    /// `allowed` sent, its answer read up to `most` bytes; when no answer
+    /// comes, whether the hub may have had the request.
+    async fn send_capped(
+        &self,
+        allowed: routes::Allowed,
+        body: Option<(String, Vec<u8>)>,
+        most: usize,
+    ) -> Result<Answer, Unanswered> {
+        use Unanswered::{MaybeSent, NotSent};
         let hub = &self.place.hub;
         if let Some((kind, bytes)) = &body {
             if !BODY_TYPES.contains(&kind.as_str()) {
-                return Err(format!("Desk doesn't send {kind} to {hub}."));
+                return Err(NotSent(format!("Desk doesn't send {kind} to {hub}.")));
             }
             if bytes.len() > MAX_BODY {
-                return Err(format!("That's too big to send to {hub}."));
+                return Err(NotSent(format!("That's too big to send to {hub}.")));
             }
         }
-        let method = Method::from_bytes(allowed.method.as_bytes()).map_err(|e| e.to_string())?;
+        let method =
+            Method::from_bytes(allowed.method.as_bytes()).map_err(|e| NotSent(e.to_string()))?;
         let send = |local: Local| {
-            let url = at(&local.base, &allowed.path, allowed.query.as_deref());
+            let url = at(&local.base, &allowed.path, allowed.query.as_deref()).map_err(NotSent);
             let mut request = self
                 .client
                 .request(method.clone(), url?)
@@ -316,11 +393,20 @@ impl Broker {
                     .header(CONTENT_TYPE, kind.as_str())
                     .body(bytes.clone());
             }
-            Ok::<_, String>(request.send())
+            Ok::<_, Unanswered>(request.send())
         };
-        let unreachable =
-            |e: reqwest::Error| format!("Desk couldn't reach {hub}: {}", e.without_url());
-        let local = self.local().await?;
+        // Refused before it was sent, nothing got it; otherwise the hub
+        // may have.
+        let unreachable = |e: reqwest::Error| {
+            let nothing_sent = e.is_connect() || e.is_builder();
+            let said = format!("Desk couldn't reach {hub}: {}", e.without_url());
+            if nothing_sent {
+                NotSent(said)
+            } else {
+                MaybeSent(said)
+            }
+        };
+        let local = self.local().await.map_err(NotSent)?;
         let mut response = match send(local.clone())?.await {
             Ok(r) => r,
             // Desk Helper may have moved the hub to new ports: where it is
@@ -328,7 +414,7 @@ impl Broker {
             // never reached the old address).
             Err(e) if e.is_connect() => {
                 self.reread().await;
-                let now = self.local().await?;
+                let now = self.local().await.map_err(NotSent)?;
                 // A machine's forward refused it: nothing got it, and the
                 // forward is up again now (or `local` failed).
                 if now.base == local.base && self.machine.is_none() {
@@ -352,7 +438,7 @@ impl Broker {
                 let machine = self.machine.as_ref().expect("a machine");
                 let gateway = machine.gateway();
                 self.reread().await;
-                let now = self.local().await?;
+                let now = self.local().await.map_err(MaybeSent)?;
                 if machine.gateway() == gateway {
                     return Err(unreachable(e));
                 }
@@ -364,7 +450,9 @@ impl Broker {
         // The hub refused before doing anything, so sending again is safe.
         if response.status() == StatusCode::UNAUTHORIZED {
             self.forget();
-            response = send(self.local().await?)?.await.map_err(unreachable)?;
+            response = send(self.local().await.map_err(NotSent)?)?
+                .await
+                .map_err(unreachable)?;
         }
         let status = response.status().as_u16();
         let content_type = response
@@ -372,7 +460,16 @@ impl Broker {
             .get(CONTENT_TYPE)
             .and_then(|v| v.to_str().ok())
             .map(str::to_string);
-        let bytes = response.bytes().await.map_err(unreachable)?;
+        let read = |e: reqwest::Error| {
+            MaybeSent(format!("Desk couldn't reach {hub}: {}", e.without_url()))
+        };
+        let mut bytes = Vec::new();
+        while let Some(chunk) = response.chunk().await.map_err(read)? {
+            if bytes.len().saturating_add(chunk.len()) > most {
+                return Err(MaybeSent(format!("{hub}'s answer is too large.")));
+            }
+            bytes.extend_from_slice(&chunk);
+        }
         Ok(Answer {
             status,
             content_type,
@@ -1281,5 +1378,119 @@ mod tests {
             assert!(t.await.unwrap().is_err());
         }
         assert_eq!(read(), 2);
+    }
+
+    /// The relay's requests go only where each is sent: this computer's
+    /// to its hub, a machine's to its; neither reaches anything else.
+    #[tokio::test]
+    async fn the_relay_reaches_its_own_hub_alone() {
+        let (url, mut seen) = hub(vec![OK_JSON]).await;
+        let local = broker_at(&url, vec![]);
+        let e = local
+            .relay_machine("POST", "/api/desk/crew/served", b"{}".to_vec(), 1024)
+            .await
+            .unwrap_err();
+        assert!(matches!(e, Unanswered::NotSent(_)), "{e:?}");
+        let e = local
+            .relay_local(
+                "POST",
+                "/api/desk/accounts/0f0e0d0c-0b0a-4909-8807-060504030201/hand-over",
+                None,
+                1024,
+            )
+            .await
+            .unwrap_err();
+        assert!(matches!(e, Unanswered::NotSent(_)), "{e:?}");
+        let machine = machine_broker(&fake_machine(&url));
+        let e = machine
+            .relay_local("GET", "/api/desk/crew/relay", None, 1024)
+            .await
+            .unwrap_err();
+        assert!(matches!(e, Unanswered::NotSent(_)), "{e:?}");
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), seen.recv())
+                .await
+                .is_err(),
+            "nothing was sent"
+        );
+        let answer = local
+            .relay_local("GET", "/api/desk/crew/relay", None, 1024)
+            .await
+            .unwrap();
+        assert_eq!(answer.status, 200);
+        let got = seen.recv().await.unwrap();
+        assert_eq!(got.line, "GET /api/desk/crew/relay HTTP/1.1");
+        assert!(got.headers.contains(&format!(
+            "authorization: bearer {}",
+            SENTINEL.to_ascii_lowercase()
+        )));
+    }
+
+    /// A poll or a post the hub turns away for its token (401) is sent
+    /// again once with the token read again.
+    #[tokio::test]
+    async fn the_relay_reads_a_refused_token_again() {
+        const NO: &str =
+            "HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+        const GONE: &str = "HTTP/1.1 204 No Content\r\nconnection: close\r\n\r\n";
+        let (url, mut seen) = hub(vec![NO, OK_JSON, NO, GONE]).await;
+        let broker = broker_at(&url, vec!["old", "new", "newer"]);
+        let polled = broker
+            .relay_local("GET", "/api/desk/crew/relay", None, 1024)
+            .await
+            .unwrap();
+        assert_eq!(polled.status, 200);
+        let posted = broker
+            .relay_local(
+                "POST",
+                "/api/desk/crew/relay/0f0e0d0c-0b0a-4909-8807-060504030201",
+                Some(br#"{"status":"ok","body":{}}"#.to_vec()),
+                1024,
+            )
+            .await
+            .unwrap();
+        assert_eq!(posted.status, 204);
+        for token in ["old", "new", "new", "newer"] {
+            let got = seen.recv().await.unwrap();
+            assert!(
+                got.headers.contains(&format!("bearer {token}")),
+                "{token}: {}",
+                got.headers
+            );
+        }
+    }
+
+    /// Whether a relayed call may have reached the machine is said: not
+    /// when nothing listens, maybe when the request was taken and dropped,
+    /// and an answer over the cap isn't read.
+    #[tokio::test]
+    async fn the_relay_says_whether_a_call_may_have_arrived() {
+        let gone = gone_address();
+        let e = machine_broker(&fake_machine(&gone))
+            .relay_machine("POST", "/api/desk/crew/served", b"{}".to_vec(), 1024)
+            .await
+            .unwrap_err();
+        assert!(matches!(e, Unanswered::NotSent(_)), "{e:?}");
+        let (dropped, took) = hub_that_drops().await;
+        let e = machine_broker(&fake_machine(&dropped))
+            .relay_machine("POST", "/api/desk/crew/served", b"{}".to_vec(), 1024)
+            .await
+            .unwrap_err();
+        assert!(matches!(e, Unanswered::MaybeSent(_)), "{e:?}");
+        assert_eq!(
+            took.load(std::sync::atomic::Ordering::SeqCst),
+            1,
+            "sent once"
+        );
+        const BIG: &str = "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: 10\r\nconnection: close\r\n\r\n0123456789";
+        let (url, _seen) = hub(vec![BIG]).await;
+        let e = machine_broker(&fake_machine(&url))
+            .relay_machine("POST", "/api/desk/crew/served", b"{}".to_vec(), 9)
+            .await
+            .unwrap_err();
+        assert_eq!(
+            e,
+            Unanswered::MaybeSent("devbox's answer is too large.".into())
+        );
     }
 }

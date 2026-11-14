@@ -5,7 +5,8 @@ import type { Agent, HubAccount } from "../chat/types";
 import type { KnowsHeld, KnowsRule, KnowsView } from "../hub/knows";
 import { placesSaid } from "./places";
 import { narrows } from "./WhatTheySee";
-import { forgetLinks, WhatTheySee } from "./WhatTheySee";
+import { forgetLinks, READ_LIMIT, WhatTheySee } from "./WhatTheySee";
+import { HubError } from "../hub/client";
 
 const api = {
   rules: vi.fn(),
@@ -69,6 +70,59 @@ const show = async (agent = ledger, hub = local) => {
 };
 
 describe("What they see", () => {
+  it("says in plain words when this computer's hub doesn't keep it yet, and what turns it on", async () => {
+    api.rule.mockRejectedValueOnce(new HubError(404, "Not Found"));
+    render(<WhatTheySee agent={ledger} hub={local} />);
+    expect(await screen.findByText(/doesn’t keep what agents see yet/)).toBeTruthy();
+    expect(screen.getByText(/update Desk and restart it/)).toBeTruthy();
+    expect(screen.queryByText(/Read-only/)).toBeNull();
+  });
+
+  it("says when the hub doesn't answer in time, and reads again on Try again", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      api.rule.mockReturnValueOnce(new Promise(() => {}));
+      render(<WhatTheySee agent={ledger} hub={local} />);
+      expect(screen.getByText("Reading what Ledger sees…")).toBeTruthy();
+      await vi.advanceTimersByTimeAsync(READ_LIMIT + 10);
+      expect((await screen.findByRole("alert")).textContent).toContain("didn’t answer in time");
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      expect(await screen.findByRole("radio", { name: /Everything/ })).toBeTruthy();
+      expect(screen.queryByRole("alert")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows a late answer, and a later read's limit never undoes it", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      let first: (v: KnowsView) => void = () => {};
+      api.rule.mockReturnValueOnce(new Promise<KnowsView>((r) => (first = r)));
+      render(<WhatTheySee agent={ledger} hub={local} />);
+      await vi.advanceTimersByTimeAsync(READ_LIMIT + 10);
+      await screen.findByRole("alert");
+      // Try again: this read hangs too, and the first answers meanwhile.
+      api.rule.mockReturnValueOnce(new Promise(() => {}));
+      fireEvent.click(screen.getByRole("button", { name: "Try again" }));
+      first(kept);
+      expect(await screen.findByRole("radio", { name: /Everything/ })).toBeTruthy();
+      // The second read's limit passes: what was shown stays.
+      await vi.advanceTimersByTimeAsync(READ_LIMIT + 10);
+      expect(screen.queryByRole("alert")).toBeNull();
+      expect(screen.getByRole("radio", { name: /Everything/ })).toBeTruthy();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("offers Try again when the read fails", async () => {
+    api.rule.mockRejectedValueOnce(new HubError(500, "Desk couldn't read what its agents see."));
+    render(<WhatTheySee agent={ledger} hub={local} />);
+    fireEvent.click(await screen.findByRole("button", { name: "Try again" }));
+    expect(await screen.findByRole("radio", { name: /Everything/ })).toBeTruthy();
+  });
+
   it("is set to everything, with the rest of the rule as it was", async () => {
     kept = viewOf(ruleOf("local/ledger", { transcripts: true, digest: "live" }));
     await show();

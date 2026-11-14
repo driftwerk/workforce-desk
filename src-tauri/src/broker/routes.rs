@@ -329,6 +329,27 @@ pub fn native_local(method: &str, target: &str) -> Result<Allowed, Refused> {
     allowed(NATIVE_LOCAL, method, target)
 }
 
+/// A boss's calls relayed to the person's machines (`crate::crew_relay`):
+/// taken from this computer's hub and answered there, and sent to each
+/// machine's hub. The native side's alone, on no list the page's requests
+/// are checked against, and each matched only by its own broker's method
+/// (this computer's, or a machine's), so neither reaches anything else.
+const RELAY_LOCAL: &[Route] = &[
+    route("GET", "/api/desk/crew/relay"),
+    route("POST", "/api/desk/crew/relay/{}"),
+];
+const RELAY_MACHINE: &[Route] = &[route("POST", "/api/desk/crew/served")];
+
+/// `method target` as one of the relay's requests to this computer's hub.
+pub fn relay_local(method: &str, target: &str) -> Result<Allowed, Refused> {
+    allowed(RELAY_LOCAL, method, target)
+}
+
+/// `method target` as the relay's request to a machine's hub.
+pub fn relay_machine(method: &str, target: &str) -> Result<Allowed, Refused> {
+    allowed(RELAY_MACHINE, method, target)
+}
+
 /// The sockets the page keeps open to the local hub.
 const SOCKETS: &[Route] = &[
     route("GET", "/api/desk/events"),
@@ -747,6 +768,76 @@ mod tests {
             assert!(
                 native_local(method, target).is_err(),
                 "{method} {target} was native"
+            );
+        }
+    }
+
+    /// A boss's relayed calls are the native side's alone: the page can
+    /// ask none of them of this computer's hub or a machine's, nor open
+    /// them as a socket, and each relay route is matched only where it is
+    /// sent (never the accounts' hand-over or the engine key).
+    #[test]
+    fn the_relay_is_never_the_pages() {
+        let id = "0f0e0d0c-0b0a-4909-8807-060504030201";
+        let relay = format!("/api/desk/crew/relay/{id}");
+        let paths = [
+            "/api/desk/crew/relay".to_string(),
+            "/api/desk/crew/relay?token=x".to_string(),
+            relay.clone(),
+            format!("{relay}?token=x"),
+            format!("{relay}/x"),
+            "/api/desk/crew/served".to_string(),
+            "/api/desk/crew/served?token=x".to_string(),
+            "/api/desk/crew/served/x".to_string(),
+        ];
+        for target in &paths {
+            for method in ["GET", "POST", "PUT", "PATCH", "DELETE"] {
+                assert!(http(method, target).is_err(), "{method} {target}");
+                assert!(
+                    machine_http(method, target).is_err(),
+                    "{method} {target} on a machine"
+                );
+                assert!(
+                    !native_only(method, target),
+                    "{method} {target} native on a machine"
+                );
+                assert!(
+                    native_local(method, target).is_err(),
+                    "{method} {target} native"
+                );
+            }
+            assert!(socket(target).is_err(), "{target} as a socket");
+        }
+        // Each where it is sent, and nowhere else.
+        assert!(relay_local("GET", "/api/desk/crew/relay").is_ok());
+        assert!(relay_local("POST", &relay).is_ok());
+        assert!(relay_machine("POST", "/api/desk/crew/served").is_ok());
+        for (method, target) in [
+            ("POST", "/api/desk/crew/relay"),
+            ("GET", relay.as_str()),
+            ("GET", "/api/desk/crew/relay?token=x"),
+            ("POST", "/api/desk/crew/served"),
+            (
+                "POST",
+                "/api/desk/accounts/0f0e0d0c-0b0a-4909-8807-060504030201/hand-over",
+            ),
+            ("GET", "/api/desk/engine-key"),
+        ] {
+            assert!(
+                relay_local(method, target).is_err(),
+                "{method} {target} relayed here"
+            );
+        }
+        for (method, target) in [
+            ("GET", "/api/desk/crew/served"),
+            ("POST", "/api/desk/crew/served?token=x"),
+            ("GET", "/api/desk/crew/relay"),
+            ("POST", relay.as_str()),
+            ("GET", "/api/desk/sessions"),
+        ] {
+            assert!(
+                relay_machine(method, target).is_err(),
+                "{method} {target} relayed there"
             );
         }
     }

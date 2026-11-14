@@ -4,6 +4,7 @@ mod broker;
 mod chrome_host;
 #[cfg(test)]
 mod commands;
+mod crew_relay;
 mod drops;
 mod files;
 mod fonts;
@@ -1124,6 +1125,9 @@ pub fn run() {
                 Arc::new(pair_gate::NativeConfirm(app.handle().clone())),
             ));
             app.manage(sockets);
+            // A local boss's calls on its group's machine sessions, carried
+            // to each machine while Desk is open.
+            app.manage(crew_relay::start(app.handle().clone()));
             app.manage(App {
                 paths,
                 backend,
@@ -1318,6 +1322,11 @@ pub fn run() {
                 && let Some(fleet) = app.try_state::<Arc<desk_machine::fleet::Fleet>>()
             {
                 fleet.shutdown();
+            }
+            if let tauri::RunEvent::Exit = event
+                && let Some(relay) = app.try_state::<crew_relay::Stop>()
+            {
+                relay.stop();
             }
             if let tauri::RunEvent::Exit = event
                 && let Some(io) = app.try_state::<machines::MachineIo>()
