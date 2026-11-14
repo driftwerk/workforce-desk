@@ -112,6 +112,12 @@ pub fn read_records(paths: &Paths) -> Result<Vec<HubRecord>> {
     }
 }
 
+/// Whether hub `id` is still paired, from a read of the records: only a
+/// read that worked, and doesn't name it, says it isn't.
+pub fn still_paired(records: Result<Vec<HubRecord>>, id: &str) -> bool {
+    records.map_or(true, |r| r.iter().any(|x| x.id == id))
+}
+
 fn write_records(paths: &Paths, records: &[HubRecord]) -> Result<()> {
     desk_core::write_private(&paths.hubs(), &serde_json::to_string_pretty(records)?)
 }
@@ -576,6 +582,22 @@ mod tests {
         )
         .unwrap();
         assert_eq!(long.label.chars().count(), LABEL_MAX);
+    }
+
+    #[test]
+    fn a_pairing_is_gone_only_when_the_records_say_so() {
+        let one = || {
+            Ok(vec![HubRecord {
+                id: "dw".into(),
+                label: "Driftwerk".into(),
+                url: "https://dw.example".into(),
+            }])
+        };
+        assert!(still_paired(one(), "dw"));
+        assert!(!still_paired(one(), "atlas"));
+        // A read that failed (the file, or the keychain behind it) is no
+        // word that the pairing went.
+        assert!(still_paired(Err(eyre::eyre!("unreadable")), "dw"));
     }
 
     #[test]

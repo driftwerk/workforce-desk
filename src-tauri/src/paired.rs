@@ -194,6 +194,11 @@ impl Paired {
         Ok(read)
     }
 
+    /// What the person calls hub `id`; blocking, as [`Self::reach`] is.
+    pub fn label(&self, id: &str) -> Option<String> {
+        self.hub(id).map(|h| h.label)
+    }
+
     /// Hub `id`, read again when it isn't among those already read (it may
     /// have just been paired).
     fn hub(&self, id: &str) -> Option<HubAccount> {

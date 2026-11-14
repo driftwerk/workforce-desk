@@ -193,6 +193,47 @@ impl HubIo {
         self.sockets.dial(owner, page, dial, events)
     }
 
+    /// Paired team hub `id` as a boss's hub (RBD1): the address Desk dials
+    /// it at, and what the person calls it. Never this computer's hub nor a
+    /// machine's, whose agents aren't bosses from another hub.
+    pub async fn boss_hub(&self, id: &str) -> Result<(Url, String), String> {
+        if crate::hubs::machine_of(id).is_some() {
+            return Err("A machine's hub keeps no agents of its own.".into());
+        }
+        let reach = self
+            .paired
+            .reach_async(id)
+            .await
+            .map_err(|e| e.to_string())?;
+        if reach.local {
+            return Err("This computer's own agents become bosses in their own settings.".into());
+        }
+        let (paired, hub) = (Arc::clone(&self.paired), id.to_string());
+        let label = tauri::async_runtime::spawn_blocking(move || paired.label(&hub))
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| id.to_string());
+        Ok((reach.base, label))
+    }
+
+    /// Whether Desk is still paired with hub `id`: true unless its
+    /// records were read and don't name it. No keychain is read, so a
+    /// token or secrets error never passes for a pairing gone; a machine's
+    /// hub and this computer's always are.
+    pub async fn is_paired(&self, id: &str) -> bool {
+        if crate::hubs::machine_of(id).is_some() || id == desk_core::LOCAL_HUB_ID {
+            return true;
+        }
+        let id = id.to_string();
+        tauri::async_runtime::spawn_blocking(move || {
+            let records = Paths::new().and_then(|p| crate::hubs::read_records(&p));
+            crate::hubs::still_paired(records, &id)
+        })
+        .await
+        .unwrap_or(true)
+    }
+
     /// Forgets the hubs read, and which were found old, after one is
     /// paired or removed.
     pub fn forget(&self) {
@@ -503,7 +544,7 @@ pub enum KnowsLinked {
 }
 
 /// Whether `id` can name an agent, as the hubs take one.
-fn agent_id_ok(id: &str) -> bool {
+pub(crate) fn agent_id_ok(id: &str) -> bool {
     (1..=64).contains(&id.len())
         && id
             .chars()
@@ -553,7 +594,7 @@ fn sync_hub_id_ok(id: &str) -> bool {
 }
 
 /// A hub's words for a refusal: its JSON `error`, else short plain text.
-fn words_of(body: &[u8]) -> Option<String> {
+pub(crate) fn words_of(body: &[u8]) -> Option<String> {
     if let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) {
         return v
             .get("error")
@@ -690,7 +731,7 @@ fn knows_trace(
 const KNOWS_SLOW: std::time::Duration = std::time::Duration::from_secs(3);
 
 /// What only the native side asks of a paired hub, never the page: minting
-/// a token (its answer holds it) and keeping one for this computer's hub to
+/// a token (its answer holds it: board sync, Desk work, a boss link) and keeping one for this computer's hub to
 /// send by (an address the page chose would be sent the person's work).
 /// Matched on decoded path segments, any case, whatever the query.
 fn page_refused(method: &str, target: &str) -> bool {
@@ -713,6 +754,8 @@ fn page_refused(method: &str, target: &str) -> bool {
         (method.as_str(), parts.as_slice()),
         ("POST", ["api", "me", "desk-knows-tokens"])
             | ("POST", ["api", "me", "remote-mcp-tokens", "desk"])
+            // A boss link's token is in its answer (RBD1).
+            | ("POST", ["api", "me", "desk-boss-links"])
             | ("PUT", ["api", "desk", "knows-links", _, _])
             // A boss's relayed calls: the native side's alone, as any
             // method, on any hub (`crate::crew_relay`).
@@ -1486,6 +1529,9 @@ pub(crate) mod tests {
             ("POST", "/api/me/desk%2Dknows-tokens"),
             ("POST", "//api/me/Desk-Knows-Tokens/"),
             ("POST", "/api/me/remote-mcp-tokens/desk"),
+            ("POST", "/api/me/desk-boss-links"),
+            ("POST", "/api/me/Desk-Boss-Links/"),
+            ("post", "/api/me/desk%2Dboss-links?renews=x"),
             ("PUT", "/api/desk/knows-links/atlas/allan"),
             ("PUT", "/api/desk/knows-links/atlas/%61llan"),
             ("PUT", "/api/desk/%ff/x"),
@@ -1497,6 +1543,8 @@ pub(crate) mod tests {
             ("PUT", "/api/desk/knows/atlas/allan"),
             ("DELETE", "/api/desk/knows-links/atlas/allan"),
             ("DELETE", "/api/me/desk-knows-tokens/t1"),
+            ("GET", "/api/me/desk-boss-links"),
+            ("DELETE", "/api/me/desk-boss-links/t1"),
             ("GET", "/api/me"),
         ] {
             assert!(!page_refused(method, target), "{method} {target}");

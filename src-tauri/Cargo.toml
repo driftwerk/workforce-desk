@@ -16,7 +16,7 @@ tauri-build = { version = "2.7.4", features = [] }
 [dependencies]
 base64 = { workspace = true }
 bytes = "1.12.1"
-chrono = { version = "0.4.45", default-features = false, features = ["std"] }
+chrono = { version = "0.4.45", default-features = false, features = ["clock", "serde", "std"] }
 desk-chrome-host = { workspace = true }
 desk-core = { workspace = true }
 desk-machine = { workspace = true }
