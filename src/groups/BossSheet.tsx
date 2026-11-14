@@ -9,7 +9,7 @@ import { useCallback, useEffect, useId, useMemo, useState } from "react";
 import { agentKey, type Agent } from "../chat/types";
 import { useChat } from "../chat/store";
 import { useDesk } from "../hub/store";
-import { thisComputerLower } from "../machines/words";
+import { thisComputer, thisComputerLower } from "../machines/words";
 import { useOverview } from "../overview/store";
 import { useHost } from "../shell/host";
 import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
@@ -326,7 +326,7 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
                         <div key={e.engine} className="oversee-row">
                           <span className={`dot dot-${s.dot}`} aria-hidden="true" />
                           <span className="oversee-check-text">
-                            <b>{e.name === "this Mac" || e.name === "this computer" ? e.name[0]!.toUpperCase() + e.name.slice(1) : e.name}</b>
+                            <b>{e.engine === "local" ? thisComputer(platform) : e.name}</b>
                             <span className="oversee-sub">{s.text}</span>
                           </span>
                         </div>
