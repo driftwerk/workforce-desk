@@ -367,10 +367,11 @@ export const changesBetween = (before: PlanSnapshot, after: PlanSnapshot): PlanC
 };
 
 /** Whether a DM message's text is only its plan card's own header, as the
- *  hub writes it when a boss proposes or changes a plan: the card says all
- *  of it. Anything else the boss says (its closing summary) is its own. */
+ *  hub writes it when a boss drafts, changes or moves a plan: the card says
+ *  all of it. Anything else the boss says (its closing summary) is its own.
+ *  "proposes a plan" is an older hub's wording, kept for its messages. */
 export const isCardText = (text: string): boolean =>
-  /^[^\n]{1,80}? (proposes a plan|changed the plan|proposes a change to the plan): /.test(text.trim());
+  /^[^\n]{1,80}? (drafted a plan for you to review|proposes a plan|changed the plan|proposes a change to the plan|moved the plan to [^\n:]{1,80}):\s/.test(text.trim());
 
 /** How often a plan's budget starts again, as said after its amount. */
 const PER: Record<PlanBudget["period"], string> = {
