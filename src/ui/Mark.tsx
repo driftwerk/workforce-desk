@@ -16,7 +16,7 @@ const RING: Partial<Record<Look, string>> = {
 const ENGINE_INITIALS: Partial<Record<string, string>> = { claude: "cc", codex: "cx", devin: "dv" };
 
 export const initialsFor = (name: string, engine?: string): string =>
-  (engine && ENGINE_INITIALS[engine]) ?? (firstGrapheme(name.trim()) ?? "?").toUpperCase();
+  (engine ? ENGINE_INITIALS[engine] : undefined) ?? (firstGrapheme(name.trim()) ?? "?").toUpperCase();
 
 /** The board's initials: a person's first and last (`RL` for Richard
  *  Lucas), a session's word starts in small letters (`bo` for brisk-otter). */

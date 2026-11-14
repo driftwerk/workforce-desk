@@ -192,7 +192,7 @@ export function EngineBlocks({
           </span>
           {e.installed && (
             <span className="small">
-              {codex.run.at === "done" && e.engine === "codex" ? "Signed in" : devin.run.at === "done" && e.engine === "devin" && e.signIn.state !== "in" ? signInText({ state: "in", via: "vendor", who: null, plan: null }, e.title) : signInText(e.signIn, e.title)}
+              {codex.run.at === "done" && e.engine === "codex" ? "Signed in" : devin.run.at === "done" && e.engine === "devin" && e.signIn.state !== "in" ? signInText({ state: "in", via: "vendor", who: null, plan: null }, e.title) : signInText(e.signIn, e.engine === "devin" ? e.title : undefined)}
               {e.engine === "codex" && e.signIn.state !== "in" && <span className="muted"> · optional, for Codex sessions</span>}
             </span>
           )}

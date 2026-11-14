@@ -335,9 +335,9 @@ impl Installs {
             // the same way. If none works, what's said and offered stays
             // the installer's; theirs goes under Details.
             let mut also = None;
-            let found = |outcome: &Outcome| {
-                !outcome.timed_out && plan.found_is_done() && installed(&backend, plan)
-            };
+            // Installed is installed, even when what came after it (`devin
+            // setup`) failed or ran out of time.
+            let found = |_: &Outcome| plan.found_is_done() && installed(&backend, plan);
             if worth_other_ways(&outcome, plan) && !found(&outcome) {
                 match other_ways(&backend, plan, &report, brew_here(&backend)) {
                     Other::Installed(other) => outcome = other,
@@ -484,18 +484,55 @@ fn clear_dead_link(plan: Cli) -> String {
 }
 
 fn spawn(backend: &Backend, plan: Cli) -> eyre::Result<std::process::Child> {
-    spawn_script(backend, &script(plan))
+    spawn_as(backend, &script(plan), plan == Cli::Devin)
 }
 
 fn spawn_script(backend: &Backend, script: &str) -> eyre::Result<std::process::Child> {
+    spawn_as(backend, script, false)
+}
+
+/// Runs `script` as an installer. `no_terminal`: in a session of its own,
+/// with no terminal to open, so a wizard at its end (`devin setup`) finds
+/// nothing to ask on and can't wait, even when Desk itself was started from
+/// a terminal. It is still its own process group, so it is stopped whole.
+fn spawn_as(
+    backend: &Backend,
+    script: &str,
+    no_terminal: bool,
+) -> eyre::Result<std::process::Child> {
     let c = cli::installer(backend, script)?;
     let mut command = c.command();
-    deadline::isolate(&mut command);
+    if no_terminal {
+        detach(&mut command);
+    } else {
+        deadline::isolate(&mut command);
+    }
     Ok(command
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()?)
+}
+
+/// A new session for `command` (and so a new process group it leads): no
+/// controlling terminal.
+fn detach(command: &mut std::process::Command) {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: setsid is async-signal-safe, and nothing else runs
+        // between fork and exec.
+        unsafe {
+            command.pre_exec(|| {
+                if libc::setsid() == -1 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+    #[cfg(not(unix))]
+    deadline::isolate(command);
 }
 
 /// How one run of the installer ended, and the last thing it printed.
@@ -968,6 +1005,19 @@ mod tests {
             std::fs::read_to_string(home.join(".local/bin/devin")).unwrap(),
             "mine"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn devins_installer_runs_with_no_terminal_to_ask_on() {
+        let mut command = std::process::Command::new("/bin/sh");
+        command.args(["-c", "(exec 3</dev/tty) 2>/dev/null && echo has-tty || echo no-tty; ps -o sid= -p $$; echo $$"]);
+        detach(&mut command);
+        let out = command.stdin(Stdio::null()).output().unwrap();
+        let said = String::from_utf8_lossy(&out.stdout);
+        let lines: Vec<&str> = said.lines().map(str::trim).collect();
+        assert_eq!(lines[0], "no-tty", "{said}");
+        assert_eq!(lines[1], lines[2], "it leads a session of its own: {said}");
     }
 
     #[cfg(unix)]
