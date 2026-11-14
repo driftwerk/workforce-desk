@@ -32,6 +32,8 @@ export const RECHECK_MS = 15_000;
 
 export class Link {
   private port: Port | null = null;
+  /** The connection an older build is looking for its rebuilt files on. */
+  private checking: Port | null = null;
   private retry = 1000;
   private changed: (s: LinkState) => void = () => undefined;
   state: LinkState = { state: "connecting", why: null, label: null, activity: null };
@@ -123,8 +125,12 @@ export class Link {
    *  per connection), telling Desk Helper only when that changes. */
   private async upToDate(expected: number, port: Port, said: string | null): Promise<void> {
     if (!this.reloader || this.port !== port) return;
+    // One look at a time: a second `expects` doesn't start another.
+    if (said === null && this.checking === port) return;
+    this.checking = port;
     const reloader = this.reloader;
     const outcome = await upToDate(expected, this.revision, reloader);
+    if (outcome !== "unbuilt") this.checking = null;
     if (outcome === "current") return;
     // Desk Helper logs it; it isn't relayed to the hub.
     if (outcome !== said) port.post({ type: "updating", revision: expected, outcome });

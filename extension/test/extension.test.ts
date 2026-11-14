@@ -579,9 +579,12 @@ describe("bringing an unpacked build up to date", () => {
     const later: (() => void)[] = [];
     const link = new Link(() => p, async () => me, new DeskTabs(new FakeChrome()), execOn(), "0.1.0", (f) => later.push(f), r, 1);
     await link.start();
-    // Desk Helper says it once, on this connection.
+    // Desk Helper says it once, on this connection; said again, it starts
+    // no second look.
+    await p.hub({ type: "expects", revision: 2 });
     await p.hub({ type: "expects", revision: 2 });
     expect(p.sent.slice(1)).toEqual([{ type: "updating", revision: 2, outcome: "unbuilt" }]);
+    expect(later).toHaveLength(1);
     const tick = async () => {
       for (const f of later.splice(0)) f();
       await new Promise((res) => setTimeout(res, 0));

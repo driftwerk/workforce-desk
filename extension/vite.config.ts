@@ -16,7 +16,9 @@ const dist = resolve(here, "dist");
 
 const manifest = (): Plugin => ({
   name: "desk-manifest",
-  closeBundle() {
+  // Only after a build that was written: closeBundle runs after a failed
+  // one too, and revision.json must never mark a broken folder as built.
+  writeBundle() {
     const out = dist;
     const m = JSON.parse(readFileSync(resolve(here, "manifest.json"), "utf8"));
     const key = process.env.DESK_EXTENSION_KEY?.trim();
