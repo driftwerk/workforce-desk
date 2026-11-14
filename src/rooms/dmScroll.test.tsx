@@ -508,6 +508,19 @@ describe("Jump to latest shows only when the end is out of sight", () => {
     expect(jumpPill()).not.toBeNull();
   });
 
+  it("counts what Allan says next as new when it lands below a New line held in sight", async () => {
+    useReads.setState({ dms: { [KEY]: { at: at(17), message: "k17" } } });
+    const s = await open();
+    expect(jumpPill()).toBeNull();
+    // A long answer: the New line stays where it is, the answer runs on
+    // below what's in sight.
+    tall.set("a1", 300);
+    await streams(s, "t-next", "a1", ["one", "more"]);
+    await ends(s, "t-next", "a1");
+    resized();
+    expect(jumpPill()?.textContent).toContain("1 new");
+  });
+
   it("doesn't show when a kept place opens with the end in sight", async () => {
     useUi.setState({ anchors: { [`dm:${KEY}`]: { id: "k18", offset: 0 } } });
     await open();

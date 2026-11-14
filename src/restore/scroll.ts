@@ -216,13 +216,13 @@ const nearEnd = (pane: HTMLElement): boolean => fromEnd(pane) <= AT_NEWEST_PX;
  *  at it. */
 const AT_MAX_PX = 1;
 
+/** The pane's own bottom padding: below the end of what's in it. */
+export const padBelow = (pane: HTMLElement): number => Number.parseFloat(getComputedStyle(pane).paddingBottom) || 0;
+
 /** Whether the end of what's in `pane` is in sight: its last line above the
- *  pane's bottom, the pane's own bottom padding aside. Measured as laid out
+ *  pane's bottom, its bottom padding (`pad`) aside. Measured as laid out
  *  now, so it holds however the pane got there. */
-export const endInView = (pane: HTMLElement): boolean => {
-  const pad = Number.parseFloat(getComputedStyle(pane).paddingBottom) || 0;
-  return fromEnd(pane) <= pad + AT_MAX_PX;
-};
+export const endInView = (pane: HTMLElement, pad = padBelow(pane)): boolean => fromEnd(pane) <= pad + AT_MAX_PX;
 
 /** A chat that stays where you put it. At its newest message, it follows
  *  what arrives and anything that grows. Scrolled up, the message you're
@@ -248,9 +248,12 @@ export function useStayPut(place: string | null, settled: boolean) {
   // line or a kept place near the end, the end drawing shorter), it's
   // not away.
   const [away, setAway] = useState(false);
+  // The pane's bottom padding, read as it's set and as it resizes (a
+  // narrower pane can pad less), not on every measure.
+  const pad = useRef(0);
   const measure = useCallback(() => {
     const el = node.current;
-    setAway(!!el && !atEnd.current && !endInView(el));
+    setAway(!!el && !atEnd.current && !endInView(el, pad.current));
   }, []);
   const settledNow = useRef(settled);
   settledNow.current = settled;
@@ -336,7 +339,14 @@ export function useStayPut(place: string | null, settled: boolean) {
         clearTimeout(timer);
         timer = setTimeout(save, SETTLE_MS);
       };
-      const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => keep());
+      pad.current = padBelow(el);
+      const ro =
+        typeof ResizeObserver === "undefined"
+          ? null
+          : new ResizeObserver(() => {
+              pad.current = padBelow(el);
+              keep();
+            });
       // The pane itself resizing: the composer, or its queue, taking room.
       ro?.observe(el);
       el.addEventListener("scroll", onScroll, { passive: true });
@@ -369,5 +379,9 @@ export function useStayPut(place: string | null, settled: boolean) {
   );
   useEffect(() => () => observer.current?.disconnect(), []);
 
-  return { pane, list, keep, toLatest, showAt, away };
+  /** Whether the pane follows its newest message: you're at it. Read
+   *  during a render, it's what you've seen so far. */
+  const following = useCallback(() => atEnd.current, []);
+
+  return { pane, list, keep, toLatest, showAt, away, following };
 }
