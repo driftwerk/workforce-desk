@@ -9,7 +9,17 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { agentKey, type Agent, type HubAccount } from "../chat/types";
 import { HubError } from "../hub/client";
 import { useMachines } from "../hub/engines";
-import { knowsLinker, knowsOf, type KnowsDigest, type KnowsHeld, type KnowsLogEntry, type KnowsRule, type KnowsView } from "../hub/knows";
+import {
+  knowsLinker,
+  knowsOf,
+  knowsTeller,
+  type MachinesTold,
+  type KnowsDigest,
+  type KnowsHeld,
+  type KnowsLogEntry,
+  type KnowsRule,
+  type KnowsView,
+} from "../hub/knows";
 import { localAccount } from "../groups/move";
 import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
@@ -60,6 +70,9 @@ type Status = { state: "idle" | "saving" } | { state: "failed"; problem: string 
  *  is asked what becomes of it. */
 type Asking = { held: KnowsHeld; why: "narrowed" | "transcripts" | "earlier" };
 
+/** How long a read of what an agent sees may take before it is said. */
+export const READ_LIMIT = 10_000;
+
 /** A refusal of a rule's route in the person's words. */
 const said = (e: unknown): string => {
   if (e instanceof HubError && (e.status === 401 || e.status === 403)) return "Only the person whose Desk this is can change what an agent sees.";
@@ -86,6 +99,17 @@ export const heldSaid = (h: KnowsHeld): string => {
   return h.sessions > 0 ? `${what} from ${n(h.sessions)} ${h.sessions === 1 ? "session" : "sessions"}` : what;
 };
 
+/** What an agent holds outside its rule here and on the person's machines. */
+const withMachines = (here: KnowsHeld, machines: MachinesTold | null): KnowsHeld =>
+  machines
+    ? {
+        ...here,
+        items: here.items + machines.held.items,
+        transcripts: here.transcripts + machines.held.transcripts,
+        sessions: here.sessions + machines.held.sessions,
+      }
+    : here;
+
 export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | undefined }) {
   const ids = useId();
   const head = `${ids}-head`;
@@ -93,10 +117,12 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
   const remote = !(hub?.local ?? false);
   const self = agentKey(agent);
   const keyOf = useCallback((): string => (remote ? (linked.get(self) ?? known.get(self) ?? self) : self), [remote, self]);
-  const places = usePlaces(self);
+  // An agent elsewhere is shared with from the person's machines too
+  // (Sees K7); one on this computer's hub isn't yet.
+  const places = usePlaces(self, remote);
   const machines = useMachines((s) => s.machines);
   const [view, setView] = useState<KnowsView | null>(null);
-  const [load, setLoad] = useState<"loading" | "ok" | "missing" | { problem: string }>("loading");
+  const [load, setLoad] = useState<"loading" | "ok" | "missing" | { problem: string; retry?: boolean }>("loading");
   const [status, setStatus] = useState<Status>({ state: "idle" });
   const [picking, setPicking] = useState(false);
   const [asking, setAsking] = useState<Asking | null>(null);
@@ -107,6 +133,10 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
   const confirmed = useRef<KnowsView | null>(null);
   /** Bumped by each change, so an older read doesn't undo a newer one. */
   const seq = useRef(0);
+  /** Bumped when the section turns to another agent or goes, so nothing
+   *  still on its way for the one before is shown. */
+  const shownFor = useRef(0);
+  const lateTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const logShown = useRef(false);
   logShown.current = showLog;
 
@@ -117,8 +147,17 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
 
   const read = useCallback(async () => {
     const k = api();
-    if (!k) return setLoad({ problem: "Desk isn’t ready just now; try again in a moment." });
+    if (!k) return setLoad({ problem: "Desk isn’t ready just now.", retry: true });
     const n = seq.current;
+    // Any answer for this agent is shown, a late one too; one that takes
+    // too long is said, with Try again, while nothing has answered.
+    const shown = shownFor.current;
+    clearTimeout(lateTimer.current);
+    const late = setTimeout(() => {
+      if (shown === shownFor.current) setLoad((l) => (l === "loading" ? { problem: "This computer’s hub didn’t answer in time.", retry: true } : l));
+    }, READ_LIMIT);
+    lateTimer.current = late;
+    const current = () => shown === shownFor.current && n === seq.current;
     try {
       // An agent elsewhere linked in an earlier run: its rule is kept by
       // the id its hub gave, which may differ in case from the roster's.
@@ -128,16 +167,23 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
         if (kept) known.set(self, kept.agent);
       }
       const v = await k.rule(keyOf());
-      if (n !== seq.current) return;
+      if (!current()) return;
       confirmed.current = v;
       setView(v);
       setLoad("ok");
     } catch (e) {
-      if (n !== seq.current) return;
+      if (!current()) return;
       if (e instanceof HubError && (e.status === 404 || e.status === 405)) setLoad("missing");
-      else setLoad({ problem: said(e) });
+      else setLoad({ problem: said(e), retry: true });
+    } finally {
+      clearTimeout(late);
     }
   }, [api, keyOf, remote, self, agent.id]);
+
+  const again = () => {
+    setLoad("loading");
+    void read();
+  };
 
   useEffect(() => {
     setView(null);
@@ -145,6 +191,11 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
     setLog(null);
     setShowLog(false);
     void read();
+    // Another agent, or gone: nothing still on its way is shown.
+    return () => {
+      shownFor.current++;
+      clearTimeout(lateTimer.current);
+    };
   }, [read]);
 
   const readLog = useCallback(async () => {
@@ -208,13 +259,17 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
       if (!nothing && !(await link())) return back();
       try {
         const changed = await k.setRule(keyOf(), next);
+        // Saved here: said at once, while the machines are told (which can
+        // wait on Desk's own pass over them). What they hold outside it is
+        // asked about with this computer's.
         if (n === seq.current) setStatus({ state: "idle" });
+        const machines = await tell();
         // Asked only when it now holds more outside the rule than before:
         // what was kept earlier was asked about then.
         const before = confirmed.current?.heldOutside.items ?? 0;
-        if (narrows(was, next) && changed.heldOutside.items > before)
+        if (narrows(was, next) && (changed.heldOutside.items > before || machines?.grew))
           setAsking({
-            held: changed.heldOutside,
+            held: withMachines(changed.heldOutside, machines),
             why:
               was.transcripts && !next.transcripts && modeOf(was.places) === modeOf(next.places) && was.places.join() === next.places.join()
                 ? "transcripts"
@@ -229,6 +284,14 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
     });
   };
 
+  /** Tells the machines this rule's part for them now, with the person's
+   *  choice when there was one: an agent elsewhere's alone. */
+  const tell = async (choice?: "delete" | "keep"): Promise<MachinesTold | null> => {
+    const t = knowsTeller();
+    const at = keyOf().indexOf("/");
+    return remote && t && at > 0 ? t(keyOf().slice(0, at), keyOf().slice(at + 1), choice) : null;
+  };
+
   const choose = (choice: "delete" | "keep") => {
     const k = api();
     setAsking(null);
@@ -237,6 +300,7 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
       try {
         await k.choose(keyOf(), choice);
         setStatus({ state: "idle" });
+        await tell(choice);
       } catch (e) {
         setStatus({ state: "failed", problem: said(e) });
       }
@@ -272,23 +336,40 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
     buttons?.[(i + step + modes.length) % modes.length]?.focus();
   };
   const shared = (view?.sharedToday ?? []).filter((s) => s.items > 0);
-  const elsewhere = machines.filter((m) => m.id !== "local").map((m) => m.name);
+  // Machines share with an agent elsewhere; with one here, not yet.
+  const elsewhere = remote ? [] : machines.filter((m) => m.id !== "local").map((m) => m.name);
   const held = view?.heldOutside;
 
   return (
     <section id="sees" className="agent-section sees" aria-labelledby={head}>
       <div className="sees-head">
         <h2 id={head}>What they see</h2>
-        <span className="oversee-sub">
-          {load === "missing"
-            ? "This needs a newer Desk on this computer: update Desk to set it."
-            : `Read-only: what ${name} knows of your work in Desk. It doesn’t let them act.`}
-        </span>
+        <span className="oversee-sub">What {name} knows of your work in Desk. They can read it, never act on it.</span>
       </div>
-      {load === "loading" && <p className="small faint">…</p>}
+      {load === "loading" && (
+        <p className="small faint" role="status">
+          Reading what {name} sees…
+        </p>
+      )}
+      {load === "missing" && (
+        <p className="small muted" role="status">
+          This computer’s hub doesn’t keep what agents see yet. It comes with a newer Desk: update Desk and restart it, then choose here what {name} sees.{" "}
+          <button type="button" className="link link-signal small" onClick={again}>
+            Try again
+          </button>
+        </p>
+      )}
       {typeof load === "object" && (
         <p className="small state-blocked" role="alert">
           {load.problem}
+          {load.retry && (
+            <>
+              {" "}
+              <button type="button" className="link link-signal small" onClick={again}>
+                Try again
+              </button>
+            </>
+          )}
         </p>
       )}
       {rule && (

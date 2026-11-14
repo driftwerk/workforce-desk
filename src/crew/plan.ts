@@ -4,6 +4,7 @@
 // both with a plan; Desk works them out again over the board's tickets as
 // they move, which the hub announces one ticket at a time.
 
+import { ENGINE_MODELS } from "../engines/engines";
 import { amountText } from "../spend/budgets";
 import type {
   BossPlan,
@@ -32,6 +33,8 @@ export interface PlanTicket {
   engine?: Engine | null;
   folder?: string | null;
   view?: View | null;
+  machine?: string | null;
+  model?: string | null;
   /** A session or an agent has it. */
   assigned?: boolean;
   /** Its session is being started. */
@@ -132,6 +135,8 @@ export const ruled = (t: BossPlanTicket): PlanTicket => ({
   engine: t.engine,
   folder: t.folder,
   view: t.view,
+  machine: t.machine ?? null,
+  model: t.model ?? null,
   assigned: !!t.assignee,
   starting: t.starting,
 });
@@ -166,7 +171,8 @@ export const resumable = (why: string | null): boolean => why === "person" || wh
 
 /** What a plan's card says it is at, and how it is drawn. */
 export const standing = (p: Pick<BossPlan, "state" | "revision" | "approvedRevision">): { text: string; look: "blocked" | "working" | "done" | "idle" } => {
-  if (p.state === "proposed") return { text: "Waiting for you", look: "blocked" };
+  // Nothing runs until the person approves it.
+  if (p.state === "proposed") return { text: "Draft — review", look: "blocked" };
   if (awaiting(p)) return { text: "A change waits for you", look: "blocked" };
   switch (p.state) {
     case "running":
@@ -248,6 +254,8 @@ export const draftOf = (tickets: readonly PlannedTicket[]): DraftTicket[] => {
     engine: t.engine,
     folder: t.folder,
     view: t.view,
+    machine: t.machine ?? null,
+    model: t.model ?? null,
     needs: t.needs.map((n) => place.get(n)).filter((i): i is number => i !== undefined),
   }));
 };
@@ -299,6 +307,10 @@ export interface TicketChange {
   engine?: { from: Engine; to: Engine };
   folder?: { from: string; to: string };
   view?: { from: View | null; to: View | null };
+  /** Null is this computer. */
+  machine?: { from: string | null; to: string | null };
+  /** Null is the engine's default. */
+  model?: { from: string | null; to: string | null };
   /** What it needs done first, by ticket id: needs it gains and loses. */
   needs?: { added: string[]; dropped: string[] };
 }
@@ -332,10 +344,12 @@ export const changesBetween = (before: PlanSnapshot, after: PlanSnapshot): PlanC
     if (w.engine !== t.engine) c.engine = { from: w.engine, to: t.engine };
     if (w.folder !== t.folder) c.folder = { from: w.folder, to: t.folder };
     if ((w.view ?? null) !== (t.view ?? null)) c.view = { from: w.view ?? null, to: t.view ?? null };
+    if ((w.machine ?? null) !== (t.machine ?? null)) c.machine = { from: w.machine ?? null, to: t.machine ?? null };
+    if ((w.model ?? null) !== (t.model ?? null)) c.model = { from: w.model ?? null, to: t.model ?? null };
     const added = t.needs.filter((n) => !w.needs.includes(n));
     const dropped = w.needs.filter((n) => !t.needs.includes(n));
     if (added.length || dropped.length) c.needs = { added, dropped };
-    if (c.title || c.body || c.engine || c.folder || c.view || c.needs) changed.push(c);
+    if (c.title || c.body || c.engine || c.folder || c.view || c.machine || c.model || c.needs) changed.push(c);
   }
   const from = before.parallel ?? null;
   const to = after.parallel ?? null;
@@ -353,10 +367,11 @@ export const changesBetween = (before: PlanSnapshot, after: PlanSnapshot): PlanC
 };
 
 /** Whether a DM message's text is only its plan card's own header, as the
- *  hub writes it when a boss proposes or changes a plan: the card says all
- *  of it. Anything else the boss says (its closing summary) is its own. */
+ *  hub writes it when a boss drafts, changes or moves a plan: the card says
+ *  all of it. Anything else the boss says (its closing summary) is its own.
+ *  "proposes a plan" is an older hub's wording, kept for its messages. */
 export const isCardText = (text: string): boolean =>
-  /^[^\n]{1,80}? (proposes a plan|changed the plan|proposes a change to the plan): /.test(text.trim());
+  /^[^\n]{1,80}? (drafted a plan for you to review|proposes a plan|changed the plan|proposes a change to the plan|moved the plan to [^\n:]{1,80}):\s/.test(text.trim());
 
 /** How often a plan's budget starts again, as said after its amount. */
 const PER: Record<PlanBudget["period"], string> = {
@@ -393,3 +408,52 @@ export const capOf = (
 /** Whether two budgets are the same in every part. */
 export const sameBudget = (a: PlanBudget | null | undefined, b: PlanBudget | null | undefined): boolean =>
   JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
+
+/** What a plan's tickets are set to, for its defaults: where each runs
+ *  (null is this computer), its engine and its model (null is the
+ *  engine's default). */
+export type TicketDefault = "machine" | "engine" | "model";
+
+const valueOf = (t: Pick<DraftTicket, TicketDefault>, key: TicketDefault): string | null =>
+  key === "engine" ? (t.engine ?? "claude") : (t[key] ?? null);
+
+/** The tickets a default of `key` is about: a model is an engine's, so
+ *  only the tickets on the plan's default engine; the rest, every one. */
+const among = <T extends Pick<DraftTicket, TicketDefault>>(tickets: readonly T[], key: TicketDefault): T[] => {
+  if (key !== "model") return [...tickets];
+  const engine = defaultOf(tickets, "engine");
+  return tickets.filter((t) => valueOf(t, "engine") === engine);
+};
+
+/** `model` kept for a ticket now on `engine` when it is one of that
+ *  engine's own (or its default); else the engine's default. */
+export const modelOn = (engine: Engine, model: string | null | undefined): string | null =>
+  model && ENGINE_MODELS[engine]?.some((m) => m.id === model) ? model : null;
+
+/** A plan's default `key`: what most of its tickets have (the first's,
+ *  on a tie). The hub keeps no default of its own; a ticket set otherwise
+ *  has overridden it. */
+export const defaultOf = (tickets: readonly Pick<DraftTicket, TicketDefault>[], key: TicketDefault): string | null => {
+  const counts = new Map<string | null, number>();
+  for (const t of among(tickets, key)) counts.set(valueOf(t, key), (counts.get(valueOf(t, key)) ?? 0) + 1);
+  let best: string | null = key === "engine" ? "claude" : null;
+  let most = 0;
+  for (const [v, n] of counts) if (n > most) [best, most] = [v, n];
+  return best;
+};
+
+/** `tickets` with the default `key` moved from `from` to `to`: each ticket
+ *  that had the default takes the new one; one set otherwise keeps its
+ *  own. Which ones moved, by place. */
+export const withDefault = (tickets: readonly DraftTicket[], key: TicketDefault, from: string | null, to: string | null): { tickets: DraftTicket[]; moved: number[] } => {
+  const moved: number[] = [];
+  const about = new Set(among(tickets, key));
+  const next = tickets.map((t, i) => {
+    if (!about.has(t) || valueOf(t, key) !== from) return t;
+    moved.push(i);
+    if (key !== "engine") return { ...t, [key]: to };
+    const engine = (to ?? "claude") as Engine;
+    return { ...t, engine, model: modelOn(engine, t.model) };
+  });
+  return { tickets: next, moved };
+};

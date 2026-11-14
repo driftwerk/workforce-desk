@@ -242,6 +242,14 @@ describe("groups in the sidebar", () => {
     expect((lastSaved().groups as DeskGroup[]).map((g) => g.id)).toEqual(["beta"]);
   });
 
+  it("opens a group's Boss sheet from its options", async () => {
+    groups();
+    fireEvent.click(screen.getByRole("button", { name: "Acme options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Boss…" }));
+    expect(await screen.findByRole("dialog", { name: "Acme · Boss" })).toBeTruthy();
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith("boss_status", { group: "acme" });
+  });
+
   it("Ungrouped has no handle or rename, and its options only clear finished sessions", () => {
     groups();
     fireEvent.click(screen.getByRole("button", { name: "Ungrouped options" }));

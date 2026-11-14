@@ -12,8 +12,10 @@ import type { Place } from "./places";
 
 /** Every place a rule can name, by its key, as Desk shows them now: the
  *  sidebar's groups, the boards, the grids, the sessions (on every
- *  machine) and the crew but `self`. */
-export function usePlaces(self: string): Map<string, Place> {
+ *  machine) and the crew but `self`. A session on a machine is said not
+ *  to be shared yet unless `fromMachines`: machines share with agents on
+ *  other hubs alone (Sees K7). */
+export function usePlaces(self: string, fromMachines = false): Map<string, Place> {
   const groups = useLayout().groups;
   const boards = useBoard((s) => s.boards);
   const order = useGrids((s) => s.order);
@@ -39,7 +41,7 @@ export function usePlaces(self: string): Map<string, Place> {
         place: `session:${key}`,
         kind: "session",
         name: names[key] ?? s.name,
-        sub: machine === LOCAL ? undefined : `on ${machineName(machine)} · not shared yet`,
+        sub: machine === LOCAL ? undefined : fromMachines ? `on ${machineName(machine)}` : `on ${machineName(machine)} · not shared yet`,
       });
     }
     for (const a of roster) {
@@ -49,5 +51,5 @@ export function usePlaces(self: string): Map<string, Place> {
       out.set(`agent:${key}`, { place: `agent:${key}`, kind: "agent", name: a.name, sub: hub && !hub.local ? `on ${hub.label}` : "the sessions they run" });
     }
     return out;
-  }, [groups, boards, order, grids, sessions, names, roster, hubs, machines, self]);
+  }, [groups, boards, order, grids, sessions, names, roster, hubs, machines, self, fromMachines]);
 }
