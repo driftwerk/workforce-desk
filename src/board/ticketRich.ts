@@ -166,21 +166,26 @@ export const remoteParts = (e: HistoryEvent, w: EventWords): Part[] => {
     case "link":
       return [{ text: actor, look: "b" }, { text: " linked " }, ...(e.to?.startsWith("#") ? [{ icon: "pr" as const }] : []), { text: e.to ?? "", look: "b" }];
     default: {
-      if (e.kind === "field" && e.by === "github" && e.field) {
+      // A PR or branch GitHub opened, merged or made.
+      if (e.kind === "field" && e.by === "github" && e.field && (e.to === "merged" || e.to === "created")) {
         const pr = e.field.startsWith("#");
         return [
           { text: `${actor} · ` },
           { icon: pr ? (e.to === "merged" ? "merge" : "pr") : "branch" },
           { text: e.field, look: pr ? "b" : "mono" },
-          { text: ` ${e.to ?? ""}` },
+          { text: ` ${e.to}` },
         ];
       }
+      const field = e.field ?? e.kind;
+      // Labels come one at a time: one added, or one taken off.
+      if (field === "labels" && (e.to || e.from))
+        return e.to ? [{ text: actor, look: "b" }, { text: " added the label " }, { text: e.to, look: "b" }] : [{ text: actor, look: "b" }, { text: " took off the label " }, { text: e.from!, look: "b" }];
+      if (field === "link" && e.from && !e.to) return [{ text: actor, look: "b" }, { text: " unlinked " }, { text: e.from, look: "b" }];
+      // A long text there (the description): only that it changed.
+      if (!e.from && !e.to) return [{ text: actor, look: "b" }, { text: ` edited the ${field}` }];
+      if (!e.to) return [{ text: actor, look: "b" }, { text: ` cleared the ${field}, which was ` }, { text: e.from!, look: "b" }];
       // A field changed there: what it is, and what it became.
-      return [
-        { text: actor, look: "b" },
-        { text: ` changed ${e.field ?? e.kind}${e.from ? ` from ${e.from}` : ""} to ` },
-        { text: e.to ?? "nothing", look: "b" },
-      ];
+      return [{ text: actor, look: "b" }, { text: ` changed the ${field}${e.from ? ` from ${e.from}` : ""} to ` }, { text: e.to, look: "b" }];
     }
   }
 };

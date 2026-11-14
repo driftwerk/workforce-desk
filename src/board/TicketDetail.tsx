@@ -326,7 +326,7 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
     return (
       <>
         <div className={cut && compact ? "ticket-clamp" : undefined}>
-          <TicketBody text={cut ? (compact ? first! : fold.shown) : t.body} onEdit={() => startEditing("body")} />
+          <TicketBody text={cut ? (compact ? first! : fold.shown) : t.body} board={t.board} onEdit={() => startEditing("body")} />
         </div>
         {cut && (
           <button type="button" className="link ticket-whole" onClick={() => setWhole(true)}>

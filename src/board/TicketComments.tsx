@@ -6,12 +6,12 @@ import { useSessionNames } from "../groups/names";
 import { deskListeners, useDesk } from "../hub/store";
 import type { ActivityEvent, DeskEvent, HistoryEvent, Ticket, TicketComment } from "../hub/types";
 import { mergeEvents } from "../overview/activity";
-import { DESK_RICH_HOST } from "../shell/richHost";
 import { plainError } from "../ui/plainError";
 import { historyLine } from "./board";
 import { BranchIcon, MergeIcon, PrIcon } from "./cardFacts";
 import { useBoard } from "./store";
 import { counts, dayText, eventParts, filtered, markText, timeline, type ActivityFilter, type EventWords, type Layout, type Part, type TimelineRow } from "./ticketRich";
+import { TICKET_RICH_HOST, useKeyedBody } from "./ticketKeyedRich";
 import { localTicketView } from "./ticketView";
 
 /** The longest comment Desk posts. */
@@ -287,6 +287,7 @@ function CommentRow({
   person: string | null | undefined;
   small?: boolean;
 }) {
+  const body = useKeyedBody(c.body, t.board);
   const behalf = onBehalfOf(c, t, person);
   // Posted there on the person's behalf, it's said so in place of where.
   const where = behalf ?? whereSaid(c) ?? (c.author.kind === "person" ? c.author.on : null);
@@ -308,8 +309,8 @@ function CommentRow({
         </div>
         {c.flagged && <p className="small ticket-comment-flag">Reads as instructions to an AI: shown as written, never acted on.</p>}
         <div className="ticket-comment-body rich">
-          <RichHostProvider host={DESK_RICH_HOST}>
-            <RichMarkdown text={c.body} />
+          <RichHostProvider host={TICKET_RICH_HOST}>
+            <RichMarkdown text={body} />
           </RichHostProvider>
         </div>
         {replies.length > 0 && (
