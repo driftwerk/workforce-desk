@@ -167,6 +167,61 @@ it("starts Codex at the usual speed unless Fast is chosen", async () => {
   expect(start).toHaveBeenCalledWith(expect.objectContaining({ engine: "codex", fast: undefined }));
 });
 
+it("starts a session on the model chosen for its engine, and offers the choice only where the hub runs it", async () => {
+  const start = vi.fn(() => Promise.resolve({ id: "s-6" }));
+  const engines = vi.fn(async () => [
+    engine({ engine: "claude", title: "Claude Code", views: ["terminal"], caps: terminalCaps("desk") }),
+    engine({ engine: "codex", title: "Codex", views: ["terminal"], caps: terminalCaps("terminal") }),
+  ]);
+  const features = vi.fn(async () => ["fresh-worktree", "session-model"]);
+  useDesk.setState({ hub: { start, engines, features } as unknown as DeskHub, openId: null });
+  render(<NewSession onClose={vi.fn()} />);
+  await act(async () => {});
+  const picker = screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement;
+  expect(picker.value).toBe("");
+  expect([...picker.options].map((o) => o.textContent)).toEqual(["Engine default", "Opus", "Sonnet", "Haiku", "Other…"]);
+  fireEvent.change(picker, { target: { value: "sonnet" } });
+  expect(screen.getByText(/Claude Code · Sonnet/)).toBeTruthy();
+  // Codex's names aren't Claude Code's: it starts on its own default.
+  fireEvent.click(screen.getByRole("radio", { name: "Codex" }));
+  expect((screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement).value).toBe("");
+  fireEvent.click(screen.getByRole("radio", { name: "Claude Code" }));
+  expect((screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement).value).toBe("sonnet");
+  fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/work/atlas" } });
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
+  expect(start).toHaveBeenCalledWith(expect.objectContaining({ engine: "claude", model: "sonnet" }));
+});
+
+it("takes a model's exact id with Other…", async () => {
+  const start = vi.fn(() => Promise.resolve({ id: "s-7" }));
+  const engines = vi.fn(async () => [engine({ engine: "codex", title: "Codex", views: ["terminal"], caps: terminalCaps("terminal") })]);
+  const features = vi.fn(async () => ["session-model"]);
+  useDesk.setState({ hub: { start, engines, features } as unknown as DeskHub, openId: null });
+  render(<NewSession onClose={vi.fn()} />);
+  await act(async () => {});
+  fireEvent.change(screen.getByRole("combobox", { name: "Model" }), { target: { value: "\u0000other" } });
+  const field = screen.getByLabelText("Model: the model's exact id");
+  fireEvent.change(field, { target: { value: " gpt-6.1-sol " } });
+  fireEvent.keyDown(field, { key: "Enter" });
+  expect((screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement).value).toBe("gpt-6.1-sol");
+  fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/work/atlas" } });
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
+  expect(start).toHaveBeenCalledWith(expect.objectContaining({ engine: "codex", model: "gpt-6.1-sol" }));
+});
+
+it("offers no model where the hub would start on its engine's default anyway, and sends none", async () => {
+  const start = vi.fn(() => Promise.resolve({ id: "s-8" }));
+  const engines = vi.fn(async () => [engine({ engine: "claude", title: "Claude Code", views: ["terminal"], caps: terminalCaps("desk") })]);
+  const features = vi.fn(async () => ["fresh-worktree"]);
+  useDesk.setState({ hub: { start, engines, features } as unknown as DeskHub, openId: null });
+  render(<NewSession onClose={vi.fn()} />);
+  await act(async () => {});
+  expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
+  fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/work/atlas" } });
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
+  expect(start).toHaveBeenCalledWith(expect.not.objectContaining({ model: expect.anything() }));
+});
+
 const account = (id: string, name: string, isDefault = false): EngineAccount => ({
   id,
   engine: "claude",

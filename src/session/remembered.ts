@@ -13,6 +13,8 @@ export interface Choices {
   approvals?: "desk" | "terminal";
   approveForMe?: boolean;
   fast?: boolean;
+  /** The model picked for `engine`; absent, its default. */
+  model?: string;
   copy?: boolean;
 }
 

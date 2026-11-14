@@ -1776,6 +1776,20 @@ body.side-resizing * {
 .ns-foot {
   align-items: center;
 }
+/* The model, in the plan card's picker (pc-engine): as wide as it says. */
+.ns-model .pc-engine {
+  align-self: flex-start;
+}
+.ns-model input.pc-model-other {
+  border-radius: 999px;
+  padding: 3px 10px;
+  width: min(22em, 100%);
+  background: var(--surface);
+}
+.ns-model input.pc-model-other:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+}
 .ns-why {
   flex: 1;
   color: var(--blocked);

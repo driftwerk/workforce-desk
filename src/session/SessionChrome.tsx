@@ -12,7 +12,7 @@ import { useCharge } from "../crew/chargeStore";
 import { useSessionSpend } from "../spend/store";
 import { usdText } from "../spend/spend";
 import { switchingText, withAccount } from "../engines/accounts";
-import { ENGINE_TITLE } from "../engines/engines";
+import { ENGINE_TITLE, modelTitle } from "../engines/engines";
 import { lookOf, statusOf } from "../floor/background";
 import { nameParts } from "../grids/head";
 import { sessionItem } from "../groups/model";
@@ -42,10 +42,11 @@ export const tabId = (ids: string, tab: SessionTab): string => `${ids}-${tab}-ta
 export const panelId = (ids: string, tab: SessionTab): string => `${ids}-${tab}`;
 
 /** What a session is and where it runs, in a line: engine and account,
- *  what Desk set for it, and its branch or folder. */
+ *  the model it was given, what Desk set for it, and its branch or folder. */
 export const whereText = (s: Session): string =>
   [
     withAccount(ENGINE_TITLE[s.engine], s),
+    s.model && modelTitle(s.engine, s.model),
     switchingText(s),
     s.mode === "auto" ? "Auto mode (set by Desk)" : s.mode === "bypassPermissions" ? "Bypass mode (set by Desk)" : null,
     s.approveForMe && "Approve for me",

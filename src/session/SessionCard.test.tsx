@@ -165,6 +165,20 @@ describe("a session's card says when Desk set a non-asking mode", () => {
   });
 });
 
+describe("a session's card says the model it was given", () => {
+  it("names it after the engine, by its listed title or its exact id, and nothing for the engine's default", () => {
+    const { unmount } = card();
+    expect(screen.queryByText(/Claude Code · Opus/)).toBeNull();
+    unmount();
+    for (const [model, text] of [["opus", "Claude Code · Opus"], ["claude-opus-5-5[1m]", "Claude Code · claude-opus-5-5[1m]"]] as const) {
+      useDesk.setState({ sessions: { s1: session({ model }) } });
+      const r = card();
+      expect(screen.getByText((_, el) => el?.tagName !== "HEADER" && !!el?.textContent?.startsWith(text) && el.children.length === 0)).toBeTruthy();
+      r.unmount();
+    }
+  });
+});
+
 describe("a session's chrome", () => {
   const hub = { interrupt: vi.fn(() => Promise.resolve()), stop: vi.fn(() => Promise.resolve()), resume: vi.fn(() => Promise.resolve()), update: vi.fn(() => Promise.resolve()), history: vi.fn(() => Promise.resolve({ events: [], more: false })) };
   beforeEach(() => {

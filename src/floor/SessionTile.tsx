@@ -6,6 +6,7 @@ import { Approval } from "../session/Approval";
 import { Mark } from "../ui/Mark";
 import { SessionTicketChip } from "../board/TicketChip";
 import { plain } from "../ui/plain";
+import { modelTitle } from "../engines/engines";
 
 const LABEL: Record<Session["state"], string> = {
   starting: "starting",
@@ -57,6 +58,7 @@ export function Tile({ session }: { session: Session }) {
           <span className="mono tile-title">{name}</span>
           <span className={`tile-state state-${state}`}>
             {LABEL[state]} · {home(session)}
+            {session.model ? ` · ${modelTitle(session.engine, session.model)}` : ""}
           </span>
         </span>
       </button>

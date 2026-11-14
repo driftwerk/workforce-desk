@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { idsNow, mayHaveHappened, reconcile } from "../ui/reconcile";
 import { OWN_SIGN_IN, OWN_SIGN_IN_LABEL, accountOfChoice, accountsOf, accountsOn, defaultChoice, hasAccounts, ownSignInWorks } from "../engines/accounts";
-import { ENGINE_TITLE, answersInDesk, defaultCaps, startable } from "../engines/engines";
+import { ENGINE_TITLE, answersInDesk, defaultCaps, modelTitle, startable } from "../engines/engines";
+import { ModelSelect } from "../engines/ModelSelect";
 import { pluginEnv } from "../grids/terminals";
 import { useChat } from "../chat/store";
 import { GroupChoice } from "./GroupChoice";
@@ -150,6 +151,8 @@ export function NewSession({
   const [approvals, setApprovals] = useState<"desk" | "terminal">("desk");
   const [approveForMe, setApproveForMe] = useState(false);
   const [fast, setFast] = useState(false);
+  // The model picked, by engine: one engine's names aren't another's.
+  const [models, setModels] = useState<Partial<Record<Engine, string | null>>>({});
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<Problem | null>(null);
   const [engines, setEngines] = useState<EngineInfo[] | null>(null);
@@ -167,6 +170,7 @@ export function NewSession({
     if (c.approvals) setApprovals(c.approvals);
     if (c.approveForMe !== undefined) setApproveForMe(c.approveForMe);
     if (c.fast !== undefined) setFast(c.fast);
+    if (c.engine) setModels((m) => ({ ...m, [c.engine!]: c.model ?? null }));
     if (c.copy !== undefined) setCopy(c.copy);
   };
   const setCwd = (folder: string) => {
@@ -220,6 +224,10 @@ export function NewSession({
   const inDesk = answersInDesk(engine, caps);
   const canApproveForMe = !!caps?.approveForMe;
   const canRunFast = !!caps?.fast;
+  // Only a hub that runs the model it is given is offered a choice: an
+  // older one would start on its engine's default and say nothing.
+  const canPickModel = features?.includes("session-model") === true;
+  const model = canPickModel ? (models[engine] ?? null) : null;
   // A machine's accounts are its own: its sessions start on one of them.
   const accounts = hasAccounts(caps) ? accountsOf(allAccounts, engine) : [];
   const missing = engines?.filter((e) => e.installed === false).map((e) => e.title) ?? [];
@@ -325,11 +333,12 @@ export function NewSession({
         approvals: inDesk ? approvals : undefined,
         approveForMe: canApproveForMe && approveForMe ? true : undefined,
         fast: canRunFast && fast ? true : undefined,
+        ...(model ? { model } : {}),
         account: accounts.length > 0 ? accountOfChoice(account) : undefined,
         ...(withCopy ? { worktree: branch, freshWorktree: true } : {}),
         env: remote ? await machineEnv(native, runOn) : await pluginEnv(),
       });
-      const choices: Choices = { engine, group, approvals, approveForMe, fast, copy: withCopy, ...(account ? { account } : {}) };
+      const choices: Choices = { engine, group, approvals, approveForMe, fast, copy: withCopy, ...(account ? { account } : {}), ...(model ? { model } : {}) };
       remember(runOn, folder || "~", choices);
       const key = keyOf(runOn, s.id);
       // In its group whichever computer it runs on; Ungrouped takes it as it comes.
@@ -390,6 +399,7 @@ export function NewSession({
   const accountName = accounts.length > 0 ? (account === OWN_SIGN_IN ? OWN_SIGN_IN_LABEL : accounts.find((a) => a.id === account)?.name) : null;
   const summary = [
     offered.length > 1 || remote ? ENGINE_TITLE[engine] : null,
+    model ? modelTitle(engine, model) : null,
     accountChoices > 1 ? accountName : null,
     inDesk ? (approvals === "desk" ? "asks in Desk" : "asks in its terminal") : null,
     canApproveForMe && approveForMe ? "approves for you" : null,
@@ -499,6 +509,12 @@ export function NewSession({
                     {n}
                   </span>
                 ))}
+              </div>
+            )}
+            {canPickModel && offered.includes(engine) && (
+              <div className="field ns-model">
+                <span className="ov-label muted">Model</span>
+                <ModelSelect engine={engine} value={model} label="Model" onChange={(m) => setModels((p) => ({ ...p, [engine]: m }))} />
               </div>
             )}
             {accountChoices > 1 && (
