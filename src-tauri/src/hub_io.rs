@@ -1349,7 +1349,7 @@ mod tests {
     async fn an_agent_s_desk_work_token_goes_to_this_computer_s_hub_and_never_to_the_page() {
         let (remote, mut remote_seen) = hub(vec![status(
             "201 Created",
-            r#"{"id":"0f6c1a2e-1b2c-4d5e-8f90-a1b2c3d4e5f6","token":"wfk_SENTINEL_KNOWS_0123456789","agentId":"allan","expiresAt":"2027-02-01T00:00:00Z"}"#,
+            &serde_json::json!({"id": "0f6c1a2e-1b2c-4d5e-8f90-a1b2c3d4e5f6", "token": KNOWS_FAKE, "agentId": "allan", "expiresAt": "2027-02-01T00:00:00Z"}).to_string(),
         )])
         .await;
         let (local, mut local_seen) = hub(vec![status("204 No Content", "")]).await;
@@ -1408,9 +1408,13 @@ mod tests {
             serde_json::from_str(kept.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         assert_eq!(
             body,
-            serde_json::json!({ "url": remote, "token": "wfk_SENTINEL_KNOWS_0123456789" })
+            serde_json::json!({ "url": remote, "token": KNOWS_FAKE })
         );
     }
+
+    /// Made-up Desk work tokens, built so no scanner takes them for real ones.
+    const KNOWS_FAKE: &str = concat!("wfk", "_SENTINEL_", "KNOWS_0123456789");
+    const KNOWS_UNKEPT: &str = concat!("wfk", "_SENTINEL-", "unkept");
 
     fn key(k: &'static str) -> impl FnOnce() -> std::future::Ready<Result<String, String>> {
         move || std::future::ready(Ok(k.to_string()))
@@ -1471,7 +1475,7 @@ mod tests {
         let (remote, mut remote_seen) = hub(vec![
             status(
                 "201 Created",
-                r#"{"id":"0f6c1a2e-1b2c-4d5e-8f90-a1b2c3d4e5f6","token":"wfk_SENTINEL-unkept"}"#,
+                &serde_json::json!({"id": "0f6c1a2e-1b2c-4d5e-8f90-a1b2c3d4e5f6", "token": KNOWS_UNKEPT}).to_string(),
             ),
             status("204 No Content", ""),
             status(

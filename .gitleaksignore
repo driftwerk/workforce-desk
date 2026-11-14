@@ -14,3 +14,7 @@
 # The protocol fixture's sample public key (extension/protocol/v1.json), made
 # up and public by nature; later commits name no key at all.
 96be8b8c29c12dce179cb47fa25efe51ad297153:extension/protocol/v1.json:generic-api-key:8
+# Sees K5's first commit wrote two made-up Desk work tokens (`wfk_SENTINEL…`)
+# into its tests as literals; later commits build them so nothing reads as one.
+aa5916ef01f40ca8a75377e3029e233fdbd2d47f:src-tauri/src/hub_io.rs:generic-api-key:1280
+aa5916ef01f40ca8a75377e3029e233fdbd2d47f:src-tauri/src/hub_io.rs:generic-api-key:1327
