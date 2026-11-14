@@ -357,6 +357,10 @@ export const ROOM_PAGE = 100;
 /** The hub's answer to a typing ping for an agent that isn't a boss. */
 const NO_BOSS = "There is no boss by that name here.";
 
+/** What an engine's own sign-in says when that engine's hub is older than
+ *  this Desk and refuses the person's paired Desk for it. */
+export const OLDER_ENGINE = "Desk on that computer is older and can’t sign its engines in this way yet. Update it, then try again.";
+
 /** The local hub's admin surface: sessions, terminals, rooms, the crew and
  *  its agents. In the app `t` is `brokered`, which holds no token. */
 export class DeskHub {
@@ -372,7 +376,13 @@ export class DeskHub {
   private asPerson = <T>(method: string, path: string, body?: unknown): Promise<T> => {
     const hub = this.person();
     if (!hub) return Promise.reject(new HubError(503, "Desk hasn’t connected to this engine as you yet. Try again in a moment."));
-    return deskCall<T>(hub, method, path, body);
+    // Desk's paired device is the person's, so a refusal means that hub is
+    // older and still wants the hub's own token: said so, never retried
+    // with that token.
+    return deskCall<T>(hub, method, path, body).catch((e: unknown) => {
+      if (e instanceof HubError && e.status === 403) throw new HubError(403, OLDER_ENGINE);
+      throw e;
+    });
   };
 
   private request = async <T>(method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> =>

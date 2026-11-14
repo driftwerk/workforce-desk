@@ -22,7 +22,7 @@ vi.mock("@tauri-apps/api/core", () => ({
 }));
 
 import { brokered, BridgedSocket } from "./broker";
-import { DeskHub, HubError } from "./client";
+import { DeskHub, HubError, OLDER_ENGINE } from "./client";
 import { useDesk } from "./store";
 import type { Body, DeskSocket, DeskTransport } from "./transport";
 
@@ -294,6 +294,14 @@ describe("an engine's own sign-in", () => {
       "POST http://127.0.0.1:9/api/desk/engines/sign-ins/cx1/token",
       "DELETE http://127.0.0.1:9/api/desk/engines/sign-ins/cx1",
     ]);
+  });
+
+  it("says plainly that an older engine's hub refused it, and never tries the hub's token", async () => {
+    const { transport, recorded } = recording();
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response(JSON.stringify({ error: "not allowed" }), { status: 403, headers: { "content-type": "application/json" } }));
+    const hub = new DeskHub(transport, () => ({ id: "machine:box", url: "http://127.0.0.1:9" }));
+    await expect(hub.startEngineSignIn("codex")).rejects.toMatchObject({ status: 403, message: OLDER_ENGINE });
+    expect(recorded).toEqual([]);
   });
 
   it("is refused here until Desk has paired with the engine's hub", async () => {
