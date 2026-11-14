@@ -112,6 +112,12 @@ pub fn read_records(paths: &Paths) -> Result<Vec<HubRecord>> {
     }
 }
 
+/// Whether hub `id` is still paired, from a read of the records: only a
+/// read that worked, and doesn't name it, says it isn't.
+pub fn still_paired(records: Result<Vec<HubRecord>>, id: &str) -> bool {
+    records.map_or(true, |r| r.iter().any(|x| x.id == id))
+}
+
 fn write_records(paths: &Paths, records: &[HubRecord]) -> Result<()> {
     desk_core::write_private(&paths.hubs(), &serde_json::to_string_pretty(records)?)
 }
@@ -484,6 +490,21 @@ mod tests {
         assert!(id_for("not a url").is_err());
     }
 
+    /// The hub's own `hub_id_for_url` (`crates/desk` there) binds a Desk
+    /// work link to the hub its address names by the same id: these are
+    /// its test's vectors, and both must agree.
+    #[test]
+    fn hub_ids_agree_with_the_hubs_own_for_a_link() {
+        for (url, id) in [
+            ("https://workforce.example.com", "workforce-example-com"),
+            ("https://hub.example.com:8443/x", "hub-example-com"),
+            ("https://a.b-c.example", "a-b-c-example"),
+            ("http://127.0.0.1:8080", "127-0-0-1"),
+        ] {
+            assert_eq!(id_for(url).unwrap(), id);
+        }
+    }
+
     #[test]
     fn pairing_an_address_again_replaces_its_token_in_place() {
         let dir = tempfile::tempdir().unwrap();
@@ -576,6 +597,22 @@ mod tests {
         )
         .unwrap();
         assert_eq!(long.label.chars().count(), LABEL_MAX);
+    }
+
+    #[test]
+    fn a_pairing_is_gone_only_when_the_records_say_so() {
+        let one = || {
+            Ok(vec![HubRecord {
+                id: "dw".into(),
+                label: "Driftwerk".into(),
+                url: "https://dw.example".into(),
+            }])
+        };
+        assert!(still_paired(one(), "dw"));
+        assert!(!still_paired(one(), "atlas"));
+        // A read that failed (the file, or the keychain behind it) is no
+        // word that the pairing went.
+        assert!(still_paired(Err(eyre::eyre!("unreadable")), "dw"));
     }
 
     #[test]

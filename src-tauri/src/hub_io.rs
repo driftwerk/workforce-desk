@@ -193,6 +193,47 @@ impl HubIo {
         self.sockets.dial(owner, page, dial, events)
     }
 
+    /// Paired team hub `id` as a boss's hub (RBD1): the address Desk dials
+    /// it at, and what the person calls it. Never this computer's hub nor a
+    /// machine's, whose agents aren't bosses from another hub.
+    pub async fn boss_hub(&self, id: &str) -> Result<(Url, String), String> {
+        if crate::hubs::machine_of(id).is_some() {
+            return Err("A machine's hub keeps no agents of its own.".into());
+        }
+        let reach = self
+            .paired
+            .reach_async(id)
+            .await
+            .map_err(|e| e.to_string())?;
+        if reach.local {
+            return Err("This computer's own agents become bosses in their own settings.".into());
+        }
+        let (paired, hub) = (Arc::clone(&self.paired), id.to_string());
+        let label = tauri::async_runtime::spawn_blocking(move || paired.label(&hub))
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| id.to_string());
+        Ok((reach.base, label))
+    }
+
+    /// Whether Desk is still paired with hub `id`: true unless its
+    /// records were read and don't name it. No keychain is read, so a
+    /// token or secrets error never passes for a pairing gone; a machine's
+    /// hub and this computer's always are.
+    pub async fn is_paired(&self, id: &str) -> bool {
+        if crate::hubs::machine_of(id).is_some() || id == desk_core::LOCAL_HUB_ID {
+            return true;
+        }
+        let id = id.to_string();
+        tauri::async_runtime::spawn_blocking(move || {
+            let records = Paths::new().and_then(|p| crate::hubs::read_records(&p));
+            crate::hubs::still_paired(records, &id)
+        })
+        .await
+        .unwrap_or(true)
+    }
+
     /// Forgets the hubs read, and which were found old, after one is
     /// paired or removed.
     pub fn forget(&self) {
@@ -325,7 +366,7 @@ impl HubIo {
         local: &str,
         agent: &str,
         engine_key: K,
-        engine_name: &str,
+        engine: (&str, &str),
     ) -> Result<KnowsLinked, String>
     where
         K: FnOnce() -> F,
@@ -357,8 +398,12 @@ impl HubIo {
             .reach_async(local)
             .await
             .map_err(|e| e.to_string())?;
-        if !here.local {
-            return Err("Desk keeps an agent's token only on this computer.".into());
+        // This computer's hub, or one of the person's machines' (Sees K7):
+        // each keeps its own token, under its own engine.
+        if !keeps_knows_tokens(local, here.local) {
+            return Err(
+                "Desk keeps an agent's token only on this computer or a machine of yours.".into(),
+            );
         }
         sync_hub_url_ok(&there.base)?;
         let url = there.base.as_str().trim_end_matches('/').to_string();
@@ -366,7 +411,7 @@ impl HubIo {
         let engine_key = engine_key().await?;
         let ask = serde_json::to_vec(&serde_json::json!({
             "agent_id": agent,
-            "engine": { "id": KNOWS_ENGINE_ID, "name": engine_name, "public_key": engine_key },
+            "engine": { "id": engine.0, "name": engine.1, "public_key": engine_key },
         }))
         .map_err(|e| e.to_string())?;
         let (meta, bytes) = self
@@ -466,6 +511,12 @@ impl HubIo {
     }
 }
 
+/// Whether hub `id` may keep an agent's Desk work token: this computer's
+/// own, or one of the person's machines' (Sees K7), never a paired hub.
+fn keeps_knows_tokens(id: &str, local: bool) -> bool {
+    local || crate::hubs::machine_of(id).is_some()
+}
+
 /// The route a paired Desk mints its own board-sync token on (BH10).
 const MINT_PATH: &str = "/api/me/remote-mcp-tokens/desk";
 
@@ -473,8 +524,8 @@ const MINT_PATH: &str = "/api/me/remote-mcp-tokens/desk";
 const KNOWS_MINT_PATH: &str = "/api/me/desk-knows-tokens";
 
 /// This computer's engine, as an agent's hub is told of it at mint: its id
-/// among the person's engines (machines are named by their own, K7).
-const KNOWS_ENGINE_ID: &str = "local";
+/// among the person's engines (a machine's is its own id, K7).
+pub const KNOWS_ENGINE_ID: &str = "local";
 
 /// What linking an agent for Desk work did, as the page is told of it:
 /// never the token.
@@ -493,7 +544,7 @@ pub enum KnowsLinked {
 }
 
 /// Whether `id` can name an agent, as the hubs take one.
-fn agent_id_ok(id: &str) -> bool {
+pub(crate) fn agent_id_ok(id: &str) -> bool {
     (1..=64).contains(&id.len())
         && id
             .chars()
@@ -543,7 +594,7 @@ fn sync_hub_id_ok(id: &str) -> bool {
 }
 
 /// A hub's words for a refusal: its JSON `error`, else short plain text.
-fn words_of(body: &[u8]) -> Option<String> {
+pub(crate) fn words_of(body: &[u8]) -> Option<String> {
     if let Ok(v) = serde_json::from_slice::<serde_json::Value>(body) {
         return v
             .get("error")
@@ -644,12 +695,43 @@ pub async fn hub_fetch(
     if page_refused(&method, &path) {
         return Err("Desk asks that of a workspace itself, never for the page.".into());
     }
-    let (meta, bytes) = io.fetch(&hub, &method, &path, body).await?;
+    let started = std::time::Instant::now();
+    let fetched = io.fetch(&hub, &method, &path, body).await;
+    if let Some(trace) = knows_trace(&path, &fetched, started.elapsed()) {
+        tracing::info!(%hub, %method, path = %split(&path).0, "{trace}");
+    }
+    let (meta, bytes) = fetched?;
     Ok(tauri::ipc::Response::new(framed(&meta, &bytes)))
 }
 
+/// A read of what agents see (Sees) that failed or was slow, in words for
+/// Desk's log, so one the page couldn't show leaves a trace. Never the
+/// answer's body: its status, or the error, and how long it took.
+fn knows_trace(
+    path: &str,
+    fetched: &Result<(Meta, Vec<u8>), String>,
+    took: std::time::Duration,
+) -> Option<String> {
+    if !split(path).0.starts_with("/api/desk/knows") {
+        return None;
+    }
+    let ms = took.as_millis();
+    match fetched {
+        Err(e) => Some(format!("a Sees read failed after {ms} ms: {e}")),
+        Ok((meta, _)) if meta.status >= 400 => Some(format!(
+            "a Sees read was answered {} after {ms} ms",
+            meta.status
+        )),
+        Ok(_) if took >= KNOWS_SLOW => Some(format!("a Sees read took {ms} ms")),
+        Ok(_) => None,
+    }
+}
+
+/// A Sees read slower than this is logged.
+const KNOWS_SLOW: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// What only the native side asks of a paired hub, never the page: minting
-/// a token (its answer holds it) and keeping one for this computer's hub to
+/// a token (its answer holds it: board sync, Desk work, a boss link) and keeping one for this computer's hub to
 /// send by (an address the page chose would be sent the person's work).
 /// Matched on decoded path segments, any case, whatever the query.
 fn page_refused(method: &str, target: &str) -> bool {
@@ -672,7 +754,12 @@ fn page_refused(method: &str, target: &str) -> bool {
         (method.as_str(), parts.as_slice()),
         ("POST", ["api", "me", "desk-knows-tokens"])
             | ("POST", ["api", "me", "remote-mcp-tokens", "desk"])
+            // A boss link's token is in its answer (RBD1).
+            | ("POST", ["api", "me", "desk-boss-links"])
             | ("PUT", ["api", "desk", "knows-links", _, _])
+            // A boss's relayed calls: the native side's alone, as any
+            // method, on any hub (`crate::crew_relay`).
+            | (_, ["api", "desk", "crew", "relay" | "served", ..])
     )
 }
 
@@ -703,12 +790,18 @@ pub async fn knows_link(
         let answer = local.fetch_native("GET", "/api/desk/engine-key").await?;
         engine_key_of(answer.status, &answer.body)
     };
-    io.link_knows(&remote, desk_core::LOCAL_HUB_ID, &agent, key, ENGINE_NAME)
-        .await
+    io.link_knows(
+        &remote,
+        desk_core::LOCAL_HUB_ID,
+        &agent,
+        key,
+        (KNOWS_ENGINE_ID, ENGINE_NAME),
+    )
+    .await
 }
 
 /// This computer's engine key, from its hub's answer.
-fn engine_key_of(status: u16, body: &str) -> Result<String, String> {
+pub(crate) fn engine_key_of(status: u16, body: &str) -> Result<String, String> {
     let refused = || "This computer's hub didn't say its engine's key.".to_string();
     if !(200..300).contains(&status) {
         return Err(refused());
@@ -981,7 +1074,7 @@ pub async fn pair_collect(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::paired::tests::{account, paired};
     use std::time::Duration;
@@ -991,7 +1084,9 @@ mod tests {
 
     /// A hub on a loopback port answering each request with the next of
     /// `answers`, and telling each request's head and body.
-    async fn hub(answers: Vec<String>) -> (String, tokio::sync::mpsc::UnboundedReceiver<String>) {
+    pub(crate) async fn hub(
+        answers: Vec<String>,
+    ) -> (String, tokio::sync::mpsc::UnboundedReceiver<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1042,7 +1137,7 @@ mod tests {
         )
     }
 
-    fn io_for(hubs: Vec<crate::hubs::HubAccount>) -> HubIo {
+    pub(crate) fn io_for(hubs: Vec<crate::hubs::HubAccount>) -> HubIo {
         HubIo::new(paired(hubs), Arc::default())
     }
 
@@ -1138,7 +1233,7 @@ mod tests {
         );
     }
 
-    fn status(line: &str, body: &str) -> String {
+    pub(crate) fn status(line: &str, body: &str) -> String {
         format!(
             "HTTP/1.1 {line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
             body.len()
@@ -1363,7 +1458,7 @@ mod tests {
                 "local",
                 "Allan",
                 key("ed25519:KEY"),
-                "Desk on this Mac",
+                ("local", "Desk on this Mac"),
             )
             .await
             .unwrap();
@@ -1434,6 +1529,9 @@ mod tests {
             ("POST", "/api/me/desk%2Dknows-tokens"),
             ("POST", "//api/me/Desk-Knows-Tokens/"),
             ("POST", "/api/me/remote-mcp-tokens/desk"),
+            ("POST", "/api/me/desk-boss-links"),
+            ("POST", "/api/me/Desk-Boss-Links/"),
+            ("post", "/api/me/desk%2Dboss-links?renews=x"),
             ("PUT", "/api/desk/knows-links/atlas/allan"),
             ("PUT", "/api/desk/knows-links/atlas/%61llan"),
             ("PUT", "/api/desk/%ff/x"),
@@ -1445,10 +1543,33 @@ mod tests {
             ("PUT", "/api/desk/knows/atlas/allan"),
             ("DELETE", "/api/desk/knows-links/atlas/allan"),
             ("DELETE", "/api/me/desk-knows-tokens/t1"),
+            ("GET", "/api/me/desk-boss-links"),
+            ("DELETE", "/api/me/desk-boss-links/t1"),
             ("GET", "/api/me"),
         ] {
             assert!(!page_refused(method, target), "{method} {target}");
         }
+    }
+
+    /// A boss's relayed calls are never the page's, on any hub, however
+    /// spelled.
+    #[test]
+    fn the_relay_is_never_asked_of_a_workspace_for_the_page() {
+        for (method, target) in [
+            ("GET", "/api/desk/crew/relay"),
+            ("get", "/api/desk/crew/relay?token=x"),
+            (
+                "POST",
+                "/api/desk/crew/relay/0f0e0d0c-0b0a-4909-8807-060504030201",
+            ),
+            ("POST", "//api/Desk/Crew/%72elay/x/"),
+            ("POST", "/api/desk/crew/served"),
+            ("PUT", "/api/desk/crew/served/x"),
+        ] {
+            assert!(page_refused(method, target), "{method} {target}");
+        }
+        assert!(!page_refused("GET", "/api/desk/crew"));
+        assert!(!page_refused("GET", "/api/desk/overview"));
     }
 
     #[test]
@@ -1494,7 +1615,7 @@ mod tests {
             account("atlas", &remote, false, "ATLAS-DEVICE"),
         ]);
         let e = io
-            .link_knows("atlas", "local", "allan", key("k"), "Desk")
+            .link_knows("atlas", "local", "allan", key("k"), ("local", "Desk"))
             .await
             .unwrap_err();
         assert!(e.contains("Desk couldn't keep the link. Try again"), "{e}");
@@ -1509,7 +1630,7 @@ mod tests {
         );
         let _put = local_seen.recv().await.unwrap();
         assert_eq!(
-            io.link_knows("atlas", "local", "allan", key("k"), "Desk")
+            io.link_knows("atlas", "local", "allan", key("k"), ("local", "Desk"))
                 .await
                 .unwrap(),
             KnowsLinked::NotAllowed {
@@ -1519,7 +1640,7 @@ mod tests {
         );
         let _refused = remote_seen.recv().await.unwrap();
         assert_eq!(
-            io.link_knows("local", "local", "allan", no_key, "Desk")
+            io.link_knows("local", "local", "allan", no_key, ("local", "Desk"))
                 .await
                 .unwrap(),
             KnowsLinked::Local {
@@ -1535,7 +1656,7 @@ mod tests {
             ("atlas", "local", "allan/x"),
         ] {
             assert!(
-                io.link_knows(remote, local, agent, no_key, "Desk")
+                io.link_knows(remote, local, agent, no_key, ("local", "Desk"))
                     .await
                     .is_err(),
                 "{remote} {local} {agent}"
@@ -1552,6 +1673,47 @@ mod tests {
                 "nothing more was sent"
             );
         }
+    }
+
+    /// A machine of the person's keeps its own token for an agent, as this
+    /// computer's hub does; a paired hub never does (Sees K7).
+    #[test]
+    fn only_this_computer_and_the_persons_machines_keep_an_agents_token() {
+        assert!(keeps_knows_tokens("local", true));
+        assert!(keeps_knows_tokens("machine:devbox", false));
+        assert!(!keeps_knows_tokens("atlas", false));
+        assert!(!keeps_knows_tokens("machines:devbox", false));
+    }
+
+    #[test]
+    fn a_sees_read_that_failed_or_was_slow_is_traced_and_no_other() {
+        let ok = |status| {
+            Ok((
+                Meta {
+                    status,
+                    content_type: None,
+                },
+                b"{\"secret\":1}".to_vec(),
+            ))
+        };
+        let quick = Duration::from_millis(40);
+        assert_eq!(
+            knows_trace("/api/desk/knows/dw/allan", &ok(200), quick),
+            None
+        );
+        assert_eq!(
+            knows_trace("/api/desk/knows/dw/allan?x=1", &ok(404), quick).as_deref(),
+            Some("a Sees read was answered 404 after 40 ms")
+        );
+        assert_eq!(
+            knows_trace("/api/desk/knows", &Err("unreachable".into()), quick).as_deref(),
+            Some("a Sees read failed after 40 ms: unreachable")
+        );
+        assert_eq!(
+            knows_trace("/api/desk/knows", &ok(200), Duration::from_secs(4)).as_deref(),
+            Some("a Sees read took 4000 ms")
+        );
+        assert_eq!(knows_trace("/api/desk/sessions", &ok(500), quick), None);
     }
 
     #[tokio::test]

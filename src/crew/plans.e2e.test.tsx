@@ -99,8 +99,8 @@ const connect = async () => {
       <RightNow brief={null} />
     </>,
   );
-  await waitFor(() => expect(within(card()).getByText("Waiting for you")).toBeTruthy());
-  await waitFor(() => expect(floor().getByRole("button", { name: /^Approve and run/ })).toBeTruthy());
+  await waitFor(() => expect(within(card()).getByText("Draft — review")).toBeTruthy());
+  await waitFor(() => expect(floor().getByRole("button", { name: /^Approve and start/ })).toBeTruthy());
 };
 
 /** The run started: the plan runs, its first wave's two sessions started,
@@ -124,7 +124,7 @@ beforeEach(() => {
   });
   useOverview.setState({ manager: null, managerSupport: "unknown", overviewSupport: "no", suggestions: {}, suggestionsLoaded: true });
   usePlans.setState({ supported: null, plans: {}, details: {}, unread: {}, refusals: {}, cards: {}, seen: {}, looking: {} });
-  useBoard.setState({ boards: {}, tickets: {} });
+  useBoard.setState({ boards: {}, tickets: {}, plan: null, shown: null });
   useFloor.setState({ hubs: {}, deciding: {}, problems: {}, answered: {} });
   stop = watchFloor();
 });
@@ -138,7 +138,7 @@ afterEach(() => {
 describe("a boss's plan, against the hub", () => {
   it("approved in the DM, runs", async () => {
     await connect();
-    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run" })));
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and start" })));
     // As the person's device, through the Floor's decide: the hub's own
     // plan route takes no approval from Desk's token.
     expect(hub.decided).toEqual([{ at: { kind: "plan", plan: PLAN, revision: 1 }, choice: "allow" }]);
@@ -150,7 +150,7 @@ describe("a boss's plan, against the hub", () => {
     await connect();
     await waitFor(() => expect(floor().getByText("Capped at $25 for the whole plan, warns at 80%, pauses new starts when over.")).toBeTruthy());
     expect(floor().getByRole("button", { name: "Open in chat: Sarah's plan" })).toBeTruthy();
-    await act(async () => fireEvent.click(floor().getByRole("button", { name: /^Approve and run/ })));
+    await act(async () => fireEvent.click(floor().getByRole("button", { name: /^Approve and start/ })));
     expect(hub.decided).toEqual([{ at: { kind: "plan", plan: PLAN, revision: 1 }, choice: "allow" }]);
     await runs();
     expect(hub.plans.requests.filter((r) => r.route.endsWith("/approve"))).toEqual([]);
@@ -159,12 +159,12 @@ describe("a boss's plan, against the hub", () => {
   it("changed by its boss before the Floor's approve reached the hub, is asked again at its newest revision", async () => {
     await connect();
     hub.plans.bossAdds("Fix the flaky payment test");
-    await act(async () => fireEvent.click(floor().getByRole("button", { name: /^Approve and run/ })));
+    await act(async () => fireEvent.click(floor().getByRole("button", { name: /^Approve and start/ })));
     await waitFor(() => expect(floor().getByRole("alert").textContent).toBe("The plan changed since you read it. This is its newest revision: look at it again."));
     expect(hub.plans.plan.state).toBe("proposed");
     // The Floor reads it again: its need is now for revision 2.
     await waitFor(() => expect(hub.web.mock.calls.filter(([u]) => String(u).includes("/api/desk/floor")).length).toBeGreaterThan(1));
-    await act(async () => fireEvent.click(floor().getByRole("button", { name: /^Approve and run/ })));
+    await act(async () => fireEvent.click(floor().getByRole("button", { name: /^Approve and start/ })));
     expect(hub.decided).toEqual([
       { at: { kind: "plan", plan: PLAN, revision: 1 }, choice: "allow" },
       { at: { kind: "plan", plan: PLAN, revision: 2 }, choice: "allow" },
@@ -177,10 +177,10 @@ describe("a boss's plan, against the hub", () => {
   it("changed by its boss before the DM's approve reached the hub, shows the newer revision and asks again", async () => {
     await connect();
     hub.plans.bossAdds("Fix the flaky payment test");
-    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run" })));
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and start" })));
     expect(within(card()).getByRole("alert").textContent).toContain("This is revision 2: look at it, then ask again.");
     expect(within(card()).getByText("Fix the flaky payment test")).toBeTruthy();
-    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run" })));
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and start" })));
     expect(hub.decided).toEqual([
       { at: { kind: "plan", plan: PLAN, revision: 1 }, choice: "allow" },
       { at: { kind: "plan", plan: PLAN, revision: 2 }, choice: "allow" },
@@ -206,7 +206,7 @@ describe("a boss's plan, against the hub", () => {
     await waitFor(() => expect(floor().getByRole("button", { name: /^Approve “Plan change/ })).toBeTruthy());
     expect(floor().getByRole("button", { name: "Look: Sarah's plan" })).toBeTruthy();
     expect(floor().getByRole("button", { name: /^Turn down “Plan change/ })).toBeTruthy();
-    expect(floor().queryByRole("button", { name: /Approve and run/ })).toBeNull();
+    expect(floor().queryByRole("button", { name: /Approve and start/ })).toBeNull();
     await act(async () => fireEvent.click(floor().getByRole("button", { name: /^Approve “Plan change/ })));
     expect(hub.decided).toEqual([{ at: { kind: "plan", plan: PLAN, revision: 2 }, choice: "allow" }]);
     expect(hub.plans.plan.approvedRevision).toBe(2);
@@ -227,13 +227,13 @@ describe("the Floor's approve", () => {
         <RightNow brief={null} />
       </>,
     );
-    await waitFor(() => expect(within(card()).getByText("Waiting for you")).toBeTruthy());
+    await waitFor(() => expect(within(card()).getByText("Draft — review")).toBeTruthy());
     // The card is mounted, but scrolled away: not seen.
     await waitFor(() => expect(floor().getByText("Look at it first")).toBeTruthy());
     expect(floor().queryByRole("button", { name: /^Approve/ })).toBeNull();
     // Look brings it into view: now it is approved here too.
     fireEvent.click(floor().getByRole("button", { name: "Open in chat: Sarah's plan" }));
-    await waitFor(() => expect(floor().getByRole("button", { name: /^Approve and run/ })).toBeTruthy());
+    await waitFor(() => expect(floor().getByRole("button", { name: /^Approve and start/ })).toBeTruthy());
     expect(floor().queryByText("Look at it first")).toBeNull();
     // Sarah changes it: the Floor asks about revision 2, which no one has seen.
     hub.plans.bossAdds("Fix the flaky payment test");
@@ -262,6 +262,74 @@ describe("the board's plan filter", () => {
     expect(screen.getAllByRole("button", { name: /^ACM-2\d: / })).toHaveLength(4);
     fireEvent.change(screen.getByRole("combobox", { name: "Plan" }), { target: { value: "" } });
     expect(screen.getByRole("button", { name: "ACM-7: Tidy the README" })).toBeTruthy();
+  });
+});
+
+describe("a plan's lasting place on its board", () => {
+  const onBoard = async () => {
+    disconnect = useDesk.getState().connect(hub);
+    await act(async () => {
+      await Promise.resolve();
+      hub.events!.say({ type: "snapshot", sessions: [], restore: [], rooms: [] } as DeskEvent);
+    });
+  };
+  const line = () => within(screen.getByRole("group", { name: `Plan: ${hub.plans.plan.goal}` }));
+  const whole = () => screen.queryByRole("article", { name: `Plan: ${hub.plans.plan.goal}` });
+
+  it("shows a line for the plan, which opens to its whole card, and closes", async () => {
+    await onBoard();
+    render(<Board />);
+    await waitFor(() => expect(line().getByText("Draft — review")).toBeTruthy());
+    expect(line().getByText("0 of 4 done")).toBeTruthy();
+    expect(whole()).toBeNull();
+    fireEvent.click(line().getByRole("button", { name: hub.plans.plan.goal }));
+    // The whole card, with what the DM's has, and the board shows its tickets alone.
+    await waitFor(() => expect(within(whole()!).getByRole("button", { name: "Approve and start" })).toBeTruthy());
+    expect(within(whole()!).queryByRole("button", { name: "Open on board" })).toBeNull();
+    expect((screen.getByRole("combobox", { name: "Plan" }) as HTMLSelectElement).value).toBe(PLAN);
+    fireEvent.click(line().getByRole("button", { name: hub.plans.plan.goal, expanded: true }));
+    expect(whole()).toBeNull();
+    expect((screen.getByRole("combobox", { name: "Plan" }) as HTMLSelectElement).value).toBe("");
+  });
+
+  it("shows the plan's card from the Plan select, and from a ticket's plan chip", async () => {
+    await onBoard();
+    render(<Board />);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Plan" })).toBeTruthy());
+    fireEvent.change(screen.getByRole("combobox", { name: "Plan" }), { target: { value: PLAN } });
+    await waitFor(() => expect(whole()).toBeTruthy());
+    fireEvent.change(screen.getByRole("combobox", { name: "Plan" }), { target: { value: "" } });
+    expect(whole()).toBeNull();
+    const ticket20 = await screen.findByRole("button", { name: "ACM-20: Refunds endpoint over Stripe refunds" });
+    fireEvent.click(await within(ticket20).findByText(hub.plans.plan.goal));
+    await waitFor(() => expect(whole()).toBeTruthy());
+    // The chip shows the plan; the ticket's panel isn't opened.
+    expect(useBoard.getState().open).toBeNull();
+  });
+
+  it("pauses and resumes from its line", async () => {
+    hub.plans.approve(1);
+    await onBoard();
+    render(<Board />);
+    await waitFor(() => expect(line().getByText("Running")).toBeTruthy());
+    await act(async () => fireEvent.click(line().getByRole("button", { name: "Pause" })));
+    await waitFor(() => expect(line().getByText("Paused")).toBeTruthy());
+    expect(hub.plans.plan.state).toBe("paused");
+    await act(async () => fireEvent.click(line().getByRole("button", { name: "Resume" })));
+    await waitFor(() => expect(line().getByText("Running")).toBeTruthy());
+  });
+
+  it("opens from the DM's card, which stays whole beside the board's", async () => {
+    await onBoard();
+    render(<DeskActions extras={{ plan: { id: PLAN, revision: 1 } }} text="Sarah proposes a plan." />);
+    await waitFor(() => expect(within(card()).getByText("Draft — review")).toBeTruthy());
+    fireEvent.click(within(card()).getByRole("button", { name: "Open on board" }));
+    expect(useDesk.getState().view).toBe("board");
+    expect(useBoard.getState().plan).toBe(PLAN);
+    render(<Board />);
+    await waitFor(() => expect(screen.getAllByRole("article", { name: /^Plan: / })).toHaveLength(2));
+    // The DM's card is still the plan's whole card, not an older revision's notice.
+    for (const c of screen.getAllByRole("article", { name: /^Plan: / })) expect(within(c).getByRole("button", { name: /^Approve and start/ })).toBeTruthy();
   });
 });
 

@@ -149,6 +149,14 @@ const offsetOf = (id: string) =>
   pane
     .querySelector<HTMLElement>(`[data-message-id="${id}"]`)!
     .getBoundingClientRect().top;
+/** What the webview does as the content draws shorter: the pane's scrollTop
+ *  is pulled up to the new end, and says so with a scroll. */
+const clamped = () =>
+  act(() => {
+    top = Math.max(0, Math.min(top, pane.scrollHeight - VIEW));
+    fireEvent.scroll(pane);
+  });
+const jumpPill = () => screen.queryByRole("button", { name: /Jump to latest/ });
 /** You scroll the pane to `y`. */
 const scrollTo = (y: number) =>
   act(() => {
@@ -466,5 +474,76 @@ describe("coming back to a DM", () => {
         line.nextElementSibling?.getAttribute("data-message-id"),
     ).toBe("k17");
     expect(atEnd()).toBe(false);
+  });
+});
+
+describe("Jump to latest shows only when the end is out of sight", () => {
+  it("doesn't show as what's at the end draws shorter and the pane is pulled up to it", async () => {
+    await open();
+    expect(atEnd()).toBe(true);
+    // The last answer settles shorter (a kept copy, the working row going):
+    // the webview's scroll comes before the ResizeObserver's.
+    tall.set("k19", 40);
+    clamped();
+    resized();
+    expect(jumpPill()).toBeNull();
+    expect(atEnd()).toBe(true);
+    // Still at the end: what grows there next is followed.
+    tall.set("k19", 400);
+    resized();
+    expect(atEnd()).toBe(true);
+    expect(jumpPill()).toBeNull();
+  });
+
+  it("doesn't show when a DM opens at a New line with all that's new in sight", async () => {
+    useReads.setState({ dms: { [KEY]: { at: at(17), message: "k17" } } });
+    await open();
+    expect(screen.getByRole("separator", { name: "New messages" })).toBeTruthy();
+    expect(atEnd()).toBe(true);
+    expect(jumpPill()).toBeNull();
+    // The new answer finishes drawing taller than the pane: now there's
+    // more below, and the pill says so.
+    tall.set("k19", 600);
+    resized();
+    expect(jumpPill()).not.toBeNull();
+  });
+
+  it("counts what Allan says next as new when it lands below a New line held in sight", async () => {
+    useReads.setState({ dms: { [KEY]: { at: at(17), message: "k17" } } });
+    const s = await open();
+    expect(jumpPill()).toBeNull();
+    // A long answer: the New line stays where it is, the answer runs on
+    // below what's in sight.
+    tall.set("a1", 300);
+    await streams(s, "t-next", "a1", ["one", "more"]);
+    await ends(s, "t-next", "a1");
+    resized();
+    expect(jumpPill()?.textContent).toContain("1 new");
+  });
+
+  it("doesn't show when a kept place opens with the end in sight", async () => {
+    useUi.setState({ anchors: { [`dm:${KEY}`]: { id: "k18", offset: 0 } } });
+    await open();
+    expect(atEnd()).toBe(true);
+    expect(jumpPill()).toBeNull();
+  });
+
+  it("shows when scrolled up past the end, and goes as a taller pane brings the end in sight", async () => {
+    await open();
+    scrollTo(1500);
+    expect(jumpPill()).not.toBeNull();
+    // The window grows: the place kept, the end in sight with no scroll.
+    VIEW = 600;
+    resized();
+    expect(atEnd()).toBe(true);
+    expect(jumpPill()).toBeNull();
+  });
+
+  it("shows while the last lines are hidden, however few", async () => {
+    await open();
+    scrollTo(pane.scrollTop - 30);
+    expect(jumpPill()).not.toBeNull();
+    scrollTo(pane.scrollHeight);
+    expect(jumpPill()).toBeNull();
   });
 });

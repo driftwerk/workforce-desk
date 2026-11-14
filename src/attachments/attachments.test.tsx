@@ -29,6 +29,10 @@ vi.mock("../platform", () => ({
     uploads.sent.push(file.name);
     return { artifact_id: `art_${file.name}`, media_type: file.type, filename: file.name, size: file.size };
   },
+  // Machines, as Settings' What they see lists them: none here.
+  machinesList: async () => [],
+  onMachinesChanged: () => () => {},
+  subscribe: () => () => {},
 }));
 
 const { useChat } = await import("../chat/store");

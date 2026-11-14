@@ -14,6 +14,7 @@
 pub mod manifest;
 pub mod parent;
 mod relay;
+pub mod revision;
 
 pub use relay::{Hub, run};
 

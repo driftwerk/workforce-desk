@@ -1,11 +1,13 @@
 import { afterEach, describe, expect, it } from "vitest";
 import fixture from "../protocol/v1.json";
+import helperFixture from "../protocol/desk-helper.json";
 import { Fail, perform, workable, type Exec } from "../src/commands";
 import { DeskTabs, type ChromeTabs, type Kept } from "../src/desk";
 import { labelOf } from "../src/identity";
 import { Link, type Port } from "../src/link";
 import { clickOn, fillField, onKeyPage, pressKey, readKey, readPage, selectOption, setFiles, shownOf, typeText } from "../src/page";
-import { PROOF_PREFIX, PROTOCOL, fromHub, type Command, type ToHub } from "../src/protocol";
+import { PROOF_PREFIX, PROTOCOL, REVISION, fromHub, type Command, type ToHub } from "../src/protocol";
+import { upToDate, type Reloader } from "../src/update";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -148,6 +150,25 @@ describe("the protocol", () => {
     const cmds = fixture.from_hub.calls.map((c) => c.cmd).sort();
     const known: Command["cmd"][] = ["capture", "capture_key", "click", "close", "fill", "front", "hand_over", "navigate", "open", "press", "read", "select", "shown", "stop", "type", "upload", "wait", "where"];
     expect(cmds).toEqual([...known].sort());
+  });
+});
+
+describe("what Desk Helper and the extension say to each other", () => {
+  it("stamps this build with the fixture's revision, and reads what Desk Helper says", () => {
+    expect(REVISION).toBe(helperFixture.revision);
+    expect(helperFixture.to_chrome.expects.revision).toBe(REVISION);
+    expect(fromHub(helperFixture.to_chrome.expects)).toEqual(helperFixture.to_chrome.expects);
+    expect(fromHub({ type: "expects", revision: "2" })).toBeNull();
+    // The hello's other fields are the hub's, as v1.json has them.
+    const { revision, ...hello } = helperFixture.from_chrome.hello;
+    expect(revision).toBe(REVISION);
+    expect(hello).toEqual(fixture.to_hub.hello);
+  });
+
+  it("is revised with the commands: a new one in v1.json is a new revision here", () => {
+    // Adding a command fails this until `commands` is updated there, and
+    // `revision` with it, so an unpacked build without it reloads.
+    expect([...helperFixture.commands].sort()).toEqual(fixture.from_hub.calls.map((c) => c.cmd).sort());
   });
 });
 
@@ -451,7 +472,7 @@ describe("the link to Desk", () => {
     const later: (() => void)[] = [];
     const link = new Link(() => p, async () => me, new DeskTabs(new FakeChrome()), execOn(), "0.1.0", (f) => later.push(f));
     await link.start();
-    expect(p.sent[0]).toEqual({ type: "hello", protocol: PROTOCOL, version: "0.1.0", key: "KEY", label: "AAAA-BBBB-CCCC-DDDD" });
+    expect(p.sent[0]).toEqual({ type: "hello", protocol: PROTOCOL, revision: REVISION, version: "0.1.0", key: "KEY", label: "AAAA-BBBB-CCCC-DDDD" });
     await p.hub({ type: "challenge", nonce: "n1", state: "pending" });
     expect(p.sent[1]).toEqual({ type: "proof", signature: "signed:n1" });
     expect(link.state.state).toBe("waiting");
@@ -467,6 +488,150 @@ describe("the link to Desk", () => {
     p.drop("Native host has exited.");
     expect(link.state.state).toBe("no-desk");
     expect(later).toHaveLength(1);
+  });
+});
+
+describe("bringing an unpacked build up to date", () => {
+  const port = () => {
+    const sent: ToHub[] = [];
+    let take: (m: unknown) => void = () => undefined;
+    const p: Port & { sent: ToHub[]; hub: (m: unknown) => Promise<void> } = {
+      sent,
+      post: (m) => sent.push(m),
+      onMessage: (f) => (take = f),
+      onDisconnect: () => undefined,
+      disconnect: () => undefined,
+      hub: async (m) => {
+        take(m);
+        await new Promise((r) => setTimeout(r, 0));
+      },
+    };
+    return p;
+  };
+  const me = { publicKey: "KEY", label: "AAAA-BBBB-CCCC-DDDD", sign: async (n: string) => `signed:${n}` };
+  /** Chrome's management, storage.local and runtime.reload, stood in for. */
+  class FakeReloader implements Reloader {
+    stored: number | null = null;
+    reloads = 0;
+    /** The rebuilt files on disk: a newer revision than any build here. */
+    disk: number | null = 99;
+    constructor(public install: string) {}
+    async onDisk() {
+      return this.disk;
+    }
+    async installType() {
+      return this.install;
+    }
+    async reloadedFor() {
+      return this.stored;
+    }
+    async remember(r: number) {
+      this.stored = r;
+    }
+    reload() {
+      this.reloads++;
+    }
+  }
+  /** A connection of a build at `revision`, Desk Helper expecting `expects`:
+   *  what the extension told it, with whatever it left for later run. */
+  const connect = async (r: FakeReloader, revision: number, expects: number, chrome = new FakeChrome()) => {
+    const p = port();
+    const later: (() => void)[] = [];
+    const link = new Link(() => p, async () => me, new DeskTabs(chrome), execOn(), "0.1.0", (f) => later.push(f), r, revision);
+    await link.start();
+    expect(p.sent[0]).toMatchObject({ type: "hello", revision });
+    await p.hub({ type: "expects", revision: expects });
+    for (const f of later.splice(0)) f();
+    return p.sent.slice(1);
+  };
+
+  it("reloads a stale unpacked build once, telling Desk Helper first, and closes Desk's window", async () => {
+    const r = new FakeReloader("development");
+    const chrome = new FakeChrome();
+    const tabs = new DeskTabs(chrome);
+    await tabs.tabFor("s");
+    const said = await connect(r, 1, 2, chrome);
+    expect(said).toEqual([{ type: "updating", revision: 2, outcome: "reloading" }]);
+    expect(r.reloads).toBe(1);
+    expect(r.stored).toBe(2);
+    expect(chrome.windows.size).toBe(0);
+  });
+
+  it("doesn't loop: the same old files after a reload are said, not reloaded again", async () => {
+    const r = new FakeReloader("development");
+    await connect(r, 1, 2);
+    // Chrome started it again from disk, and the files were still old.
+    const again = await connect(r, 1, 2);
+    expect(again).toEqual([{ type: "updating", revision: 2, outcome: "tried" }]);
+    expect(r.reloads).toBe(1);
+    const andAgain = await connect(r, 1, 2);
+    expect(andAgain[0]).toMatchObject({ outcome: "tried" });
+    expect(r.reloads).toBe(1);
+    // A Desk expecting newer still gets its one reload.
+    await connect(r, 2, 3);
+    expect(r.reloads).toBe(2);
+  });
+
+  it("waits, without spending its one try, while the files on disk aren't rebuilt yet, and looks again", async () => {
+    const r = new FakeReloader("development");
+    r.disk = null;
+    const p = port();
+    const later: (() => void)[] = [];
+    const link = new Link(() => p, async () => me, new DeskTabs(new FakeChrome()), execOn(), "0.1.0", (f) => later.push(f), r, 1);
+    await link.start();
+    // Desk Helper says it once, on this connection; said again, it starts
+    // no second look.
+    await p.hub({ type: "expects", revision: 2 });
+    await p.hub({ type: "expects", revision: 2 });
+    expect(p.sent.slice(1)).toEqual([{ type: "updating", revision: 2, outcome: "unbuilt" }]);
+    expect(later).toHaveLength(1);
+    const tick = async () => {
+      for (const f of later.splice(0)) f();
+      await new Promise((res) => setTimeout(res, 0));
+    };
+    // Mid-build, then the old files: it keeps looking, and says nothing new.
+    for (const disk of [null, 1]) {
+      r.disk = disk;
+      await tick();
+      expect(p.sent).toHaveLength(2);
+      expect(later).toHaveLength(1);
+    }
+    expect(r.reloads).toBe(0);
+    expect(r.stored).toBeNull();
+    // The build finished: it reloads into it, with no new connection.
+    r.disk = 2;
+    await tick();
+    expect(p.sent.slice(2)).toEqual([{ type: "updating", revision: 2, outcome: "reloading" }]);
+    await tick();
+    expect(r.reloads).toBe(1);
+    expect(later).toHaveLength(0);
+  });
+
+  it("never reloads a Web Store install", async () => {
+    for (const install of ["normal", "sideload", "admin", "other"]) {
+      const r = new FakeReloader(install);
+      expect(await connect(r, 1, 2)).toEqual([{ type: "updating", revision: 2, outcome: "store" }]);
+      expect(r.reloads).toBe(0);
+      expect(r.stored).toBeNull();
+    }
+  });
+
+  it("leaves a current build alone, and says nothing", async () => {
+    for (const expects of [1, 2]) {
+      const r = new FakeReloader("development");
+      expect(await connect(r, 2, expects)).toEqual([]);
+      expect(r.reloads).toBe(0);
+      expect(r.stored).toBeNull();
+    }
+    expect(await upToDate(2, 2, new FakeReloader("development"))).toBe("current");
+  });
+
+  it("ignores what Desk Helper expects when it has no way to reload", async () => {
+    const p = port();
+    const link = new Link(() => p, async () => me, new DeskTabs(new FakeChrome()), execOn(), "0.1.0", () => undefined);
+    await link.start();
+    await p.hub({ type: "expects", revision: REVISION + 1 });
+    expect(p.sent).toHaveLength(1);
   });
 });
 

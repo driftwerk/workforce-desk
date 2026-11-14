@@ -1027,6 +1027,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "bytes",
+ "chrono",
  "desk-chrome-host",
  "desk-core",
  "desk-machine",
@@ -1087,6 +1088,8 @@ dependencies = [
  "tempfile",
  "tokio",
  "tokio-tungstenite",
+ "tracing",
+ "tracing-subscriber",
  "windows-registry",
  "windows-sys 0.61.2",
 ]

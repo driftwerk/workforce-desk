@@ -131,12 +131,16 @@ export function TicketCard({
   waiting,
   settled = false,
   plan,
+  onPlan,
   buttonRef,
   onOpen,
   onKeyDown,
 }: {
   /** The goal of the boss's plan it is in, if it is in one. */
   plan?: string;
+  /** Shows that plan's card, from its chip (by pointer; the board's Plan
+   *  select and its plans' lines are the keyboard's way). */
+  onPlan?: () => void;
   ticket: Ticket;
   all: Readonly<Record<string, Ticket>>;
   /** Every ticket's state, worked out once for the board. */
@@ -329,7 +333,19 @@ export function TicketCard({
         {t.state === "dropped" && !facts?.stateKind && <span className="faint small board-dropped">Dropped</span>}
         {written && !theirs && <By who={t.createdBy} />}
         {plan !== undefined && (
-          <span className="chip board-plan-chip" title={plan ? `In the plan “${plan}”` : "In a plan"}>
+          <span
+            className={onPlan ? "chip board-plan-chip board-plan-chip-link" : "chip board-plan-chip"}
+            title={onPlan ? `Show the plan “${plan || "it is in"}”` : plan ? `In the plan “${plan}”` : "In a plan"}
+            onClick={
+              onPlan
+                ? (e) => {
+                    // The chip shows its plan; the card around it isn't opened.
+                    e.stopPropagation();
+                    onPlan();
+                  }
+                : undefined
+            }
+          >
             {plan || "Plan"}
           </span>
         )}

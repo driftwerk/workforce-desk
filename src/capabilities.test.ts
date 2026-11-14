@@ -198,6 +198,16 @@ describe("each window's capabilities", () => {
       "board_sync_mint",
       // Linking an agent for Desk work: Settings, in the main window only.
       "knows_link",
+      // A group's boss on another hub: the main window's Boss sheet only.
+      "boss_link",
+      "boss_set",
+      "boss_pause",
+      "boss_resume",
+      "boss_unlink",
+      "boss_retry",
+      "boss_unpause_engine",
+      // Telling the machines what an agent sees of them (Sees K7).
+      "knows_machines",
     ])
       expect(grid.has(c), c).toBe(false);
     expect(capability("grid").windows).toEqual(["grid-*"]);

@@ -80,3 +80,42 @@ export const linkKnows = async (remote: string, agent: string): Promise<KnowsLin
     throw new HubError(502, e instanceof Error ? e.message : String(e));
   }
 };
+
+/** What links an agent elsewhere in this window: the link above in the main
+ *  window, which sets it (`shell/App.tsx`); none in a grid's, which isn't
+ *  granted the command. */
+let linker: typeof linkKnows | null = null;
+
+export const setKnowsLinker = (f: typeof linkKnows | null) => {
+  linker = f;
+};
+
+export const knowsLinker = (): typeof linkKnows | null => linker;
+
+/** Tells the person's machines what agent `agent` on hub `hub` sees of
+ *  them now, after its rule changed: with `choice` when it narrowed and the
+ *  person said what to do with what the agent holds (Sees K7). Quiet when
+ *  it can't: Desk tells them again every few minutes. */
+export const tellMachines = async (hub: string, agent: string, choice?: "keep" | "delete"): Promise<MachinesTold | null> => {
+  if (!inTauri) return null;
+  try {
+    return await invoke<MachinesTold>("knows_machines", { hub, agent, choice: choice ?? null });
+  } catch {
+    // Told again on Desk's next pass.
+    return null;
+  }
+};
+
+/** What an agent holds of the person's machines outside its rule now, and
+ *  whether telling them grew it (Sees K7). */
+export type MachinesTold = { held: { items: number; transcripts: number; sessions: number }; grew: boolean };
+
+/** What tells the machines in this window: the one above in the main
+ *  window, which sets it (`shell/App.tsx`); none in a grid's. */
+let teller: typeof tellMachines | null = null;
+
+export const setKnowsTeller = (f: typeof tellMachines | null) => {
+  teller = f;
+};
+
+export const knowsTeller = (): typeof tellMachines | null => teller;

@@ -185,6 +185,7 @@ describe("The Settings tab", () => {
       "How they sound",
       "How they remember",
       "How they work",
+      "What they see",
       "Checking in",
       "Fine-tuning",
     ]);

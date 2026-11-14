@@ -206,8 +206,23 @@ const messageRow = (pane: HTMLElement, id: string): HTMLElement | null =>
 /** How far up you scroll to leave the newest message while it grows. */
 const LEAVE_PX = 4;
 
+/** How far `pane` is from the end of its scrolling. */
+const fromEnd = (pane: HTMLElement): number => pane.scrollHeight - pane.scrollTop - pane.clientHeight;
+
 /** Whether `pane` is at (or within reach of) its newest message. */
-const nearEnd = (pane: HTMLElement): boolean => pane.scrollHeight - pane.scrollTop - pane.clientHeight <= AT_NEWEST_PX;
+const nearEnd = (pane: HTMLElement): boolean => fromEnd(pane) <= AT_NEWEST_PX;
+
+/** Slack for a fractional scrollTop: this near the end of the scrolling is
+ *  at it. */
+const AT_MAX_PX = 1;
+
+/** The pane's own bottom padding: below the end of what's in it. */
+export const padBelow = (pane: HTMLElement): number => Number.parseFloat(getComputedStyle(pane).paddingBottom) || 0;
+
+/** Whether the end of what's in `pane` is in sight: its last line above the
+ *  pane's bottom, its bottom padding (`pad`) aside. Measured as laid out
+ *  now, so it holds however the pane got there. */
+export const endInView = (pane: HTMLElement, pad = padBelow(pane)): boolean => fromEnd(pane) <= pad + AT_MAX_PX;
 
 /** A chat that stays where you put it. At its newest message, it follows
  *  what arrives and anything that grows. Scrolled up, the message you're
@@ -228,7 +243,18 @@ export function useStayPut(place: string | null, settled: boolean) {
   const waiting = useRef<Anchor | null>(place ? (useUi.getState().anchors[place] ?? null) : null);
   // What Desk set scrollTop to last: a scroll event at it is Desk's own.
   const ours = useRef<number | null>(null);
+  // Away from the newest message and its end out of sight: what Jump to
+  // latest shows for. Held somewhere with the end in sight anyway (a New
+  // line or a kept place near the end, the end drawing shorter), it's
+  // not away.
   const [away, setAway] = useState(false);
+  // The pane's bottom padding, read as it's set and as it resizes (a
+  // narrower pane can pad less), not on every measure.
+  const pad = useRef(0);
+  const measure = useCallback(() => {
+    const el = node.current;
+    setAway(!!el && !atEnd.current && !endInView(el, pad.current));
+  }, []);
   const settledNow = useRef(settled);
   settledNow.current = settled;
 
@@ -247,29 +273,28 @@ export function useStayPut(place: string | null, settled: boolean) {
         held.current = waiting.current;
         atEnd.current = false;
         waiting.current = null;
-        setAway(true);
       } else if (settledNow.current) waiting.current = null;
     }
-    if (atEnd.current) return write(el, el.scrollHeight);
-    const h = held.current;
-    if (!h) return;
-    const row = messageRow(el, h.id);
-    // Its message gone (a kept copy took its place, under another id): what's
-    // in sight now is held from here on.
-    if (!row) {
-      held.current = firstInSight(el);
-      return;
+    if (atEnd.current) write(el, el.scrollHeight);
+    else if (held.current) {
+      const h = held.current;
+      const row = messageRow(el, h.id);
+      // Its message gone (a kept copy took its place, under another id):
+      // what's in sight now is held from here on.
+      if (!row) held.current = firstInSight(el);
+      else {
+        const off = row.getBoundingClientRect().top - el.getBoundingClientRect().top - h.offset;
+        if (Math.abs(off) >= 1) write(el, el.scrollTop + off);
+      }
     }
-    const off = row.getBoundingClientRect().top - el.getBoundingClientRect().top - h.offset;
-    if (Math.abs(off) >= 1) write(el, el.scrollTop + off);
-  }, []);
+    measure();
+  }, [measure]);
 
   /** Goes to the newest message, and follows it from there. */
   const toLatest = useCallback(() => {
     atEnd.current = true;
     held.current = null;
     waiting.current = null;
-    setAway(false);
     keep();
     if (place) useUi.getState().setAnchor(place, null);
   }, [keep, place]);
@@ -280,7 +305,6 @@ export function useStayPut(place: string | null, settled: boolean) {
       atEnd.current = false;
       held.current = { id, offset };
       waiting.current = null;
-      setAway(true);
       keep();
     },
     [keep],
@@ -303,17 +327,26 @@ export function useStayPut(place: string | null, settled: boolean) {
         ours.current = null;
         // Yours: where you are now is where to stay. Any scroll up leaves
         // the newest message, however near it; back within reach, you're
-        // at it again.
+        // at it again. Landing at the very end is at it whichever way: the
+        // webview pulling the pane up as what's at the end draws shorter
+        // (the working row going, a reply's kept copy) isn't you leaving.
         waiting.current = null;
         const up = el.scrollTop < lastTop.current - LEAVE_PX;
         lastTop.current = el.scrollTop;
-        atEnd.current = !up && nearEnd(el);
+        atEnd.current = fromEnd(el) <= AT_MAX_PX || (!up && nearEnd(el));
         held.current = atEnd.current ? null : firstInSight(el);
-        setAway(!atEnd.current);
+        measure();
         clearTimeout(timer);
         timer = setTimeout(save, SETTLE_MS);
       };
-      const ro = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(() => keep());
+      pad.current = padBelow(el);
+      const ro =
+        typeof ResizeObserver === "undefined"
+          ? null
+          : new ResizeObserver(() => {
+              pad.current = padBelow(el);
+              keep();
+            });
       // The pane itself resizing: the composer, or its queue, taking room.
       ro?.observe(el);
       el.addEventListener("scroll", onScroll, { passive: true });
@@ -328,7 +361,7 @@ export function useStayPut(place: string | null, settled: boolean) {
       };
       keep();
     },
-    [keep, place],
+    [keep, measure, place],
   );
   useEffect(() => () => offScroll.current?.(), []);
 
@@ -346,5 +379,9 @@ export function useStayPut(place: string | null, settled: boolean) {
   );
   useEffect(() => () => observer.current?.disconnect(), []);
 
-  return { pane, list, keep, toLatest, showAt, away };
+  /** Whether the pane follows its newest message: you're at it. Read
+   *  during a render, it's what you've seen so far. */
+  const following = useCallback(() => atEnd.current, []);
+
+  return { pane, list, keep, toLatest, showAt, away, following };
 }

@@ -71,4 +71,6 @@ Bump `version` in `extension/manifest.json`, build and zip as above, then **Pack
    - In Desk, open Settings → Browser and check the code there matches the one in the popup.
    - Press **It's my Chrome**.
 
+After that the unpacked build keeps itself up to date: when Desk Helper is built with a newer revision than the one Chrome runs (`extension/protocol/desk-helper.json`), the extension reloads itself from `extension/dist`, once per revision, and reconnects. Desk Helper logs what happened to `logs/chrome-host.log` in Desk's folder. Bump `revision` there whenever the extension gains something Desk relies on. A Web Store install never reloads itself; Chrome updates it.
+
 The unpacked ID depends on the folder's path. To keep it fixed across checkouts, set `DESK_EXTENSION_KEY` once the store's public key is known (step 2 of "Tie Desk to the item" above).

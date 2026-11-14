@@ -711,6 +711,62 @@ button.ticket-chip:hover {
   border-color: transparent;
 }
 
+/* A card's plan chip shows its plan, when the board can show it. */
+.board-plan-chip-link {
+  cursor: pointer;
+}
+.board-plan-chip-link:hover {
+  text-decoration: underline;
+}
+
+/* The board's plans, under its header as its sync is: a line each (goal,
+   standing, progress, Pause or Resume), the one shown with its whole card
+   under it, in a scroll of its own so the columns stay in sight. */
+.board-plans {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 28px;
+  border-bottom: 1px solid var(--border);
+  flex: none;
+  max-height: 65vh;
+  overflow-y: auto;
+  /* A shadow at an edge with more to scroll to, so a card's foot (its
+     Approve) is never out of sight unsaid. */
+  background:
+    linear-gradient(var(--bg) 30%, transparent) center top,
+    linear-gradient(transparent, var(--bg) 70%) center bottom,
+    radial-gradient(farthest-side at 50% 0, var(--lift), transparent) center top,
+    radial-gradient(farthest-side at 50% 100%, var(--lift), transparent) center bottom;
+  background-repeat: no-repeat;
+  background-size: 100% 28px, 100% 28px, 100% 10px, 100% 10px;
+  background-attachment: local, local, scroll, scroll;
+}
+.board-plans > .plan-row-open {
+  margin: 0 -10px;
+  padding: 0 10px;
+  border-radius: var(--radius);
+  background: var(--raised);
+}
+.board-plan-card {
+  padding: 6px 0 8px;
+}
+.board-plan-card .plancard {
+  max-width: 900px;
+  /* Not clipped: its foot sticks to the band's bottom (below). */
+  overflow: visible;
+}
+/* However long the plan, its foot (counts, Drop, Edit, Pause, Approve and
+   start) stays in sight at the band's bottom while its tickets scroll. */
+.board-plan-card .pc-foot {
+  position: sticky;
+  bottom: -8px;
+  z-index: 1;
+  background: var(--raised);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+  box-shadow: 0 -6px 12px -8px var(--lift);
+}
+
 /* ── Sync with Linear or Jira ───────────────────────────────────────────── */
 
 /* A synced board's sync, under its header: what it's linked to, its chip,
@@ -880,7 +936,8 @@ button.ticket-chip:hover {
     margin-inline: 16px;
     padding-inline: 12px;
   }
-  .board-sync {
+  .board-sync,
+  .board-plans {
     margin-inline: 0;
     padding-inline: 16px;
   }
