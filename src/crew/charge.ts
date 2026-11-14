@@ -11,6 +11,8 @@ export interface Boss {
   id: string;
   name: string;
   level: OversightLevel | null;
+  /** One on another hub, its group's grant names (`id` is `<hub>/<agent>`). */
+  served?: boolean;
 }
 
 /** How long the person's wheel lasts after their last input, as the hub

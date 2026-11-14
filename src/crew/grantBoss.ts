@@ -34,7 +34,9 @@ interface GrantBossState {
  *  runs). Its name is the roster's when the paired hub's roster has it. */
 export const bossOfStatus = (s: RemoteBoss | null, rosterName?: string): Boss | null => {
   if (!s || s.paused || s.pausing || s.stopping) return null;
-  return { id: s.party, name: rosterName ?? s.agent, level: s.choice.level };
+  // Every engine's grant read as not serving it (expired, say): none.
+  if (s.engines.length > 0 && s.engines.every((e) => e.live === false)) return null;
+  return { id: s.party, name: rosterName ?? s.agent, level: s.choice.level, served: true };
 };
 
 const nameOf = (s: RemoteBoss | null): string | undefined =>
@@ -49,13 +51,17 @@ export const useGrantBosses = create<GrantBossState>((set, get) => ({
     set((s) => ({ byGroup: { ...s.byGroup, [group]: bossOfStatus(status, nameOf(status)) }, readAt: { ...s.readAt, [group]: Date.now() } })),
   ensure: (group) => {
     if (group === UNGROUPED || reading.has(group)) return;
-    if (Date.now() - (get().readAt[group] ?? 0) < FRESH_MS) return;
+    const asked = Date.now();
+    if (asked - (get().readAt[group] ?? 0) < FRESH_MS) return;
     reading.add(group);
     remoteBosses
       .status(group)
-      .then((s) => get().heard(group, s))
-      // Kept as last read; read again next time it's asked for.
-      .catch(() => {})
+      .then((s) => {
+        // Read fresher meanwhile (the Boss sheet): that stands.
+        if ((get().readAt[group] ?? 0) <= asked) get().heard(group, s);
+      })
+      // Kept as last read, and not asked again until it would be anyway.
+      .catch(() => set((s) => ({ readAt: { ...s.readAt, [group]: Date.now() } })))
       .finally(() => reading.delete(group));
   },
 }));
@@ -82,5 +88,8 @@ export const useGrantBossOf = (s: Placed | null | undefined): Boss | null => {
   return boss;
 };
 
-/** Whether `boss` is one on another hub (its id `<hub>/<agent>`). */
-export const isServed = (boss: Boss | null | undefined): boolean => !!boss && boss.id.includes("/");
+/** Whether `boss` is one on another hub, named by its grant. */
+export const isServed = (boss: Boss | null | undefined): boolean => !!boss?.served;
+
+/** How often the groups' bosses are read again while Desk is open. */
+export const REREAD_MS = FRESH_MS;

@@ -47,7 +47,7 @@ import { ChargeBadge } from "../crew/ChargeBadge";
 import { SessionTicketChip } from "../board/TicketChip";
 import { chargeChoices } from "../crew/charge";
 import { useBoss, useCharge, useCharges } from "../crew/chargeStore";
-import { grantBossOf, useGrantBosses } from "../crew/grantBoss";
+import { grantBossOf, REREAD_MS, useGrantBosses } from "../crew/grantBoss";
 import { BossSheet } from "./BossSheet";
 import { remoteBosses } from "./remoteBoss";
 import { below, DragChip, isMenuKey, MoreIcon, PLUGINS, SENSORS, SortRow, step, type Operation } from "./rows";
@@ -242,7 +242,13 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   // them to it.
   const groupIds = groups.map((g) => g.id).join("\n");
   useEffect(() => {
-    for (const id of groupIds.split("\n")) if (id) useGrantBosses.getState().ensure(id);
+    const read = () => {
+      for (const id of groupIds.split("\n")) if (id) useGrantBosses.getState().ensure(id);
+    };
+    read();
+    // Paused, stopped or linked elsewhere meanwhile: read again while open.
+    const again = setInterval(read, REREAD_MS);
+    return () => clearInterval(again);
   }, [groupIds]);
 
   // After a move from the keyboard, focus stays on what moved, wherever it

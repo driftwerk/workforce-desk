@@ -344,7 +344,7 @@ describe("a session Sarah runs", () => {
       layout: { groups: [{ id: "acme", name: "Acme", collapsed: false, items: ["session:s1"] }], ungrouped: { collapsed: false, items: [] } },
       kept: true,
     });
-    useGrantBosses.setState({ byGroup: { acme: { id: "driftwerk/allan", name: "Allan", level: "act" } }, readAt: { acme: Date.now() } });
+    useGrantBosses.setState({ byGroup: { acme: { id: "driftwerk/allan", name: "Allan", level: "act", served: true } }, readAt: { acme: Date.now() } });
     render(<SessionCard session={useDesk.getState().sessions.s1!} />);
     fireEvent.click(screen.getByRole("button", { name: "Session options" }));
     expect(screen.queryByRole("menuitem", { name: "Hand to Sarah" })).toBeNull();
@@ -353,13 +353,21 @@ describe("a session Sarah runs", () => {
     expect(hand).toEqual([{ route: "POST /api/desk/sessions/s1/charge", said: { boss: "driftwerk/allan" } }]);
   });
 
-  it("offers no boss of a group's grant while it only watches, or is paused", async () => {
+  it("is handed to this computer's own boss naming none, in a group no grant bosses", async () => {
+    await connect();
+    render(<SessionCard session={useDesk.getState().sessions.s1!} />);
+    fireEvent.click(screen.getByRole("button", { name: "Session options" }));
+    await act(async () => fireEvent.click(screen.getByRole("menuitem", { name: "Hand to Sarah" })));
+    expect(hub.said.filter((r) => r.route === "POST /api/desk/sessions/s1/charge")).toEqual([{ route: "POST /api/desk/sessions/s1/charge", said: {} }]);
+  });
+
+  it("offers no boss of a group's grant while it only watches", async () => {
     await connect();
     useHubLayout.setState({
       layout: { groups: [{ id: "acme", name: "Acme", collapsed: false, items: ["session:s1"] }], ungrouped: { collapsed: false, items: [] } },
       kept: true,
     });
-    useGrantBosses.setState({ byGroup: { acme: { id: "driftwerk/allan", name: "Allan", level: "watch" } }, readAt: { acme: Date.now() } });
+    useGrantBosses.setState({ byGroup: { acme: { id: "driftwerk/allan", name: "Allan", level: "watch", served: true } }, readAt: { acme: Date.now() } });
     render(<SessionCard session={useDesk.getState().sessions.s1!} />);
     fireEvent.click(screen.getByRole("button", { name: "Session options" }));
     expect(screen.queryByRole("menuitem", { name: /^Hand to/ })).toBeNull();
