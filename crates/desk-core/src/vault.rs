@@ -69,6 +69,7 @@ impl KeyOwner {
     pub fn of(account: &str) -> Self {
         if Secret::ALL.iter().any(|s| s.account() == account)
             || account == device_token_account(LOCAL_HUB_ID)
+            || account == crate::POSTGRES_PASSWORD_NEXT_ACCOUNT
         {
             KeyOwner::Helper
         } else {
@@ -548,6 +549,12 @@ pub(crate) mod tests {
         assert_eq!(KeyOwner::of(GATEWAY), KeyOwner::Helper);
         assert_eq!(KeyOwner::of(LOCAL), KeyOwner::Helper);
         assert_eq!(KeyOwner::of(REMOTE), KeyOwner::App);
+        // The spare Postgres password a rotation keeps is the helper's too:
+        // `forget_backend` deletes it and the helper writes it.
+        assert_eq!(
+            KeyOwner::of(crate::POSTGRES_PASSWORD_NEXT_ACCOUNT),
+            KeyOwner::Helper
+        );
     }
 
     #[test]

@@ -12,14 +12,16 @@
 //! database. The new password is kept in the secret store first (under
 //! [`POSTGRES_PASSWORD_NEXT_ACCOUNT`]); the database takes it second; it
 //! becomes the password third. A start that finds one kept and not yet the
-//! password asks the database which of the two it holds.
+//! password asks the database which of the two it holds. This runs as soon
+//! as Postgres is up, before anything signs in to it, so a start after a cut
+//! reaches it.
 
 use std::path::Path;
 
 use desk_core::{POSTGRES_PASSWORD_NEXT_ACCOUNT, Secret, Secrets};
 use eyre::{Result, eyre};
-use sqlx::Connection;
 use sqlx::postgres::{PgConnectOptions, PgConnection};
+use sqlx::{ConnectOptions, Connection};
 
 /// The marker, in the hub's folder, of a password already changed.
 pub const MARKER: &str = "postgres-password-rotated";
@@ -65,7 +67,10 @@ impl Local {
             .port(self.port)
             .username(self.user)
             .password(password)
-            .database("postgres");
+            .database("postgres")
+            // The statement that changes the password has it in it, and
+            // sqlx logs a slow statement (and every one at debug).
+            .disable_statement_logging();
         Ok(PgConnection::connect_with(&options).await?)
     }
 }
@@ -123,7 +128,12 @@ pub async fn run(
         }
         Err(e) => {
             tracing::warn!(error = %e, "Postgres's password was not changed; tried again at the next start");
-            current
+            // It may be changed all the same, and only the keeping of it
+            // failed: then the database takes the spare, not `current`.
+            match accounts.get(POSTGRES_PASSWORD_NEXT_ACCOUNT) {
+                Ok(Some(next)) if database.accepts(&next).await => next,
+                _ => current,
+            }
         }
     }
 }
@@ -174,12 +184,15 @@ mod tests {
     use std::collections::HashMap;
 
     #[derive(Default)]
-    struct Store(RefCell<HashMap<String, String>>);
+    struct Store(RefCell<HashMap<String, String>>, bool);
     impl Accounts for Store {
         fn get(&self, a: &str) -> Result<Option<String>> {
             Ok(self.0.borrow().get(a).cloned())
         }
         fn set(&self, a: &str, v: &str) -> Result<()> {
+            if self.1 && a == Secret::PostgresPassword.account() {
+                return Err(eyre!("the store refuses"));
+            }
             self.0.borrow_mut().insert(a.into(), v.into());
             Ok(())
         }
@@ -222,7 +235,7 @@ mod tests {
     async fn the_password_changes_once() {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join(MARKER);
-        let accounts = Store::default();
+        let accounts = Store(Default::default(), false);
         accounts.set(account(), "old").unwrap();
         let db = fake("old", false);
 
@@ -246,7 +259,7 @@ mod tests {
     async fn a_refused_change_keeps_the_old_password_and_tries_again() {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join(MARKER);
-        let accounts = Store::default();
+        let accounts = Store(Default::default(), false);
         accounts.set(account(), "old").unwrap();
         let db = fake("old", true);
 
@@ -270,7 +283,7 @@ mod tests {
     async fn a_change_cut_off_after_the_database_took_it_is_finished() {
         let dir = tempfile::tempdir().unwrap();
         let marker = dir.path().join(MARKER);
-        let accounts = Store::default();
+        let accounts = Store(Default::default(), false);
         accounts.set(account(), "old").unwrap();
         accounts
             .set(POSTGRES_PASSWORD_NEXT_ACCOUNT, "spare")
@@ -293,5 +306,28 @@ mod tests {
             let e = local.change("old", bad).await.unwrap_err();
             assert!(e.to_string().contains("not one Desk made"), "{e}");
         }
+    }
+
+    /// The database took the new password and the store would not keep it:
+    /// this start uses the spare, and the next finds it the same way.
+    #[tokio::test]
+    async fn a_password_the_store_would_not_keep_is_still_the_one_used() {
+        let dir = tempfile::tempdir().unwrap();
+        let marker = dir.path().join(MARKER);
+        let accounts = Store(Default::default(), true);
+        accounts.set("other", "x").unwrap();
+        let db = fake("old", false);
+
+        let now = run(&marker, &accounts, &db, "old".into()).await;
+        assert_ne!(now, "old");
+        assert_eq!(*db.password.borrow(), now);
+        assert!(!marker.exists());
+        assert_eq!(
+            accounts
+                .get(POSTGRES_PASSWORD_NEXT_ACCOUNT)
+                .unwrap()
+                .as_deref(),
+            Some(now.as_str())
+        );
     }
 }
