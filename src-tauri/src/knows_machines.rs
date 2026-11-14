@@ -338,6 +338,10 @@ pub struct Ending {
     one: tokio::sync::Mutex<()>,
 }
 
+/// How long one call to take sharing back may take: removing a machine or
+/// a hub is never held up longer by one that doesn't answer.
+const CALL: Duration = Duration::from_secs(20);
+
 /// What ended a token on a hub: done, or to be tried again.
 enum Ended {
     Done,
@@ -353,10 +357,20 @@ impl Ending {
     }
 
     fn owed(&self) -> Vec<Owed> {
-        std::fs::read_to_string(&self.file)
-            .ok()
-            .and_then(|s| serde_json::from_str(&s).ok())
-            .unwrap_or_default()
+        let text = match std::fs::read_to_string(&self.file) {
+            Ok(t) => t,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
+            Err(e) => {
+                tracing::warn!(error = %e, "what Desk still owes to end sharing couldn't be read");
+                return Vec::new();
+            }
+        };
+        serde_json::from_str(&text).unwrap_or_else(|e| {
+            // Kept aside, never overwritten: what it held may still be owed.
+            tracing::warn!(error = %e, "what Desk still owes to end sharing is unreadable; kept as knows-ended.json.bad");
+            let _ = std::fs::rename(&self.file, self.file.with_extension("json.bad"));
+            Vec::new()
+        })
     }
 
     fn keep(&self, owed: &[Owed]) {
@@ -416,7 +430,10 @@ impl Ending {
 
     /// Tells again each hub that couldn't be told, dropping those Desk is
     /// no longer paired with.
-    pub async fn retry(&self, io: &HubIo, paired: &[String]) {
+    pub async fn retry(&self, io: &HubIo, paired: Option<&[String]>) {
+        // Which hubs Desk is paired with couldn't be read: nothing is
+        // dropped, nothing told, until it can.
+        let Some(paired) = paired else { return };
         let _one = self.one.lock().await;
         let owed = self.owed();
         if owed.is_empty() {
@@ -440,7 +457,10 @@ impl Ending {
 /// unlinks what it names and ends each token on its own hub. Best effort:
 /// a hub that can't be reached is left, and said.
 async fn unlink_on(io: &HubIo, hub: &str, path: &str) {
-    match io.fetch(hub, "DELETE", path, None).await {
+    let asked = tokio::time::timeout(CALL, io.fetch(hub, "DELETE", path, None))
+        .await
+        .unwrap_or_else(|_| Err("it didn't answer in time".to_string()));
+    match asked {
         Ok((meta, _)) if (200..300).contains(&meta.status) => {}
         Ok((meta, _)) => {
             tracing::warn!(%hub, status = meta.status, "a hub didn't unlink what it shares by");
@@ -459,18 +479,14 @@ async fn end_engine(io: &HubIo, hub: &str, engine: &str) -> Ended {
     if !plain(hub) || !plain(engine) || hub == LOCAL || crate::hubs::machine_of(hub).is_some() {
         return Ended::Done;
     }
-    match io
-        .fetch(
-            hub,
-            "DELETE",
-            &format!("/api/me/desk-knows-tokens/engines/{engine}"),
-            None,
-        )
+    let path = format!("/api/me/desk-knows-tokens/engines/{engine}");
+    let asked = tokio::time::timeout(CALL, io.fetch(hub, "DELETE", &path, None))
         .await
-    {
+        .unwrap_or_else(|_| Err("it didn't answer in time".to_string()));
+    match asked {
         Ok((meta, _)) if (200..300).contains(&meta.status) => Ended::Done,
         Ok((meta, _)) if matches!(meta.status, 401 | 403 | 404) => {
-            tracing::debug!(%hub, status = meta.status, "an agent's hub has no Desk work tokens of this computer to end");
+            tracing::warn!(%hub, %engine, status = meta.status, "an agent's hub wouldn't end a removed engine's Desk work tokens (no such tokens, an older hub, or this computer's device isn't known there); any live ones end when they expire");
             Ended::Done
         }
         Ok((meta, body)) => Ended::Later(words(meta.status, &body)),
@@ -480,11 +496,14 @@ async fn end_engine(io: &HubIo, hub: &str, engine: &str) -> Ended {
 
 /// The hubs of other workspaces Desk is paired with, by id.
 pub fn remote_hubs(paths: &desk_core::Paths) -> Vec<String> {
+    paired_hubs(paths).unwrap_or_default()
+}
+
+/// The same, or none when the list couldn't be read.
+pub fn paired_hubs(paths: &desk_core::Paths) -> Option<Vec<String>> {
     crate::hubs::read_records(paths)
-        .unwrap_or_default()
-        .into_iter()
-        .map(|r| r.id)
-        .collect()
+        .ok()
+        .map(|r| r.into_iter().map(|r| r.id).collect())
 }
 
 /// This computer's hub, by its id here.
@@ -881,7 +900,7 @@ mod tests {
                 engine: "box".into()
             }]
         );
-        ending.retry(&io, &hubs).await;
+        ending.retry(&io, Some(&hubs)).await;
         assert_eq!(
             lines(&mut dw_seen),
             ["DELETE /api/me/desk-knows-tokens/engines/box"]
@@ -900,7 +919,7 @@ mod tests {
         ending.machine(&io, None, "box", &["dw".to_string()]).await;
         assert_eq!(ending.owed().len(), 1);
         lines(&mut seen);
-        ending.retry(&io, &[]).await;
+        ending.retry(&io, Some(&[])).await;
         assert!(ending.owed().is_empty());
         assert!(lines(&mut seen).is_empty());
         // An id that isn't plain, or a hub that isn't a workspace's, is
@@ -943,6 +962,45 @@ mod tests {
                 "DELETE /api/me/desk-knows-tokens/engines/box"
             ]
         );
+        assert!(ending.owed().is_empty());
+    }
+
+    #[tokio::test]
+    async fn what_is_owed_survives_an_unreadable_pairing_list_or_file() {
+        let (dw, mut seen) = hub(vec![status("500 Internal Server Error", "{}")]).await;
+        let io = io_for(vec![
+            account("local", "http://127.0.0.1:9", true, "MAC"),
+            account("dw", &dw, false, "DW"),
+        ]);
+        let (ending, _dir) = ending();
+        ending.machine(&io, None, "box", &["dw".to_string()]).await;
+        lines(&mut seen);
+        // The pairing list couldn't be read: nothing is dropped or sent.
+        ending.retry(&io, None).await;
+        assert_eq!(ending.owed().len(), 1);
+        assert!(lines(&mut seen).is_empty());
+        // A file that can't be parsed is kept aside, not overwritten.
+        std::fs::write(&ending.file, "{ not json").unwrap();
+        assert!(ending.owed().is_empty());
+        assert_eq!(
+            std::fs::read_to_string(ending.file.with_extension("json.bad")).unwrap(),
+            "{ not json"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_hub_that_doesnt_know_this_computer_has_nothing_owed() {
+        let (dw, _seen) = hub(vec![
+            status("401 Unauthorized", "{}"),
+            status("403 Forbidden", "{}"),
+        ])
+        .await;
+        let io = io_for(vec![
+            account("local", "http://127.0.0.1:9", true, "MAC"),
+            account("dw", &dw, false, "DW"),
+        ]);
+        let (ending, _dir) = ending();
+        ending.machine(&io, None, "box", &["dw".to_string()]).await;
         assert!(ending.owed().is_empty());
     }
 }

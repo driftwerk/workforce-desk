@@ -1122,7 +1122,7 @@ pub fn run() {
                             // What a removed machine's tokens still owe
                             // an agent's hub is told again first.
                             ending
-                                .retry(&io, &knows_machines::remote_hubs(&paths))
+                                .retry(&io, knows_machines::paired_hubs(&paths).as_deref())
                                 .await;
                             knows.sync_all(&io, &list).await;
                         }
