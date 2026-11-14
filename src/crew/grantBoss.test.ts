@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { remoteBosses, type BossEngine, type RemoteBoss } from "../groups/remoteBoss";
+import { bossStatus } from "../groups/bossStatus";
+import type { BossEngine, RemoteBoss } from "../groups/remoteBoss";
 import { bossOfStatus, isServed, useGrantBosses } from "./grantBoss";
 
 const allan = (over: Partial<RemoteBoss> = {}): RemoteBoss => ({
@@ -61,7 +62,7 @@ describe("the groups' bosses, read", () => {
   afterEach(() => vi.restoreAllMocks());
 
   it("are read once at a time, and not again while fresh", async () => {
-    const status = vi.spyOn(remoteBosses, "status").mockResolvedValue(allan());
+    const status = vi.spyOn(bossStatus, "read").mockResolvedValue(allan());
     useGrantBosses.getState().ensure("acme");
     useGrantBosses.getState().ensure("acme");
     await vi.waitFor(() => expect(useGrantBosses.getState().byGroup.acme?.id).toBe("driftwerk/allan"));
@@ -71,7 +72,7 @@ describe("the groups' bosses, read", () => {
 
   it("are not asked again at once after a read that failed, and keep what was read", async () => {
     useGrantBosses.setState({ byGroup: { acme: bossOfStatus(allan()) }, bossed: { acme: true }, readAt: { acme: 0 } });
-    const status = vi.spyOn(remoteBosses, "status").mockRejectedValue(new Error("unreachable"));
+    const status = vi.spyOn(bossStatus, "read").mockRejectedValue(new Error("unreachable"));
     useGrantBosses.getState().ensure("acme");
     await vi.waitFor(() => expect(useGrantBosses.getState().readAt.acme).toBeGreaterThan(0));
     useGrantBosses.getState().ensure("acme");
@@ -81,7 +82,7 @@ describe("the groups' bosses, read", () => {
 
   it("never lay an older read over a fresher one the Boss sheet heard", async () => {
     let answer: (s: RemoteBoss | null) => void = () => {};
-    vi.spyOn(remoteBosses, "status").mockReturnValue(new Promise((r) => (answer = r)));
+    vi.spyOn(bossStatus, "read").mockReturnValue(new Promise((r) => (answer = r)));
     useGrantBosses.getState().ensure("acme");
     useGrantBosses.getState().heard("acme", allan({ paused: true }));
     answer(allan());
@@ -91,7 +92,7 @@ describe("the groups' bosses, read", () => {
   });
 
   it("never read the ungrouped", () => {
-    const status = vi.spyOn(remoteBosses, "status");
+    const status = vi.spyOn(bossStatus, "read");
     useGrantBosses.getState().ensure("ungrouped");
     expect(status).not.toHaveBeenCalled();
   });

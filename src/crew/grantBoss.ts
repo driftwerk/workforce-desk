@@ -9,7 +9,8 @@ import { create } from "zustand";
 import { useEffect } from "react";
 import { useChat } from "../chat/store";
 import { groupOf, sessionItem, UNGROUPED, type Layout } from "../groups/model";
-import { remoteBosses, type RemoteBoss } from "../groups/remoteBoss";
+import { bossStatus } from "../groups/bossStatus";
+import type { RemoteBoss } from "../groups/remoteBoss";
 import { useLayout } from "../groups/store";
 import { sessionKey, type MachineId } from "../hub/machines";
 import type { Boss } from "./charge";
@@ -63,8 +64,8 @@ export const useGrantBosses = create<GrantBossState>((set, get) => ({
     const asked = Date.now();
     if (asked - (get().readAt[group] ?? 0) < FRESH_MS) return;
     reading.add(group);
-    remoteBosses
-      .status(group)
+    bossStatus
+      .read(group)
       .then((s) => {
         // Read fresher meanwhile (the Boss sheet): that stands.
         if ((get().readAt[group] ?? 0) < asked) get().heard(group, s);
