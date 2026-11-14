@@ -348,7 +348,8 @@ async fn carry<E: Ends>(ends: &E, call: &Call, machine: &MachineId, timing: Timi
 }
 
 /// A session as a machine lists it, as much as a plan reads: its id,
-/// names, folder, state and last reply (capped); none without an id.
+/// names, folder, state, when it was made and last reply (capped); none
+/// without an id.
 fn session_of(v: &Value) -> Option<Value> {
     let id = v.get("id")?.as_str()?;
     let text = |k: &str| {
@@ -367,6 +368,7 @@ fn session_of(v: &Value) -> Option<Value> {
         "displayName": text("displayName"),
         "cwd": text("cwd"),
         "state": text("state"),
+        "createdAt": text("createdAt"),
         "lastReply": reply,
     }))
 }
@@ -977,6 +979,7 @@ mod tests {
         let made = json!({
             "id": SESSION, "name": "VEL-3", "displayName": null, "cwd": "/home/dev/vellev",
             "state": "starting", "lastReply": null, "engine": "claude", "pending": {"x": 1},
+            "createdAt": "2026-11-14T08:00:00Z",
         });
         let (fake, mut rx) = with_desk(
             vec![Does::Says(200, made)],
@@ -995,6 +998,7 @@ mod tests {
             json!({"status": "ok", "body": {
                 "id": SESSION, "name": "VEL-3", "displayName": null,
                 "cwd": "/home/dev/vellev", "state": "starting", "lastReply": null,
+                "createdAt": "2026-11-14T08:00:00Z",
             }})
         );
         let sent = fake.desk_sent.lock().unwrap().clone();
