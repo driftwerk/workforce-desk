@@ -1243,3 +1243,97 @@ a.ref {
 .oversee-pref-where .field:last-child:not(:first-child) {
   flex: 1 1 200px;
 }
+/* A brief update: each session a small label, its items one line each
+   under it; the mark's colour says done or for you. Undo shows on hover
+   or focus. */
+.msg-text.overseer.is-brief {
+  gap: 20px;
+}
+.brief-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.brief-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--faint);
+}
+.brief-items {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 0 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.brief-row {
+  display: grid;
+  grid-template-columns: 12px minmax(0, 1fr) auto;
+  column-gap: 10px;
+  align-items: baseline;
+  line-height: 1.5;
+}
+.brief-mark {
+  font-weight: 700;
+}
+.brief-mark.done {
+  color: var(--done);
+}
+.brief-mark.for-you {
+  color: var(--blocked);
+}
+.brief-mark.faint,
+.brief-row.is-quiet .brief-action {
+  color: var(--faint);
+}
+.brief-why {
+  color: var(--faint);
+}
+.link.brief-more {
+  margin-left: 8px;
+  font-size: 12px;
+  color: var(--faint);
+}
+.brief-tools {
+  display: inline-flex;
+  gap: 14px;
+  font-size: 12px;
+}
+.brief-tools .link {
+  font-size: 12px;
+  color: var(--faint);
+}
+/* Undo waits for the line; Done, what's for you, stays. */
+.brief-tools .link:not(.brief-done) {
+  opacity: 0;
+}
+.brief-row:hover .brief-tools .link,
+.brief-row:focus-within .brief-tools .link {
+  opacity: 1;
+}
+.brief-tools .link.brief-done {
+  color: var(--signal-soft-text);
+  font-weight: 600;
+}
+.brief-detail {
+  grid-column: 2 / -1;
+  margin: 4px 0 0;
+  padding-left: 12px;
+  box-shadow: inset 2px 0 0 var(--border);
+  color: var(--muted);
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+.brief-settled {
+  font-size: 13px;
+  color: var(--faint);
+}
+.link.brief-fold {
+  font-size: 13px;
+  color: var(--faint);
+  text-align: left;
+}
+.brief-settled-list .brief-items {
+  padding-left: 0;
+}

@@ -3,6 +3,7 @@ import { useDesk } from "../hub/store";
 import { HubError } from "../hub/client";
 import type {
   AnswerOption,
+  BriefGroup,
   DecisionLine,
   DeskExtras,
   MentionedAway,
@@ -18,6 +19,9 @@ import type {
 import type { DeliveryKind } from "../chat/types";
 import { openLink } from "../shell/links";
 import { plainError } from "../ui/plainError";
+import { Brief } from "./Brief";
+import { useSettledBy } from "./settled";
+import { UNDO_LABEL, useUndo } from "./undo";
 
 // What the boss says in your chat with it, laid out as the agreed "Update"
 // board has it, in Desk's own tokens and never boxed:
@@ -58,6 +62,7 @@ export const overseerPost = (extras: DeskExtras | undefined, delivery: DeliveryK
 export function OverseerBody({ extras, content }: { extras: DeskExtras; content: string }) {
   if (extras.away) return <CatchUp away={extras.away} update={extras.update ?? {}} />;
   if (extras.update) return <Update update={extras.update} />;
+  if (extras.item?.forYou) return <ForYouPost item={extras.item} content={content} />;
   if (extras.item) return <NeedsYouPost item={extras.item} content={content} />;
   if (extras.decisions?.length)
     return (
@@ -356,11 +361,22 @@ function Head({ update, headline, handled }: { update: MentionedUpdate; headline
 
 function CatchUp({ away, update }: { away: MentionedAway; update: MentionedUpdate }) {
   const parked = away.parked ?? [];
+  const brief = update.brief?.length ? update.brief : null;
   return (
-    <div className="msg-text overseer">
-      <Head update={update} headline={away.headline} handled={away.handled} />
-      <WaitingAll update={update} />
-      {(update.decisions ?? []).length > 0 && <WhatIDid decisions={update.decisions!} />}
+    <div className={`msg-text overseer${brief ? " is-brief" : ""}`}>
+      <Head update={brief ? { kept: update.kept } : update} headline={away.headline} handled={away.handled} />
+      {brief ? (
+        <>
+          <WaitingAll update={update} />
+          <Brief groups={brief} />
+          <More n={update.moreItems} />
+        </>
+      ) : (
+        <>
+          <WaitingAll update={update} />
+          {(update.decisions ?? []).length > 0 && <WhatIDid decisions={update.decisions!} />}
+        </>
+      )}
       {parked.length > 0 && (
         <section className="did" aria-label="Set aside">
           <span className="sec-label">Set aside until you say</span>
@@ -427,7 +443,23 @@ function Parked({ id, text }: { id: string; text: string }) {
   );
 }
 
+/** "N more: ask “what else?”", when the brief left some out. */
+function More({ n }: { n?: number }) {
+  if (!n) return null;
+  return <p className="faint small">{n === 1 ? "1 more" : `${n} more`}: ask “what else?”</p>;
+}
+
 function Update({ update }: { update: MentionedUpdate }) {
+  if (update.brief?.length)
+    return (
+      <div className="msg-text overseer is-brief">
+        {update.headline && <p className="upd-line">{update.headline}</p>}
+        <WaitingAll update={update} />
+        <Brief groups={update.brief} />
+        <More n={update.moreItems} />
+        {update.footer && <p className="faint small">{update.footer}</p>}
+      </div>
+    );
   return (
     <div className="msg-text overseer">
       <Head update={update} />
@@ -538,8 +570,16 @@ function WaitingAll({ update }: { update: MentionedUpdate }) {
   );
 }
 
-/** Something waiting on you, as the hub laid it out. */
+/** Something waiting on you, as the hub laid it out; one faint line once
+ *  it is settled. */
 function Laid({ n, holdingUp }: { n: NeedsYou; holdingUp?: string | null }) {
+  const by = useSettledBy(n.itemId, n.settledBy);
+  if (by)
+    return (
+      <p className="faint small brief-settled-need">
+        ✓ {n.question.replace(/[.?]+$/, "")} — {by === "you" ? "settled by you" : "settled in the session"}
+      </p>
+    );
   return (
     <Needs
       id={n.itemId}
@@ -572,6 +612,24 @@ function Waiting({ w }: { w: WaitingItem }) {
   );
 }
 
+/** Something only you can do, in a message of its own: one line, as a
+ *  brief says it, with Done. */
+function ForYouPost({ item, content }: { item: MentionedItem; content: string }) {
+  const [first, rest] = firstSentence(unlead(content));
+  const action = item.question?.trim() || first;
+  const group: BriefGroup = {
+    sessionId: null,
+    label: "For you",
+    items: [{ id: item.itemId, kind: "forYou", action, why: null, detail: item.detail ?? (item.question ? null : rest || null), undo: null, settledBy: null }],
+    leftAlone: 0,
+  };
+  return (
+    <div className="msg-text overseer is-brief">
+      <Brief groups={[group]} />
+    </div>
+  );
+}
+
 /** A needs-you or still-waiting message of its own. */
 function NeedsYouPost({ item, content }: { item: MentionedItem; content: string }) {
   const post = readNeedsPost(content);
@@ -597,7 +655,6 @@ function NeedsYouPost({ item, content }: { item: MentionedItem; content: string 
 // What you settled here, by decision and by item, for as long as Desk
 // runs: a row drawn again (scrolled away and back) says so at once, as the
 // hub would when asked again.
-const undoneHere = new Map<string, string>();
 const settledHere = new Map<string, string>();
 const heldHere = new Set<string>();
 /** Answers that offer "Always", by item: the answer given. */
@@ -776,13 +833,6 @@ function Always({ id, when, then }: { id: string; when: string; then: string }) 
 
 // ── 3. What I did ─────────────────────────────────────────────────────────
 
-export const UNDO_LABEL: Record<NonNullable<DecisionLine["undo"]>, string> = {
-  undo: "Undo",
-  correct: "Correct",
-  stop: "Stop it",
-  resume: "Resume",
-};
-
 /** The boss's decisions, one line each; the times it did nothing folded
  *  into one line that opens on a click. `labelled`: under "What I did",
  *  as an update says them. */
@@ -820,37 +870,9 @@ function WhatIDid({ decisions, labelled = true }: { decisions: readonly Decision
 
 function DecisionRow({ line, action, why, message, timed }: { line: DecisionLine; action: string; why: string; message: string | null; timed: boolean }) {
   const connected = useDesk((s) => !!s.hub);
-  const [undone, setUndone] = useState<string | null>(undoneHere.get(line.id) ?? null);
-  // A decision that can't be undone after all: no button to press again.
-  const [fixed, setFixed] = useState(false);
+  const { undone, isUndone, fixed, busy, problem, undo } = useUndo(line.id, !!line.undone);
   const [shown, setShown] = useState(false);
   const panel = useId();
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
-  const done = (said: string) => {
-    undoneHere.set(line.id, said);
-    setUndone(said);
-  };
-  // Undone here, or elsewhere as the message now says.
-  const isUndone = undone !== null || !!line.undone;
-  const undo = async () => {
-    const hub = useDesk.getState().hub;
-    if (!hub) return;
-    setBusy(true);
-    setProblem(null);
-    try {
-      const r = await hub.undoDecision(line.id);
-      done(r?.done ?? "");
-    } catch (e) {
-      // Undone already elsewhere, or gone with its session: it shows so.
-      if (e instanceof HubError && (e.status === 409 || e.status === 404)) done("");
-      else {
-        if (e instanceof HubError && e.status === 400) setFixed(true);
-        setProblem(plainError(e));
-      }
-    }
-    setBusy(false);
-  };
   const what = action.replace(/\.$/, "");
   return (
     <li className="dec-row">
