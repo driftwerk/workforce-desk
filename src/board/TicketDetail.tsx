@@ -42,7 +42,7 @@ import {
   type FactId,
   type Layout,
 } from "./ticketRich";
-import { ActivityFold, Crumbs, Development, Dotted, EpicChildren, EpicProgress, LinkedWork, Person, SectionHead, SubItems } from "./TicketSections";
+import { ActivityFold, Crumbs, Development, Dotted, EpicChildren, EpicProgress, LinkedWork, Person, SectionHead, SubItems, useEpicProgress } from "./TicketSections";
 
 const STATES: TicketState[] = ["backlog", "todo", "doing", "review", "done", "dropped"];
 
@@ -285,7 +285,8 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
   const popup = useTicketPopup();
   const wide = layout === "wide";
   const compact = layout === "compact";
-  const byline = bylineText(t, layout);
+  const progress = useEpicProgress(t);
+  const byline = bylineText(t, layout, progress?.total);
   const working = t.assignee?.kind === "session" ? t.assignee.id : null;
   // An epic reads as its progress and children; its comments and history
   // fold in its details column.
@@ -610,6 +611,7 @@ function Facts({ ticket: t, layout, onState }: { ticket: Ticket; layout: Layout;
   const sync = useBoard((s) => s.boards[t.board]?.sync ?? null);
   const session = useDesk((s) => (t.assignee?.kind === "session" ? s.sessions[t.assignee.id] : undefined));
   const popup = useTicketPopup();
+  const progress = useEpicProgress(t);
   const e = t.external;
   const d = e?.details;
   const system = sync && e ? e.system : null;
@@ -691,22 +693,23 @@ function Facts({ ticket: t, layout, onState }: { ticket: Ticket; layout: Layout;
   if (d?.reporter && system === "jira" && !epic) facts.reporter = { label: "Reporter", value: <Person name={d.reporter} me={sync?.meName} /> };
   if (d?.priority || d?.priorityRank)
     facts.priority = { label: "Priority", value: <>{d.priorityRank !== undefined && <PriorityBars rank={d.priorityRank} name={d.priority} />}{d.priority}</> };
-  if (epic && (d?.subItems?.total ?? d?.children?.length))
+  // An epic's children and their points, as its progress counts them.
+  if (progress?.total)
     facts.children = {
       label: "Children",
       value: (
         <>
-          {d!.subItems?.total ?? d!.children!.length}
-          {d!.subItems && <span className="ticket-there">{d!.subItems.done} done</span>}
+          {progress.total}
+          <span className="ticket-there">{progress.done} done</span>
         </>
       ),
     };
-  if (epic && d?.childPoints)
+  if (progress?.points)
     facts.points = {
       label: "Points",
       value: (
         <span className="mono ticket-points-of">
-          {d.childPoints.done} / {d.childPoints.total}
+          {progress.points.done} / {progress.points.total}
         </span>
       ),
     };

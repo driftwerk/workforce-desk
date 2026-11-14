@@ -1141,6 +1141,12 @@ button.ticket-crumb:hover {
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
+/* Its one paragraph ends where its lines do, cut or not: a paragraph of
+   two lines or fewer kept its margin inside the clamp, and stood 12px
+   further from "Show all of it" than a longer one cut to two. */
+.ticket-clamp .ticket-md p {
+  margin-bottom: 0;
+}
 .ticket-whole {
   display: block;
   margin-top: 4px;
@@ -1439,17 +1445,17 @@ button.ticket-row:not(:disabled):hover {
   color: var(--faint);
   white-space: nowrap;
 }
-.ticket-tone-done {
-  color: var(--done);
-}
 .ticket-tone-blocked {
   color: var(--blocked);
 }
 .ticket-tone-faint {
   color: var(--faint);
 }
-.ticket-tone-muted {
-  color: var(--muted);
+.ticket-epic-all-done {
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 13px;
+  color: var(--faint);
 }
 .ticket-epic-more {
   align-self: flex-start;

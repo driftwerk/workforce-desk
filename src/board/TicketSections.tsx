@@ -31,12 +31,13 @@ import {
   checksText,
   childColumn,
   childGroups,
-  childTone,
   dayText,
   devOf,
   epicProgress,
+  isEpic,
   prRows,
   type ChildGrouping,
+  type EpicProgress as EpicProgressCount,
   type Layout,
   type PrRow,
 } from "./ticketRich";
@@ -175,9 +176,17 @@ function Who({ name, me }: { name?: string; me?: string | null }) {
   );
 }
 
-/** A state's colour, by what it says. */
-const stateTone = (state: string | undefined, done?: boolean): string =>
-  done || /^(done|closed|resolved|completed)$/i.test(state ?? "") ? "state-done" : /progress|review|doing/i.test(state ?? "") ? "ticket-tone-working" : "muted";
+/** A state's colour class, by what it says: done, under way, blocked,
+ *  waiting in a backlog, or anything else. `started` and `stateKind` are a
+ *  child's, where its issue says them. */
+export const stateTone = (state: string | undefined, done?: boolean, { started, stateKind }: { started?: boolean; stateKind?: string } = {}): string => {
+  const s = state ?? "";
+  if (done || /^(done|closed|resolved|completed)$/i.test(s)) return "state-done";
+  if (/blocked/i.test(s)) return "ticket-tone-blocked";
+  if (started || /progress|review|doing/i.test(s)) return "ticket-tone-working";
+  if (/backlog|triage/i.test(s) || stateKind === "backlog") return "ticket-tone-faint";
+  return "muted";
+};
 
 /** Its sub-tasks (Jira) or sub-issues (Linear): how many are done, as a
  *  bar where there's room, and a row each. The shortest view lists those
@@ -443,7 +452,9 @@ const useChildColumn = (t: Ticket): ((c: TicketChild) => TicketState) => {
 };
 
 /** The site's priority names by rank, from its issues here: a child's
- *  bars say theirs in a tooltip. */
+ *  bars say theirs in a tooltip. A child carries only its rank, so its name
+ *  is inferred from another issue on the board at that rank; none there,
+ *  the bars' own word (Urgent, High, Medium, Low). */
 const usePriorityNames = (t: Ticket): Map<number, string> => {
   const all = useBoard((s) => s.tickets);
   return useMemo(() => {
@@ -456,15 +467,21 @@ const usePriorityNames = (t: Ticket): Map<number, string> => {
   }, [all, t.board]);
 };
 
+/** An epic's progress by Desk's columns, the one count its byline, facts,
+ *  list and bar all say; null for a ticket that isn't an epic. */
+export const useEpicProgress = (t: Ticket): EpicProgressCount | null => {
+  const columnOf = useChildColumn(t);
+  const d = t.external?.details;
+  return useMemo(() => (d && isEpic(t) ? epicProgress(d, columnOf) : null), [d, t, columnOf]);
+};
+
 /** How far an epic is: done of all its children by Desk's columns, its
  *  points, its due day, a bar of done, doing and review, and the rest, and
  *  how many children are blocked. */
 export function EpicProgress({ ticket: t }: { ticket: Ticket }) {
-  const columnOf = useChildColumn(t);
+  const p = useEpicProgress(t);
   const d = t.external?.details;
-  if (!d) return null;
-  const p = epicProgress(d, columnOf);
-  if (!p.total) return null;
+  if (!d || !p?.total) return null;
   const pct = (n: number) => `${(n / p.total) * 100}%`;
   return (
     <section className="ticket-epic-progress" aria-label="Progress">
@@ -513,8 +530,9 @@ const GROUPINGS: { id: ChildGrouping; word: string }[] = [
 export function EpicChildren({ ticket: t }: { ticket: Ticket }) {
   const [by, setBy] = useState<ChildGrouping>("state");
   const [hideDone, setHideDone] = useState(false);
-  const [unfold, setUnfold] = useState(false);
+  const [unfold, setUnfold] = useState<ReadonlySet<string>>(new Set());
   const columnOf = useChildColumn(t);
+  const progress = useEpicProgress(t);
   const names = usePriorityNames(t);
   const issue = useOpenIssue(t);
   const me = useBoard((s) => s.boards[t.board]?.sync?.meName);
@@ -522,12 +540,12 @@ export function EpicChildren({ ticket: t }: { ticket: Ticket }) {
   const children = d?.children ?? [];
   if (!children.length) return null;
   const groups = childGroups(children, columnOf, by, { hideDone, unfold });
-  const total = d?.subItems?.total ?? children.length;
+  const finished = children.filter((c) => ["done", "dropped"].includes(columnOf(c))).length;
   return (
     <section className="ticket-epic-children" aria-label="Child items">
       <div className="ticket-sec-head ticket-epic-head">
         <h2 className="ticket-section-head">Child items</h2>
-        <span className="ticket-sec-note">{total}</span>
+        <span className="ticket-sec-note">{progress?.total ?? children.length}</span>
         <span className="ticket-sec-gap" />
         <span className="ticket-epic-controls">
           <span className="ticket-epic-by" id={`group-by-${t.id}`}>
@@ -568,12 +586,14 @@ export function EpicChildren({ ticket: t }: { ticket: Ticket }) {
               />
             ))}
             {g.folded > 0 && (
-              <button type="button" className="link ticket-epic-more" onClick={() => setUnfold(true)}>
+              <button type="button" className="link ticket-epic-more" onClick={() => setUnfold(new Set([...unfold, g.id]))}>
                 {g.folded} more done
               </button>
             )}
           </div>
         ))}
+        {/* Done hidden, and nothing left: say so, not an empty list. */}
+        {hideDone && finished === children.length && <p className="ticket-epic-all-done">All {finished} done</p>}
       </div>
     </section>
   );
@@ -608,7 +628,7 @@ function EpicChildRow({
       )}
       {c.points !== undefined && <span className="mono ticket-row-pts">{c.points} pts</span>}
       {pr && <PrChip look={pr.look} text={pr.text} title={pr.title} />}
-      {c.state && <span className={`ticket-row-state ticket-tone-${childTone(c)}`}>{c.state}</span>}
+      {c.state && <span className={`ticket-row-state ${stateTone(c.state, c.done, c)}`}>{c.state}</span>}
       <Who name={c.assignee} me={me} />
     </button>
   );

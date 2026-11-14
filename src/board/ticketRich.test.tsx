@@ -133,6 +133,8 @@ describe("a ticket's facts", () => {
     // Only an epic has children; a story's band is its first eight without.
     expect(factOrder("jira", (f) => f !== "children", true)).toEqual(["state", "working", "assignee", "priority", "type", "points", "sprint", "due"]);
     expect(factOrder("jira", has("state", "assignee", "priority", "type", "children", "points", "due"), true)).toEqual(["state", "assignee", "priority", "type", "children", "points", "due"]);
+    // An epic with a session working on it and a sprint: its band's eight, Due a click away.
+    expect(factOrder("jira", every, true)).toEqual(["state", "working", "assignee", "priority", "type", "children", "points", "sprint"]);
     expect(factOrder("linear", every, true)).toHaveLength(8);
   });
 

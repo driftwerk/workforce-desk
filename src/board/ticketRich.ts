@@ -289,14 +289,15 @@ export const spanText = (starts: string, ends: string): string => {
 };
 
 /** The line under the title: what it is, who wrote it there and when, and
- *  (where there's room) when it last changed. */
-export const bylineText = (t: Ticket, layout: Layout): string | null => {
+ *  (where there's room) when it last changed. An epic says how many
+ *  children it has instead: `children`, as its progress counts them. */
+export const bylineText = (t: Ticket, layout: Layout, children?: number): string | null => {
   const e = t.external;
   const d = e?.details;
   if (!e || !d?.reporter) return null;
   // An epic says how many children it has where a story says its dates.
   if (isEpicDetails(e.system, d)) {
-    const n = d.subItems?.total ?? d.children?.length ?? 0;
+    const n = children ?? 0;
     const by = `${d.reporter} on ${SYSTEM[e.system]}`;
     return [d.kind, layout === "compact" ? by : `written by ${by}`, n ? `${n} child item${n === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ");
   }
@@ -371,8 +372,10 @@ export const childColumn = (c: TicketChild, here: TicketState | undefined, state
 };
 
 /** An epic's progress by Desk's columns: done, doing and review, and to do
- *  and backlog; a dropped child isn't counted. Without its children listed,
- *  what the hub counted. */
+ *  and backlog, and the points of those done of all; a dropped child isn't
+ *  counted. Its byline, its Children and Points facts and its list's head
+ *  all say these numbers. Without its children listed, what the hub
+ *  counted. */
 export interface EpicProgress {
   total: number;
   done: number;
@@ -387,18 +390,29 @@ export interface EpicProgress {
 export const epicProgress = (d: TicketDetails, columnOf: (c: TicketChild) => TicketState): EpicProgress => {
   const children = d.children ?? [];
   let done: number, moving: number, rest: number;
+  let points: Progress | undefined;
   if (children.length) {
     const cols = children.map(columnOf);
     done = cols.filter((c) => c === "done").length;
     moving = cols.filter((c) => c === "doing" || c === "review").length;
     rest = cols.filter((c) => c === "todo" || c === "backlog").length;
+    const counted = children.filter((_, i) => cols[i] !== "dropped" && children[i]!.points !== undefined);
+    if (counted.length)
+      points = {
+        done: counted.filter((c) => columnOf(c) === "done").reduce((n, c) => n + c.points!, 0),
+        total: counted.reduce((n, c) => n + c.points!, 0),
+      };
   } else {
     done = d.subItems?.done ?? 0;
     moving = d.subItems?.started ?? 0;
     rest = Math.max(0, (d.subItems?.total ?? 0) - done - moving);
+    points = d.childPoints;
   }
   const total = done + moving + rest;
-  return { total, done, moving, rest, pct: total ? Math.round((done / total) * 100) : 0, points: d.childPoints, blocked: d.childBlocked };
+  // Points that add up to none aren't said.
+  if (points && !points.total) points = undefined;
+  // 58%, never rounded up to done.
+  return { total, done, moving, rest, pct: total ? Math.floor((done / total) * 100) : 0, points, blocked: d.childBlocked };
 };
 
 export type ChildGrouping = "none" | "state" | "assignee" | "type";
@@ -422,13 +436,14 @@ export const DONE_SHOWN = 2;
 /** An epic's children in groups: by state in {@link CHILD_STATE_ORDER},
  *  by who has them ("No one" last), by type, or one group. Within a group
  *  the hub's order holds; grouped other than by state, they go by state
- *  first. Done ones fold after two unless `unfold`; `hideDone` leaves them
+ *  first. Done ones fold after two unless their group is in `unfold`;
+ *  `hideDone` leaves them
  *  out, and a group left empty goes. */
 export const childGroups = (
   children: readonly TicketChild[],
   columnOf: (c: TicketChild) => TicketState,
   by: ChildGrouping,
-  { hideDone = false, unfold = false }: { hideDone?: boolean; unfold?: boolean } = {},
+  { hideDone = false, unfold = new Set<string>() }: { hideDone?: boolean; unfold?: ReadonlySet<string> } = {},
 ): ChildGroup[] => {
   const finished = (c: TicketChild) => {
     const col = columnOf(c);
@@ -456,7 +471,7 @@ export const childGroups = (
     const sorted = by === "state" ? all : [...all].sort((a, b) => rank(a) - rank(b));
     const open = sorted.filter((c) => !finished(c));
     const shut = sorted.filter(finished);
-    const keep = unfold ? shut : shut.slice(0, DONE_SHOWN);
+    const keep = unfold.has(k) ? shut : shut.slice(0, DONE_SHOWN);
     const pts = all.filter((c) => c.points !== undefined);
     return {
       id: k,
@@ -467,14 +482,4 @@ export const childGroups = (
       points: pts.length ? pts.reduce((n, c) => n + c.points!, 0) : null,
     };
   });
-};
-
-/** A child's state's colour, by what it says. */
-export const childTone = (c: Pick<TicketChild, "state" | "done" | "started" | "stateKind">): "done" | "working" | "blocked" | "faint" | "muted" => {
-  const s = c.state ?? "";
-  if (c.done || /^(done|closed|resolved|completed)$/i.test(s)) return "done";
-  if (/blocked/i.test(s)) return "blocked";
-  if (c.started || /progress|review|doing/i.test(s)) return "working";
-  if (/backlog|triage/i.test(s) || c.stateKind === "backlog") return "faint";
-  return "muted";
 };

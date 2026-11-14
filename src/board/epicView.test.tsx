@@ -4,11 +4,21 @@
 // progress bar and fold as drawn.
 
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { ReactNode } from "react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Board, Ticket, TicketChild, TicketDetails, TicketState } from "../hub/types";
 import { useBoard } from "./store";
-import { ActivityFold, EpicChildren, EpicProgress } from "./TicketSections";
-import { bylineText, childColumn, childGroups, childTone, epicProgress, factOrder, isEpic } from "./ticketRich";
+import { TicketDetail } from "./TicketDetail";
+import { ActivityFold, EpicChildren, EpicProgress, stateTone } from "./TicketSections";
+import { bylineText, childColumn, childGroups, epicProgress, factOrder, isEpic } from "./ticketRich";
+
+vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
+vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
+vi.mock("@tauri-apps/plugin-global-shortcut", () => ({ register: vi.fn(), unregister: vi.fn() }));
+vi.mock("@workforce/rich", () => ({
+  RichMarkdown: ({ text }: { text: string }) => text,
+  RichHostProvider: ({ children }: { children: ReactNode }) => children,
+}));
 import { ACME, ticket } from "./testing";
 
 afterEach(cleanup);
@@ -82,14 +92,21 @@ describe("which column an epic's child counts in", () => {
 });
 
 describe("an epic's progress", () => {
-  it("counts its children by Desk's columns: done, doing and review, the rest; dropped ones not at all", () => {
+  it("counts its children and their points by Desk's columns: done, doing and review, the rest; dropped ones not at all", () => {
     expect(epicProgress(DETAILS, byName)).toEqual({ total: 12, done: 7, moving: 2, rest: 3, pct: 58, points: { done: 28, total: 47 }, blocked: 1 });
-    const dropped = { ...DETAILS, children: [...CHILDREN, child("ACM-30", "Won't Do", "done")] };
-    expect(epicProgress(dropped, byName).total).toBe(12);
+    // The hub counts a Won't Do child as done, and its points; Desk doesn't.
+    const dropped = { ...DETAILS, subItems: { done: 8, total: 13, started: 2 }, childPoints: { done: 36, total: 55 }, children: [...CHILDREN, child("ACM-30", "Won't Do", "done", { points: 8 })] };
+    expect(epicProgress(dropped, byName)).toMatchObject({ total: 12, done: 7, points: { done: 28, total: 47 } });
+  });
+
+  it("says its percent rounded down, and no points when they add up to none", () => {
+    const three = [child("A-1", "Done", "done", { points: 0 }), child("A-2", "Done", "done", { points: 0 }), child("A-3", "To Do", "new")];
+    expect(epicProgress({ children: three }, byName)).toMatchObject({ pct: 66, points: undefined });
+    expect(epicProgress({ subItems: { done: 1, total: 3 }, childPoints: { done: 0, total: 0 } }, byName).points).toBeUndefined();
   });
 
   it("without its children listed, is what the hub counted", () => {
-    expect(epicProgress({ subItems: { done: 3, total: 10, started: 2 } }, byName)).toMatchObject({ total: 10, done: 3, moving: 2, rest: 5, pct: 30 });
+    expect(epicProgress({ subItems: { done: 3, total: 10, started: 2 }, childPoints: { done: 5, total: 20 } }, byName)).toMatchObject({ total: 10, done: 3, moving: 2, rest: 5, pct: 30, points: { done: 5, total: 20 } });
     expect(epicProgress({}, byName).total).toBe(0);
   });
 });
@@ -107,8 +124,11 @@ describe("an epic's children in groups", () => {
     ]);
   });
 
-  it("unfolded, shows every done one; with done hidden, leaves them and their group out", () => {
-    expect(childGroups(CHILDREN, byName, "state", { unfold: true }).at(-1)!.rows).toHaveLength(7);
+  it("unfolded, shows every done one in that group alone; with done hidden, leaves them and their group out", () => {
+    expect(childGroups(CHILDREN, byName, "state", { unfold: new Set(["done"]) }).at(-1)!.rows).toHaveLength(7);
+    const people = childGroups(CHILDREN, byName, "assignee", { unfold: new Set(["Sam Lee"]) });
+    expect(people.map((g) => g.folded)).toEqual([1, 0, 0, 0]);
+    expect(people[2]!.rows.map((c) => c.key)).toEqual(["ACM-11", "ACM-14", "ACM-17", "ACM-19", "ACM-22"]);
     expect(childGroups(CHILDREN, byName, "state", { hideDone: true }).map((g) => g.title)).toEqual(["Doing", "Review", "To do", "Backlog"]);
   });
 
@@ -145,13 +165,24 @@ describe("an epic's words", () => {
   });
 
   it("says its child count in its byline where a story says its dates", () => {
-    expect(bylineText(epic(), "wide")).toBe("Epic · written by Dana Kim on Jira · 12 child items");
-    expect(bylineText(epic(), "compact")).toBe("Epic · Dana Kim on Jira · 12 child items");
-    expect(bylineText(epic({ ...DETAILS, subItems: undefined, children: [] }), "wide")).toBe("Epic · written by Dana Kim on Jira");
+    expect(bylineText(epic(), "wide", 12)).toBe("Epic · written by Dana Kim on Jira · 12 child items");
+    expect(bylineText(epic(), "compact", 1)).toBe("Epic · Dana Kim on Jira · 1 child item");
+    expect(bylineText(epic(), "wide")).toBe("Epic · written by Dana Kim on Jira");
   });
 
   it("colours a child's state by what it says", () => {
-    expect(CHILDREN.slice(0, 6).map(childTone)).toEqual(["working", "working", "blocked", "muted", "faint", "done"]);
+    expect(CHILDREN.slice(0, 6).map((c) => stateTone(c.state, c.done, c))).toEqual([
+      "ticket-tone-working",
+      "ticket-tone-working",
+      "ticket-tone-blocked",
+      "muted",
+      "ticket-tone-faint",
+      "state-done",
+    ]);
+    // A sub-item's and a link's, said by their state alone, as before.
+    expect(stateTone("In Progress")).toBe("ticket-tone-working");
+    expect(stateTone("To Do")).toBe("muted");
+    expect(stateTone("Anything", true)).toBe("state-done");
   });
 
   it("lists its children before its points in the details", () => {
@@ -212,6 +243,39 @@ describe("an epic, drawn", () => {
     fireEvent.click(screen.getByRole("button", { name: "Hide done" }));
     expect(screen.queryByText("Work ACM-16")).toBeNull();
     expect(screen.queryByRole("button", { name: /more done/ })).toBeNull();
+  });
+
+  it("says one count everywhere when the hub's differs: a Won't Do child counts nowhere, nor do its points", () => {
+    // The hub says 13 children, 8 done, 36 of 55 points; Desk's columns say 12, 7, 28 of 47.
+    const t = epic({ ...DETAILS, subItems: { done: 8, total: 13, started: 2 }, childPoints: { done: 36, total: 55 }, children: [...CHILDREN, child("ACM-30", "Won't Do", "done", { points: 8 })] });
+    useBoard.setState({ tickets: { ...useBoard.getState().tickets, [t.id]: t } });
+    render(<TicketDetail ticket={t} />);
+    // The byline, the progress line, the list's head, and the Children and Points facts.
+    expect(screen.getByText("Epic · written by Dana Kim on Jira · 12 child items")).toBeTruthy();
+    expect(screen.getByRole("region", { name: "Progress" }).textContent).toContain("7 of 12 done · 28 of 47 points");
+    const list = screen.getByRole("region", { name: "Child items" });
+    expect(list.querySelector(".ticket-sec-note")?.textContent).toBe("12");
+    expect(document.querySelector(".ticket-fact-children")?.textContent).toBe("127 done");
+    expect(document.querySelector(".ticket-fact-points")?.textContent).toBe("28 / 47");
+    // It still lists, under Dropped.
+    expect(within(screen.getByRole("group", { name: "Dropped" })).getByText("Work ACM-30")).toBeTruthy();
+  });
+
+  it("with done hidden and every child done, says so", () => {
+    const t = epic({ ...DETAILS, children: CHILDREN.slice(5) });
+    render(<EpicChildren ticket={t} />);
+    fireEvent.click(screen.getByRole("button", { name: "Hide done" }));
+    expect(screen.getByText("All 7 done")).toBeTruthy();
+    expect(screen.queryAllByRole("heading", { level: 3 })).toHaveLength(0);
+  });
+
+  it("unfolds one group's done ones, not every group's", () => {
+    render(<EpicChildren ticket={epic()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Assignee" }));
+    const sam = screen.getByRole("group", { name: "Sam Lee" });
+    fireEvent.click(within(sam).getByRole("button", { name: "1 more done" }));
+    expect(within(screen.getByRole("group", { name: "Sam Lee" })).queryByRole("button", { name: /more done/ })).toBeNull();
+    expect(within(screen.getByRole("group", { name: "Alex Park" })).getByRole("button", { name: "1 more done" })).toBeTruthy();
   });
 
   it("folds its comments and history, closed until asked", () => {
