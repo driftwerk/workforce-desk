@@ -34,6 +34,9 @@ const bodies = (route: string) => plans.requests.filter((r) => r.route === route
 const show = async (revision = 1) => {
   render(<DeskActions extras={{ plan: { id: PLAN, revision } }} text="Sarah proposes a plan." />);
   await waitFor(() => expect(card()).toBeTruthy());
+  // A proposed plan's tickets get their engine and model pickers once the
+  // hub has said which engines there are, a moment after the card itself.
+  if (plans.plan.state === "proposed") await screen.findAllByRole("combobox", { name: /^Engine for / });
 };
 
 beforeEach(() => {

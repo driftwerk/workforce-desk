@@ -2394,6 +2394,30 @@ fn an_uninstall_is_cancelled_between_steps_before_anything_is_removed() {
 }
 
 #[test]
+fn a_machine_says_it_is_being_uninstalled_only_while_it_is() {
+    let b = Box_::new();
+    let _hub = serve(&b);
+    std::fs::write(b.fake("linger-allowed"), "").unwrap();
+    let r = fleet(&b, "0.2.0", true);
+    let id = r.fleet.add("devbox", "devbox").unwrap();
+    until("ready", || r.fleet.state(&id) == Some(State::Ready));
+    let removing = || r.fleet.list().iter().any(|m| m.removing);
+    assert!(!removing());
+    std::fs::write(b.fake("stop-slow"), "").unwrap();
+    let going = {
+        let (fleet, id) = (Arc::clone(&r.fleet), id.clone());
+        std::thread::spawn(move || fleet.uninstall(&id))
+    };
+    until("stopping", || {
+        removed_said(&r).contains(&"stop running".to_string())
+    });
+    assert!(removing(), "it is going now");
+    r.fleet.cancel_uninstall(&id).unwrap();
+    assert!(!going.join().unwrap().unwrap(), "cancelled");
+    assert!(!removing(), "and is not once it stopped");
+}
+
+#[test]
 fn an_uninstall_checks_desks_folder_is_gone() {
     let b = Box_::new();
     let _hub = serve(&b);

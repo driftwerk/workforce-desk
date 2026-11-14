@@ -32,6 +32,11 @@ export const OPEN_WITHIN_MS = 30_000;
 export const APPROVE_WITHIN_MS = 10 * 60_000;
 /** How long Codex's code works. */
 export const CODE_WITHIN_MS = 15 * 60_000;
+/** How long a sign-in can be under way before it is taken as abandoned
+ *  (its window closed, its page never answered): the longest any waits (the
+ *  16 minutes of the browser window Devin opens, past its hub's own limit)
+ *  and a few minutes over. */
+export const ABANDONED_AFTER_MS = 20 * 60_000;
 /** How often a sign-in under way is read again (besides its events). */
 export const SIGN_IN_POLL_MS = 1000;
 
@@ -543,7 +548,9 @@ export type DevinRun =
    *  instead. Its hub ends it after 16 minutes; Desk waits a little longer. */
   | { at: "browser"; id: string; say: string; instead: string }
   | { at: "done" }
-  | { at: "failed"; why: string };
+  /** `instead`: the label of the way on beside it, a new sign-in with a
+   *  code to paste, when one is offered (the hub's field, or Desk's own). */
+  | { at: "failed"; why: string; instead?: string };
 
 /** How long Desk waits on Devin's own browser window: past its hub's own
  *  limit (16 minutes), whose plain words come first. */
@@ -559,8 +566,8 @@ export const devinNotOpened = (where: Where, manual = false): string =>
   `Devin on ${where} didn’t start its sign-in within ${DEVIN_START_WITHIN_MS / 1000} s, so Desk stopped it. ${manual ? "Try again." : "Try again, or paste a code instead."}`;
 export const devinNotSigned = "Nobody signed in on Devin’s page within 10 minutes, so Desk stopped it.";
 export const devinNotFinished = "Nobody finished signing in in Devin’s browser window, so Desk stopped it. Try again, or paste a code instead.";
-/** Whether a failure says a pasted code is the way on. */
-export const offersPaste = (why: string): boolean => /paste a code instead/i.test(why);
+/** The way on Desk offers beside its own failures that say it. */
+export const PASTE_INSTEAD = "Paste a code instead";
 /** What a code the hub refused says, by why it refused it (`status`): a
  *  code that wasn't one (400) is pasted again as the page shows it; a
  *  refusal the hub says in a sentence of its own (409: one already went)
@@ -642,7 +649,7 @@ export function useDevinSignIn(machine: MachineId, where: Where, native: Machine
           put({ at: "done" });
           return done.current?.();
         case "failed":
-          return put({ at: "failed", why: s.why });
+          return put(s.instead ? { at: "failed", why: s.why, instead: s.instead } : { at: "failed", why: s.why });
         case "device":
           return;
       }
@@ -682,14 +689,14 @@ export function useDevinSignIn(machine: MachineId, where: Where, native: Machine
         };
         if (phase === "opening" && now.at === "opening") {
           console.warn(`Devin's sign-in on ${where} didn't start within ${DEVIN_START_WITHIN_MS / 1000} s: stopped it`);
-          put({ at: "failed", why: devinNotOpened(where, manual.current) });
+          put(manual.current ? { at: "failed", why: devinNotOpened(where, true) } : { at: "failed", why: devinNotOpened(where), instead: PASTE_INSTEAD });
           stopIt(now.id);
         } else if (phase.startsWith("page:") && now.at === "page") {
           put({ at: "failed", why: devinNotSigned });
           stopIt(now.id);
         } else if (phase.startsWith("browser:") && now.at === "browser") {
           console.warn(`Devin's sign-in on ${where} waited in its browser window past its hub's limit: stopped it`);
-          put({ at: "failed", why: devinNotFinished });
+          put({ at: "failed", why: devinNotFinished, instead: PASTE_INSTEAD });
           stopIt(now.id);
         }
       },

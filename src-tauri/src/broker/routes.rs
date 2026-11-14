@@ -132,13 +132,9 @@ const HTTP: &[Route] = &[
     route("GET", "/api/desk/features"),
     // Every engine read again at once, after Desk installed or signed one in.
     route("POST", "/api/desk/engines/read"),
-    // An engine's own sign-in, run by its hub: Codex's device page, Devin's
-    // page (this computer has no other way to sign Devin in). A pasted token
-    // is typed into the sign-in, and never read back.
-    route("POST", "/api/desk/engines/sign-ins"),
-    route("GET", "/api/desk/engines/sign-ins/{}"),
-    route("DELETE", "/api/desk/engines/sign-ins/{}"),
-    route("POST", "/api/desk/engines/sign-ins/{}/token"),
+    // An engine's own sign-in is on none of these lists: only the person
+    // whose Desk it is may run one, and the hub refuses its own token for
+    // it, so the page asks it by their paired Desk (`hub_io`) alone.
     // The person's engine accounts. A pasted sign-in is sent to the hub, and
     // never read back.
     route("GET", "/api/desk/accounts"),
@@ -323,11 +319,14 @@ pub fn native_only(method: &str, target: &str) -> bool {
 
 /// What only the native side asks of this computer's hub, never the page
 /// (they are on no list the page's requests are checked against): an
-/// account's sign-in, to copy it to one of the person's machines; and this
-/// computer's engine key, to register when an agent is linked for Desk work.
+/// account's sign-in, to copy it to one of the person's machines; this
+/// computer's engine key, to register when an agent is linked for Desk
+/// work; and the grants its group bosses should have on the machines
+/// (`crate::local_bosses`), so the page can neither read nor shape one.
 const NATIVE_LOCAL: &[Route] = &[
     route("POST", "/api/desk/accounts/{}/hand-over"),
     route("GET", "/api/desk/engine-key"),
+    route("GET", "/api/desk/machine-grants"),
 ];
 
 /// `method target` as one of the native side's own requests to this
@@ -1051,6 +1050,33 @@ mod tests {
         assert!(native_local("GET", "/api/desk/engine-key/x").is_err());
     }
 
+    /// What a local boss's machine grants say is read by the native side
+    /// alone, of this computer's hub: never by the page, of any hub, nor
+    /// with a token in its address, nor written.
+    #[test]
+    fn a_local_boss_s_machine_grants_are_read_by_the_native_side_alone() {
+        let path = "/api/desk/machine-grants";
+        assert!(native_local("GET", path).is_ok());
+        for (method, target) in [
+            ("GET", path.to_string()),
+            ("GET", format!("{path}?token=t")),
+            ("PUT", path.to_string()),
+            ("GET", format!("{path}/devbox")),
+        ] {
+            assert!(http(method, &target).is_err(), "page: {method} {target}");
+            assert!(
+                machine_http(method, &target).is_err(),
+                "page on a machine: {method} {target}"
+            );
+            assert!(!native_only(method, &target), "{method} {target}");
+            assert!(native_boss(method, &target).is_err(), "{method} {target}");
+            assert!(relay_machine(method, &target).is_err(), "{method} {target}");
+        }
+        assert!(native_local("GET", &format!("{path}?token=t")).is_err());
+        assert!(native_local("PUT", path).is_err());
+        assert!(native_local("GET", &format!("{path}/devbox")).is_err());
+    }
+
     /// A group's boss on another hub is linked, granted and stopped by the
     /// native side alone (RBD1): the page can't ask any of it of this
     /// computer's hub or a machine's, however spelled.
@@ -1125,9 +1151,6 @@ mod tests {
             "not this computer's"
         );
         assert!(machine_http("GET", "/api/desk/terminals/t1/programs").is_ok());
-        assert!(machine_http("POST", "/api/desk/engines/sign-ins").is_ok());
-        assert!(machine_http("GET", "/api/desk/engines/sign-ins/e1").is_ok());
-        assert!(machine_http("DELETE", "/api/desk/engines/sign-ins/e1").is_ok());
         assert!(native_only("GET", "/api/desk/accounts/sign-ins/s1/direct"));
         assert!(
             native_only("GET", "/api/desk/accounts/sign-ins/s1/%64irect")
@@ -1139,17 +1162,20 @@ mod tests {
             http("GET", "/api/desk/folders").is_err(),
             "not this computer's"
         );
-        // An engine's own sign-in, on this computer as on a machine.
+        // An engine's own sign-in goes by the person's paired Desk alone,
+        // never with the hub's token, on this computer as on a machine.
         for (m, p) in [
             ("POST", "/api/desk/engines/sign-ins"),
             ("GET", "/api/desk/engines/sign-ins/e1"),
             ("DELETE", "/api/desk/engines/sign-ins/e1"),
             ("POST", "/api/desk/engines/sign-ins/e1/token"),
+            ("GET", "/api/desk/engines/sign-ins/e1/token"),
         ] {
-            assert!(http(m, p).is_ok() && machine_http(m, p).is_ok(), "{m} {p}");
+            assert!(
+                http(m, p).is_err() && machine_http(m, p).is_err(),
+                "{m} {p}"
+            );
         }
-        assert!(http("GET", "/api/desk/engines/sign-ins/e1/token").is_err());
-        assert!(http("POST", "/api/desk/engines/sign-ins/e1/token/x").is_err());
         for (m, p) in [
             ("GET", "/api/desk/folders?path=x&token=y"),
             ("POST", "/api/desk/folders?path=x"),

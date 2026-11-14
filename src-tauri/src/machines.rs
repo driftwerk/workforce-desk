@@ -220,6 +220,18 @@ impl MachineIo {
         crate::hubs::machine_accounts(&self.machines)
     }
 
+    /// Every machine's id, as the sidebar names it.
+    pub fn ids(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self
+            .machines
+            .list()
+            .into_iter()
+            .map(|m| m.id.as_str().to_string())
+            .collect();
+        ids.sort();
+        ids
+    }
+
     /// Machine `id`, as Desk reaches it.
     pub fn link(&self, id: &str) -> Result<Arc<Link>, String> {
         self.machines
