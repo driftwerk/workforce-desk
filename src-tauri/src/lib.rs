@@ -13,6 +13,7 @@ mod grid_windows;
 mod helper;
 mod hub_io;
 mod hubs;
+mod knows_machines;
 mod links;
 mod logins;
 mod machine_accounts;
@@ -1066,6 +1067,30 @@ pub fn run() {
                 backend.clone(),
                 Arc::clone(&machines),
             ));
+            // What agents on other hubs see of the person's machines
+            // (Sees K7): told when a rule changes, and every few minutes.
+            let knows = Arc::new(knows_machines::KnowsMachines::default());
+            app.manage(Arc::clone(&knows));
+            app.manage(Arc::clone(&machines));
+            {
+                let (handle, machines) = (app.handle().clone(), Arc::clone(&machines));
+                tauri::async_runtime::spawn(async move {
+                    loop {
+                        tokio::time::sleep(knows_machines::EVERY).await;
+                        let list = {
+                            let machines = Arc::clone(&machines);
+                            tauri::async_runtime::spawn_blocking(move || {
+                                knows_machines::machines_of(&machines)
+                            })
+                            .await
+                            .unwrap_or_default()
+                        };
+                        if let Some(io) = handle.try_state::<hub_io::HubIo>() {
+                            knows.sync_all(&io, &list).await;
+                        }
+                    }
+                });
+            }
             app.manage(machines::MachineIo::new(
                 Arc::clone(&machines),
                 Arc::clone(&sockets),
@@ -1191,6 +1216,7 @@ pub fn run() {
             hub_io::hub_fetch,
             hub_io::board_sync_mint,
             hub_io::knows_link,
+            knows_machines::knows_machines,
             hub_io::hub_socket_open,
             hub_io::pair_request,
             hub_io::pair_collect,

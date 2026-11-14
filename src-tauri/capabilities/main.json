@@ -72,6 +72,7 @@
     "allow-hub-socket-open",
     "allow-board-sync-mint",
     "allow-knows-link",
+    "allow-knows-machines",
     "allow-pair-request",
     "allow-pair-collect",
     "allow-fonts-list",

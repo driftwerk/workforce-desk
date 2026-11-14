@@ -47,7 +47,7 @@ import { NewSession } from "../session/NewSession";
 import { SessionCard } from "../session/SessionCard";
 import { LedgerPanel } from "../spend/Ledger";
 import { Board } from "../board/BoardView";
-import { linkKnows, setKnowsLinker } from "../hub/knows";
+import { linkKnows, setKnowsLinker, setKnowsTeller, tellMachines } from "../hub/knows";
 import { BrowserPill } from "../browser/BrowserPill";
 import { useBrowserWatch, useLocalBrowser } from "../browser/store";
 import { OpenTicket } from "../board/TicketDetail";
@@ -160,7 +160,11 @@ export function App() {
   // Linking an agent elsewhere for Desk work is this window's alone.
   useEffect(() => {
     setKnowsLinker(linkKnows);
-    return () => setKnowsLinker(null);
+    setKnowsTeller(tellMachines);
+    return () => {
+      setKnowsLinker(null);
+      setKnowsTeller(null);
+    };
   }, []);
   // A privacy pane that wouldn't open is said, not only logged.
   useEffect(() => {
