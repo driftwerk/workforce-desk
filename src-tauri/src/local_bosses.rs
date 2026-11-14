@@ -11,6 +11,9 @@
 //!   powers. Nothing here adds to it; what can't be one of those grants is
 //!   not carried ([`carried`]): a boss on another hub, folders,
 //!   repositories, memory search, a resume, a field the hub doesn't send.
+//!   Act fully is carried only with its daily budget ([`capped`]); the hub
+//!   counts that budget once across this computer and every machine, and
+//!   each machine acts fully only while the hub says so, every second.
 //! - **Asked natively once per group**, Cancel the default, before a boss
 //!   first runs the group's machine sessions (the design's migration
 //!   question): "Oversee this group" never said machines, and a boss made
@@ -18,8 +21,10 @@
 //!   person puts in the group from then on, as at home, up to the level it
 //!   was asked at: a higher one asks again. A no holds until a machine
 //!   session the person wasn't asked about joins the group, or the boss's
-//!   level or switches change at home. What is kept (`local_bosses.json`,
-//!   private) is each group's answer, and nothing else.
+//!   level or switches change at home. An agent made again with the same
+//!   id is another boss, and is asked again. What is kept
+//!   (`local_bosses.json`, private) is each group's answer, and nothing
+//!   else.
 //! - **Never a group bossed from another hub** ([`crate::bosses`]'s): not
 //!   one Desk linked such a boss for, nor one whose grant on the machine
 //!   names such a boss. One boss per group. Only grants naming a boss here
@@ -82,6 +87,10 @@ pub struct WantedGrant {
     pub agent: String,
     #[serde(default)]
     pub agent_name: String,
+    /// When the agent was made on this computer's hub: one made again with
+    /// the same id is asked about again. None from a hub that can't say.
+    #[serde(default)]
+    pub agent_since: Option<String>,
     pub grant: Value,
 }
 
@@ -271,6 +280,10 @@ fn renewal_due(held: &Value, now: DateTime<Utc>) -> bool {
 #[serde(rename_all = "camelCase")]
 pub struct Said {
     pub agent: String,
+    /// When that agent was made, as the hub said: an agent made again with
+    /// the same id is another boss.
+    #[serde(default)]
+    pub since: Option<String>,
     pub yes: bool,
     /// The machine sessions (`<machine>/<id>`) they were asked about.
     pub sessions: Vec<String>,
@@ -301,6 +314,12 @@ pub struct Yes {
 }
 
 impl Said {
+    /// Whether this answer was for `a`'s boss: the same agent, made at the
+    /// same time.
+    fn of(&self, a: &Asked) -> bool {
+        self.agent == a.agent && self.since == a.since
+    }
+
     /// The last yes for this boss, if there is one.
     fn yes_said(&self) -> Option<Yes> {
         self.last_yes.clone().or_else(|| {
@@ -365,7 +384,7 @@ pub enum Consent {
 fn consent(kept: &Kept, group: &str, a: &Asked) -> Consent {
     let rank = |l: &str| level_rank(&json!(l)).unwrap_or(0);
     match kept.groups.get(group) {
-        Some(s) if s.agent != a.agent || s.ask_again => Consent::Ask,
+        Some(s) if !s.of(a) || s.ask_again => Consent::Ask,
         Some(s)
             if s.yes_said()
                 .is_some_and(|y| rank(&a.level) <= rank(&y.level)) =>
@@ -390,13 +409,28 @@ fn consent(kept: &Kept, group: &str, a: &Asked) -> Consent {
 fn yes_of(kept: &Kept, group: &str, a: &Asked) -> Option<Yes> {
     kept.groups
         .get(group)
-        .filter(|s| s.agent == a.agent)
+        .filter(|s| s.of(a))
         .and_then(Said::yes_said)
 }
 
-/// `grant` as Desk carries it to a machine: no higher than Act, and no
-/// budget, whatever the hub says (Act fully isn't given to machines yet).
+/// Act fully's daily budget `grant` carries, in dollars: above 0 and up to
+/// Act fully's most.
+fn budget_of(grant: &Value) -> Option<f64> {
+    grant["act"]["budget_usd_per_day"]
+        .as_f64()
+        .filter(|u| u.is_finite() && *u > 0.0 && *u <= MOST_BUDGET_USD)
+}
+
+/// The most Act fully's daily budget may be.
+const MOST_BUDGET_USD: f64 = 10_000.0;
+
+/// `grant` as Desk carries it to a machine: Act fully only with a daily
+/// budget, which the hub counts once across this computer and every
+/// machine; else no higher than Act, and no budget.
 fn capped(grant: Value) -> Value {
+    if grant["level"] == "full" && budget_of(&grant).is_some() {
+        return grant;
+    }
     let mut grant = at_most(grant, "act");
     if let Some(act) = grant["act"].as_object_mut() {
         act.remove("budget_usd_per_day");
@@ -423,6 +457,7 @@ struct Asked {
     group_name: String,
     level: String,
     act: Value,
+    since: Option<String>,
     sessions: BTreeMap<String, BTreeSet<String>>,
 }
 
@@ -430,12 +465,15 @@ fn by_group(wanted: &Wanted) -> BTreeMap<String, Asked> {
     let mut out: BTreeMap<String, Asked> = BTreeMap::new();
     for (m, mw) in &wanted.machines {
         for g in mw.grants.iter().filter(|g| carried(g)) {
+            // What the person is asked about is what will be written.
+            let grant = capped(g.grant.clone());
             let a = out.entry(g.group.clone()).or_insert_with(|| Asked {
                 agent: g.agent.clone(),
                 agent_name: g.agent_name.clone(),
-                group_name: g.grant["name"].as_str().unwrap_or(&g.group).to_string(),
-                level: g.grant["level"].as_str().unwrap_or("watch").to_string(),
-                act: g.grant["act"].clone(),
+                group_name: grant["name"].as_str().unwrap_or(&g.group).to_string(),
+                level: grant["level"].as_str().unwrap_or("watch").to_string(),
+                act: grant["act"].clone(),
+                since: g.agent_since.clone(),
                 sessions: BTreeMap::new(),
             });
             if a.agent != g.agent {
@@ -478,6 +516,17 @@ fn level_words(level: &str) -> &'static str {
     }
 }
 
+/// How `a` would run them, in words: at Act fully, with its one daily
+/// budget.
+fn how_words(a: &Asked) -> String {
+    match (a.level.as_str(), budget_of(&json!({"act": a.act}))) {
+        ("full", Some(usd)) => format!(
+            "at Act fully, within one daily budget of ${usd:.2} counted across this computer and every machine"
+        ),
+        (l, _) => level_words(l).to_string(),
+    }
+}
+
 /// The question that lets `a` run its group's machine sessions, from what
 /// will be written alone.
 fn question(a: &Asked, names: &BTreeMap<String, String>) -> (String, String, String) {
@@ -494,7 +543,7 @@ fn question(a: &Asked, names: &BTreeMap<String, String>) -> (String, String, Str
         "{boss} oversees {} on this computer. Let {boss} run its {n} {sessions} on {} too, as {boss} runs its sessions here: {}, seeing everything, terminals included?\n\n{boss}'s calls reach them through Desk while this computer is awake and Desk is open, and each machine decides each one at no more than {boss}'s settings here. Stop overseeing ends it there too.",
         bosses::quoted(&a.group_name),
         bosses::and(&wheres),
-        level_words(&a.level),
+        how_words(a),
     );
     (
         format!("Let {boss} run machine sessions"),
@@ -533,7 +582,7 @@ pub async fn ask_one(
         false => kept
             .groups
             .get(&group)
-            .filter(|s| s.agent == a.agent)
+            .filter(|s| s.of(&a))
             .and_then(Said::yes_said),
     };
     keep_said(
@@ -541,6 +590,7 @@ pub async fn ask_one(
         &group,
         Said {
             agent: a.agent.clone(),
+            since: a.since.clone(),
             yes: said,
             sessions: a.flat().into_iter().collect(),
             level: a.level.clone(),
