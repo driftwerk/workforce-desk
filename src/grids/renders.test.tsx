@@ -1,4 +1,5 @@
 import { act, cleanup, render, screen } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
@@ -81,6 +82,28 @@ it("leaves a pane's conversation alone when another session changes or another a
     act(() => useChat.setState((s) => ({ conversations: { ...s.conversations, "local/other": { ...emptyConversation(), messages: [{ ...msg(1), content: "x".repeat(n++) }] } } })));
   }
   expect(counts.dm).toBe(0);
+});
+
+// Each pane's menu offers this computer's sessions newest first, with
+// where each stands: read as it opens, so a session no pane shows moving
+// (its state, its turn) draws no pane again.
+it("draws no pane again when a session it doesn't show moves", () => {
+  layOut(MAIN_GRID, "quarters");
+  deliver(MAIN_GRID, { kind: "agent", agent: "local/allan" });
+  deliver(MAIN_GRID, { kind: "session", sessionId: "s0" });
+  deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+  deliver(MAIN_GRID, { kind: "session", sessionId: "s2" });
+  let draws = 0;
+  render(
+    <Profiler id="grid" onRender={() => draws++}>
+      <GridsMain />
+    </Profiler>,
+  );
+  draws = 0;
+  let n = 0;
+  for (const state of ["blocked", "working", "idle", "working", "background"] as const)
+    act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s5: { ...s.sessions.s5!, state, updatedAt: new Date(Date.UTC(2026, 9, 29, 10, 0, n++)).toISOString() } } })));
+  expect(draws).toBe(0);
 });
 
 // Every grid's row is in the sidebar whatever the main area shows, so a
