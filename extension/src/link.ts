@@ -129,7 +129,14 @@ export class Link {
     if (said === null && this.checking === port) return;
     this.checking = port;
     const reloader = this.reloader;
-    const outcome = await upToDate(expected, this.revision, reloader);
+    let outcome: Awaited<ReturnType<typeof upToDate>>;
+    try {
+      outcome = await upToDate(expected, this.revision, reloader);
+    } catch {
+      // Chrome couldn't say: nothing is reloaded, and a later `expects` looks again.
+      this.checking = null;
+      return;
+    }
     if (outcome !== "unbuilt") this.checking = null;
     if (outcome === "current") return;
     // Desk Helper logs it; it isn't relayed to the hub.
