@@ -79,7 +79,7 @@ export function ChooseMe({ where, hub, chosen, onDone, onCancel }: { where: MeWh
           {shown.map((m) => (
             <li key={m.id}>
               <button type="button" className="choose-me-row" disabled={busy} onClick={() => void keep(m)} aria-label={`I'm ${m.name}`}>
-                <Mark name={m.name} size="xs" src={m.avatar ?? null} person />
+                <Mark name={m.name} size="xs" src={m.avatar ?? null} person tone="series" />
                 <span>{m.name}</span>
               </button>
             </li>

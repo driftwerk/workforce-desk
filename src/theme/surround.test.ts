@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
-import { BUILTIN, HARBOUR, NIGHT } from "./builtin";
+import { BUILTIN, DAY, HARBOUR, NIGHT } from "./builtin";
 import before from "./fixtures/before-day.json";
-import { ALPHA_TOKENS, bestOn, contrast, contrastChecks, cssVariables, derive, isDarkGround, isHex, ON_FILL_CHOICES, scaleAlpha, TOKENS, type ThemeSpec } from "./tokens";
+import { ALPHA_TOKENS, bestOn, contrast, contrastChecks, cssVariables, derive, isDarkGround, isHex, ON_FILL_CHOICES, scaleAlpha, SERIES_MARK_TOKENS, TOKENS, type ThemeSpec } from "./tokens";
 import { parseTheme, serializeTheme, ThemeError } from "./toml";
 import { dimVariables, xtermTheme } from "./xterm";
 
@@ -45,6 +45,20 @@ describe("themes from before the new tokens", () => {
     const vars = cssVariables(derive(NIGHT));
     // Today's .35, .25 and .4 black shadows.
     expect([vars["--shadow"], vars["--shadow-soft"], vars["--shadow-strong"]]).toEqual(["#00000059", "#00000040", "#00000066"]);
+  });
+});
+
+describe("a board mark's initials", () => {
+  it("are whichever of ink and white reads better on the worst of the series they fill", () => {
+    expect([NIGHT, HARBOUR, DAY].map((s) => derive(s).colors.onSeriesMark)).toEqual(["#161714", "#161714", "#FFFFFF"]);
+    // A light theme that sets no series has the light defaults, where white
+    // falls to 2.69 and ink only to 3.12: ink.
+    const light: ThemeSpec = { ...DAY, id: "light", overrides: {} };
+    expect(derive(light).dark).toBe(false);
+    expect(derive(light).colors.onSeriesMark).toBe("#161714");
+    // Its own series count: dark ones take white.
+    const deep: ThemeSpec = { ...light, overrides: Object.fromEntries(SERIES_MARK_TOKENS.map((t) => [t, "#1F3A66"])) };
+    expect(derive(deep).colors.onSeriesMark).toBe("#FFFFFF");
   });
 });
 

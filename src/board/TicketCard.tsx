@@ -66,7 +66,7 @@ export function Upstream({ who, me, system }: { who: SyncAssignee | null; me: st
   const you = !!me && who.id === me;
   return (
     <span className="board-upstream" title={`${you ? "You have" : `${who.name} has`} it on ${title}`}>
-      <Mark name={who.name} size="xs" person />
+      <Mark name={who.name} size="xs" person tone="series" you={you} />
       <span className="board-upstream-name">{you ? "You" : who.name}</span>
     </span>
   );
@@ -270,7 +270,7 @@ export function TicketCard({
   // there beside it, else the assignee there.
   const there = upstream ? (
     <span className="board-upstream-also" title={`${upstream.id === board?.sync?.me ? "You have" : `${upstream.name} has`} it on ${SYSTEM_TITLE[system!]}`}>
-      <Mark name={upstream.name} size="xs" person />
+      <Mark name={upstream.name} size="xs" person tone="series" you={upstream.id === board?.sync?.me} />
     </span>
   ) : null;
   const who =

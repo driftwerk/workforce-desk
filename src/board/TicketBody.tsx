@@ -1,5 +1,5 @@
 import { RichHostProvider, RichMarkdown } from "@workforce/rich";
-import { DESK_RICH_HOST } from "../shell/richHost";
+import { TICKET_RICH_HOST, useKeyedBody } from "./ticketKeyedRich";
 
 /** A description someone's tool sent with its newlines written out (`\n` as
  *  two characters, one line in all): real line breaks, as the hub makes them
@@ -9,8 +9,10 @@ export const unescapeNewlines = (text: string): string =>
 
 /** A ticket's description as markdown, with the renderer chat uses: no raw
  *  HTML, a remote image as a link or Desk's placeholder, checklists drawn
- *  read-only. Clicking text opens it for editing; a link opens as a link. */
-export function TicketBody({ text, onEdit }: { text: string; onEdit: () => void }) {
+ *  read-only, a key of a ticket on its board as that ticket's chip. Clicking
+ *  text opens it for editing; a link or a chip opens as itself. */
+export function TicketBody({ text, board, onEdit }: { text: string; board?: string; onEdit: () => void }) {
+  const shown = useKeyedBody(unescapeNewlines(text), board);
   return (
     <div
       className="ticket-text ticket-md rich"
@@ -22,8 +24,8 @@ export function TicketBody({ text, onEdit }: { text: string; onEdit: () => void 
         onEdit();
       }}
     >
-      <RichHostProvider host={DESK_RICH_HOST}>
-        <RichMarkdown text={unescapeNewlines(text)} />
+      <RichHostProvider host={TICKET_RICH_HOST}>
+        <RichMarkdown text={shown} />
       </RichHostProvider>
       <button type="button" className="link ticket-md-edit" onClick={onEdit}>
         Edit description

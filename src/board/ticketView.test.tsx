@@ -32,6 +32,7 @@ import { useOverview } from "../overview/store";
 import { askDeskAbout, FileViewer } from "./FileViewer";
 import { useBoard } from "./store";
 import { ACME } from "./testing";
+import { TicketBody } from "./TicketBody";
 import { onBehalfOf, TicketActivity, whereSaid } from "./TicketComments";
 import { forgetFetchedFiles, KEPT, TicketFiles, useFileUrl, useUploads } from "./TicketFiles";
 import { useFileDrop } from "../attachments/Compose";
@@ -277,6 +278,51 @@ describe("a ticket's files", () => {
 });
 
 describe("a ticket's comments", () => {
+  it("draws a key of a ticket on the board as its chip with its state, and leaves others as text", async () => {
+    const id = "0f3c2a9e-1b2c-4d5e-8f90-123456789abc";
+    const other = ticket(2, {
+      id,
+      key: "ACME-2",
+      title: "Admin page",
+      external: { system: "jira", key: "ACME-2", url: "https://acme.example/browse/ACME-2", remoteUpdatedAt: "2026-11-10T09:00:00Z", synced: true, link: "l1", details: { kind: "Sub-task", kindLevel: -1, remoteState: "In Progress" } } as never,
+    });
+    useBoard.setState({ tickets: { [id]: other } });
+    hub.comments.mockResolvedValue({ comments: [comment("a", { body: "Left: ACME-2 and ACME-9, not `ACME-2`." })], problem: null });
+    const { container } = render(<TicketActivity ticket={synced()} />);
+    const chip = await screen.findByRole("button", { name: "Open ACME-2: Admin page, In Progress" });
+    expect(chip.querySelector(".ticket-issue-chip-state")?.textContent).toBe("In Progress");
+    expect(chip.querySelector(".ticket-issue-chip-state")?.className).toContain("ticket-tone-working");
+    expect(container.querySelectorAll(".ticket-issue-chip")).toHaveLength(1);
+    expect(container.querySelector(".ticket-comment-body")?.textContent).toContain("ACME-9");
+    fireEvent.click(chip);
+    expect(useBoard.getState().open).toBe(id);
+    useBoard.setState({ tickets: {}, open: null });
+  });
+
+  it("draws a key in a description as its chip; the chip opens its ticket, not the editor, and the text still does", () => {
+    const id = "0f3c2a9e-1b2c-4d5e-8f90-123456789abd";
+    const other = ticket(3, {
+      id,
+      key: "ACME-3",
+      title: "Unified login",
+      external: { system: "jira", key: "ACME-3", url: "https://acme.example/browse/ACME-3", remoteUpdatedAt: "2026-11-10T09:00:00Z", synced: true, link: "l1", details: { kind: "Story", kindLevel: 0, remoteState: "Done" } } as never,
+    });
+    useBoard.setState({ tickets: { [id]: other } });
+    const text = "Follows ACME-3 and ACME-9.";
+    const onEdit = vi.fn();
+    const { container } = render(<TicketBody text={text} board={other.board} onEdit={onEdit} />);
+    const chip = screen.getByRole("button", { name: "Open ACME-3: Unified login, Done" });
+    expect(container.querySelectorAll(".ticket-issue-chip")).toHaveLength(1);
+    expect(container.textContent).toContain("ACME-9");
+    expect(container.innerHTML).not.toContain("desk://");
+    fireEvent.click(chip);
+    expect(onEdit).not.toHaveBeenCalled();
+    expect(useBoard.getState().open).toBe(id);
+    fireEvent.click(screen.getByText(/Follows/));
+    expect(onEdit).toHaveBeenCalledTimes(1);
+    useBoard.setState({ tickets: {}, open: null });
+  });
+
   it("says who wrote each: a person there, an agent there, Desk's note, only in Desk", () => {
     expect(whereSaid(comment("a"))).toBeNull();
     expect(whereSaid(comment("b", { author: { kind: "agent", name: "Bot", on: "Linear" } }))).toBe("agent on Linear");

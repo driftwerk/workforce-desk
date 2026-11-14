@@ -234,6 +234,7 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/items/{}/answer"),
     route("POST", "/api/desk/items/{}/drop"),
     route("POST", "/api/desk/items/{}/always"),
+    route("POST", "/api/desk/items/{}/done"),
     // Your typing to a boss, and whether its DM is in front of you.
     route("POST", "/api/desk/dm/{}/typing"),
     route("POST", "/api/desk/presence"),
