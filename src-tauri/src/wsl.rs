@@ -148,29 +148,44 @@ pub fn wsl_user_name() -> String {
 
 /// "Create a user": `distro`'s only user is root, which Desk won't run
 /// as, so Desk makes a normal one named after the Windows user and makes it
-/// the default (the distro restarts; its files stay). Its name.
+/// the default (the distro restarts; its files stay). What to tell the
+/// person, when the user was made without sudo.
 #[tauri::command]
-pub async fn wsl_create_user(distro: String) -> CommandResult<String> {
+pub async fn wsl_create_user(distro: String) -> CommandResult<Option<String>> {
     tauri::async_runtime::spawn_blocking(move || {
         let user = desk_wsl::fix::user_name(&std::env::var("USERNAME").unwrap_or_default());
-        desk_wsl::fix::create_user(&WslExe::system(), &distro, &user)?;
-        Ok(user)
+        Ok(desk_wsl::fix::create_user(
+            &WslExe::system(),
+            &distro,
+            &user,
+        )?)
     })
     .await
     .map_err(text)?
 }
 
+/// The Ubuntu Desk installed beside the person's Linux.
+#[derive(Debug, Clone, Serialize)]
+pub struct Alongside {
+    pub name: String,
+    pub note: Option<String>,
+}
+
 /// "Install Ubuntu alongside": the person's Linux is too old for Desk, so
 /// Desk installs a current Ubuntu beside it (theirs stays as it is) with a
-/// normal user named after the Windows one. Its name, to set Desk up in.
+/// normal user named after the Windows one. Its name, to set Desk up in,
+/// and what to tell the person, when the user was made without sudo.
 #[tauri::command]
-pub async fn wsl_install_alongside() -> CommandResult<String> {
+pub async fn wsl_install_alongside() -> CommandResult<Alongside> {
     tauri::async_runtime::spawn_blocking(move || {
         let wsl = WslExe::system();
         desk_wsl::fix::install_alongside(&wsl)?;
         let user = desk_wsl::fix::user_name(&std::env::var("USERNAME").unwrap_or_default());
-        desk_wsl::fix::create_user(&wsl, desk_wsl::fix::ALONGSIDE, &user)?;
-        Ok(desk_wsl::fix::ALONGSIDE.to_string())
+        let note = desk_wsl::fix::create_user(&wsl, desk_wsl::fix::ALONGSIDE, &user)?;
+        Ok(Alongside {
+            name: desk_wsl::fix::ALONGSIDE.to_string(),
+            note,
+        })
     })
     .await
     .map_err(text)?

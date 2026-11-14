@@ -38,7 +38,9 @@ pub fn user_name(windows: &str) -> String {
 /// `/etc/sudoers.d`, checked with visudo where there is one), since it has
 /// none: never an existing account that has a password of its own; and makes it the distro's default in `/etc/wsl.conf`, keeping the
 /// rest of that file (and the link, when it is one). WSL starts the distro
-/// as that user after a restart.
+/// as that user after a restart. When visudo turns the sudo file down, the
+/// user is still made, without sudo, and the script says `no-sudo` on its
+/// error output (exit 0), for [`create_user`] to tell the person.
 pub const CREATE_USER_SCRIPT: &str = r#"set -eu
 u="$1"
 nopw=1
@@ -59,7 +61,9 @@ if [ "$nopw" = 1 ] && [ -d /etc/sudoers.d ]; then
   s="/etc/sudoers.d/desk-$u"
   printf '%s ALL=(ALL) NOPASSWD:ALL\n' "$u" > "$s.desk"
   chmod 0440 "$s.desk"
-  if command -v visudo >/dev/null 2>&1 && ! visudo -cf "$s.desk" >/dev/null 2>&1; then rm -f "$s.desk"
+  if command -v visudo >/dev/null 2>&1 && ! visudo -cf "$s.desk" >/dev/null 2>&1; then
+    rm -f "$s.desk"
+    echo "no-sudo" >&2
   else mv "$s.desk" "$s"; fi
 fi
 f=/etc/wsl.conf
@@ -81,9 +85,14 @@ cat "$t.desk" > "$t"
 rm -f "$t.desk"
 "#;
 
+/// What the person is told when the distro's own check turned the sudo
+/// file down: the user was made, without sudo.
+pub const NO_SUDO_NOTE: &str = "Your user was made, but it can't use sudo without a password: this Linux didn't accept the file Desk wrote for it. Desk still works, but anything that needs sudo will ask for a password, or can't be done from Desk.";
+
 /// Makes a normal user `user` in `distro` and its default, then stops the
-/// distro so it starts as that user next time.
-pub fn create_user(wsl: &WslExe, distro: &str, user: &str) -> Result<(), String> {
+/// distro so it starts as that user next time. A note for the person when
+/// the user was made without sudo ([`NO_SUDO_NOTE`]).
+pub fn create_user(wsl: &WslExe, distro: &str, user: &str) -> Result<Option<String>, String> {
     named(distro)?;
     let out = wsl
         // --exec: run as given, never through the distro's shell (which
@@ -116,9 +125,17 @@ pub fn create_user(wsl: &WslExe, distro: &str, user: &str) -> Result<(), String>
             "Desk couldn't make a user in {distro}. Try again, or make one there yourself and set it as the default."
         )));
     }
+    let note = no_sudo(&out.stderr).then(|| NO_SUDO_NOTE.to_string());
     // Stopped, so it starts as the new default; its files stay.
     let _ = wsl.run(&["--terminate", distro]);
-    Ok(())
+    Ok(note)
+}
+
+/// Whether the script's error output says visudo turned the sudo file down.
+fn no_sudo(stderr: &[u8]) -> bool {
+    crate::detect::decode(stderr)
+        .lines()
+        .any(|l| l.trim() == "no-sudo")
 }
 
 /// Installs [`ALONGSIDE`] next to the person's Linux, registered but not
@@ -303,6 +320,45 @@ mod tests {
         };
         assert!(pw("kings").starts_with("$6$"));
         assert_eq!(pw("new"), "!");
+    }
+
+    /// The sudoers part, run for real with a visudo that says no: the file
+    /// isn't kept, and the script says so for the person to be told.
+    #[cfg(unix)]
+    #[test]
+    fn a_sudo_file_visudo_turns_down_is_not_kept_and_is_said() {
+        let start = CREATE_USER_SCRIPT.find("if [ \"$nopw\" = 1 ]").unwrap();
+        let end = CREATE_USER_SCRIPT.find("f=/etc/wsl.conf").unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let visudo = |code: i32| {
+            let path = bin.join("visudo");
+            std::fs::write(&path, format!("#!/bin/sh\nexit {code}\n")).unwrap();
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+        };
+        let sudoers = dir.path().join("sudoers.d");
+        std::fs::create_dir_all(&sudoers).unwrap();
+        let part =
+            CREATE_USER_SCRIPT[start..end].replace("/etc/sudoers.d", sudoers.to_str().unwrap());
+        let run = || {
+            std::process::Command::new("/bin/sh")
+                .env("PATH", format!("{}:/usr/bin:/bin", bin.display()))
+                .args(["-c", &format!("u=\"$1\"; nopw=1\n{part}"), "t", "kings"])
+                .output()
+                .unwrap()
+        };
+        visudo(1);
+        let out = run();
+        assert!(out.status.success());
+        assert!(no_sudo(&out.stderr));
+        assert_eq!(std::fs::read_dir(&sudoers).unwrap().count(), 0);
+        visudo(0);
+        let out = run();
+        assert!(out.status.success());
+        assert!(!no_sudo(&out.stderr));
+        assert!(sudoers.join("desk-kings").exists());
     }
 
     #[test]

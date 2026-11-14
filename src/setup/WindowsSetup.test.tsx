@@ -42,8 +42,8 @@ beforeEach(() => {
   platform.setUpInWsl.mockReset().mockResolvedValue(undefined);
   platform.forgetWslResume.mockReset().mockResolvedValue(undefined);
   platform.convertToWsl2.mockReset().mockResolvedValue(undefined);
-  platform.createWslUser.mockReset().mockResolvedValue("sarah");
-  platform.installUbuntuAlongside.mockReset().mockResolvedValue("Ubuntu-24.04");
+  platform.createWslUser.mockReset().mockResolvedValue(null);
+  platform.installUbuntuAlongside.mockReset().mockResolvedValue({ name: "Ubuntu-24.04", note: null });
   platform.wslUserName.mockReset().mockResolvedValue("sarah");
   useSetup.setState({ open: true, skipped: false });
   useHost.setState({ ...DEFAULT_HOST, platform: "windows", host: null });
@@ -75,6 +75,30 @@ describe("Linux Desk can't use yet, put right by Desk", () => {
     await flush();
     expect(platform.createWslUser).toHaveBeenCalledWith("Debian");
     expect(platform.setUpInWsl).toHaveBeenCalledWith("Debian");
+  });
+
+  it("says plainly when the new user was made without sudo, and says nothing when it has it", async () => {
+    platform.detectWsl.mockResolvedValue({ problem: null, distros: [rooted] });
+    platform.createWslUser.mockResolvedValueOnce("Your user was made, but it can't use sudo without a password.");
+    render(<WindowsSetup />);
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Create a user, then set up" }));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Create sarah and restart Debian" }));
+    await flush();
+    expect(screen.getByText("Sudo isn’t set up for your user")).toBeTruthy();
+    expect(screen.getByText(/can't use sudo without a password/)).toBeTruthy();
+  });
+
+  it("says nothing of sudo when the new user has it", async () => {
+    platform.detectWsl.mockResolvedValue({ problem: null, distros: [rooted] });
+    render(<WindowsSetup />);
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Create a user, then set up" }));
+    await flush();
+    fireEvent.click(screen.getByRole("button", { name: "Create sarah and restart Debian" }));
+    await flush();
+    expect(screen.queryByText("Sudo isn’t set up for your user")).toBeNull();
   });
 
   it("installs Ubuntu alongside a Linux too old for Desk, then sets up there", async () => {

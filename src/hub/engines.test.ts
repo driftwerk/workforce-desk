@@ -123,6 +123,9 @@ describe("keys", () => {
     expect(readState("sideways").kind).toBe("failed");
     // This computer's id, or one a key can't hold, is no machine's.
     expect(readMachine({ id: "local", state: "ready" })).toBeNull();
+    // Said only while Desk is being uninstalled from it.
+    expect(readMachine({ id: "devbox", name: "devbox", target: "dev@box", state: "ready", removing: true })?.removing).toBe(true);
+    expect(readMachine({ id: "devbox", name: "devbox", target: "dev@box", state: "ready" })?.removing).toBeUndefined();
     expect(readMachine({ id: "a/b", state: "ready" })).toBeNull();
   });
 

@@ -108,6 +108,8 @@ export function WindowsSetup() {
 
   /** What Desk is doing before it sets up, said while it runs. */
   const [fixing, setFixing] = useState<string | null>(null);
+  /** Said under the steps when the user Desk made can't use sudo. */
+  const [sudoNote, setSudoNote] = useState<string | null>(null);
   const setUpIn = (name: string, fix: DistroOption["fix"]) =>
     run(
       `setting Desk up in ${name}`,
@@ -119,7 +121,7 @@ export function WindowsSetup() {
           }
           if (fix === "user") {
             setFixing(`Making you a user in ${name}…`);
-            await createWslUser(name);
+            setSudoNote(await createWslUser(name));
           }
         } finally {
           setFixing(null);
@@ -152,7 +154,9 @@ export function WindowsSetup() {
         let name: string;
         try {
           setFixing("Installing Ubuntu 24.04… About 5 minutes. Your Linux stays as it is.");
-          name = await installUbuntuAlongside();
+          const made = await installUbuntuAlongside();
+          name = made.name;
+          setSudoNote(made.note);
         } finally {
           setFixing(null);
         }
@@ -357,6 +361,12 @@ export function WindowsSetup() {
                 );
               })}
             </ol>
+            {sudoNote && (
+              <div className="wsl-card wsl-warn">
+                <b>Sudo isn’t set up for your user</b>
+                <span className="muted small">{sudoNote}</span>
+              </div>
+            )}
             {blocked && (
               <div className="wsl-card wsl-warn">
                 <b>Windows can’t reach Desk inside {pick}</b>
