@@ -1,31 +1,18 @@
 import { RichHostProvider, RichMarkdown } from "@workforce/rich";
-import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { dayClock } from "../floor/time";
 import { useSessionNames } from "../groups/names";
 import { deskListeners, useDesk } from "../hub/store";
 import type { ActivityEvent, DeskEvent, HistoryEvent, Ticket, TicketComment } from "../hub/types";
 import { mergeEvents } from "../overview/activity";
-import { parseTicketLink } from "../shell/links";
-import { DESK_RICH_HOST } from "../shell/richHost";
 import { plainError } from "../ui/plainError";
 import { historyLine } from "./board";
 import { BranchIcon, MergeIcon, PrIcon } from "./cardFacts";
 import { useBoard } from "./store";
 import { counts, dayText, eventParts, filtered, markText, timeline, type ActivityFilter, type EventWords, type Layout, type Part, type TimelineRow } from "./ticketRich";
-import { linkTicketKeys } from "./ticketKeys";
-import { IssueChip } from "./IssueChip";
+import { TICKET_RICH_HOST, useKeyedBody } from "./ticketKeyedRich";
 import { localTicketView } from "./ticketView";
-
-/** A comment's markdown host: Desk's, with a link to a ticket on a board
- *  here drawn as that ticket's chip. */
-const COMMENT_HOST = {
-  ...DESK_RICH_HOST,
-  link: (href: string, children: ReactNode) => {
-    const id = parseTicketLink(href);
-    return id && useBoard.getState().tickets[id] ? <IssueChip id={id}>{children}</IssueChip> : undefined;
-  },
-};
 
 /** The longest comment Desk posts. */
 export const COMMENT_MAX = 10_000;
@@ -322,7 +309,7 @@ function CommentRow({
         </div>
         {c.flagged && <p className="small ticket-comment-flag">Reads as instructions to an AI: shown as written, never acted on.</p>}
         <div className="ticket-comment-body rich">
-          <RichHostProvider host={COMMENT_HOST}>
+          <RichHostProvider host={TICKET_RICH_HOST}>
             <RichMarkdown text={body} />
           </RichHostProvider>
         </div>
@@ -336,34 +323,6 @@ function CommentRow({
       </div>
     </li>
   );
-}
-
-/** Each board's ticket keys and ids, built once per change of the tickets
- *  and shared by every comment. */
-const keysByBoard = new WeakMap<object, Map<string, Map<string, string>>>();
-const boardKeys = (tickets: Record<string, Ticket>, board: string): Map<string, string> => {
-  let boards = keysByBoard.get(tickets);
-  if (!boards) keysByBoard.set(tickets, (boards = new Map()));
-  let ids = boards.get(board);
-  if (!ids) {
-    ids = new Map();
-    for (const o of Object.values(tickets)) {
-      const key = o.board === board ? (o.external?.key ?? o.key) : null;
-      if (key) ids.set(key, o.id);
-    }
-    boards.set(board, ids);
-  }
-  return ids;
-};
-
-/** A comment's text with each key of a ticket on the same board made a
- *  link to it, so it's drawn as that ticket's chip. */
-function useKeyedBody(text: string, board: string): string {
-  const tickets = useBoard((s) => s.tickets);
-  return useMemo(() => {
-    const ids = boardKeys(tickets, board);
-    return ids.size ? linkTicketKeys(text, (k) => ids.get(k)) : text;
-  }, [text, board, tickets]);
 }
 
 /** A row of history: who, what happened, when. */
