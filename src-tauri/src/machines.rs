@@ -454,7 +454,7 @@ pub fn machine_sign_in_forward_stop(
 }
 
 /// Opens a page a machine's engine gave for signing in (Claude's page with a
-/// code, Codex's device page) in the browser, once it is checked to be that
+/// code, Codex's device page, Devin's page) in the browser, once it is checked to be that
 /// engine's own: https on its hosts, read as a browser reads it. The page
 /// never opens a machine's page itself.
 #[tauri::command]
@@ -466,6 +466,7 @@ pub fn machine_open_sign_in_page(
     let hosts = match engine.as_str() {
         "claude" => callback::CLAUDE_PAGES,
         "codex" => callback::CODEX_PAGES,
+        "devin" => callback::DEVIN_PAGES,
         _ => return Err("Desk doesn't sign that in.".into()),
     };
     let page = callback::sign_in_page(&url, hosts)

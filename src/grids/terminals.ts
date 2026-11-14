@@ -266,12 +266,12 @@ const useGridsWriter = (gridId: string): boolean => useGrids((s) => writes(gridI
 const SHELLS = new Set(["zsh", "bash", "fish", "sh", "dash", "tcsh", "ksh", "login"]);
 
 /** What a terminal shows in its header: the shell and what's running in it
- *  (Codex is recognised here, by its process). */
+ *  (Codex and Devin are recognised here, by their processes). */
 export const describeTerminal = (info: TerminalInfo | undefined, programs: string[] | undefined) => {
   const [first, ...rest] = programs ?? [];
   const shell = first ?? (info && baseName(info.shell)) ?? "zsh";
   const running = rest.find((p) => !SHELLS.has(p)) ?? null;
-  return { shell, running, codex: rest.some((p) => /^codex\b/.test(p)), claude: rest.some((p) => p === "claude") };
+  return { shell, running, codex: rest.some((p) => /^codex\b/.test(p)), claude: rest.some((p) => p === "claude"), devin: rest.some((p) => p === "devin") };
 };
 
 /** The session running in terminal `key` (see `keyOf`), once Desk's hooks

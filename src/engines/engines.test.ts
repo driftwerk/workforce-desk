@@ -41,5 +41,8 @@ it("answers approvals in Desk as the caps say, else only for Claude Code", () =>
 it("says a sign-in in words, the plan's name as the engine says it", () => {
   expect(signInText({ state: "in", via: "plan", who: null, plan: "ultra" })).toBe("Signed in, on ultra plan");
   expect(signInText({ state: "in", via: "vendor", who: null, plan: null })).toBe("Signed in, on its own account");
+  expect(signInText({ state: "in", via: "vendor", who: null, plan: null }, "Devin")).toBe("Signed in to Devin");
+  expect(signInText({ state: "in", via: "vendor", who: "sam@example.com", plan: null }, "Devin")).toBe("Signed in to Devin as sam@example.com");
+  expect(signInText({ state: "out" }, "Devin")).toBe("Not signed in");
   expect(signInText({ state: "out" })).toBe("Not signed in");
 });

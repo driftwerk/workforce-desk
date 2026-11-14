@@ -546,7 +546,20 @@ function AddAccount({
 }
 
 /** The code field: a group, not a form, as it may sit inside another. */
-export function CodeField({ onSend, focus = false }: { onSend: (code: string) => void; focus?: boolean }) {
+export function CodeField({
+  onSend,
+  focus = false,
+  secret = false,
+  label = "Code from the sign-in page",
+  placeholder = "Code from the page",
+}: {
+  onSend: (code: string) => void;
+  focus?: boolean;
+  /** A token: hidden as it's typed. */
+  secret?: boolean;
+  label?: string;
+  placeholder?: string;
+}) {
   const [code, setCode] = useState("");
   const send = () => {
     if (!code.trim()) return;
@@ -554,9 +567,10 @@ export function CodeField({ onSend, focus = false }: { onSend: (code: string) =>
     setCode("");
   };
   return (
-    <span className="field-row" role="group" aria-label="Sign-in code">
+    <span className="field-row" role="group" aria-label={secret ? "Sign-in token" : "Sign-in code"}>
       <input
         className="field-text mono"
+        type={secret ? "password" : "text"}
         value={code}
         onChange={(e) => setCode(e.target.value)}
         onKeyDown={(e) => {
@@ -565,8 +579,8 @@ export function CodeField({ onSend, focus = false }: { onSend: (code: string) =>
             send();
           }
         }}
-        placeholder="Code from the page"
-        aria-label="Code from the sign-in page"
+        placeholder={placeholder}
+        aria-label={label}
         autoComplete="off"
         spellCheck={false}
         autoFocus={focus}

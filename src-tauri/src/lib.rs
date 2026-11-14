@@ -430,7 +430,7 @@ fn helper_open_login_items(app: State<'_, App>) {
 
 /// Off the main thread: finding the CLI reads the login shell's PATH.
 #[tauri::command]
-async fn cli_installed(app: State<'_, App>, plan: logins::Plan) -> CommandResult<bool> {
+async fn cli_installed(app: State<'_, App>, plan: logins::install::Cli) -> CommandResult<bool> {
     let backend = app.backend()?;
     tauri::async_runtime::spawn_blocking(move || logins::install::installed(&backend, plan))
         .await
@@ -438,7 +438,7 @@ async fn cli_installed(app: State<'_, App>, plan: logins::Plan) -> CommandResult
 }
 
 #[tauri::command]
-async fn cli_install(app: tauri::AppHandle, plan: logins::Plan) -> CommandResult<()> {
+async fn cli_install(app: tauri::AppHandle, plan: logins::install::Cli) -> CommandResult<()> {
     let backend = app.state::<App>().backend()?;
     tauri::async_runtime::spawn_blocking(move || {
         app.state::<logins::install::Installs>()
