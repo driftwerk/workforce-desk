@@ -32,6 +32,11 @@ export const OPEN_WITHIN_MS = 30_000;
 export const APPROVE_WITHIN_MS = 10 * 60_000;
 /** How long Codex's code works. */
 export const CODE_WITHIN_MS = 15 * 60_000;
+/** How long a sign-in can be under way before it is taken as abandoned
+ *  (its window closed, its page never answered): the longest any waits (the
+ *  16 minutes of the browser window Devin opens, past its hub's own limit)
+ *  and a few minutes over. */
+export const ABANDONED_AFTER_MS = 20 * 60_000;
 /** How often a sign-in under way is read again (besides its events). */
 export const SIGN_IN_POLL_MS = 1000;
 

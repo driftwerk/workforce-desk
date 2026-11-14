@@ -507,13 +507,15 @@ export const installWsl = (): Promise<void> => invoke("wsl_install");
 export const forgetWslResume = (): Promise<void> => invoke("wsl_forget_resume");
 export const convertToWsl2 = (distro: string): Promise<void> => invoke("wsl_convert", { distro });
 /** "Create a user": a normal user named after the Windows one, made the
- *  distro's default (it restarts; its files stay). Its name. */
-export const createWslUser = (distro: string): Promise<string> => invoke("wsl_create_user", { distro });
+ *  distro's default (it restarts; its files stay). What to tell the
+ *  person when it was made without sudo; null when all went as planned. */
+export const createWslUser = (distro: string): Promise<string | null> => invoke("wsl_create_user", { distro });
 /** The user "Create a user" makes, to say before it does. */
 export const wslUserName = (): Promise<string> => invoke("wsl_user_name");
 /** "Install Ubuntu alongside": a current Ubuntu beside a Linux too old for
- *  Desk, with a normal user. Its name, to set Desk up in. */
-export const installUbuntuAlongside = (): Promise<string> => invoke("wsl_install_alongside");
+ *  Desk, with a normal user. Its name, to set Desk up in, and what to
+ *  tell the person when the user was made without sudo. */
+export const installUbuntuAlongside = (): Promise<{ name: string; note: string | null }> => invoke("wsl_install_alongside");
 /** Sets Desk up in `distro`; progress arrives through `onWslSetup`. */
 export const setUpInWsl = (distro: string): Promise<void> => invoke("wsl_setup", { distro });
 /** Turns on WSL's localhost forwarding and restarts WSL. */

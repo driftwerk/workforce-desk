@@ -6,7 +6,8 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useDesk } from "../hub/store";
 import * as platform from "../platform";
-import { AWAY_MS, setLastInput, UpdateNotice, useRestartWhenIdle } from "./UpdateNotice";
+import { AWAY_MS, machineIsBusy, setLastInput, signingInNow, UpdateNotice, useRestartWhenIdle } from "./UpdateNotice";
+import { ABANDONED_AFTER_MS } from "../engines/signIn";
 import { isWorking, useUpdates } from "./store";
 import { followInput, lastInputAt } from "./away";
 import { useChat } from "../chat/store";
@@ -296,6 +297,27 @@ it("waits, too, for a machine being set up or updated, and an account signing in
   act(() => accountsOn("local").setState({ signIns: {} }));
   await act(async () => void (await new Promise((r) => setTimeout(r, 2100))));
   expect(platform.updateInstall).toHaveBeenCalledTimes(1);
+});
+
+it("counts a machine Desk is uninstalling as busy, with one being set up or updated", () => {
+  const m = (state: { kind: string }, removing?: boolean) => ({ id: "d", state, removing }) as never;
+  expect(machineIsBusy(m({ kind: "ready" }, true))).toBe(true);
+  expect(machineIsBusy(m({ kind: "adding" }))).toBe(true);
+  expect(machineIsBusy(m({ kind: "updating" }))).toBe(true);
+  expect(machineIsBusy(m({ kind: "ready" }))).toBe(false);
+  expect(machineIsBusy(m({ kind: "ready" }, false))).toBe(false);
+});
+
+it("stops waiting for a sign-in left open longer than one can take", () => {
+  const seen = new Map<string, number>();
+  expect(signingInNow(seen, ["devbox/s1"], 0)).toBe(true);
+  expect(signingInNow(seen, ["devbox/s1"], ABANDONED_AFTER_MS - 1)).toBe(true);
+  expect(signingInNow(seen, ["devbox/s1"], ABANDONED_AFTER_MS)).toBe(false);
+  // A new one, begun later, counts from its own start.
+  expect(signingInNow(seen, ["devbox/s1", "local/s2"], ABANDONED_AFTER_MS + 5)).toBe(true);
+  // Finished ones are forgotten; the same id again starts afresh.
+  expect(signingInNow(seen, [], ABANDONED_AFTER_MS + 10)).toBe(false);
+  expect(signingInNow(seen, ["devbox/s1"], ABANDONED_AFTER_MS + 20)).toBe(true);
 });
 
 it("hides on Later until a newer version is out, through restarts and the checks every few hours", async () => {
