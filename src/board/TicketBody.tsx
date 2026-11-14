@@ -1,4 +1,6 @@
 import { RichHostProvider, RichMarkdown } from "@workforce/rich";
+import { useMemo } from "react";
+import { ticketImage } from "./ticketFileImage";
 import { TICKET_RICH_HOST, useKeyedBody } from "./ticketKeyedRich";
 
 /** A description someone's tool sent with its newlines written out (`\n` as
@@ -9,22 +11,25 @@ export const unescapeNewlines = (text: string): string =>
 
 /** A ticket's description as markdown, with the renderer chat uses: no raw
  *  HTML, a remote image as a link or Desk's placeholder, checklists drawn
- *  read-only, a key of a ticket on its board as that ticket's chip. Clicking
- *  text opens it for editing; a link or a chip opens as itself. */
-export function TicketBody({ text, board, onEdit }: { text: string; board?: string; onEdit: () => void }) {
+ *  read-only, a key of a ticket on its board as that ticket's chip, what the
+ *  hub writes as directives drawn, and a picture of ticket `ticket`'s own
+ *  drawn from its file. Clicking text opens it for editing; a link, a chip,
+ *  a picture or a collapsible's title is itself. */
+export function TicketBody({ text, board, ticket, onEdit }: { text: string; board?: string; ticket?: string; onEdit: () => void }) {
   const shown = useKeyedBody(unescapeNewlines(text), board);
+  const host = useMemo(() => ({ ...TICKET_RICH_HOST, image: ticketImage(ticket) }), [ticket]);
   return (
     <div
       className="ticket-text ticket-md rich"
       title="Change what it's about"
       onClick={(e) => {
         const target = e.target as HTMLElement;
-        if (target.closest("a, button, input")) return;
+        if (target.closest("a, button, input, summary")) return;
         if (window.getSelection()?.toString()) return;
         onEdit();
       }}
     >
-      <RichHostProvider host={TICKET_RICH_HOST}>
+      <RichHostProvider host={host}>
         <RichMarkdown text={shown} />
       </RichHostProvider>
       <button type="button" className="link ticket-md-edit" onClick={onEdit}>

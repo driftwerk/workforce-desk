@@ -1112,7 +1112,7 @@ button.ticket-crumb:hover {
 .ticket-description .ticket-md li > p {
   margin: 0;
 }
-.ticket-description .ticket-md code {
+.ticket-description .ticket-md :not(pre) > code {
   padding: 1px 5px;
   border-radius: 4px;
   background: var(--raised);
@@ -1126,6 +1126,72 @@ button.ticket-crumb:hover {
 }
 .ticket-description .ticket-md input[type="checkbox"] {
   accent-color: var(--done);
+}
+/* The rest as the Description mockup draws it: a checklist flush with the
+   text, its boxes drawn (done in the done colour); a table ruled under each
+   row, with no box; a quote a 2px rule. */
+.ticket-description .ticket-md ul:has(> .task-list-item) {
+  padding-left: 0;
+}
+.ticket-description .ticket-md .task-list-item input[type="checkbox"] {
+  appearance: none;
+  display: inline-grid;
+  flex: none;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  border: 1.5px solid var(--faint);
+  border-radius: 4px;
+  opacity: 1;
+  transform: translateY(2px);
+}
+.ticket-description .ticket-md .task-list-item input[type="checkbox"]:checked {
+  border-color: var(--done);
+  background: var(--done);
+}
+.ticket-description .ticket-md .task-list-item input[type="checkbox"]:checked::before {
+  --check: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 8.4l2.8 2.8L12.6 5' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  content: "";
+  width: 9px;
+  height: 9px;
+  background: var(--bg);
+  -webkit-mask: var(--check) center / contain no-repeat;
+  mask: var(--check) center / contain no-repeat;
+}
+.ticket-description .ticket-md .wf-tablewrap {
+  margin: 0 0 12px;
+  border: 0;
+  border-radius: 0;
+}
+.ticket-description .ticket-md table {
+  width: auto;
+  min-width: min(420px, 100%);
+  font-size: 13px;
+}
+.ticket-description .ticket-md :is(th, td) {
+  padding: 7px 12px;
+  border-bottom: 1px solid var(--border);
+  border-left: 0;
+}
+.ticket-description .ticket-md thead th {
+  background: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 650;
+}
+.ticket-description .ticket-md tbody tr:nth-child(even) {
+  background: none;
+}
+.ticket-description .ticket-md tbody tr:last-child td {
+  border-bottom: 1px solid var(--border);
+}
+.ticket-description .ticket-md blockquote {
+  margin: 0 0 12px;
+  padding: 0 0 0 14px;
+  border-left: 0;
+  box-shadow: inset 2px 0 0 var(--border);
+  color: var(--muted);
 }
 /* Folded: its edit link waits until all of it shows. */
 .ticket-clamp .ticket-md,
@@ -1711,6 +1777,150 @@ button.ticket-row:not(:disabled):hover {
 }
 .ticket-issue-chip-state {
   font-size: 11.5px;
+}
+/* What the hub writes as directives in a synced ticket's text, as the
+   Description mockup draws it: a mention, a status lozenge, a date and a
+   bare link as chips, a panel as a rule in its tone with an icon (like a
+   quote, never a tinted box), a collapsible closed until clicked, and a
+   picture of the ticket's own. */
+.ticket-md .ticket-mention {
+  padding: 0 5px;
+  border-radius: 6px;
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+  font-weight: 600;
+}
+.ticket-md :is(.ticket-lozenge, .ticket-panel-note) {
+  --tone: var(--muted);
+}
+.ticket-md :is(.ticket-lozenge, .ticket-panel-note).tone-info {
+  --tone: var(--working);
+}
+.ticket-md :is(.ticket-lozenge, .ticket-panel-note).tone-success {
+  --tone: var(--done);
+}
+.ticket-md :is(.ticket-lozenge, .ticket-panel-note).tone-warning {
+  --tone: var(--blocked);
+}
+.ticket-md :is(.ticket-lozenge, .ticket-panel-note).tone-danger {
+  --tone: var(--ansi-red);
+}
+.ticket-md :is(.ticket-lozenge, .ticket-panel-note).tone-purple {
+  --tone: var(--ansi-magenta);
+}
+.ticket-md .ticket-lozenge {
+  display: inline-block;
+  padding: 0 6px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--tone) 14%, transparent);
+  color: var(--tone);
+  font: 700 11px var(--font-ui);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+.ticket-md .ticket-inline-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 100%;
+  margin: 0;
+  padding: 0 7px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 12.5px;
+  line-height: 1.55;
+  text-decoration: none;
+  vertical-align: baseline;
+  white-space: nowrap;
+}
+.ticket-md :is(a, button).ticket-inline-chip {
+  cursor: pointer;
+}
+.ticket-md :is(a, button).ticket-inline-chip:hover {
+  border-color: var(--muted);
+}
+.ticket-md .ticket-inline-chip svg {
+  flex: none;
+}
+.ticket-md .ticket-smart-link-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ticket-md .ticket-panel-note {
+  display: flex;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 2px 0 2px 14px;
+  box-shadow: inset 2px 0 0 var(--tone);
+}
+.ticket-md .ticket-panel-icon {
+  flex: none;
+  color: var(--tone);
+}
+.ticket-md .ticket-panel-body {
+  flex: 1;
+  min-width: 0;
+}
+.ticket-md .ticket-panel-body > :first-child {
+  margin-top: 0;
+}
+.ticket-md .ticket-panel-body > :last-child {
+  margin-bottom: 0;
+}
+.ticket-md .ticket-expand {
+  margin: 8px 0 12px;
+}
+.ticket-md .ticket-expand > summary {
+  list-style: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+.ticket-md .ticket-expand > summary::-webkit-details-marker {
+  display: none;
+}
+.ticket-md .ticket-expand > summary b {
+  color: var(--text);
+}
+.ticket-md .ticket-expand-mark {
+  display: inline-block;
+  transition: transform 0.12s;
+}
+.ticket-md .ticket-expand[open] > summary .ticket-expand-mark {
+  transform: rotate(90deg);
+}
+.ticket-md .ticket-expand-body {
+  padding: 8px 0 0 14px;
+}
+.ticket-md .ticket-expand-body > :last-child {
+  margin-bottom: 0;
+}
+.ticket-md .ticket-md-picture {
+  display: inline-block;
+  max-width: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  vertical-align: top;
+  cursor: zoom-in;
+}
+.ticket-md .ticket-md-picture img {
+  display: block;
+  max-width: 100%;
+  max-height: 360px;
+}
+.ticket-md .ticket-md-picture-wait {
+  display: block;
+  width: 260px;
+  max-width: 100%;
+  height: 140px;
 }
 .ticket-comment-body > :first-child {
   margin-top: 0;
