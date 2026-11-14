@@ -233,8 +233,10 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
         const changed = await k.setRule(keyOf(), next);
         // The machines' part, told now: what they hold outside it is asked
         // about with this computer's.
-        const machines = await tell();
+        // Saved here: said at once, while the machines are told (which can
+        // wait on Desk's own pass over them).
         if (n === seq.current) setStatus({ state: "idle" });
+        const machines = await tell();
         // Asked only when it now holds more outside the rule than before:
         // what was kept earlier was asked about then.
         const before = confirmed.current?.heldOutside.items ?? 0;

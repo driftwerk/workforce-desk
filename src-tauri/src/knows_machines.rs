@@ -10,7 +10,7 @@
 //! sessions that move. Agents on this computer's hub aren't shared with
 //! from machines yet: a machine's hub can't reach this computer's.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -100,6 +100,8 @@ pub struct KnowsMachines {
     linked: Mutex<HashMap<(String, String), Instant>>,
     /// One pass at a time, so a rule changed twice isn't told out of order.
     pass: tokio::sync::Mutex<()>,
+    /// What couldn't be told, warned of once a run: (machine hub, rule key).
+    warned: Mutex<HashSet<(String, String)>>,
 }
 
 /// Whether `s` can be a hub's or an agent's id in a path: never `.` or
@@ -182,7 +184,16 @@ impl KnowsMachines {
                 }
                 Ok(None) => {}
                 Err(e) => {
-                    tracing::warn!(machine = %m.name, %hub, %agent, error = %e, "a machine wasn't told what an agent sees");
+                    let first = self
+                        .warned
+                        .lock()
+                        .expect("warned")
+                        .insert((m.hub.clone(), format!("{hub}/{agent}")));
+                    if first {
+                        tracing::warn!(machine = %m.name, %hub, %agent, error = %e, "a machine wasn't told what an agent sees");
+                    } else {
+                        tracing::debug!(machine = %m.name, %hub, %agent, error = %e, "a machine wasn't told what an agent sees");
+                    }
                 }
             }
         }
