@@ -304,8 +304,12 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
       ? [hub?.label ?? "This computer", brainLine(brain, provider)].join(" · ")
       : describeAgent(agent, hub?.label ?? agent.hubId);
   const overseeing = local && manager?.agentId === agent.id && manager.level ? manager.level : null;
+  // The overseer's line says its brain too, as every other agent's does.
+  const brainShown = local && brain && provider && !fallback ? brainLine(brain, provider) : "";
   const subtitle =
-    overseeing && tab === "chat" ? overseeingLine(roster, agent, trackedOverview ?? trackedSessions, overseeing) : brainSubtitle;
+    overseeing && tab === "chat"
+      ? [overseeingLine(roster, agent, trackedOverview ?? trackedSessions, overseeing), brainShown].filter(Boolean).join(" · ")
+      : brainSubtitle;
   const Root = inPane ? "div" : "main";
   // Working, or a streamed turn not yet said to have ended (for a grace).
   const busy = isRunning(convo);
