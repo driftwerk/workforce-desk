@@ -217,13 +217,21 @@ impl HubIo {
         Ok((reach.base, label))
     }
 
-    /// Whether Desk is still paired with hub `id`: its record is there,
-    /// reached or not.
+    /// Whether Desk is still paired with hub `id`: true unless its
+    /// records were read and don't name it. No keychain is read, so a
+    /// token or secrets error never passes for a pairing gone; a machine's
+    /// hub and this computer's always are.
     pub async fn is_paired(&self, id: &str) -> bool {
-        !matches!(
-            self.paired.reach_async(id).await,
-            Err(crate::paired::Failure::Unknown)
-        )
+        if crate::hubs::machine_of(id).is_some() || id == desk_core::LOCAL_HUB_ID {
+            return true;
+        }
+        let id = id.to_string();
+        tauri::async_runtime::spawn_blocking(move || {
+            let records = Paths::new().and_then(|p| crate::hubs::read_records(&p));
+            crate::hubs::still_paired(records, &id)
+        })
+        .await
+        .unwrap_or(true)
     }
 
     /// Forgets the hubs read, and which were found old, after one is

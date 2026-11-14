@@ -2055,7 +2055,9 @@ async fn renew<E: Engine, H: BossHub>(
         Err(e) => return Err(e.words()),
     };
     if let Err(why) = keep_orphan(kept_at, &group.id, &minted.token_id).await {
-        let _ = revoke(hub, &minted.token_id).await;
+        if revoke(hub, &minted.token_id).await.is_err() {
+            tracing::warn!(token_id = %minted.token_id, group = %group.id, "a renewed boss link was neither kept nor revoked: it lives until it expires");
+        }
         return Err(why);
     }
     if let Err(why) = hand(engine, at, &minted, &entry.agent, &group.id).await {
@@ -2846,38 +2848,62 @@ static WAKE: tokio::sync::Notify = tokio::sync::Notify::const_new();
 const KEEP_AT_MOST_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// Desk is about to forget paired hub `hub`: every group whose boss is
-/// there is stopped while the hub can still revoke its tokens. What is
-/// left is stopped once it's forgotten ([`hub_removed`]).
-pub async fn hub_removing(app: &tauri::AppHandle, hub: &str) {
+/// there is stopped while the hub can still revoke its tokens. When some
+/// can't be ended, the person is asked natively whether to remove it
+/// anyway; a no keeps the hub. What is left is stopped once it's
+/// forgotten ([`hub_removed`]).
+pub async fn hub_removing(app: &tauri::AppHandle, hub: &str) -> CommandResult<()> {
     use tauri::Manager;
     let Ok(kept_at) = kept_path() else {
-        return;
+        return Ok(());
     };
     if !kept_at.exists() {
-        return;
+        return Ok(());
     }
-    let groups: Vec<String> = load(&kept_at)
-        .await
-        .groups
-        .into_iter()
-        .filter(|(_, l)| l.hub == hub)
-        .map(|(g, _)| g)
-        .collect();
+    let on_hub = |kept: Kept| -> Vec<(String, GroupLink)> {
+        kept.groups
+            .into_iter()
+            .filter(|(_, l)| l.hub == hub)
+            .collect()
+    };
+    let groups = on_hub(load(&kept_at).await);
     if groups.is_empty() {
-        return;
+        return Ok(());
     }
     let io = app.state::<HubIo>();
-    let Revoker::Reached(paired) = Revoker::of(&io, hub).await else {
-        return;
-    };
-    let local = app.state::<Broker>();
-    let machines = app.state::<MachineIo>();
-    let ids = machine_ids(&local, &kept_at, None).await;
-    let engines = engines_now(&local, &machines, &ids);
-    for g in groups {
-        if let Err(e) = unlink(&kept_at, &engines, Revoke::By(&paired), &g).await {
-            tracing::warn!(error = %e, "a boss on a hub being removed wasn't stopped everywhere");
+    if let Revoker::Reached(paired) = Revoker::of(&io, hub).await {
+        let local = app.state::<Broker>();
+        let machines = app.state::<MachineIo>();
+        let ids = machine_ids(&local, &kept_at, None).await;
+        let engines = engines_now(&local, &machines, &ids);
+        for (g, _) in &groups {
+            if let Err(e) = unlink(&kept_at, &engines, Revoke::By(&paired), g).await {
+                tracing::warn!(error = %e, "a boss on a hub being removed wasn't stopped everywhere");
+            }
         }
+    }
+    // What is left still holds links the hub didn't end: the person says
+    // whether to forget them anyway.
+    let left = on_hub(load(&kept_at).await);
+    let Some((_, first)) = left.first() else {
+        return Ok(());
+    };
+    let label = quoted(&first.hub_label);
+    let mut bosses: Vec<String> = left.iter().map(|(_, l)| capital(&l.agent)).collect();
+    bosses.sort();
+    bosses.dedup();
+    let bosses: Vec<&str> = bosses.iter().map(String::as_str).collect();
+    let question = format!(
+        "Desk can't reach {label} to end {}'s links. Remove it anyway?\n\nTheir links stay live on {label} until they expire, or until someone there revokes them.",
+        and(&bosses)
+    );
+    let ask = native_ask(app.clone());
+    if ask(format!("Remove {label}"), question, "Remove Anyway".into()).await? {
+        Ok(())
+    } else {
+        Err(format!(
+            "{label} is kept: Desk ends its links once it can reach it."
+        ))
     }
 }
 

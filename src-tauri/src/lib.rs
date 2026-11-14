@@ -228,7 +228,7 @@ async fn hubs_remove(
         return Err("A machine is removed from Settings → Machines.".into());
     }
     // Its agents' links are revoked while Desk can still ask it to.
-    bosses::hub_removing(&handle, &id).await;
+    bosses::hub_removing(&handle, &id).await?;
     let removed = hubs::remove(&app.paths, &id).map_err(text);
     io.forget();
     // Its agents boss nothing here any more: their groups are stopped.
