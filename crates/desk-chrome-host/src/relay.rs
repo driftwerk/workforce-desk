@@ -14,6 +14,7 @@ use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 use tokio_tungstenite::tungstenite::http::HeaderValue;
 
+use crate::revision::{self, Program};
 use crate::{HUB_PATH, called_by, extension_ids, parent};
 
 /// The local hub as the host reaches it.
@@ -104,6 +105,48 @@ fn is_hello(frame: &[u8]) -> bool {
     serde_json::from_slice::<serde_json::Value>(frame).is_ok_and(|v| v["type"] == "hello")
 }
 
+/// The extension said hello (once per port): it is told the revision Desk
+/// expects, straight away, hub or no hub, and how it stands is logged.
+fn greet(hello: &[u8]) {
+    let v = serde_json::from_slice::<serde_json::Value>(hello).unwrap_or_default();
+    match revision::on_hello(&v) {
+        Some(line) => tracing::warn!("{line}"),
+        None => tracing::info!(
+            revision = revision::said(&v),
+            version = v["version"].as_str().unwrap_or("?"),
+            "Desk's Chrome extension said hello, up to date"
+        ),
+    }
+    let _ = write_frame(&mut std::io::stdout(), &revision::expects());
+}
+
+/// Logs to `logs/chrome-host.log` in Desk's folder: stdout is Chrome's
+/// channel, and stderr goes nowhere anyone reads. Never the token.
+fn init_logging() {
+    let Ok(paths) = desk_core::Paths::new() else {
+        return;
+    };
+    let log = paths.logs().join("chrome-host.log");
+    if std::fs::create_dir_all(paths.logs()).is_err() {
+        return;
+    }
+    if std::fs::metadata(&log).is_ok_and(|m| m.len() > 5 * 1024 * 1024) {
+        let _ = std::fs::rename(&log, log.with_extension("log.1"));
+    }
+    let Ok(file) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&log)
+    else {
+        return;
+    };
+    let _ = tracing_subscriber::fmt()
+        .with_ansi(false)
+        .with_max_level(tracing::Level::INFO)
+        .with_writer(std::sync::Mutex::new(file))
+        .try_init();
+}
+
 /// The hub's `/ws/desk/chrome` for `gateway_url`, and nothing else.
 pub fn socket_url(gateway_url: &str) -> Result<String> {
     let rest = gateway_url
@@ -135,6 +178,7 @@ pub fn run(args: &[String], hub: impl Fn() -> Result<Option<Hub>> + Send + Sync 
         );
         return 2;
     }
+    init_logging();
     let Ok(rt) = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -165,7 +209,17 @@ async fn relay(hub: impl Fn() -> Result<Option<Hub>> + Send + Sync + 'static) ->
     let hub = std::sync::Arc::new(hub);
     let mut hello: Option<Vec<u8>> = None;
     let mut wait = Duration::from_secs(1);
+    let me = Program::now();
     loop {
+        // A Desk install replaced this program while it waited for the
+        // hub: it steps aside, Chrome's port closes, and the extension's
+        // reconnecting starts the new one, which expects the new revision.
+        if me.replaced() {
+            tracing::info!(
+                "Desk was updated since Chrome started this relay: it steps aside so Chrome starts the new one"
+            );
+            return 0;
+        }
         let reach = {
             let hub = hub.clone();
             tokio::task::spawn_blocking(move || hub()).await
@@ -187,8 +241,15 @@ async fn relay(hub: impl Fn() -> Result<Option<Hub>> + Send + Sync + 'static) ->
                     tokio::select! {
                         _ = &mut deadline => break,
                         frame = chrome_rx.recv() => match frame {
-                            Some(f) if is_hello(&f) => hello = Some(f),
-                            Some(_) => {}
+                            Some(f) if is_hello(&f) => {
+                                greet(&f);
+                                hello = Some(f);
+                            }
+                            Some(f) => {
+                                if let Some(line) = revision::updating(&f) {
+                                    tracing::info!("{line}");
+                                }
+                            }
                             None => return 0,
                         },
                     }
@@ -207,12 +268,28 @@ async fn relay(hub: impl Fn() -> Result<Option<Hub>> + Send + Sync + 'static) ->
         {
             continue;
         }
+        // The hub may stay up through an install that replaced this
+        // program: it looks now and then, not only when the hub drops.
+        let mut look = tokio::time::interval(Duration::from_secs(30));
+        look.tick().await;
         loop {
             tokio::select! {
+                _ = look.tick() => {
+                    if me.replaced() {
+                        tracing::info!("Desk was updated since Chrome started this relay: it steps aside so Chrome starts the new one");
+                        let _ = to_hub.send(Message::Close(None)).await;
+                        return 0;
+                    }
+                }
                 frame = chrome_rx.recv() => match frame {
                     Some(f) => {
                         if is_hello(&f) {
+                            greet(&f);
                             hello = Some(f.clone());
+                        } else if let Some(line) = revision::updating(&f) {
+                            // Between the extension and Desk Helper alone.
+                            tracing::info!("{line}");
+                            continue;
                         }
                         if to_hub.send(Message::text(String::from_utf8_lossy(&f).into_owned())).await.is_err() {
                             break;
