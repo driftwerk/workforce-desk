@@ -76,7 +76,7 @@ describe("the plan card's words", () => {
   it("waits on the person for the first revision and for each change of scope", () => {
     const p = { state: "proposed" as const, paused: null, revision: 1, approvedRevision: null };
     expect(awaiting(p)).toBe(true);
-    expect(standing(p)).toEqual({ text: "Waiting for you", look: "blocked" });
+    expect(standing(p)).toEqual({ text: "Draft — review", look: "blocked" });
     const running = { ...p, state: "running" as const, approvedRevision: 1 };
     expect(awaiting(running)).toBe(false);
     expect(standing(running).text).toBe("Running");
