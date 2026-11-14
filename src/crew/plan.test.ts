@@ -150,8 +150,12 @@ describe("the plan card's header, as the hub writes it", async () => {
   const at = `${desk}/../workforce-public-desk/crates/hub/src/desk_crew/plan.rs`;
   const source = fs.existsSync(at) ? fs.readFileSync(at, "utf8") : undefined;
   it.skipIf(source === undefined)("is the wording Desk reads as the card's own (skipped without the hub checked out)", () => {
-    for (const said of ['"{} proposes a plan: {}\\n\\n{}"', '"{name} changed the plan: {}"', '"{name} proposes a change to the plan: {}"']) expect(source).toContain(said);
+    for (const said of ['"{} drafted a plan for you to review: {}\\n\\n{}"', '"{name} changed the plan: {}"', '"{name} proposes a change to the plan: {}"', '"{name} moved the plan to {board}:\\n\\n{}"']) expect(source).toContain(said);
+    expect(isCardText("Sarah drafted a plan for you to review: Refunds\n\n1. ACM-20 Refunds endpoint")).toBe(true);
+    expect(isCardText("Sarah moved the plan to Vellev:\n\n1. VEL-1 Profile recall")).toBe(true);
+    // An older hub's words, in messages it posted.
     expect(isCardText("Sarah proposes a plan: Refunds\n\n1. ACM-20 Refunds endpoint")).toBe(true);
+    expect(isCardText("Sarah moved the plan forward a day, as you asked.")).toBe(false);
     expect(isCardText("Sarah changed the plan: Moved “A” after “B”")).toBe(true);
     expect(isCardText("Sarah proposes a change to the plan: Added “C”")).toBe(true);
   });
