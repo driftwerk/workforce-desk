@@ -348,8 +348,30 @@ pub fn machine_reconnect(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> Com
 }
 
 #[tauri::command]
-pub fn machine_remove(fleet: tauri::State<'_, Arc<Fleet>>, id: String) -> CommandResult<()> {
-    fleet.remove(&id)
+pub async fn machine_remove(
+    fleet: tauri::State<'_, Arc<Fleet>>,
+    io: tauri::State<'_, crate::hub_io::HubIo>,
+    ending: tauri::State<'_, Arc<crate::knows_machines::Ending>>,
+    knows: tauri::State<'_, Arc<crate::knows_machines::KnowsMachines>>,
+    app: tauri::State<'_, crate::App>,
+    id: String,
+) -> CommandResult<()> {
+    // Desk stays installed and running there, so what it shares by is
+    // taken back first: its hub unlinks (each token ended where it was
+    // made) while it is still reached, and each agent hub is told to end
+    // the tokens this computer minted for it, which needs no machine.
+    let hub = format!("{}{id}", crate::hubs::MACHINE_HUB);
+    ending
+        .machine(
+            &io,
+            Some(&hub),
+            &id,
+            &crate::knows_machines::remote_hubs(&app.paths),
+        )
+        .await;
+    knows.forget_machine(&hub);
+    let fleet = Arc::clone(&fleet);
+    blocking(move || fleet.remove(&id)).await
 }
 
 /// "Cancel adding": stops setting machine `id` up at once, and forgets it.
@@ -387,11 +409,32 @@ pub fn machine_cancel_update(fleet: tauri::State<'_, Arc<Fleet>>, id: String) ->
 #[tauri::command]
 pub async fn machine_uninstall(
     fleet: tauri::State<'_, Arc<Fleet>>,
+    io: tauri::State<'_, crate::hub_io::HubIo>,
+    ending: tauri::State<'_, Arc<crate::knows_machines::Ending>>,
+    knows: tauri::State<'_, Arc<crate::knows_machines::KnowsMachines>>,
+    app: tauri::State<'_, crate::App>,
     id: String,
     sign_out_codex: Option<bool>,
 ) -> CommandResult<bool> {
     let fleet = Arc::clone(&fleet);
-    blocking(move || fleet.uninstall_with(&id, sign_out_codex.unwrap_or(true))).await
+    let machine = id.clone();
+    let removed =
+        blocking(move || fleet.uninstall_with(&id, sign_out_codex.unwrap_or(true))).await?;
+    // Everything Desk kept there is gone, its links with it: the tokens it
+    // held are ended on each agent hub from here. (Not when the person
+    // cancelled, and nothing was removed.)
+    if removed {
+        ending
+            .machine(
+                &io,
+                None,
+                &machine,
+                &crate::knows_machines::remote_hubs(&app.paths),
+            )
+            .await;
+        knows.forget_machine(&format!("{}{machine}", crate::hubs::MACHINE_HUB));
+    }
+    Ok(removed)
 }
 
 /// How long reading Desk's log on a machine may take.

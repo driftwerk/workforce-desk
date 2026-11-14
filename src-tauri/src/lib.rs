@@ -223,6 +223,8 @@ async fn hubs_remove(
     handle: tauri::AppHandle,
     app: State<'_, App>,
     io: State<'_, hub_io::HubIo>,
+    ending: State<'_, Arc<knows_machines::Ending>>,
+    machines: State<'_, Arc<desk_machine::Machines>>,
     id: String,
 ) -> CommandResult<()> {
     if hubs::machine_of(&id).is_some() {
@@ -230,6 +232,22 @@ async fn hubs_remove(
     }
     // Its agents' links are revoked while Desk can still ask it to.
     bosses::hub_removing(&handle, &id).await?;
+    // What agents there see of the person's work stops with the hub: their
+    // links are unlinked on this computer's hub and each machine's, and the
+    // tokens ended there while Desk still holds its device token.
+    let list = {
+        let machines = Arc::clone(&machines);
+        tauri::async_runtime::spawn_blocking(move || knows_machines::machines_of(&machines))
+            .await
+            .unwrap_or_default()
+    };
+    let here: Vec<String> = std::iter::once(desk_core::LOCAL_HUB_ID.to_string())
+        .chain(list.iter().map(|m| m.hub.clone()))
+        .collect();
+    let engines: Vec<String> = std::iter::once(hub_io::KNOWS_ENGINE_ID.to_string())
+        .chain(list.iter().map(|m| m.id.clone()))
+        .collect();
+    ending.hub(&io, &id, &here, &engines).await;
     let removed = hubs::remove(&app.paths, &id).map_err(text);
     io.forget();
     // Its agents boss nothing here any more: their groups are stopped.
@@ -1083,9 +1101,12 @@ pub fn run() {
             // (Sees K7): told when a rule changes, and every few minutes.
             let knows = Arc::new(knows_machines::KnowsMachines::default());
             app.manage(Arc::clone(&knows));
+            let ending = Arc::new(knows_machines::Ending::at(&paths));
+            app.manage(Arc::clone(&ending));
             app.manage(Arc::clone(&machines));
             {
                 let (handle, machines) = (app.handle().clone(), Arc::clone(&machines));
+                let (ending, paths) = (Arc::clone(&ending), paths.clone());
                 tauri::async_runtime::spawn(async move {
                     loop {
                         tokio::time::sleep(knows_machines::EVERY).await;
@@ -1098,6 +1119,11 @@ pub fn run() {
                             .unwrap_or_default()
                         };
                         if let Some(io) = handle.try_state::<hub_io::HubIo>() {
+                            // What a removed machine's tokens still owe
+                            // an agent's hub is told again first.
+                            ending
+                                .retry(&io, &knows_machines::remote_hubs(&paths))
+                                .await;
                             knows.sync_all(&io, &list).await;
                         }
                     }
