@@ -206,6 +206,8 @@ describe("each window's capabilities", () => {
       "boss_unlink",
       "boss_retry",
       "boss_unpause_engine",
+      // Telling the machines what an agent sees of them (Sees K7).
+      "knows_machines",
     ])
       expect(grid.has(c), c).toBe(false);
     expect(capability("grid").windows).toEqual(["grid-*"]);

@@ -82,6 +82,7 @@
     "allow-boss-retry",
     "allow-boss-unpause-engine",
     "allow-boss-layout-changed",
+    "allow-knows-machines",
     "allow-pair-request",
     "allow-pair-collect",
     "allow-fonts-list",

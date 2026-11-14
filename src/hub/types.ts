@@ -2109,8 +2109,14 @@ export interface PlanBudget {
  *  session starts in. */
 export interface BossPlanTicket extends Ticket {
   engine: Engine | null;
+  /** On a machine, that machine's absolute path. */
   folder: string | null;
   view: View | null;
+  /** The machine it runs on, as the sidebar names it; null (or absent,
+   *  from an older hub) is this computer. */
+  machine?: string | null;
+  /** Its engine's model; null (or absent) is the engine's default. */
+  model?: string | null;
   /** Its session is being started. */
   starting: boolean;
   /** What holds its session while Desk's breaker does: it is blocked on
@@ -2126,6 +2132,11 @@ export interface PlannedTicket {
   engine: Engine;
   folder: string;
   view: View | null;
+  /** The machine it runs on, as the sidebar names it; null (or absent,
+   *  from an older hub) is this computer. */
+  machine?: string | null;
+  /** Its engine's model; null (or absent) is the engine's default. */
+  model?: string | null;
   /** The plan's tickets it needs done first. */
   needs: string[];
 }
@@ -2162,6 +2173,11 @@ export interface DraftTicket {
   engine?: Engine;
   folder: string;
   view?: View | null;
+  /** The machine it runs on, as the sidebar names it; null (or absent,
+   *  from an older hub) is this computer. */
+  machine?: string | null;
+  /** Its engine's model; null (or absent) is the engine's default. */
+  model?: string | null;
   needs: number[];
 }
 

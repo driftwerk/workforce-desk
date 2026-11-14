@@ -366,7 +366,7 @@ impl HubIo {
         local: &str,
         agent: &str,
         engine_key: K,
-        engine_name: &str,
+        engine: (&str, &str),
     ) -> Result<KnowsLinked, String>
     where
         K: FnOnce() -> F,
@@ -398,8 +398,12 @@ impl HubIo {
             .reach_async(local)
             .await
             .map_err(|e| e.to_string())?;
-        if !here.local {
-            return Err("Desk keeps an agent's token only on this computer.".into());
+        // This computer's hub, or one of the person's machines' (Sees K7):
+        // each keeps its own token, under its own engine.
+        if !keeps_knows_tokens(local, here.local) {
+            return Err(
+                "Desk keeps an agent's token only on this computer or a machine of yours.".into(),
+            );
         }
         sync_hub_url_ok(&there.base)?;
         let url = there.base.as_str().trim_end_matches('/').to_string();
@@ -407,7 +411,7 @@ impl HubIo {
         let engine_key = engine_key().await?;
         let ask = serde_json::to_vec(&serde_json::json!({
             "agent_id": agent,
-            "engine": { "id": KNOWS_ENGINE_ID, "name": engine_name, "public_key": engine_key },
+            "engine": { "id": engine.0, "name": engine.1, "public_key": engine_key },
         }))
         .map_err(|e| e.to_string())?;
         let (meta, bytes) = self
@@ -507,6 +511,12 @@ impl HubIo {
     }
 }
 
+/// Whether hub `id` may keep an agent's Desk work token: this computer's
+/// own, or one of the person's machines' (Sees K7), never a paired hub.
+fn keeps_knows_tokens(id: &str, local: bool) -> bool {
+    local || crate::hubs::machine_of(id).is_some()
+}
+
 /// The route a paired Desk mints its own board-sync token on (BH10).
 const MINT_PATH: &str = "/api/me/remote-mcp-tokens/desk";
 
@@ -514,8 +524,8 @@ const MINT_PATH: &str = "/api/me/remote-mcp-tokens/desk";
 const KNOWS_MINT_PATH: &str = "/api/me/desk-knows-tokens";
 
 /// This computer's engine, as an agent's hub is told of it at mint: its id
-/// among the person's engines (machines are named by their own, K7).
-const KNOWS_ENGINE_ID: &str = "local";
+/// among the person's engines (a machine's is its own id, K7).
+pub const KNOWS_ENGINE_ID: &str = "local";
 
 /// What linking an agent for Desk work did, as the page is told of it:
 /// never the token.
@@ -780,12 +790,18 @@ pub async fn knows_link(
         let answer = local.fetch_native("GET", "/api/desk/engine-key").await?;
         engine_key_of(answer.status, &answer.body)
     };
-    io.link_knows(&remote, desk_core::LOCAL_HUB_ID, &agent, key, ENGINE_NAME)
-        .await
+    io.link_knows(
+        &remote,
+        desk_core::LOCAL_HUB_ID,
+        &agent,
+        key,
+        (KNOWS_ENGINE_ID, ENGINE_NAME),
+    )
+    .await
 }
 
 /// This computer's engine key, from its hub's answer.
-fn engine_key_of(status: u16, body: &str) -> Result<String, String> {
+pub(crate) fn engine_key_of(status: u16, body: &str) -> Result<String, String> {
     let refused = || "This computer's hub didn't say its engine's key.".to_string();
     if !(200..300).contains(&status) {
         return Err(refused());
@@ -1058,7 +1074,7 @@ pub async fn pair_collect(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::paired::tests::{account, paired};
     use std::time::Duration;
@@ -1068,7 +1084,9 @@ mod tests {
 
     /// A hub on a loopback port answering each request with the next of
     /// `answers`, and telling each request's head and body.
-    async fn hub(answers: Vec<String>) -> (String, tokio::sync::mpsc::UnboundedReceiver<String>) {
+    pub(crate) async fn hub(
+        answers: Vec<String>,
+    ) -> (String, tokio::sync::mpsc::UnboundedReceiver<String>) {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let url = format!("http://{}", listener.local_addr().unwrap());
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -1119,7 +1137,7 @@ mod tests {
         )
     }
 
-    fn io_for(hubs: Vec<crate::hubs::HubAccount>) -> HubIo {
+    pub(crate) fn io_for(hubs: Vec<crate::hubs::HubAccount>) -> HubIo {
         HubIo::new(paired(hubs), Arc::default())
     }
 
@@ -1215,7 +1233,7 @@ mod tests {
         );
     }
 
-    fn status(line: &str, body: &str) -> String {
+    pub(crate) fn status(line: &str, body: &str) -> String {
         format!(
             "HTTP/1.1 {line}\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
             body.len()
@@ -1440,7 +1458,7 @@ mod tests {
                 "local",
                 "Allan",
                 key("ed25519:KEY"),
-                "Desk on this Mac",
+                ("local", "Desk on this Mac"),
             )
             .await
             .unwrap();
@@ -1597,7 +1615,7 @@ mod tests {
             account("atlas", &remote, false, "ATLAS-DEVICE"),
         ]);
         let e = io
-            .link_knows("atlas", "local", "allan", key("k"), "Desk")
+            .link_knows("atlas", "local", "allan", key("k"), ("local", "Desk"))
             .await
             .unwrap_err();
         assert!(e.contains("Desk couldn't keep the link. Try again"), "{e}");
@@ -1612,7 +1630,7 @@ mod tests {
         );
         let _put = local_seen.recv().await.unwrap();
         assert_eq!(
-            io.link_knows("atlas", "local", "allan", key("k"), "Desk")
+            io.link_knows("atlas", "local", "allan", key("k"), ("local", "Desk"))
                 .await
                 .unwrap(),
             KnowsLinked::NotAllowed {
@@ -1622,7 +1640,7 @@ mod tests {
         );
         let _refused = remote_seen.recv().await.unwrap();
         assert_eq!(
-            io.link_knows("local", "local", "allan", no_key, "Desk")
+            io.link_knows("local", "local", "allan", no_key, ("local", "Desk"))
                 .await
                 .unwrap(),
             KnowsLinked::Local {
@@ -1638,7 +1656,7 @@ mod tests {
             ("atlas", "local", "allan/x"),
         ] {
             assert!(
-                io.link_knows(remote, local, agent, no_key, "Desk")
+                io.link_knows(remote, local, agent, no_key, ("local", "Desk"))
                     .await
                     .is_err(),
                 "{remote} {local} {agent}"
@@ -1655,6 +1673,16 @@ mod tests {
                 "nothing more was sent"
             );
         }
+    }
+
+    /// A machine of the person's keeps its own token for an agent, as this
+    /// computer's hub does; a paired hub never does (Sees K7).
+    #[test]
+    fn only_this_computer_and_the_persons_machines_keep_an_agents_token() {
+        assert!(keeps_knows_tokens("local", true));
+        assert!(keeps_knows_tokens("machine:devbox", false));
+        assert!(!keeps_knows_tokens("atlas", false));
+        assert!(!keeps_knows_tokens("machines:devbox", false));
     }
 
     #[test]
