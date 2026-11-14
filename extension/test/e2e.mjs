@@ -112,7 +112,11 @@ async function main() {
     console.error(`e2e: ${why}`);
     void finish(1);
   };
+  // The build's own revision.json, put back however the run ends.
+  const onDisk = join(dist, "revision.json");
+  let built = null;
   const finish = async (code) => {
+    if (built !== null) writeFileSync(onDisk, built);
     // Chrome writes to its profile as it closes: wait for it, then remove
     // the throwaway profile.
     const exited = new Promise((r) => (proc.exitCode !== null ? r() : proc.once("exit", r)));
@@ -242,11 +246,10 @@ async function main() {
   send({ type: "expects", revision: newer });
   const waits = await next();
   expect(waits.type === "updating" && waits.outcome === "unbuilt", "an older unpacked build waits while its folder isn't rebuilt");
-  // Rebuilt (as far as it can tell): it reloads into it.
-  const onDisk = join(dist, "revision.json");
-  const built = readFileSync(onDisk, "utf8");
+  // Rebuilt (as far as it can tell): it finds that by itself, on this same
+  // connection, and reloads into it.
+  built = readFileSync(onDisk, "utf8");
   writeFileSync(onDisk, JSON.stringify({ revision: newer }));
-  send({ type: "expects", revision: newer });
   const told = await next();
   expect(told.type === "updating" && told.revision === newer && told.outcome === "reloading", "an older unpacked build says it's reloading itself");
   const back = wire(await nextConn());
@@ -255,7 +258,6 @@ async function main() {
   back.send({ type: "expects", revision: newer });
   const second = await back.next();
   expect(second.type === "updating" && second.outcome === "tried", "the same old files after a reload are said, not reloaded again");
-  writeFileSync(onDisk, built);
   clearTimeout(timer);
   await finish(0);
 }

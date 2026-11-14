@@ -572,18 +572,36 @@ describe("bringing an unpacked build up to date", () => {
     expect(r.reloads).toBe(2);
   });
 
-  it("waits, without spending its one try, while the files on disk aren't rebuilt yet", async () => {
+  it("waits, without spending its one try, while the files on disk aren't rebuilt yet, and looks again", async () => {
     const r = new FakeReloader("development");
+    r.disk = null;
+    const p = port();
+    const later: (() => void)[] = [];
+    const link = new Link(() => p, async () => me, new DeskTabs(new FakeChrome()), execOn(), "0.1.0", (f) => later.push(f), r, 1);
+    await link.start();
+    // Desk Helper says it once, on this connection.
+    await p.hub({ type: "expects", revision: 2 });
+    expect(p.sent.slice(1)).toEqual([{ type: "updating", revision: 2, outcome: "unbuilt" }]);
+    const tick = async () => {
+      for (const f of later.splice(0)) f();
+      await new Promise((res) => setTimeout(res, 0));
+    };
+    // Mid-build, then the old files: it keeps looking, and says nothing new.
     for (const disk of [null, 1]) {
       r.disk = disk;
-      expect(await connect(r, 1, 2)).toEqual([{ type: "updating", revision: 2, outcome: "unbuilt" }]);
+      await tick();
+      expect(p.sent).toHaveLength(2);
+      expect(later).toHaveLength(1);
     }
     expect(r.reloads).toBe(0);
     expect(r.stored).toBeNull();
-    // The build finished: the next connection reloads into it.
+    // The build finished: it reloads into it, with no new connection.
     r.disk = 2;
-    expect(await connect(r, 1, 2)).toEqual([{ type: "updating", revision: 2, outcome: "reloading" }]);
+    await tick();
+    expect(p.sent.slice(2)).toEqual([{ type: "updating", revision: 2, outcome: "reloading" }]);
+    await tick();
     expect(r.reloads).toBe(1);
+    expect(later).toHaveLength(0);
   });
 
   it("never reloads a Web Store install", async () => {

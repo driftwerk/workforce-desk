@@ -27,6 +27,9 @@ export interface Port {
   disconnect(): void;
 }
 
+/** How often an older unpacked build looks again for its rebuilt files. */
+export const RECHECK_MS = 15_000;
+
 export class Link {
   private port: Port | null = null;
   private retry = 1000;
@@ -94,21 +97,9 @@ export class Link {
       case "status":
         this.set({ activity: m.activity });
         return;
-      case "expects": {
-        if (!this.reloader) return;
-        const outcome = await upToDate(m.revision, this.revision, this.reloader);
-        if (outcome === "current") return;
-        // Desk Helper logs it; it isn't relayed to the hub.
-        port.post({ type: "updating", revision: m.revision, outcome });
-        if (outcome !== "reloading") return;
-        // Desk's window would be left behind: what names it goes with the
-        // reload (`storage.session`). Nothing is asked of it yet.
-        await this.tabs.stop().catch(() => 0);
-        // A moment for the message to reach Desk Helper first.
-        const reloader = this.reloader;
-        this.later(() => reloader.reload(), 250);
+      case "expects":
+        await this.upToDate(m.revision, port, null);
         return;
-      }
       case "call": {
         if (this.state.state !== "ready") {
           port.post({ type: "result", id: m.id, ok: false, error: "This Chrome isn't confirmed in Desk yet." });
@@ -124,6 +115,29 @@ export class Link {
         return;
       }
     }
+  }
+
+  /** Desk Helper expects `expected`: an older unpacked build reloads
+   *  itself. While its files on disk aren't rebuilt yet it looks again every
+   *  [`RECHECK_MS`] on this same connection (Desk Helper says `expects` once
+   *  per connection), telling Desk Helper only when that changes. */
+  private async upToDate(expected: number, port: Port, said: string | null): Promise<void> {
+    if (!this.reloader || this.port !== port) return;
+    const reloader = this.reloader;
+    const outcome = await upToDate(expected, this.revision, reloader);
+    if (outcome === "current") return;
+    // Desk Helper logs it; it isn't relayed to the hub.
+    if (outcome !== said) port.post({ type: "updating", revision: expected, outcome });
+    if (outcome === "unbuilt") {
+      this.later(() => void this.upToDate(expected, port, outcome), RECHECK_MS);
+      return;
+    }
+    if (outcome !== "reloading") return;
+    // Desk's window would be left behind: what names it goes with the
+    // reload (`storage.session`). Nothing is asked of it yet.
+    await this.tabs.stop().catch(() => 0);
+    // A moment for the message to reach Desk Helper first.
+    this.later(() => reloader.reload(), 250);
   }
 
   /** The person closed one of Desk's tabs. */

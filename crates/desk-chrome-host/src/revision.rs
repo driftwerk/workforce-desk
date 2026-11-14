@@ -74,7 +74,7 @@ pub fn updating(frame: &[u8]) -> Option<String> {
             "Desk's extension isn't an unpacked build, so it doesn't reload itself; Chrome updates it from the Web Store to revision {r}."
         ),
         Some("unbuilt") => format!(
-            "Desk's extension is an unpacked build, but its folder (extension/dist) isn't built at revision {r} yet: it reloads itself once it is, on its next connection. Run `npm run extension` if it stays like this."
+            "Desk's extension is an unpacked build, but its folder (extension/dist) isn't built at revision {r} yet: it looks again every 15 s and reloads itself once it is. Run `npm run extension` if it stays like this."
         ),
         Some("tried") => format!(
             "Desk's extension reloaded itself for revision {r} already and is still older: its folder (extension/dist) wasn't rebuilt. Run `npm run extension` and reload it in chrome://extensions."

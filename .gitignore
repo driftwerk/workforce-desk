@@ -1,7 +1,5 @@
 node_modules
 dist
-dist.next
-dist.old
 target
 src-tauri/gen
 src-tauri/binaries

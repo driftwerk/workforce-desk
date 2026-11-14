@@ -25,8 +25,8 @@ export interface Reloader {
 
 /** What to do when Desk Helper expects `expected` and this build is
  *  `mine`. Only files on disk that are at least `expected` are reloaded
- *  into: until then ("unbuilt": not rebuilt yet, or mid-build) it waits for
- *  the next connection, and the one try isn't spent. "reloading" is
+ *  into: until then ("unbuilt": not rebuilt yet, or mid-build) the caller
+ *  looks again later, and the one try isn't spent. "reloading" is
  *  remembered before it's returned, so a reload that somehow brings back
  *  old code never reloads again for `expected`. */
 export const upToDate = async (expected: number, mine: number, r: Reloader): Promise<"current" | "reloading" | "store" | "unbuilt" | "tried"> => {
