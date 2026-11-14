@@ -1470,7 +1470,7 @@ button.card-icon:hover:not(:disabled) {
 }
 
 /* ── A boss's plan in its DM (BD11): goal, waves, each ticket's engine and
-   folder, where it stands, and Approve and run. After the approved mockup
+   folder, where it stands, and Approve and start. After the approved mockup
    (floor-groups-mockup.html, b); every colour is a token. */
 
 .plancard {
@@ -1664,6 +1664,60 @@ button.card-icon:hover:not(:disabled) {
 .pc-engine:disabled {
   opacity: 0.6;
 }
+/* Other…: a model's exact id, in the picker's own shape. */
+.pc-model-other {
+  background-image: none;
+  padding-right: 10px;
+  width: 13em;
+}
+/* A ticket's machine, engine and model, at its line's end. */
+.pc-tk-run {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.pc-tk-run .pc-engine {
+  min-width: 9.5em;
+}
+.pc-machine {
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+  border-color: transparent;
+}
+
+/* A draft plan's defaults for every ticket: where they run, engine, model. */
+.pc-defaults {
+  margin: 10px 16px 0;
+  padding: 10px 12px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pc-defaults-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+}
+.pc-defaults-head .pc-wave-label {
+  margin: 0;
+}
+.pc-defaults-row,
+.pc-edit-where {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px 16px;
+}
+.pc-defaults-row .pc-engine,
+.pc-edit-where .pc-engine {
+  align-self: flex-start;
+}
 .pc-foot {
   padding: 12px 16px 14px;
   border-top: 1px solid var(--border);
@@ -1769,7 +1823,12 @@ button.card-icon:hover:not(:disabled) {
   padding: 6px 10px;
 }
 .pc-edit-folder {
+  font-family: var(--font-mono);
   font-size: 12.5px;
+}
+/* In a ticket's column of fields it is a line, never a column's height. */
+.pc-edit-row > .pc-edit-folder {
+  flex: none;
 }
 .pc-edit-needs {
   display: flex;
@@ -1787,7 +1846,7 @@ button.card-icon:hover:not(:disabled) {
   .pc-tk {
     grid-template-columns: auto minmax(0, 1fr);
   }
-  .pc-tk .pc-engine {
+  .pc-tk .pc-tk-run {
     grid-column: 2;
     justify-self: start;
   }

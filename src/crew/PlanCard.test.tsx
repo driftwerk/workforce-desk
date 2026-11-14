@@ -2,7 +2,9 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useBoard } from "../board/store";
 import { useChat } from "../chat/store";
+import { invoke } from "@tauri-apps/api/core";
 import { DeskHub } from "../hub/client";
+import { useMachines } from "../hub/engines";
 import { deskListeners, useDesk } from "../hub/store";
 import type { DeskSocket, DeskTransport } from "../hub/transport";
 import { DeskActions } from "../overview/DeskActions";
@@ -50,6 +52,8 @@ beforeEach(() => {
 });
 afterEach(() => {
   cleanup();
+  useMachines.setState({ machines: [] });
+  vi.mocked(invoke).mockImplementation(() => Promise.resolve());
   useDesk.setState({ hub: null });
   vi.unstubAllGlobals();
 });
@@ -59,10 +63,10 @@ describe("a plan waiting for the person", () => {
     await show();
     const c = card();
     expect(within(c).getByRole("heading", { name: "Refunds from the order page and from admin, covered by a test" })).toBeTruthy();
-    expect(within(c).getByText("Waiting for you")).toBeTruthy();
+    expect(within(c).getByText("Draft — review")).toBeTruthy();
     expect(within(c).getByText("rev 1")).toBeTruthy();
     expect(within(c).getByText("Board: Acme · Sarah's plan")).toBeTruthy();
-    expect([...c.querySelectorAll(".pc-wave-label")].map((l) => l.textContent)).toEqual(["Starts at once · 2 side by side", "Then · after ACM-20", "Last"]);
+    expect([...c.querySelectorAll(".pc-wave .pc-wave-label")].map((l) => l.textContent)).toEqual(["Starts at once · 2 side by side", "Then · after ACM-20", "Last"]);
     const engine = within(c).getByRole("combobox", { name: "Engine for ACM-21" }) as HTMLSelectElement;
     expect(engine.value).toBe("codex");
     // An engine that can't run here is offered, and can't be chosen.
@@ -70,7 +74,7 @@ describe("a plan waiting for the person", () => {
     expect(within(c).getByText("~/code/acme-admin")).toBeTruthy();
     expect(within(c).getByText("· needs ACM-21, ACM-22")).toBeTruthy();
     expect(within(c).getByText("4 tickets")).toBeTruthy();
-    expect(within(c).getAllByRole("button").map((b) => b.textContent)).toEqual(["Open on board", "Drop", "Edit", "Approve and run"]);
+    expect(within(c).getAllByRole("button").map((b) => b.textContent)).toEqual(["Open on board", "Drop", "Edit", "Approve and start"]);
   });
 
   it("shows what each ticket starts with, folded away", async () => {
@@ -84,7 +88,7 @@ describe("a plan waiting for the person", () => {
 
   it("runs once approved, and shows its progress as its sessions start", async () => {
     await show();
-    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run" })));
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and start" })));
     expect(decided).toEqual([allow(1)]);
     await waitFor(() => expect(within(card()).getByText("Running")).toBeTruthy());
     expect(within(card()).getByText("0 of 4 done · 2 running")).toBeTruthy();
@@ -99,12 +103,12 @@ describe("a plan waiting for the person", () => {
   it("shows the newer revision when the boss changed it first, and asks again", async () => {
     await show();
     plans.bossAdds("Fix the flaky payment test");
-    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run" })));
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and start" })));
     expect(within(card()).getByRole("alert").textContent).toContain("Sarah changed the plan since you read it. This is revision 2: look at it, then ask again.");
     expect(within(card()).getByText("rev 2")).toBeTruthy();
     expect(within(card()).getByText("Fix the flaky payment test")).toBeTruthy();
     expect(usePlans.getState().plans[PLAN]!.state).toBe("proposed");
-    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run" })));
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and start" })));
     expect(decided).toEqual([allow(1), allow(2)]);
     await waitFor(() => expect(within(card()).getByText("Running")).toBeTruthy());
   });
@@ -128,10 +132,10 @@ describe("a plan waiting for the person", () => {
       {
         revision: 1,
         tickets: [
-          { id: "t20", title: "Refunds endpoint over Stripe refunds", body: "", engine: "codex", folder: "/Users/sam/code/acme-api", view: null, needs: [] },
-          { id: "t21", title: "Refund button in the admin", body: "", engine: "codex", folder: "/Users/sam/code/acme-admin", view: null, needs: [] },
-          { id: "t22", title: "Refund from the order page", body: "", engine: "claude", folder: "/Users/sam/code/acme-web", view: null, needs: [0] },
-          { title: "Fix the flaky payment test", engine: "codex", folder: "/Users/sam/code/acme-web", needs: [2] },
+          { id: "t20", title: "Refunds endpoint over Stripe refunds", body: "", engine: "codex", folder: "/Users/sam/code/acme-api", view: null, machine: null, model: null, needs: [] },
+          { id: "t21", title: "Refund button in the admin", body: "", engine: "codex", folder: "/Users/sam/code/acme-admin", view: null, machine: null, model: null, needs: [] },
+          { id: "t22", title: "Refund from the order page", body: "", engine: "claude", folder: "/Users/sam/code/acme-web", view: null, machine: null, model: null, needs: [0] },
+          { title: "Fix the flaky payment test", engine: "codex", folder: "/Users/sam/code/acme-web", machine: null, model: null, needs: [2] },
         ],
       },
     ]);
@@ -170,17 +174,17 @@ describe("a plan's budget", () => {
     expect(within(card()).getByText("cap $25 for the whole plan, warns at 80%, pauses new starts when over")).toBeTruthy();
     const field = within(card()).getByRole("textbox", { name: "Cap the plan's spend, in dollars" }) as HTMLInputElement;
     expect(field.value).toBe("25");
-    expect(within(card()).getByRole("button", { name: "Approve and run, capped at $25" })).toBeTruthy();
+    expect(within(card()).getByRole("button", { name: "Approve and start, capped at $25" })).toBeTruthy();
     fireEvent.change(field, { target: { value: "40" } });
-    expect(within(card()).getByRole("button", { name: "Approve and run, capped at $40" })).toBeTruthy();
+    expect(within(card()).getByRole("button", { name: "Approve and start, capped at $40" })).toBeTruthy();
     fireEvent.change(field, { target: { value: "" } });
-    expect(within(card()).getByRole("button", { name: "Approve and run" })).toBeTruthy();
+    expect(within(card()).getByRole("button", { name: "Approve and start" })).toBeTruthy();
     fireEvent.change(field, { target: { value: "lots" } });
     expect(within(card()).getByRole("alert").textContent).toBe("Say the cap in dollars, like 40.");
-    fireEvent.click(within(card()).getByRole("button", { name: /^Approve and run/ }));
+    fireEvent.click(within(card()).getByRole("button", { name: /^Approve and start/ }));
     expect(decided).toEqual([]);
     fireEvent.change(field, { target: { value: "40" } });
-    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run, capped at $40" })));
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and start, capped at $40" })));
     expect(decided).toEqual([{ ...allow(1), budget: cap(40) }]);
   });
 
@@ -194,7 +198,7 @@ describe("a plan's budget", () => {
     // The person makes it pause new starts, warning earlier.
     fireEvent.change(over, { target: { value: "pause" } });
     fireEvent.change(within(card()).getByRole("combobox", { name: "When it warns" }), { target: { value: "0.5" } });
-    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run, capped at $25" })));
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and start, capped at $25" })));
     expect(decided).toEqual([{ ...allow(1), budget: { ...cap(25), warnAt: 0.5, onExceed: "pause" } }]);
   });
 
@@ -211,7 +215,7 @@ describe("a plan's budget", () => {
   it("as proposed, is approved without saying it again; taken off, is sent as none", async () => {
     plans.plan.budget = cap(25);
     await show();
-    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run, capped at $25" })));
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and start, capped at $25" })));
     expect(decided).toEqual([allow(1)]);
     cleanup();
     Object.assign(plans.plan, { state: "proposed", approvedRevision: null });
@@ -219,7 +223,7 @@ describe("a plan's budget", () => {
     decided.length = 0;
     await show();
     fireEvent.change(within(card()).getByRole("textbox", { name: "Cap the plan's spend, in dollars" }), { target: { value: "" } });
-    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and run" })));
+    await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Approve and start" })));
     expect(decided).toEqual([{ ...allow(1), budget: null }]);
   });
 
@@ -442,5 +446,89 @@ describe("progress", () => {
     const { engine: _e, folder: _f, view: _v, starting: _s, ...board } = done;
     act(() => deskListeners.forEach((l) => l({ type: "ticket", ticket: board })));
     expect(within(card()).getByText("1 of 4 done · 1 running · next ACM-22 when a slot frees")).toBeTruthy();
+  });
+});
+
+describe("a draft plan's review: where each ticket runs, and with what", () => {
+  const models = () => (bodies(`PATCH /api/desk/plans/${PLAN}`).at(-1) as { tickets: { model?: string | null; machine?: string | null; folder: string }[] }).tickets;
+
+  it("sets every ticket's model from the plan's defaults, keeping a ticket set otherwise and another engine's", async () => {
+    plans.plan.tickets[2]!.model = "opus";
+    plans.plan.revisions[0]!.snapshot.tickets[2]!.model = "opus";
+    await show();
+    expect(within(card()).getByText("Draft — review")).toBeTruthy();
+    expect((within(card()).getByRole("combobox", { name: "Model for ACM-22" }) as HTMLSelectElement).value).toBe("opus");
+    await act(async () => fireEvent.change(within(card()).getByRole("combobox", { name: "Every ticket's model" }), { target: { value: "sonnet" } }));
+    expect(bodies(`PATCH /api/desk/plans/${PLAN}`)).toHaveLength(1);
+    // ACM-21 runs on Codex: Claude Code's model isn't its.
+    expect(models().map((t) => t.model)).toEqual(["sonnet", null, "opus", "sonnet"]);
+    await waitFor(() => expect((within(card()).getByRole("combobox", { name: "Model for ACM-20" }) as HTMLSelectElement).value).toBe("sonnet"));
+  });
+
+  it("takes the engine's default model when a ticket moves to an engine without it", async () => {
+    plans.plan.tickets[0]!.model = "opus";
+    plans.plan.revisions[0]!.snapshot.tickets[0]!.model = "opus";
+    await show();
+    await act(async () => fireEvent.change(within(card()).getByRole("combobox", { name: "Engine for ACM-20" }), { target: { value: "codex" } }));
+    expect(models()[0]).toMatchObject({ model: null });
+  });
+
+  it("keeps nothing typed in Other… when Escape leaves it", async () => {
+    await show();
+    fireEvent.change(within(card()).getByRole("combobox", { name: "Model for ACM-20" }), { target: { value: "\u0000other" } });
+    const field = within(card()).getByRole("textbox", { name: "Model for ACM-20: the model's exact id" });
+    fireEvent.change(field, { target: { value: "claude-opus-4-1" } });
+    fireEvent.keyDown(field, { key: "Escape" });
+    fireEvent.blur(field);
+    expect(bodies(`PATCH /api/desk/plans/${PLAN}`)).toHaveLength(0);
+    expect((within(card()).getByRole("combobox", { name: "Model for ACM-20" }) as HTMLSelectElement).value).toBe("");
+  });
+
+  it("takes a model's exact id from Other…", async () => {
+    await show();
+    fireEvent.change(within(card()).getByRole("combobox", { name: "Model for ACM-20" }), { target: { value: "\u0000other" } });
+    const field = within(card()).getByRole("textbox", { name: "Model for ACM-20: the model's exact id" });
+    fireEvent.change(field, { target: { value: "claude-opus-4-1" } });
+    await act(async () => fireEvent.keyDown(field, { key: "Enter" }));
+    expect(models()[0]!.model).toBe("claude-opus-4-1");
+    await waitFor(() => expect((within(card()).getByRole("combobox", { name: "Model for ACM-20" }) as HTMLSelectElement).value).toBe("claude-opus-4-1"));
+  });
+
+  it("shows the engine's default when the hub doesn't keep a ticket's model yet", async () => {
+    plans.keepsModel = false;
+    await show();
+    await act(async () => fireEvent.change(within(card()).getByRole("combobox", { name: "Model for ACM-20" }), { target: { value: "sonnet" } }));
+    await waitFor(() => expect(within(card()).getByText("rev 2")).toBeTruthy());
+    expect((within(card()).getByRole("combobox", { name: "Model for ACM-20" }) as HTMLSelectElement).value).toBe("");
+  });
+
+  it("moves every ticket to a machine, each folder found under its home there, checked before it's saved", async () => {
+    useMachines.setState({ machines: [{ id: "devbox", name: "devbox", target: "devbox", version: "1", state: { kind: "ready" } }] });
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => (cmd === "machine_home" ? "/home/sam" : undefined) as never);
+    await show();
+    const where = within(card()).getByRole("radiogroup", { name: "Every ticket runs on" });
+    await act(async () => fireEvent.click(within(where).getByRole("radio", { name: "devbox" })));
+    const form = await within(card()).findByRole("form", { name: "Edit the plan" });
+    await waitFor(() => expect((within(form).getByRole("textbox", { name: "Folder of ticket 1" }) as HTMLInputElement).value).toBe("/home/sam/code/acme-api"));
+    expect(bodies(`PATCH /api/desk/plans/${PLAN}`)).toHaveLength(0);
+    await act(async () => fireEvent.click(within(form).getByRole("button", { name: "Save" })));
+    expect(models().map((t) => [t.machine, t.folder])).toEqual([
+      ["devbox", "/home/sam/code/acme-api"],
+      ["devbox", "/home/sam/code/acme-admin"],
+      ["devbox", "/home/sam/code/acme-web"],
+      ["devbox", "/home/sam/code/acme-web"],
+    ]);
+    await waitFor(() => expect(within(card()).getAllByText("devbox", { selector: ".pc-machine" })).toHaveLength(4));
+  });
+
+  it("asks a ticket's whole path on a machine", async () => {
+    useMachines.setState({ machines: [{ id: "devbox", name: "devbox", target: "devbox", version: "1", state: { kind: "ready" } }] });
+    await show();
+    fireEvent.click(within(card()).getByRole("button", { name: "Edit" }));
+    const form = within(card()).getByRole("form", { name: "Edit the plan" });
+    await act(async () => fireEvent.click(within(within(form).getByRole("radiogroup", { name: "Where ticket 2 runs" })).getByRole("radio", { name: "devbox" })));
+    fireEvent.change(within(form).getByRole("textbox", { name: "Folder of ticket 2" }), { target: { value: "code/acme-admin" } });
+    expect(within(form).getByText("On devbox, say the folder's whole path, from /.")).toBeTruthy();
+    expect((within(form).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
   });
 });

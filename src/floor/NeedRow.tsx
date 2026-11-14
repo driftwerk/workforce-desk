@@ -55,7 +55,7 @@ const planOf = (need: Pick<FloorNeed, "answer">): string | null =>
 /** A plan is approved (and runs) from the Floor; looking at it, editing or
  *  dropping it is in its boss's DM. */
 const PLAN = {
-  proposed: { word: "Approve and run", busy: "Approving…", done: "Approved: it starts", open: "Open in chat" },
+  proposed: { word: "Approve and start", busy: "Approving…", done: "Approved: it starts", open: "Open in chat" },
   change: { word: "Approve", busy: "Approving…", done: "Approved", open: "Look" },
   failing: { word: "Continue", busy: "Going on…", done: "Going on", open: "Look" },
 } as const;

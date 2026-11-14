@@ -80,6 +80,9 @@ export class PlanHub {
   limit = 2;
   /** The board's tickets in no plan. */
   others: Ticket[] = [];
+  /** Whether it keeps a ticket's model (a hub before per-session models
+   *  doesn't say it back). */
+  keepsModel = true;
 
   constructor(tickets: BossPlanTicket[] = refunds(), over: Partial<BossPlanDetail> = {}) {
     this.plan = {
@@ -214,7 +217,8 @@ export class PlanHub {
     p.tickets = tickets.map((d, i) => {
       const was = p.tickets.find((t) => t.id === d.id);
       const base = was ?? ticket(Number(ids[i]!.slice(1)), d.title, { folder: d.folder });
-      return { ...base, title: d.title, engine: d.engine ?? base.engine, folder: d.folder, needs: d.needs.map((k) => ids[k]!), rank: (i + 1) * 1024 };
+      const model = this.keepsModel ? { model: d.model ?? null } : {};
+      return { ...base, title: d.title, engine: d.engine ?? base.engine, folder: d.folder, machine: d.machine ?? null, ...model, needs: d.needs.map((k) => ids[k]!), rank: (i + 1) * 1024 };
     });
     p.revision += 1;
     p.revisions.push(this.revisionOf(p.revision, { kind: "you", id: "you", name: "You" }, "minor", "Changed the plan"));

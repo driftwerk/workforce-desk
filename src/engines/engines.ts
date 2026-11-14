@@ -27,6 +27,23 @@ export const ENGINE_SHORT: Record<Engine, string> = {
   custom: "Custom",
 };
 
+/** The models each engine is offered with, by the names its program takes
+ *  (`--model`), after "Engine default". An engine with none listed here is
+ *  offered its default, or a model named exactly (Other…): new models land
+ *  faster than this list. */
+export const ENGINE_MODELS: Partial<Record<Engine, readonly { id: string; title: string }[]>> = {
+  claude: [
+    { id: "opus", title: "Opus" },
+    { id: "sonnet", title: "Sonnet" },
+    { id: "haiku", title: "Haiku" },
+  ],
+};
+
+/** What a model is called: its listed title, else its id; null is the
+ *  engine's default. */
+export const modelTitle = (engine: Engine, model: string | null | undefined): string =>
+  !model ? "Engine default" : (ENGINE_MODELS[engine]?.find((m) => m.id === model)?.title ?? model);
+
 /** "Claude Code session", "Codex session". */
 export const sessionOf = (engine: Engine): string => `${ENGINE_TITLE[engine]} session`;
 

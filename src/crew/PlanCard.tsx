@@ -1,6 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useBoard } from "../board/store";
-import { ENGINE_TITLE } from "../engines/engines";
+import { ENGINE_TITLE, modelTitle } from "../engines/engines";
+import { ModelSelect } from "../engines/ModelSelect";
+import { LOCAL, useMachines } from "../machines/engines";
+import { homeWithin, onMachine } from "../machines/folders";
+import { RunOn } from "../machines/RunOn";
+import { nameOfMachine } from "../machines/words";
+import { machineHome } from "../platform";
+import { useHost } from "../shell/host";
 import { useDesk } from "../hub/store";
 import type { PlanBudget, BossPlan, BossPlanDetail, BossPlanTicket, DraftTicket, Engine, EngineInfo, OnPlanDrop } from "../hub/types";
 import { useLocalAgent } from "../overview/people";
@@ -13,7 +20,9 @@ import {
   capOf,
   sameBudget,
   changesBetween,
+  defaultOf,
   draftOf,
+  modelOn,
   liveCard,
   liveTickets,
   needChoices,
@@ -29,6 +38,7 @@ import {
   started,
   waves,
   waveTitle,
+  withDefault,
   withoutTicket,
   working,
   type PlanChanges,
@@ -155,7 +165,24 @@ function RevisionNotice({ detail, plan, revision, text }: { detail: BossPlanDeta
   );
 }
 
-type Asking = null | "approve" | "turnDown" | "continue" | "pause" | "resume" | "drop" | "save" | "engine";
+type Asking = null | "approve" | "turnDown" | "continue" | "pause" | "resume" | "drop" | "save" | "engine" | "model";
+
+/** The name of the machine a ticket runs on (null: this computer). */
+const useMachineName = (): ((machine: string | null | undefined) => string) => {
+  const machines = useMachines((s) => s.machines);
+  const platform = useHost((h) => h.platform);
+  return (machine) => nameOfMachine(machine ?? LOCAL, machines, platform);
+};
+
+/** `folder` (a path on the machine a ticket ran on) on `machine` instead:
+ *  the same place under its home, when both homes say; else none, for the
+ *  person to say. */
+const folderOn = async (folder: string, machine: string | null): Promise<string> => {
+  const under = homeShort(folder);
+  if (!under.startsWith("~")) return "";
+  const home = await homeWithin(() => machineHome(machine ?? LOCAL), machine ?? LOCAL).catch(() => null);
+  return home ? onMachine(under, home) : "";
+};
 
 function WholePlan({ detail, plan, onBoard }: { detail: BossPlanDetail; plan: BossPlan; onBoard: boolean }) {
   const board = useBoard((s) => s.tickets);
@@ -250,7 +277,9 @@ function WholePlan({ detail, plan, onBoard }: { detail: BossPlanDetail; plan: Bo
   const draft = (): DraftTicket[] =>
     newest
       ? draftOf(newest)
-      : draftOf(tickets.map((t) => ({ id: t.id, title: t.title, body: t.body, engine: t.engine ?? "claude", folder: t.folder ?? "", view: t.view, needs: t.needs })));
+      : draftOf(
+          tickets.map((t) => ({ id: t.id, title: t.title, body: t.body, engine: t.engine ?? "claude", folder: t.folder ?? "", view: t.view, machine: t.machine, model: t.model, needs: t.needs })),
+        );
 
   const run = async (what: Exclude<Asking, null>, request: () => Promise<void>) => {
     setAsking(what);
@@ -298,8 +327,37 @@ function WholePlan({ detail, plan, onBoard }: { detail: BossPlanDetail; plan: Bo
     if (ok || usePlans.getState().refusals[plan.id]?.from !== undefined) setEditing(null);
   };
   const setEngine = (ticket: string, engine: Engine) => {
-    const tickets = draft().map((t) => (t.id === ticket ? { ...t, engine } : t));
+    const tickets = draft().map((t) => (t.id === ticket ? { ...t, engine, model: modelOn(engine, t.model) } : t));
     void run("engine", () => store.edit(plan.id, { revision: detail.revision, tickets }));
+  };
+  const setModel = (ticket: string, model: string | null) => {
+    const tickets = draft().map((t) => (t.id === ticket ? { ...t, model } : t));
+    void run("model", () => store.edit(plan.id, { revision: detail.revision, tickets }));
+  };
+  // The plan's defaults: every ticket that has the default takes the new
+  // one, in one edit. Another machine needs each moved ticket's folder
+  // there: the editor opens with them, to check before saving.
+  const [placing, setPlacing] = useState(false);
+  const setDefault = async (key: "machine" | "engine" | "model", to: string | null) => {
+    const all = draft();
+    const from = defaultOf(all, key);
+    if (from === to) return;
+    const { tickets, moved } = withDefault(all, key, from, to);
+    if (key !== "machine") {
+      void run(key === "engine" ? "engine" : "model", () => store.edit(plan.id, { revision: detail.revision, tickets }));
+      return;
+    }
+    const revision = detail.revision;
+    setPlacing(true);
+    try {
+      const folders = await Promise.all(moved.map((i) => folderOn(all[i]!.folder, to)));
+      // A newer revision came meanwhile: it is shown to choose from again.
+      if (usePlans.getState().details[plan.id]?.revision !== revision) return;
+      moved.forEach((i, n) => (tickets[i] = { ...tickets[i]!, folder: folders[n]! }));
+      setEditing(tickets);
+    } finally {
+      setPlacing(false);
+    }
   };
   const drop = async (sessions: OnPlanDrop) => {
     if (await run("drop", () => store.drop(plan.id, sessions))) setDropping(null);
@@ -393,6 +451,18 @@ function WholePlan({ detail, plan, onBoard }: { detail: BossPlanDetail; plan: Bo
         </div>
       )}
 
+      {/* A draft: nothing runs until the person approves it. Where every
+          ticket runs, and with what, is theirs to say first. */}
+      {waitsOnYou && plan.approvedRevision === null && !editing && (
+        <PlanDefaults
+          tickets={draft()}
+          choices={choices ?? engineChoices(null)}
+          disabled={busy || placing || stale}
+          placing={placing}
+          onChange={(key, to) => void setDefault(key, to)}
+        />
+      )}
+
       {editing ? (
         <PlanEditor
           draft={editing}
@@ -424,6 +494,7 @@ function WholePlan({ detail, plan, onBoard }: { detail: BossPlanDetail; plan: Bo
                     choices={plan.state === "proposed" && !started(t) ? choices : null}
                     disabled={busy}
                     onEngine={(e) => setEngine(t.id, e)}
+                    onModel={(m) => setModel(t.id, m)}
                   />
                 ) : null;
               })}
@@ -562,8 +633,8 @@ function WholePlan({ detail, plan, onBoard }: { detail: BossPlanDetail; plan: Bo
                       : plan.approvedRevision !== null
                         ? "Approve the change"
                         : approvedCap
-                          ? `Approve and run, capped at ${amountText(approvedCap.unit, approvedCap.amount)}`
-                          : "Approve and run"}
+                          ? `Approve and start, capped at ${amountText(approvedCap.unit, approvedCap.amount)}`
+                          : "Approve and start"}
                   </button>
                 )}
                 {capProblem && (
@@ -604,10 +675,12 @@ const BUSY: Record<Exclude<Asking, null>, string> = {
   drop: "Dropping…",
   save: "Saving…",
   engine: "Saving the engine…",
+  model: "Saving the model…",
 };
 
 /** A change of scope in full: what approving it would approve. */
 function ChangeDetails({ changes, names }: { changes: PlanChanges; names: ReadonlyMap<string, string> }) {
+  const machineName = useMachineName();
   const where = (t: { engine: Engine; folder: string }) => `${ENGINE_TITLE[t.engine]} in ${homeShort(t.folder)}`;
   const named = (ids: readonly string[]) => ids.map((id) => names.get(id) ?? "a ticket").join(", ");
   return (
@@ -678,6 +751,16 @@ function ChangeDetails({ changes, names }: { changes: PlanChanges; names: Readon
               View: {c.view.from ?? "the engine's own"} → {c.view.to ?? "the engine's own"}
             </span>
           )}
+          {c.machine && (
+            <span className="small">
+              Runs on: {machineName(c.machine.from)} → {machineName(c.machine.to)}
+            </span>
+          )}
+          {c.model && (
+            <span className="small">
+              Model: {modelTitle(c.ticket.engine, c.model.from)} → {modelTitle(c.ticket.engine, c.model.to)}
+            </span>
+          )}
           {c.needs && (
             <span className="small">
               {[
@@ -706,9 +789,10 @@ const STATE_WORD: Partial<Record<BossPlanTicket["state"], { word: string; look: 
   dropped: { word: "Dropped", look: "faint" },
 };
 
-/** One ticket of a wave: its key and title, its engine (a picker while
- *  the plan waits to be approved and it hasn't started), its folder, what
- *  it needs, and where it stands. */
+/** One ticket of a wave: its key and title, its engine and model
+ *  (pickers while the plan waits to be approved and it hasn't started),
+ *  the machine it runs on when not this computer, its folder, what it
+ *  needs, and where it stands. */
 function TicketRow({
   t,
   all,
@@ -716,6 +800,7 @@ function TicketRow({
   choices,
   disabled,
   onEngine,
+  onModel,
 }: {
   t: BossPlanTicket;
   all: readonly BossPlanTicket[];
@@ -723,18 +808,36 @@ function TicketRow({
   choices: EngineChoice[] | null;
   disabled: boolean;
   onEngine: (e: Engine) => void;
+  onModel: (m: string | null) => void;
 }) {
+  const machineName = useMachineName();
   const needs = t.needs.map((n) => all.find((x) => x.id === n)?.key).filter(Boolean);
   const state = STATE_WORD[t.state];
+  const who = t.key ?? t.title;
   return (
     <div className="pc-tk">
       <span className="pc-key">{t.key ?? "·"}</span>
       <span className="pc-t">{t.title}</span>
-      {choices && t.engine ? (
-        <EngineSelect value={t.engine} choices={choices} label={`Engine for ${t.key ?? t.title}`} disabled={disabled} onChange={onEngine} />
-      ) : (
-        t.engine && <span className="chip">{ENGINE_TITLE[t.engine]}</span>
-      )}
+      <span className="pc-tk-run">
+        {t.machine && (
+          <span className="chip pc-machine" title={`Runs on ${machineName(t.machine)}`}>
+            {machineName(t.machine)}
+          </span>
+        )}
+        {choices && t.engine ? (
+          <>
+            <EngineSelect value={t.engine} choices={choices} label={`Engine for ${who}`} disabled={disabled} onChange={onEngine} />
+            <ModelSelect engine={t.engine} value={t.model ?? null} label={`Model for ${who}`} disabled={disabled} onChange={onModel} />
+          </>
+        ) : (
+          t.engine && (
+            <span className="chip">
+              {ENGINE_TITLE[t.engine]}
+              {t.model ? ` · ${modelTitle(t.engine, t.model)}` : ""}
+            </span>
+          )
+        )}
+      </span>
       <span className="pc-sub">
         {t.folder && <span className="mono">{homeShort(t.folder)}</span>}
         {needs.length > 0 && <span>· needs {needs.join(", ")}</span>}
@@ -753,9 +856,55 @@ function TicketRow({
   );
 }
 
-/** The plan's tickets to change in place: each one's title, engine and
- *  needs; tickets added (with the folder they work in) and taken out. Saved
- *  as a new revision. */
+/** A draft plan's defaults, for every ticket at once: where it runs, its
+ *  engine and its model. Each is what most tickets have; a ticket set
+ *  otherwise (on its own line, or in Edit) keeps its own. */
+function PlanDefaults({
+  tickets,
+  choices,
+  disabled,
+  placing,
+  onChange,
+}: {
+  tickets: readonly DraftTicket[];
+  choices: EngineChoice[];
+  disabled: boolean;
+  placing: boolean;
+  onChange: (key: "machine" | "engine" | "model", to: string | null) => void;
+}) {
+  const machine = defaultOf(tickets, "machine");
+  const engine = (defaultOf(tickets, "engine") ?? "claude") as Engine;
+  const model = defaultOf(tickets, "model");
+  const own = tickets.filter((t) => (t.machine ?? null) !== machine || (t.engine ?? "claude") !== engine || (t.model ?? null) !== model).length;
+  // (A ticket on another engine has its own model: it counts once, as set otherwise.)
+  return (
+    <div className="pc-defaults" role="group" aria-label="Every ticket">
+      <span className="pc-defaults-head">
+        <span className="pc-wave-label pc-defaults-label">Every ticket</span>
+        <span className="small muted">
+          A draft: nothing runs until you approve it.
+          {own > 0 ? (own === 1 ? " One ticket is set otherwise, and keeps its own." : ` ${own} tickets are set otherwise, and keep their own.`) : ""}
+        </span>
+      </span>
+      <RunOn value={machine ?? LOCAL} label="Every ticket runs on" disabled={disabled} onChange={(m) => onChange("machine", m === LOCAL ? null : m)} />
+      <span className="pc-defaults-row">
+        <label className="field">
+          <span className="ov-label muted">Engine</span>
+          <EngineSelect value={engine} choices={choices} label="Every ticket's engine" disabled={disabled} onChange={(e) => onChange("engine", e)} />
+        </label>
+        <label className="field">
+          <span className="ov-label muted">Model</span>
+          <ModelSelect engine={engine} value={model} label="Every ticket's model" disabled={disabled} onChange={(m) => onChange("model", m)} />
+        </label>
+        {placing && <span className="small muted">Finding each folder there…</span>}
+      </span>
+    </div>
+  );
+}
+
+/** The plan's tickets to change in place: each one's title, engine,
+ *  model, where it runs (this computer or a machine, and its folder there)
+ *  and needs; tickets added and taken out. Saved as a new revision. */
 function PlanEditor({
   draft,
   choices,
@@ -775,11 +924,31 @@ function PlanEditor({
   onSave: (d: DraftTicket[]) => void;
 }) {
   const put = (i: number, t: Partial<DraftTicket>) => onChange(draft.map((x, j) => (j === i ? { ...x, ...t } : x)));
+  // The draft as it is now, for a folder found after the person moved on.
+  const latest = useRef(draft);
+  latest.current = draft;
+  const machineName = useMachineName();
+  // Another machine: the ticket's folder there, found under its home when
+  // it can be, else left for the person to say.
+  const moveTo = (i: number, machine: string | null) => {
+    const was = draft[i]!;
+    const moved = { ...was, machine, folder: "" };
+    onChange(draft.map((x, j) => (j === i ? moved : x)));
+    // Filled in only while that ticket is as it was left: not edited,
+    // removed or moved since.
+    void folderOn(was.folder, machine).then((folder) => {
+      const now = latest.current;
+      const at = now.indexOf(moved);
+      if (folder && at >= 0) onChange(now.map((x, j) => (j === at ? { ...x, folder } : x)));
+    });
+  };
+  // On a machine a folder is that machine's absolute path.
+  const placed = (t: DraftTicket) => !!t.folder.trim() && (!t.machine || /^([\\/]|[A-Za-z]:[\\/])/.test(t.folder.trim()));
   const firstEngine = draft.find((t) => t.engine)?.engine ?? "claude";
   const firstFolder = draft[draft.length - 1]?.folder ?? "";
   // A ticket added starts in the folder of the one before it.
   const [defaultFolder, setDefault] = useState("");
-  const ok = draft.length > 0 && draft.every((t) => t.title.trim() && t.folder.trim());
+  const ok = draft.length > 0 && draft.every((t) => t.title.trim() && placed(t));
   const label = (i: number) => `ticket ${i + 1}`;
   return (
     <form
@@ -798,14 +967,33 @@ function PlanEditor({
             <li key={t.id ?? `new-${i}`} className="pc-edit-row">
               <span className="pc-edit-line">
                 <input className="pc-edit-title" aria-label={`Title of ${label(i)}`} value={t.title} onChange={(e) => put(i, { title: e.target.value })} required />
-                <EngineSelect value={t.engine ?? firstEngine} choices={choices} label={`Engine of ${label(i)}`} disabled={locked} onChange={(engine) => put(i, { engine })} />
+                <EngineSelect value={t.engine ?? firstEngine} choices={choices} label={`Engine of ${label(i)}`} disabled={locked} onChange={(engine) => put(i, { engine, model: modelOn(engine, t.model) })} />
                 <button type="button" className="btn btn-ghost btn-sm" aria-label={`Remove ${label(i)}`} onClick={() => onChange(withoutTicket(draft, i))}>
                   Remove
                 </button>
               </span>
-              {!t.id && (
+              {!locked && (
+                <span className="pc-edit-where">
+                  <RunOn value={t.machine ?? LOCAL} label={`Where ${label(i)} runs`} onChange={(m) => moveTo(i, m === LOCAL ? null : m)} />
+                  <label className="field">
+                    <span className="ov-label muted">Model</span>
+                    <ModelSelect engine={t.engine ?? firstEngine} value={t.model ?? null} label={`Model of ${label(i)}`} onChange={(model) => put(i, { model })} />
+                  </label>
+                </span>
+              )}
+              {!locked && (
                 <>
-                  <input className="pc-edit-folder mono" aria-label={`Folder of ${label(i)}`} value={t.folder} placeholder="/path/to/repo" onChange={(e) => put(i, { folder: e.target.value })} required />
+                  <input
+                    className="pc-edit-folder mono"
+                    aria-label={`Folder of ${label(i)}`}
+                    value={t.folder}
+                    placeholder={t.machine ? `A folder on ${machineName(t.machine)}, like /home/you/repo` : "/path/to/repo"}
+                    onChange={(e) => put(i, { folder: e.target.value })}
+                    required
+                  />
+                  {t.machine && t.folder.trim() && !placed(t) && (
+                    <span className="small state-blocked">On {machineName(t.machine)}, say the folder's whole path, from /.</span>
+                  )}
                   {t.folder && t.folder === defaultFolder && (
                     <span className="pc-edit-default">The folder of the ticket above, as a start: change it if this one works elsewhere.</span>
                   )}
@@ -837,7 +1025,8 @@ function PlanEditor({
       <span className="pc-actions">
         <button type="button" className="btn btn-ghost" onClick={() => {
             setDefault(firstFolder);
-            onChange([...draft, { title: "", engine: firstEngine, folder: firstFolder, needs: [] }]);
+            const last = draft[draft.length - 1];
+            onChange([...draft, { title: "", engine: firstEngine, folder: firstFolder, machine: last?.machine ?? null, model: last?.engine === firstEngine ? (last.model ?? null) : null, needs: [] }]);
           }}>
           Add a ticket
         </button>
