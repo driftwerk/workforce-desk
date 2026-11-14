@@ -701,7 +701,7 @@ describe("the board, synced", () => {
     const todo = within(screen.getByRole("region", { name: "To do" }));
     expect(todo.getByText("Unassigned")).toBeTruthy();
     expect(todo.getByText("Ana Diaz")).toBeTruthy();
-    expect(todo.getByText("A")).toBeTruthy();
+    expect(todo.getByText("AD")).toBeTruthy();
     expect(within(screen.getByRole("region", { name: "Doing" })).getByText("You")).toBeTruthy();
     // Only the one no one has can be taken; an older hub's says nothing.
     expect(screen.getAllByRole("button", { name: /^Take / })).toHaveLength(1);
