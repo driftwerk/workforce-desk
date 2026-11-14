@@ -10,6 +10,9 @@ import { MAIN_GRID } from "./model";
 import type { GridStorage } from "./storage";
 import { createGrid, deliver, layOut, startGrids, useGrids } from "./store";
 import { useTerminals } from "./terminals";
+import { SidebarGroups } from "../groups/SidebarGroups";
+import { useSettings } from "../settings/store";
+import { EMPTY_LAYOUT } from "../groups/model";
 
 const counts = { dm: 0 };
 // How often each grid's sidebar row was drawn.
@@ -23,7 +26,7 @@ vi.mock("../groups/rows", async (orig) => {
   return {
     ...m,
     SortRow: (p: Parameters<typeof m.SortRow>[0]) => {
-      if (p.type === "grid") rowDraws[p.id] = (rowDraws[p.id] ?? 0) + 1;
+      rowDraws[p.id] = (rowDraws[p.id] ?? 0) + 1;
       return <m.SortRow {...p} />;
     },
   };
@@ -131,4 +134,25 @@ it("draws a grid's sidebar row again only for what that row says", async () => {
   expect(rowDraws[other]).toBeGreaterThan(0);
   expect(rowDraws[MAIN_GRID]).toBeGreaterThan(0);
   act(() => useFloor.setState({ hubs: {} }));
+});
+
+// The sidebar lists every session: one's event (its state, its turn), or
+// another opening, draws again only the rows whose words or marks change,
+// not every row for every event.
+it("draws a session's sidebar row again only for what that row shows", () => {
+  useSettings.setState({ loaded: true, groups: [], ungrouped: EMPTY_LAYOUT.ungrouped, sessionNames: {} });
+  render(<SidebarGroups />);
+  expect(screen.getByRole("button", { name: /task-0/ })).toBeTruthy();
+  for (const k of Object.keys(rowDraws)) delete rowDraws[k];
+  let n = 0;
+  for (const state of ["blocked", "working", "idle", "working"] as const)
+    act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s5: { ...s.sessions.s5!, state, updatedAt: new Date(Date.UTC(2026, 9, 29, 10, 0, n++)).toISOString() } } })));
+  expect(rowDraws["session:s5"]).toBeGreaterThan(0);
+  for (const id of ["s0", "s1", "s2", "s3", "s4"]) expect(rowDraws[`session:${id}`] ?? 0).toBe(0);
+  expect(rowDraws["agent:local/allan"] ?? 0).toBe(0);
+  // Opening one lights its row, and only its.
+  for (const k of Object.keys(rowDraws)) delete rowDraws[k];
+  act(() => useDesk.setState({ openId: "s2" }));
+  expect(rowDraws["session:s2"]).toBeGreaterThan(0);
+  for (const id of ["s0", "s1", "s3", "s4", "s5"]) expect(rowDraws[`session:${id}`] ?? 0).toBe(0);
 });
