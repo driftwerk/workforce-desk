@@ -26,11 +26,20 @@
 //!   written to each engine, so it can be renewed and taken back.
 //! - **Kept alive** while Desk is open ([`keep_alive`]): every grant renewed
 //!   (they last 72 hours) or written anew when the group's sessions
-//!   changed, and each link's token renewed with under 10 days left.
+//!   changed, each link's token renewed with under 10 days left (or made
+//!   anew once expired), and an engine new to the group linked. At Act and
+//!   above, a session the person didn't say the boss may run isn't granted
+//!   until they do.
 //! - **Pause** stops the group's grant on every engine (never the
-//!   engine-wide pause, which would stop every boss there); **Stop** pauses,
-//!   then revokes every token, takes each link off its engine and deletes
-//!   each grant.
+//!   engine-wide pause, which would stop every boss there), and keeping
+//!   alive sends each engine its stop until it has taken it, renewing
+//!   nothing. **Stop** sends every engine its stop at once, then revokes
+//!   every token, takes each link off its engine and deletes each grant;
+//!   until all of it is done, keeping alive tries those steps alone again.
+//! - **Nothing is held across a request**: what is kept is read and
+//!   written under a lock held for the file alone, and one change to a
+//!   group runs at a time. Pause and Stop send their stops before waiting
+//!   for it.
 
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -200,6 +209,17 @@ pub struct EngineLink {
     /// Why it couldn't be reached last time, in plain words.
     #[serde(default)]
     pub problem: Option<String>,
+    /// Whether it took its stop since the group was paused or stopped.
+    #[serde(default)]
+    pub stopped: bool,
+}
+
+/// An engine the group's boss couldn't be linked on, and why.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotLinked {
+    pub name: String,
+    pub why: String,
 }
 
 /// A group's boss on another hub, as Desk linked it.
@@ -211,16 +231,73 @@ pub struct GroupLink {
     pub hub_label: String,
     pub agent: String,
     pub choice: Choice,
+    /// The person paused it: nothing is renewed, and each engine is sent
+    /// its stop until it has taken it.
     #[serde(default)]
     pub paused: bool,
+    /// The person stopped it: only Stop's steps are tried again, until
+    /// every engine is clear and every token revoked.
+    #[serde(default)]
+    pub stopping: bool,
     /// By engine id: `local`, or a machine's.
     pub engines: BTreeMap<String, EngineLink>,
+    /// The sessions, by engine, the person last said the boss may run. At
+    /// Act and above no other session is granted until they say so.
+    #[serde(default)]
+    pub confirmed: BTreeMap<String, Vec<String>>,
+    /// Tokens made on the boss's hub that no engine holds (a link not
+    /// handed over, or one renewed): revoked until the hub says they're
+    /// gone. Each is kept before it is handed over, so none is lost.
+    #[serde(default)]
+    pub orphans: Vec<String>,
+    /// Engines it couldn't be linked on, and why: offered again.
+    #[serde(default)]
+    pub unlinked: BTreeMap<String, NotLinked>,
 }
 
 impl GroupLink {
+    fn new(at: &HubAt, agent: &str, choice: &Choice) -> Self {
+        Self {
+            hub: at.id.clone(),
+            hub_label: at.label.clone(),
+            agent: agent.to_string(),
+            choice: choice.clone(),
+            paused: false,
+            stopping: false,
+            engines: BTreeMap::new(),
+            confirmed: BTreeMap::new(),
+            orphans: Vec::new(),
+            unlinked: BTreeMap::new(),
+        }
+    }
+
     /// The boss as a grant names it.
     fn boss_key(&self) -> String {
         format!("remote:{}/{}", self.hub, self.agent)
+    }
+
+    /// The sessions on `engine` the boss may run now: below Act every one
+    /// in the group; at Act and above only those the person said.
+    fn allowed(&self, group: &Group, engine: &str) -> Vec<String> {
+        let now = group.members.get(engine).cloned().unwrap_or_default();
+        if self.choice.level < Level::Act {
+            return now;
+        }
+        let said = self.confirmed.get(engine);
+        now.into_iter()
+            .filter(|s| said.is_some_and(|c| c.contains(s)))
+            .collect()
+    }
+
+    /// How many of the group's sessions wait on the person to let the
+    /// boss run them.
+    fn waiting(&self, group: &Group) -> usize {
+        group.count()
+            - group
+                .members
+                .keys()
+                .map(|e| self.allowed(group, e).len())
+                .sum::<usize>()
     }
 }
 
@@ -231,7 +308,8 @@ pub struct Kept {
     pub groups: BTreeMap<String, GroupLink>,
 }
 
-/// One read-and-write of what is kept at a time.
+/// One read-and-write of what is kept at a time: held for the file alone,
+/// never across a request.
 static KEPT: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
 fn read_kept(path: &Path) -> Kept {
@@ -248,6 +326,48 @@ fn write_kept(path: &Path, kept: &Kept) -> Result<(), String> {
     let text = serde_json::to_string_pretty(kept).map_err(|e| e.to_string())?;
     desk_core::write_private(path, &text)
         .map_err(|e| format!("Desk couldn't keep what it linked: {e}"))
+}
+
+/// What is kept, as it is now.
+async fn load(kept_at: &Path) -> Kept {
+    let _one = KEPT.lock().await;
+    read_kept(kept_at)
+}
+
+/// Group `group`'s boss, as kept now.
+async fn load_group(kept_at: &Path, group: &str) -> Option<GroupLink> {
+    load(kept_at).await.groups.remove(group)
+}
+
+/// Changes group `group`'s record: read afresh, `f` changes only what its
+/// caller owns, and written back at once, so no change made meanwhile is
+/// lost. Nothing when the group has no record.
+async fn change_group<R>(
+    kept_at: &Path,
+    group: &str,
+    f: impl FnOnce(&mut GroupLink) -> R,
+) -> Result<Option<R>, String> {
+    let _one = KEPT.lock().await;
+    let mut kept = read_kept(kept_at);
+    let Some(entry) = kept.groups.get_mut(group) else {
+        return Ok(None);
+    };
+    let r = f(entry);
+    write_kept(kept_at, &kept)?;
+    Ok(Some(r))
+}
+
+/// One change to a group's boss at a time. Pause and Stop send their stops
+/// before they wait for it; keeping alive passes over a group being
+/// changed.
+static OPS: std::sync::Mutex<BTreeMap<String, Arc<tokio::sync::Mutex<()>>>> =
+    std::sync::Mutex::new(BTreeMap::new());
+
+fn ops_of(kept_at: &Path, group: &str) -> Arc<tokio::sync::Mutex<()>> {
+    let mut ops = OPS.lock().unwrap_or_else(|e| e.into_inner());
+    ops.entry(format!("{}\n{group}", kept_at.display()))
+        .or_default()
+        .clone()
 }
 
 // ── What it talks to ────────────────────────────────────────────────────
@@ -364,11 +484,35 @@ pub struct Group {
     pub id: String,
     pub name: String,
     pub members: BTreeMap<String, Vec<String>>,
+    /// The sessions, by engine, the layout lists elsewhere: in another
+    /// group, or Ungrouped. One born in this group and listed there has
+    /// been taken out of it.
+    pub elsewhere: BTreeMap<String, Vec<String>>,
 }
 
 impl Group {
     fn count(&self) -> usize {
         self.members.values().map(Vec::len).sum()
+    }
+}
+
+/// The sessions an item list names, by engine.
+fn sessions_in(items: &Value, into: &mut BTreeMap<String, Vec<String>>) {
+    for item in items.as_array().into_iter().flatten() {
+        let Some(key) = item.as_str().and_then(|k| k.strip_prefix("session:")) else {
+            continue;
+        };
+        let (engine, session) = match key.split_once('/') {
+            Some((m, s)) => (m.to_string(), s),
+            None => (LOCAL_ENGINE.to_string(), key),
+        };
+        if uuid_ok(session) {
+            into.entry(engine).or_default().push(session.to_string());
+        }
+    }
+    for list in into.values_mut() {
+        list.sort();
+        list.dedup();
     }
 }
 
@@ -383,28 +527,18 @@ pub fn group_of(layout: &Value, id: &str) -> Result<Group, String> {
     if !group_id_ok(id) {
         return Err("That group can't have a boss on another hub.".into());
     }
-    let g = layout["groups"]
-        .as_array()
+    let groups = layout["groups"].as_array();
+    let g = groups
         .and_then(|gs| gs.iter().find(|g| g["id"] == id))
         .ok_or("That group isn't in the sidebar any more.")?;
     let name = g["name"].as_str().unwrap_or(id).trim().to_string();
-    let mut members: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for item in g["items"].as_array().into_iter().flatten() {
-        let Some(key) = item.as_str().and_then(|k| k.strip_prefix("session:")) else {
-            continue;
-        };
-        let (engine, session) = match key.split_once('/') {
-            Some((m, s)) => (m.to_string(), s),
-            None => (LOCAL_ENGINE.to_string(), key),
-        };
-        if uuid_ok(session) {
-            members.entry(engine).or_default().push(session.to_string());
-        }
+    let mut members = BTreeMap::new();
+    sessions_in(&g["items"], &mut members);
+    let mut elsewhere = BTreeMap::new();
+    for other in groups.into_iter().flatten().filter(|o| o["id"] != id) {
+        sessions_in(&other["items"], &mut elsewhere);
     }
-    for list in members.values_mut() {
-        list.sort();
-        list.dedup();
-    }
+    sessions_in(&layout["ungrouped"]["items"], &mut elsewhere);
     Ok(Group {
         id: id.to_string(),
         name: if name.is_empty() {
@@ -413,6 +547,7 @@ pub fn group_of(layout: &Value, id: &str) -> Result<Group, String> {
             name
         },
         members,
+        elsewhere,
     })
 }
 
@@ -427,7 +562,7 @@ fn uuid_ok(s: &str) -> bool {
         })
 }
 
-async fn layout_group(here: &impl Engine, id: &str) -> Result<Group, String> {
+async fn read_layout(here: &impl Engine) -> Result<Value, String> {
     let a = here.call("GET", "/api/desk/layout", None).await?;
     if !ok(a.status) {
         return Err(format!(
@@ -435,34 +570,110 @@ async fn layout_group(here: &impl Engine, id: &str) -> Result<Group, String> {
             said(a.status, a.body.as_bytes())
         ));
     }
-    let layout = json_of(&a.body).ok_or("Desk couldn't read its sidebar.")?;
-    group_of(&layout, id)
+    json_of(&a.body).ok_or_else(|| "Desk couldn't read its sidebar.".into())
+}
+
+async fn layout_group(here: &impl Engine, id: &str) -> Result<Group, String> {
+    group_of(&read_layout(here).await?, id)
+}
+
+/// The engines a group is linked on: each that holds its sessions, this
+/// computer's first; this computer's alone while it has none.
+fn engines_of(group: &Group) -> Vec<String> {
+    let mut ids: Vec<String> = group
+        .members
+        .iter()
+        .filter(|(_, s)| !s.is_empty())
+        .map(|(e, _)| e.clone())
+        .collect();
+    ids.sort_by_key(|e| e != LOCAL_ENGINE);
+    if ids.is_empty() {
+        ids.push(LOCAL_ENGINE.into());
+    }
+    ids
 }
 
 // ── The questions ───────────────────────────────────────────────────────
 
-/// "Acme's 6 sessions on devbox and this Mac".
+/// The longest a name the page can set is said in a native question.
+const QUOTED_MAX: usize = 40;
+
+/// A name the page can set (a group's, a hub's, a machine's) as a native
+/// question says it: no control, direction or invisible characters, on one
+/// line, at most [`QUOTED_MAX`] characters, in quotes. So no name can push
+/// what the question asks out of sight, or pass for another part of it.
+fn quoted(s: &str) -> String {
+    let plain: String = s
+        .chars()
+        .map(|c| match c {
+            c if c.is_control() => ' ',
+            '\u{200b}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{2060}'..='\u{2069}' => ' ',
+            '\u{feff}' => ' ',
+            '"' | '“' | '”' | '«' | '»' => '\'',
+            c => c,
+        })
+        .collect();
+    let one = plain.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut out: String = one.chars().take(QUOTED_MAX).collect();
+    if one.chars().count() > QUOTED_MAX {
+        out = out.trim_end().to_string();
+        out.push('…');
+    }
+    if out.is_empty() {
+        out.push('?');
+    }
+    format!("“{out}”")
+}
+
+/// The boss's hub as a question names it: its label in Desk, and the host
+/// Desk reaches it at, which the page can't change.
+fn hub_words(at: &HubAt) -> String {
+    match url::Url::parse(&at.base)
+        .ok()
+        .and_then(|u| u.host_str().map(str::to_string))
+    {
+        Some(host) => format!("{} ({host})", quoted(&at.label)),
+        None => quoted(&at.label),
+    }
+}
+
+/// What the boss may do, first in every question, from what will be
+/// written alone.
+fn terms(c: &Choice) -> String {
+    match (c.level, c.budget_usd_per_day) {
+        (Level::Full, Some(b)) => format!(
+            "{}, up to ${b:.2} a day of real money, seeing {}.",
+            c.level.words(),
+            c.sees.words()
+        ),
+        _ => format!("{}, seeing {}.", c.level.words(), c.sees.words()),
+    }
+}
+
+/// "3 sessions in “Acme”, on devbox and this Mac".
 fn sessions_phrase(group: &Group, names: &BTreeMap<String, String>) -> String {
     let n = group.count();
+    let name = quoted(&group.name);
     if n == 0 {
-        return format!("{} (it has no sessions yet)", group.name);
+        return format!("{name}, which has no sessions yet, on {HERE}");
     }
     // Machines first, this computer last, as the person reads it.
-    let mut wheres: Vec<&str> = group
+    let mut wheres: Vec<String> = group
         .members
         .iter()
         .filter(|(e, s)| e.as_str() != LOCAL_ENGINE && !s.is_empty())
-        .map(|(e, _)| names.get(e).map_or(e.as_str(), String::as_str))
+        .map(|(e, _)| quoted(names.get(e).map_or(e.as_str(), String::as_str)))
         .collect();
     if group
         .members
         .get(LOCAL_ENGINE)
         .is_some_and(|s| !s.is_empty())
     {
-        wheres.push(HERE);
+        wheres.push(HERE.into());
     }
+    let wheres: Vec<&str> = wheres.iter().map(String::as_str).collect();
     let sessions = if n == 1 { "session" } else { "sessions" };
-    format!("{}'s {n} {sessions} on {}", group.name, and(&wheres))
+    format!("{n} {sessions} in {name}, on {}", and(&wheres))
 }
 
 /// The one line that says what Act fully leaves to Desk.
@@ -474,21 +685,20 @@ pub fn full_line(boss: &str) -> String {
 
 fn what_it_means(boss: &str, hub: &str, group: &str, c: &Choice) -> String {
     let level = match c.level {
-        Level::Watch => format!("{boss} can look and tell you what he sees. He can't do anything."),
+        Level::Watch => {
+            format!("{boss} can look and tell you what they see. They can't do anything.")
+        }
         Level::Suggest => format!("{boss} suggests; you decide each one, in Desk or Slack."),
         Level::Act => format!(
-            "{boss} runs the sessions you give him. Pushes to main, merges, publishes and deploys come to you."
+            "{boss} runs the sessions you give them. Pushes to main, merges, publishes and deploys come to you."
         ),
         Level::Full => format!(
-            "{boss} decides every request {group}'s sessions ask, on {hub} with its own model, up to ${:.2} a day of real money. {}",
-            c.budget_usd_per_day.unwrap_or_default(),
+            "{boss} decides every request the sessions ask, on {hub} with its own model, within the daily budget. {}",
             full_line(boss)
         ),
     };
     format!(
-        "{}, seeing {}. {level}\n\n{hub} receives what {boss} sees of {group}, and its model reads it. Stop {boss} in Desk ends it on every engine.",
-        c.level.words(),
-        c.sees.words(),
+        "{level}\n\n{hub} receives what {boss} sees of {group}, and its model reads it. Stop {boss} in Desk ends it on every engine."
     )
 }
 
@@ -545,14 +755,27 @@ struct Minted {
     hub: Option<String>,
 }
 
+/// Whether a token can go into a request body as it is: no character JSON
+/// would escape, so it is never copied out of [`Zeroizing`] memory to be.
+fn token_ok(t: &str) -> bool {
+    !t.is_empty()
+        && t.len() <= 512
+        && t.chars()
+            .all(|c| c.is_ascii_graphic() && c != '"' && c != '\\')
+}
+
 fn minted_of(body: &[u8]) -> Option<Minted> {
-    let v: Value = serde_json::from_slice(body).ok()?;
+    let mut v: Value = serde_json::from_slice(body).ok()?;
+    // The token is taken out of the answer, not copied.
+    let token = match v.get_mut("token").map(Value::take) {
+        Some(Value::String(s)) => Zeroizing::new(s),
+        _ => return None,
+    };
     let id_ok = |s: &str| {
         !s.is_empty() && s.len() <= 64 && s.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
     };
     let token_id = v["id"].as_str().filter(|s| id_ok(s))?.to_string();
     let link_id = v["link_id"].as_str().filter(|s| id_ok(s))?.to_string();
-    let token = Zeroizing::new(v["token"].as_str()?.to_string());
     let expires_at = v["expires_at"].as_str()?.parse().ok()?;
     let hub = v["hub"].as_str().map(str::to_string);
     Some(Minted {
@@ -580,43 +803,55 @@ async fn engine_key(engine: &impl Engine) -> Result<String, String> {
         .ok_or_else(|| format!("Desk on {} didn't say its key.", engine.name()))
 }
 
-/// Revokes token `id` on the boss's hub, logging a failure (the next mint
-/// for the same engine replaces it anyway).
+/// Revokes token `id` on the boss's hub. Gone already (404), or Desk's
+/// pairing with the hub ended (401: its tokens went with it), counts as
+/// done.
 async fn revoke(hub: &impl BossHub, id: &str) -> Result<(), String> {
     match hub
         .call("DELETE", &format!("{LINKS_PATH}/{}", seg(id)), None)
         .await
     {
-        Ok((status, _)) if ok(status) || status == 404 => Ok(()),
+        Ok((status, _)) if ok(status) || status == 404 || status == 401 => Ok(()),
         Ok((status, body)) => {
-            tracing::warn!(status, "a boss link wasn't revoked");
+            tracing::warn!(status, "a boss link wasn't revoked; trying again later");
             Err(said(status, &body))
         }
         Err(e) => {
-            tracing::warn!(error = %e, "a boss link wasn't revoked");
+            tracing::warn!(error = %e, "a boss link wasn't revoked; trying again later");
             Err(e)
         }
     }
 }
 
-/// Revokes the token just minted, `id`, that wasn't handed over: `why`.
-async fn undone(hub: &impl BossHub, id: &str, why: String) -> Result<Minted, String> {
-    let _ = revoke(hub, id).await;
-    Err(why)
+/// Why a mint made nothing.
+enum MintError {
+    /// The agent doesn't take boss work from Desk: no other engine is asked.
+    Declined(String),
+    /// The token to renew is gone (expired, or revoked): mint a new one.
+    Gone,
+    Other(String),
 }
 
-/// Mints a link for `engine` (renewing `renews`), checks the hub named
-/// itself at the address Desk dials, and hands the link to the engine. On
-/// any failure past the mint, the new token is revoked.
-async fn mint_and_hand(
+impl MintError {
+    fn words(self) -> String {
+        match self {
+            Self::Declined(w) | Self::Other(w) => w,
+            Self::Gone => "The boss's hub no longer has that link.".into(),
+        }
+    }
+}
+
+/// Mints a link for `engine` (renewing `renews`), and checks the hub named
+/// itself at the address Desk dials. A token it can't use is revoked.
+async fn mint(
     engine: &impl Engine,
     hub: &impl BossHub,
     at: &HubAt,
     agent: &str,
     group: &Group,
     renews: Option<&str>,
-) -> Result<Minted, String> {
-    let key = engine_key(engine).await?;
+) -> Result<Minted, MintError> {
+    let key = engine_key(engine).await.map_err(MintError::Other)?;
     let name: String = group.name.chars().take(GROUP_NAME_MAX).collect();
     let ask = Zeroizing::new(
         json!({
@@ -627,102 +862,153 @@ async fn mint_and_hand(
         })
         .to_string(),
     );
-    let (status, body) = hub.call("POST", LINKS_PATH, Some(&ask)).await?;
+    let (status, body) = hub
+        .call("POST", LINKS_PATH, Some(&ask))
+        .await
+        .map_err(MintError::Other)?;
     if !ok(status) {
         let words = words_of(&body).unwrap_or_else(|| format!("it answered {status}"));
         return Err(match status {
-            403 if words.contains("doesn't take boss work") => format!(
+            403 if words.contains("doesn't take boss work") => MintError::Declined(format!(
                 "{} doesn't take boss work from Desk: {}'s admin turns it on in {}'s settings.",
                 capital(agent),
                 at.label,
                 capital(agent)
-            ),
-            _ => format!(
+            )),
+            404 if renews.is_some() => MintError::Gone,
+            _ => MintError::Other(format!(
                 "{} didn't link {} to {}: {words}",
                 at.label,
                 capital(agent),
                 engine.name()
-            ),
+            )),
         });
     }
-    let minted =
-        minted_of(&body).ok_or_else(|| format!("{} didn't make a link Desk can use.", at.label))?;
+    let minted = minted_of(&body).ok_or_else(|| {
+        MintError::Other(format!("{} didn't make a link Desk can use.", at.label))
+    })?;
     drop(body);
     // The engine dials, and signs for, the name the hub gave itself: it must
     // be the address Desk is paired with it at (the RB4 review's note).
-    match minted.hub.as_deref() {
-        Some(named) if named == at.base => {}
-        Some(named) => {
-            let why = format!(
-                "{} calls itself {named}, but Desk is paired with it at {}: its admin sets its public address to the one Desk uses.",
-                at.label, at.base
-            );
-            return undone(hub, &minted.token_id, why).await;
+    let wrong = match minted.hub.as_deref() {
+        Some(named) if named == at.base => {
+            (!token_ok(&minted.token)).then(|| format!("{} made a link Desk can't use.", at.label))
         }
-        None => {
-            let why = format!(
-                "{} has no public address set, so engines can't reach it: its admin sets one.",
-                at.label
-            );
-            return undone(hub, &minted.token_id, why).await;
-        }
+        Some(named) => Some(format!(
+            "{} calls itself {named}, but Desk is paired with it at {}: its admin sets its public address to the one Desk uses.",
+            at.label, at.base
+        )),
+        None => Some(format!(
+            "{} has no public address set, so engines can't reach it: its admin sets one.",
+            at.label
+        )),
+    };
+    if let Some(why) = wrong {
+        let _ = revoke(hub, &minted.token_id).await;
+        return Err(MintError::Other(why));
     }
-    let handed = Zeroizing::new(
-        json!({
-            "hub": at.id,
-            "hubUrl": at.base,
-            "canonicalHub": at.base,
-            "linkId": minted.link_id,
-            "tokenId": minted.token_id,
-            "token": minted.token.as_str(),
-            "expiresAt": minted.expires_at,
-            "engineId": engine.id(),
-            "agentId": agent,
-        })
-        .to_string(),
-    );
+    Ok(minted)
+}
+
+/// The body that hands `minted` to an engine, built in [`Zeroizing`]
+/// memory with the token put in as it is ([`token_ok`]).
+fn handed_body(at: &HubAt, minted: &Minted, engine: &str, agent: &str) -> Zeroizing<String> {
+    let rest = json!({
+        "hub": at.id,
+        "hubUrl": at.base,
+        "canonicalHub": at.base,
+        "linkId": minted.link_id,
+        "tokenId": minted.token_id,
+        "expiresAt": minted.expires_at,
+        "engineId": engine,
+        "agentId": agent,
+    })
+    .to_string();
+    let mut out = Zeroizing::new(String::with_capacity(rest.len() + minted.token.len() + 16));
+    out.push_str(&rest[..rest.len() - 1]);
+    out.push_str(",\"token\":\"");
+    out.push_str(&minted.token);
+    out.push_str("\"}");
+    out
+}
+
+/// Hands `minted` to `engine` for group `group`.
+async fn hand(
+    engine: &impl Engine,
+    at: &HubAt,
+    minted: &Minted,
+    agent: &str,
+    group: &str,
+) -> Result<(), String> {
+    let body = handed_body(at, minted, engine.id(), agent);
     let put = engine
         .call(
             "PUT",
-            &format!("/api/desk/boss-links/{}", seg(&group.id)),
-            Some(&handed),
+            &format!("/api/desk/boss-links/{}", seg(group)),
+            Some(&body),
         )
         .await;
-    drop(handed);
+    drop(body);
     match put {
-        Ok(a) if ok(a.status) => Ok(minted),
-        Ok(a) => {
-            let why = format!(
-                "Desk on {} didn't keep the link: {}",
-                engine.name(),
-                said(a.status, a.body.as_bytes())
-            );
-            undone(hub, &minted.token_id, why).await
+        Ok(a) if ok(a.status) => Ok(()),
+        Ok(a) => Err(format!(
+            "Desk on {} didn't keep the link: {}",
+            engine.name(),
+            said(a.status, a.body.as_bytes())
+        )),
+        Err(e) => Err(e),
+    }
+}
+
+/// Takes link `link` off `engine` for group `group`.
+async fn take_link_off(engine: &impl Engine, group: &str, link: &str) -> Result<(), String> {
+    let path = format!("/api/desk/boss-links/{}/{}", seg(group), seg(link));
+    match engine.call("DELETE", &path, None).await {
+        Ok(a) if ok(a.status) || a.status == 404 => Ok(()),
+        Ok(a) => Err(said(a.status, a.body.as_bytes())),
+        Err(why) => Err(why),
+    }
+}
+
+/// Keeps `token` among the group's orphans before it is handed over, so a
+/// Desk that stops meanwhile still revokes it.
+async fn keep_orphan(kept_at: &Path, group: &str, token: &str) -> Result<(), String> {
+    change_group(kept_at, group, |l| {
+        if !l.orphans.iter().any(|t| t == token) {
+            l.orphans.push(token.to_string());
         }
-        Err(e) => undone(hub, &minted.token_id, e).await,
+    })
+    .await
+    .map(|_| ())
+}
+
+/// Revokes `token`, an orphan of the group, and forgets it once it's gone.
+async fn revoke_orphan(kept_at: &Path, hub: &impl BossHub, group: &str, token: &str) {
+    if revoke(hub, token).await.is_ok() {
+        let _ = change_group(kept_at, group, |l| l.orphans.retain(|t| t != token)).await;
     }
 }
 
 // ── Grants ──────────────────────────────────────────────────────────────
 
-/// What a grant says, apart from its revision.
-fn grant_says(group: &Group, engine: &str, boss_key: &str, choice: &Choice) -> Value {
+/// What a grant says, apart from its revision and what leaves it.
+fn grant_says(boss_key: &str, choice: &Choice, name: &str, members: Vec<String>) -> Value {
     json!({
         "grantVersion": GRANT_VERSION,
-        "name": group.name,
+        "name": name,
         "boss": boss_key,
         "level": choice.level,
         "sees": choice.sees,
         "recall": false,
         "folders": [],
         "repos": [],
-        "members": group.members.get(engine).cloned().unwrap_or_default(),
+        "members": members,
         "act": choice.act(),
     })
 }
 
-/// The revision the engine has for `group`: its grant's, or what a
-/// deleted one left; 0 for none.
+/// The revision the engine has for `group` (its grant's, or what a deleted
+/// one left; 0 for none), and its grant.
 async fn revision_on(engine: &impl Engine, group: &str) -> Result<(i64, Value), String> {
     let a = engine.call("GET", "/api/desk/grants", None).await?;
     if !ok(a.status) {
@@ -746,13 +1032,28 @@ async fn revision_on(engine: &impl Engine, group: &str) -> Result<(i64, Value), 
     Ok((have, held))
 }
 
+/// The sessions born in the group on an engine that the layout now lists
+/// elsewhere: taken out of it.
+fn leaving(held: &Value, group: &Group, engine: &str) -> Vec<String> {
+    let elsewhere = group.elsewhere.get(engine);
+    held["born"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter(|s| elsewhere.is_some_and(|e| e.iter().any(|x| x == s)))
+        .map(str::to_string)
+        .collect()
+}
+
 /// Writes `says` to `engine` as `group`'s grant: at `same` (the revision
 /// last written) when it says nothing new, which only renews it, else at
-/// one past what the engine has. `resume` lets a stopped grant go on. A
-/// write another one overtook is tried once more. The revision written.
+/// one past what the engine has. `resume` lets a stopped grant go on: only
+/// after the person said so natively. A write another one overtook is
+/// tried once more, past what the engine has then. The revision written.
 async fn write_grant(
     engine: &impl Engine,
-    group: &str,
+    group: &Group,
     says: &Value,
     same: Option<i64>,
     resume: bool,
@@ -760,13 +1061,14 @@ async fn write_grant(
     let mut tries = 0;
     loop {
         tries += 1;
-        let (have, _) = revision_on(engine, group).await?;
+        let (have, held) = revision_on(engine, &group.id).await?;
         let revision = match same {
-            Some(r) if r == have && !resume => r,
+            Some(r) if r == have && !resume && tries == 1 => r,
             _ => have + 1,
         };
         let mut body = says.clone();
         body["revision"] = json!(revision);
+        body["leaving"] = json!(leaving(&held, group, engine.id()));
         if resume {
             body["resume"] = json!(true);
         }
@@ -774,7 +1076,7 @@ async fn write_grant(
         let a = engine
             .call(
                 "PUT",
-                &format!("/api/desk/grants/{}", seg(group)),
+                &format!("/api/desk/grants/{}", seg(&group.id)),
                 Some(&body),
             )
             .await?;
@@ -809,6 +1111,18 @@ async fn stop_on(engine: &impl Engine, group: &str) -> Result<(), String> {
     }
 }
 
+/// Deletes `group`'s grant on `engine` (what it leaves keeps its stop).
+async fn delete_grant(engine: &impl Engine, group: &str) -> Result<(), String> {
+    match engine
+        .call("DELETE", &format!("/api/desk/grants/{}", seg(group)), None)
+        .await
+    {
+        Ok(a) if ok(a.status) || a.status == 404 => Ok(()),
+        Ok(a) => Err(said(a.status, a.body.as_bytes())),
+        Err(why) => Err(why),
+    }
+}
+
 // ── The commands' work ──────────────────────────────────────────────────
 
 /// Where each engine of a group stands after a change, for the page.
@@ -829,6 +1143,13 @@ pub struct Failed {
 }
 
 impl Done {
+    fn cancelled() -> Self {
+        Self {
+            cancelled: true,
+            ..Self::default()
+        }
+    }
+
     fn fail(&mut self, engine: &str, why: String) {
         self.failed.push(Failed {
             engine: engine.to_string(),
@@ -860,6 +1181,10 @@ impl<E: Engine> Engines<E> {
         names
     }
 
+    fn name_of(&self, id: &str) -> String {
+        self.names().remove(id).unwrap_or_else(|| id.to_string())
+    }
+
     fn get(&self, id: &str) -> Result<&E, String> {
         if id == LOCAL_ENGINE {
             return Ok(&self.here);
@@ -872,40 +1197,151 @@ impl<E: Engine> Engines<E> {
     }
 }
 
-/// The engines `group` is linked on: this computer's always (a boss may
-/// start sessions in an empty group), and each machine holding its
-/// sessions.
-fn engines_of(group: &Group) -> Vec<String> {
-    let mut ids = vec![LOCAL_ENGINE.to_string()];
-    ids.extend(
-        group
-            .members
-            .iter()
-            .filter(|(e, s)| e.as_str() != LOCAL_ENGINE && !s.is_empty())
-            .map(|(e, _)| e.clone()),
-    );
-    ids
+/// The native question, Cancel first: `Ok(true)` only on its yes; `Err`
+/// when it can't be asked now.
+pub trait Ask: FnOnce(String, String, String) -> Self::Answer {
+    type Answer: Future<Output = Result<bool, String>>;
 }
 
-/// Makes `agent` on `at` the boss of group `group_id` at `choice`, once
-/// `ask` says yes (see the module). An engine already linked to the same
-/// boss is left as it is, so this also tries again the ones that failed.
+impl<A, F> Ask for A
+where
+    A: FnOnce(String, String, String) -> F,
+    F: Future<Output = Result<bool, String>>,
+{
+    type Answer = F;
+}
+
+/// The question that makes `agent` on `at` the boss of `group` at
+/// `choice`, in place of `replaces`.
+fn link_question(
+    at: &HubAt,
+    agent: &str,
+    group: &Group,
+    names: &BTreeMap<String, String>,
+    choice: &Choice,
+    replaces: Option<&GroupLink>,
+) -> String {
+    let boss = capital(agent);
+    let instead = replaces.map_or(String::new(), |r| {
+        format!(
+            ", in place of {} on {}",
+            capital(&r.agent),
+            quoted(&r.hub_label)
+        )
+    });
+    format!(
+        "{}\n\nLet {boss} on {} boss {}{instead}?\n\n{}",
+        terms(choice),
+        hub_words(at),
+        sessions_phrase(group, names),
+        what_it_means(&boss, &quoted(&at.label), &quoted(&group.name), choice)
+    )
+}
+
+/// What one engine's linking did.
+enum Linked {
+    Yes,
+    No(String),
+    /// The agent declined boss work: no other engine is asked.
+    Declined(String),
+}
+
+/// Links engine `id` for group `group`: a new link minted (its token kept
+/// among the orphans first), handed over, and the grant written; then kept
+/// as the engine's. What fails is undone: the link taken off, the token
+/// revoked.
 #[allow(clippy::too_many_arguments)]
-pub async fn link<E, H, A, F>(
+async fn link_engine<E: Engine, H: BossHub>(
     kept_at: &Path,
     engines: &Engines<E>,
     hub: &H,
     at: &HubAt,
+    entry: &GroupLink,
+    group: &Group,
+    id: &str,
+    resume: bool,
+) -> Linked {
+    let engine = match engines.get(id) {
+        Ok(e) => e,
+        Err(why) => return Linked::No(why),
+    };
+    if !name_ok(engine.id()) {
+        return Linked::No(format!(
+            "{}'s id can't name an engine in a link.",
+            engine.name()
+        ));
+    }
+    let minted = match mint(engine, hub, at, &entry.agent, group, None).await {
+        Ok(m) => m,
+        Err(MintError::Declined(why)) => return Linked::Declined(why),
+        Err(e) => return Linked::No(e.words()),
+    };
+    if let Err(why) = keep_orphan(kept_at, &group.id, &minted.token_id).await {
+        let _ = revoke(hub, &minted.token_id).await;
+        return Linked::No(why);
+    }
+    if let Err(why) = hand(engine, at, &minted, &entry.agent, &group.id).await {
+        revoke_orphan(kept_at, hub, &group.id, &minted.token_id).await;
+        return Linked::No(why);
+    }
+    let says = grant_says(
+        &entry.boss_key(),
+        &entry.choice,
+        &group.name,
+        entry.allowed(group, id),
+    );
+    match write_grant(engine, group, &says, None, resume).await {
+        Ok(revision) => {
+            let link = EngineLink {
+                name: engine.name().to_string(),
+                link_id: minted.link_id.clone(),
+                token_id: minted.token_id.clone(),
+                expires_at: minted.expires_at,
+                revision,
+                written: says,
+                reached_at: Some(Utc::now()),
+                problem: None,
+                stopped: false,
+            };
+            let kept = change_group(kept_at, &group.id, |l| {
+                l.orphans.retain(|t| *t != minted.token_id);
+                l.unlinked.remove(id);
+                l.engines.insert(id.to_string(), link);
+            })
+            .await;
+            match kept {
+                Ok(_) => Linked::Yes,
+                Err(why) => Linked::No(why),
+            }
+        }
+        Err(why) => {
+            // Not granted: the link comes off the engine, and is revoked.
+            let _ = take_link_off(engine, &group.id, &minted.link_id).await;
+            revoke_orphan(kept_at, hub, &group.id, &minted.token_id).await;
+            Linked::No(why)
+        }
+    }
+}
+
+/// Makes `agent` on `at` the boss of group `group_id` at `choice`, once
+/// the person says yes natively (see the module). A group with another
+/// boss on another hub has it stopped first, in the same question;
+/// `old_hub` reaches that boss's hub to revoke its tokens.
+#[allow(clippy::too_many_arguments)]
+pub async fn link<E, H>(
+    kept_at: &Path,
+    engines: &Engines<E>,
+    hub: &H,
+    at: &HubAt,
+    old_hub: Option<&H>,
     group_id: &str,
     agent: &str,
     choice: Choice,
-    ask: A,
+    ask: impl Ask,
 ) -> Result<Done, String>
 where
     E: Engine,
     H: BossHub,
-    A: FnOnce(String, String, String) -> F,
-    F: Future<Output = bool>,
 {
     let choice = choice.checked()?;
     if !agent_id_ok(agent) {
@@ -924,386 +1360,735 @@ where
         ));
     }
     let group = layout_group(&engines.here, group_id).await?;
+    let replaces = load_group(kept_at, group_id).await;
+    if let Some(other) = &replaces
+        && other.hub == at.id
+        && other.agent == agent
     {
-        let _one = KEPT.lock().await;
-        if let Some(other) = read_kept(kept_at).groups.get(group_id)
-            && (other.hub != at.id || other.agent != agent)
-        {
-            return Err(format!(
-                "{} already has {} on {} as its boss: stop {} first.",
-                group.name,
-                capital(&other.agent),
-                other.hub_label,
-                capital(&other.agent)
-            ));
-        }
+        return Err(format!(
+            "{} already bosses {}: change it in the group's Boss sheet.",
+            capital(agent),
+            group.name
+        ));
     }
     let boss = capital(agent);
-    let question = format!(
-        "Let {boss} on {} boss {}?\n\n{}",
-        at.label,
-        sessions_phrase(&group, &engines.names()),
-        what_it_means(&boss, &at.label, &group.name, &choice)
+    let question = link_question(
+        at,
+        agent,
+        &group,
+        &engines.names(),
+        &choice,
+        replaces.as_ref(),
     );
     if !ask(
         format!("Make {boss} a boss"),
         question,
         format!("Make {boss} the Boss"),
     )
-    .await
+    .await?
     {
-        return Ok(Done {
-            cancelled: true,
-            ..Done::default()
-        });
+        return Ok(Done::cancelled());
     }
-    let _one = KEPT.lock().await;
-    let mut kept = read_kept(kept_at);
-    let entry = kept
-        .groups
-        .entry(group_id.to_string())
-        .or_insert_with(|| GroupLink {
-            hub: at.id.clone(),
-            hub_label: at.label.clone(),
-            agent: agent.to_string(),
-            choice: choice.clone(),
-            paused: false,
-            engines: BTreeMap::new(),
-        });
-    entry.choice = choice.clone();
-    entry.paused = false;
-    let boss_key = entry.boss_key();
+    let ops = ops_of(kept_at, group_id);
+    let _op = ops.lock().await;
+    if replaces.is_some() {
+        let stopped = stop_all(kept_at, engines, old_hub, group_id).await?;
+        if !stopped.failed.is_empty() {
+            return Err(format!(
+                "Desk couldn't stop {}'s boss everywhere yet, so {boss} isn't linked: {}",
+                group.name,
+                stopped
+                    .failed
+                    .iter()
+                    .map(|f| format!("{}: {}", f.engine, f.why))
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            ));
+        }
+    }
+    // What the person was asked about is what the boss may run.
+    let mut entry = GroupLink::new(at, agent, &choice);
+    entry.confirmed = group.members.clone();
+    {
+        let _one = KEPT.lock().await;
+        let mut kept = read_kept(kept_at);
+        kept.groups.insert(group_id.to_string(), entry.clone());
+        write_kept(kept_at, &kept)?;
+    }
     let mut done = Done::default();
-    let names = engines.names();
+    let mut declined: Option<String> = None;
     for id in engines_of(&group) {
-        let shown = names.get(&id).cloned().unwrap_or_else(|| id.clone());
-        let engine = match engines.get(&id) {
-            Ok(e) => e,
-            Err(why) => {
-                done.fail(&shown, why);
+        let shown = engines.name_of(&id);
+        let outcome = match &declined {
+            Some(why) => Linked::No(why.clone()),
+            // A new link lets a grant stopped before go on: the person said so.
+            None => link_engine(kept_at, engines, hub, at, &entry, &group, &id, true).await,
+        };
+        let why = match outcome {
+            Linked::Yes => {
+                done.done.push(shown);
                 continue;
             }
+            Linked::No(why) => why,
+            Linked::Declined(why) => {
+                declined = Some(why.clone());
+                why
+            }
         };
-        if !name_ok(engine.id()) {
-            done.fail(
-                &shown,
-                format!("{shown}'s id can't name an engine in a link."),
-            );
-            continue;
-        }
-        let says = grant_says(&group, &id, &boss_key, &choice);
-        let linked = entry.engines.get(&id).cloned();
-        let link = match linked {
-            Some(l) => l,
-            None => match mint_and_hand(engine, hub, at, agent, &group, None).await {
-                Ok(m) => EngineLink {
+        let _ = change_group(kept_at, group_id, |l| {
+            l.unlinked.insert(
+                id.clone(),
+                NotLinked {
                     name: shown.clone(),
-                    link_id: m.link_id.clone(),
-                    token_id: m.token_id.clone(),
-                    expires_at: m.expires_at,
-                    revision: 0,
-                    written: Value::Null,
-                    reached_at: None,
-                    problem: None,
+                    why: why.clone(),
                 },
-                Err(why) => {
-                    done.fail(&shown, why);
-                    continue;
-                }
-            },
-        };
-        // A new link lets a grant stopped before go on: the person said so.
-        match write_grant(engine, &group.id, &says, None, true).await {
-            Ok(revision) => {
-                entry.engines.insert(
-                    id.clone(),
-                    EngineLink {
-                        revision,
-                        written: says,
-                        reached_at: Some(Utc::now()),
-                        problem: None,
-                        ..link
-                    },
-                );
-                done.done.push(shown);
-            }
-            Err(why) => {
-                // Not granted: the link comes off the engine, and is revoked.
-                if !entry.engines.contains_key(&id) {
-                    let _ = engine
-                        .call(
-                            "DELETE",
-                            &format!(
-                                "/api/desk/boss-links/{}/{}",
-                                seg(&group.id),
-                                seg(&link.link_id)
-                            ),
-                            None,
-                        )
-                        .await;
-                    let _ = revoke(hub, &link.token_id).await;
-                }
-                done.fail(&shown, why);
-            }
+            );
+        })
+        .await;
+        done.fail(&shown, why);
+    }
+    // Nothing linked and nothing to revoke: nothing kept.
+    {
+        let _one = KEPT.lock().await;
+        let mut kept = read_kept(kept_at);
+        if kept
+            .groups
+            .get(group_id)
+            .is_some_and(|l| l.engines.is_empty() && l.orphans.is_empty())
+        {
+            kept.groups.remove(group_id);
+            write_kept(kept_at, &kept)?;
         }
     }
-    if entry.engines.is_empty() {
-        kept.groups.remove(group_id);
-    }
-    write_kept(kept_at, &kept)?;
     tracing::info!(group = %group_id, hub = %at.id, done = done.done.len(), failed = done.failed.len(), "linked a boss on another hub");
     Ok(done)
 }
 
-/// Changes how much group `group_id`'s boss may do and see: asked first
-/// when it gives more.
-pub async fn set<E, A, F>(
+/// Changes how much group `group_id`'s boss may do and see. Asked first
+/// when it gives more: a higher level, more seen, more money, or, at Act
+/// and above, sessions the person hasn't let the boss run yet. Nothing
+/// that narrows is asked, nor waits on a question.
+pub async fn set<E, H>(
     kept_at: &Path,
     engines: &Engines<E>,
+    hub: Option<(&H, &HubAt)>,
     group_id: &str,
     choice: Choice,
-    ask: A,
+    ask: impl Ask,
 ) -> Result<Done, String>
 where
     E: Engine,
-    A: FnOnce(String, String, String) -> F,
-    F: Future<Output = bool>,
+    H: BossHub,
 {
     let choice = choice.checked()?;
-    let group = layout_group(&engines.here, group_id).await?;
-    let link = {
-        let _one = KEPT.lock().await;
-        read_kept(kept_at).groups.get(group_id).cloned()
-    }
-    .ok_or_else(|| format!("{} has no boss on another hub.", group.name))?;
+    let layout = read_layout(&engines.here).await?;
+    let group = group_of(&layout, group_id)?;
+    let link = load_group(kept_at, group_id)
+        .await
+        .ok_or_else(|| format!("{} has no boss on another hub.", group.name))?;
     let boss = capital(&link.agent);
-    if choice.widens(&link.choice) {
-        let question = format!(
-            "Let {boss} on {} do more in {}?\n\n{}",
-            link.hub_label,
-            group.name,
-            what_it_means(&boss, &link.hub_label, &group.name, &choice)
-        );
-        if !ask(format!("Give {boss} more"), question, "Save".into()).await {
-            return Ok(Done {
-                cancelled: true,
-                ..Done::default()
-            });
-        }
-    }
-    let _one = KEPT.lock().await;
-    let mut kept = read_kept(kept_at);
-    let Some(entry) = kept.groups.get_mut(group_id) else {
-        return Err(format!("{} has no boss on another hub.", group.name));
-    };
-    entry.choice = choice.clone();
-    let boss_key = entry.boss_key();
-    let mut done = Done::default();
-    for (id, l) in entry.engines.iter_mut() {
-        let engine = match engines.get(id) {
-            Ok(e) => e,
-            Err(why) => {
-                l.problem = Some(why.clone());
-                done.fail(&l.name, why);
-                continue;
-            }
+    let mut after = link.clone();
+    after.choice = choice.clone();
+    let more_sessions = after.waiting(&group) > 0;
+    let asked = choice.widens(&link.choice) || more_sessions;
+    if asked {
+        let at = HubAt {
+            id: link.hub.clone(),
+            label: link.hub_label.clone(),
+            base: hub.map_or_else(String::new, |(_, at)| at.base.clone()),
         };
-        let says = grant_says(&group, id, &boss_key, &choice);
-        match write_grant(engine, &group.id, &says, None, false).await {
-            Ok(r) => {
-                l.revision = r;
-                l.written = says;
-                l.reached_at = Some(Utc::now());
-                l.problem = None;
-                done.done.push(l.name.clone());
-            }
-            Err(why) => {
-                l.problem = Some(why.clone());
-                done.fail(&l.name, why);
-            }
+        let question = format!(
+            "{}\n\nLet {boss} on {} boss {}?\n\n{}",
+            terms(&choice),
+            hub_words(&at),
+            sessions_phrase(&group, &engines.names()),
+            what_it_means(&boss, &quoted(&at.label), &quoted(&group.name), &choice)
+        );
+        if !ask(format!("Give {boss} more"), question, "Save".into()).await? {
+            return Ok(Done::cancelled());
         }
     }
-    write_kept(kept_at, &kept)?;
+    let ops = ops_of(kept_at, group_id);
+    let _op = ops.lock().await;
+    change_group(kept_at, group_id, |l| {
+        l.choice = choice.clone();
+        // What the person was just asked about, or, below Act, the group.
+        if asked || choice.level < Level::Act {
+            l.confirmed = group.members.clone();
+        }
+    })
+    .await?
+    .ok_or_else(|| format!("{} has no boss on another hub.", group.name))?;
+    let mut done = Done::default();
+    sync(kept_at, engines, hub, group_id, &layout, false, &mut done).await;
     Ok(done)
 }
 
-/// Pauses group `group_id`'s boss on every engine, at once.
+/// Sends `group`'s stop to every engine it is linked on, all at once.
+async fn stops<E: Engine>(
+    engines: &Engines<E>,
+    group: &str,
+    ids: &[String],
+) -> Vec<(String, Result<(), String>)> {
+    let sent = ids.iter().map(|id| async move {
+        let r = match engines.get(id) {
+            Ok(e) => stop_on(e, group).await,
+            Err(why) => Err(why),
+        };
+        (id.clone(), r)
+    });
+    futures_util::future::join_all(sent).await
+}
+
+/// Pauses group `group_id`'s boss on every engine, at once. Paused is only
+/// said once every engine has taken its stop; until then keeping alive
+/// sends it again, and renews nothing.
 pub async fn pause<E: Engine>(
     kept_at: &Path,
     engines: &Engines<E>,
     group_id: &str,
 ) -> Result<Done, String> {
-    let _one = KEPT.lock().await;
-    let mut kept = read_kept(kept_at);
-    let entry = kept
-        .groups
-        .get_mut(group_id)
+    let link = load_group(kept_at, group_id)
+        .await
         .ok_or("That group has no boss on another hub.")?;
-    entry.paused = true;
+    let ids: Vec<String> = link.engines.keys().cloned().collect();
+    // At once, before waiting on anything.
+    stops(engines, group_id, &ids).await;
+    let ops = ops_of(kept_at, group_id);
+    let _op = ops.lock().await;
+    // Again, past any change that was under way.
+    let sent = stops(engines, group_id, &ids).await;
     let mut done = Done::default();
-    for (id, l) in &entry.engines {
-        match engines.get(id) {
-            Ok(e) => match stop_on(e, group_id).await {
-                Ok(()) => done.done.push(l.name.clone()),
-                Err(why) => done.fail(&l.name, why),
-            },
-            Err(why) => done.fail(&l.name, why),
+    change_group(kept_at, group_id, |l| {
+        l.paused = true;
+        for (id, r) in &sent {
+            let Some(e) = l.engines.get_mut(id) else {
+                continue;
+            };
+            match r {
+                Ok(()) => {
+                    e.stopped = true;
+                    e.problem = None;
+                    done.done.push(e.name.clone());
+                }
+                Err(why) => {
+                    e.problem = Some(why.clone());
+                    done.fail(&e.name, why.clone());
+                }
+            }
         }
-    }
-    write_kept(kept_at, &kept)?;
+    })
+    .await?;
     Ok(done)
 }
 
-/// Lets group `group_id`'s paused boss go on, once `ask` says yes.
-pub async fn resume<E, A, F>(
+/// Lets group `group_id`'s paused boss go on, once the person says so.
+pub async fn resume<E, H>(
     kept_at: &Path,
     engines: &Engines<E>,
+    hub: Option<(&H, &HubAt)>,
     group_id: &str,
-    ask: A,
+    ask: impl Ask,
 ) -> Result<Done, String>
 where
     E: Engine,
-    A: FnOnce(String, String, String) -> F,
-    F: Future<Output = bool>,
+    H: BossHub,
 {
-    let group = layout_group(&engines.here, group_id).await?;
-    let link = {
-        let _one = KEPT.lock().await;
-        read_kept(kept_at).groups.get(group_id).cloned()
+    let layout = read_layout(&engines.here).await?;
+    let group = group_of(&layout, group_id)?;
+    let link = load_group(kept_at, group_id)
+        .await
+        .ok_or_else(|| format!("{} has no boss on another hub.", group.name))?;
+    if link.stopping {
+        return Err(format!(
+            "{} was stopped: make a boss of it again.",
+            capital(&link.agent)
+        ));
     }
-    .ok_or_else(|| format!("{} has no boss on another hub.", group.name))?;
     let boss = capital(&link.agent);
-    let question = format!(
-        "Let {boss} on {} go on bossing {}?\n\n{}",
-        link.hub_label,
-        sessions_phrase(&group, &engines.names()),
-        what_it_means(&boss, &link.hub_label, &group.name, &link.choice)
-    );
-    if !ask(format!("Let {boss} go on"), question, "Go On".into()).await {
-        return Ok(Done {
-            cancelled: true,
-            ..Done::default()
-        });
-    }
-    let _one = KEPT.lock().await;
-    let mut kept = read_kept(kept_at);
-    let Some(entry) = kept.groups.get_mut(group_id) else {
-        return Err(format!("{} has no boss on another hub.", group.name));
+    let at = HubAt {
+        id: link.hub.clone(),
+        label: link.hub_label.clone(),
+        base: hub.map_or_else(String::new, |(_, at)| at.base.clone()),
     };
-    let boss_key = entry.boss_key();
-    let choice = entry.choice.clone();
-    let mut done = Done::default();
-    let mut all = true;
-    for (id, l) in entry.engines.iter_mut() {
-        let engine = match engines.get(id) {
-            Ok(e) => e,
-            Err(why) => {
-                all = false;
-                done.fail(&l.name, why);
-                continue;
-            }
-        };
-        let says = grant_says(&group, id, &boss_key, &choice);
-        match write_grant(engine, &group.id, &says, None, true).await {
-            Ok(r) => {
-                l.revision = r;
-                l.written = says;
-                l.reached_at = Some(Utc::now());
-                done.done.push(l.name.clone());
-            }
-            Err(why) => {
-                all = false;
-                done.fail(&l.name, why);
-            }
-        }
+    let question = format!(
+        "{}\n\nLet {boss} on {} go on bossing {}?\n\n{}",
+        terms(&link.choice),
+        hub_words(&at),
+        sessions_phrase(&group, &engines.names()),
+        what_it_means(
+            &boss,
+            &quoted(&at.label),
+            &quoted(&group.name),
+            &link.choice
+        )
+    );
+    if !ask(format!("Let {boss} go on"), question, "Go On".into()).await? {
+        return Ok(Done::cancelled());
     }
-    entry.paused = !all;
-    write_kept(kept_at, &kept)?;
+    let ops = ops_of(kept_at, group_id);
+    let _op = ops.lock().await;
+    change_group(kept_at, group_id, |l| {
+        l.paused = false;
+        l.confirmed = group.members.clone();
+        for e in l.engines.values_mut() {
+            e.stopped = false;
+        }
+    })
+    .await?;
+    let mut done = Done::default();
+    sync(kept_at, engines, hub, group_id, &layout, true, &mut done).await;
+    if !done.failed.is_empty() {
+        // Not every engine let it go on: it stays paused, and says where.
+        let _ = change_group(kept_at, group_id, |l| l.paused = true).await;
+        pause_quietly(kept_at, engines, group_id).await;
+    }
     Ok(done)
 }
 
-/// Stop: ends group `group_id`'s boss on another hub. Each engine is
-/// paused first, so nothing more is served; then every token is revoked,
-/// each link taken off its engine and each grant deleted. Each step is done
-/// whatever one before it did; what couldn't be reached is said, and kept
-/// so Stop can be pressed again for it.
+/// Stops again the engines that went on, when another didn't.
+async fn pause_quietly<E: Engine>(kept_at: &Path, engines: &Engines<E>, group_id: &str) {
+    let Some(link) = load_group(kept_at, group_id).await else {
+        return;
+    };
+    let ids: Vec<String> = link.engines.keys().cloned().collect();
+    let sent = stops(engines, group_id, &ids).await;
+    let _ = change_group(kept_at, group_id, |l| {
+        for (id, r) in sent {
+            if let Some(e) = l.engines.get_mut(&id) {
+                e.stopped = r.is_ok();
+            }
+        }
+    })
+    .await;
+}
+
+/// Stop: ends group `group_id`'s boss on another hub. Every engine's stop
+/// is sent first, all at once, before waiting on anything; then every
+/// token is revoked, each link taken off its engine and each grant
+/// deleted. What couldn't be done is said, and tried again by keeping
+/// alive (and by Stop pressed again) until it is: nothing else is.
+/// `hub` is none when Desk is no longer paired with the boss's hub: its
+/// tokens went with the pairing.
 pub async fn unlink<E, H>(
     kept_at: &Path,
     engines: &Engines<E>,
-    hub: &H,
+    hub: Option<&H>,
     group_id: &str,
 ) -> Result<Done, String>
 where
     E: Engine,
     H: BossHub,
 {
-    let _one = KEPT.lock().await;
-    let mut kept = read_kept(kept_at);
-    let Some(entry) = kept.groups.get_mut(group_id) else {
+    let Some(link) = load_group(kept_at, group_id).await else {
         return Ok(Done::default());
     };
-    let mut done = Done::default();
-    let mut left = BTreeMap::new();
-    let ids: Vec<String> = entry.engines.keys().cloned().collect();
-    for id in ids {
-        let l = entry.engines.get(&id).cloned().expect("listed");
-        let engine = engines.get(&id);
+    let ids: Vec<String> = link.engines.keys().cloned().collect();
+    stops(engines, group_id, &ids).await;
+    let ops = ops_of(kept_at, group_id);
+    let _op = ops.lock().await;
+    stop_all(kept_at, engines, hub, group_id).await
+}
+
+/// Stop's steps, with the group's changes held: marked stopping, then
+/// each engine stopped, every token revoked, each link taken off and each
+/// grant deleted; what is done is forgotten.
+async fn stop_all<E, H>(
+    kept_at: &Path,
+    engines: &Engines<E>,
+    hub: Option<&H>,
+    group_id: &str,
+) -> Result<Done, String>
+where
+    E: Engine,
+    H: BossHub,
+{
+    let Some(link) = change_group(kept_at, group_id, |l| {
+        l.stopping = true;
+        l.paused = true;
+        l.clone()
+    })
+    .await?
+    else {
+        return Ok(Done::default());
+    };
+    let ids: Vec<String> = link.engines.keys().cloned().collect();
+    let stopped = stops(engines, group_id, &ids).await;
+    // Every token: each engine's, and those no engine holds.
+    let tokens: Vec<String> = link
+        .engines
+        .values()
+        .map(|l| l.token_id.clone())
+        .chain(link.orphans.iter().cloned())
+        .collect();
+    let revoked: Vec<(String, Result<(), String>)> = match hub {
+        Some(h) => {
+            futures_util::future::join_all(
+                tokens
+                    .iter()
+                    .map(|t| async move { (t.clone(), revoke(h, t).await) }),
+            )
+            .await
+        }
+        None => tokens.iter().map(|t| (t.clone(), Ok(()))).collect(),
+    };
+    let cleared = futures_util::future::join_all(link.engines.iter().map(|(id, l)| async move {
         let mut problems: Vec<String> = Vec::new();
-        if let Ok(e) = &engine
-            && let Err(why) = stop_on(*e, group_id).await
-        {
-            problems.push(why);
-        }
-        let revoked = revoke(hub, &l.token_id).await;
-        if let Err(why) = &revoked {
-            problems.push(format!("the boss's hub didn't revoke its link: {why}"));
-        }
-        match &engine {
+        match engines.get(id) {
             Ok(e) => {
-                let path = format!("/api/desk/boss-links/{}/{}", seg(group_id), seg(&l.link_id));
-                match e.call("DELETE", &path, None).await {
-                    Ok(a) if ok(a.status) || a.status == 404 => {}
-                    Ok(a) => problems.push(said(a.status, a.body.as_bytes())),
-                    Err(why) => problems.push(why),
+                if let Err(why) = take_link_off(e, group_id, &l.link_id).await {
+                    problems.push(why);
                 }
-                match e
-                    .call(
-                        "DELETE",
-                        &format!("/api/desk/grants/{}", seg(group_id)),
-                        None,
-                    )
-                    .await
-                {
-                    Ok(a) if ok(a.status) || a.status == 404 => {}
-                    Ok(a) => problems.push(said(a.status, a.body.as_bytes())),
-                    Err(why) => problems.push(why),
+                if let Err(why) = delete_grant(e, group_id).await {
+                    problems.push(why);
                 }
             }
-            Err(why) => problems.push(why.clone()),
+            Err(why) => problems.push(why),
         }
-        if problems.is_empty() {
-            done.done.push(l.name.clone());
-        } else {
-            let why = problems.join(" ");
-            done.fail(&l.name, why.clone());
-            left.insert(
-                id,
-                EngineLink {
-                    problem: Some(why),
-                    ..l
-                },
+        (id.clone(), problems)
+    }))
+    .await;
+    let mut done = Done::default();
+    let gone = change_group(kept_at, group_id, |l| {
+        for (id, r) in &stopped {
+            if let Some(e) = l.engines.get_mut(id) {
+                e.stopped |= r.is_ok();
+            }
+        }
+        for (t, r) in &revoked {
+            if r.is_ok() {
+                l.orphans.retain(|o| o != t);
+            } else if l.engines.values().any(|e| e.token_id == *t) && !l.orphans.contains(t) {
+                // Its engine may be cleared before it is: kept to revoke.
+                l.orphans.push(t.clone());
+            }
+        }
+        for (id, problems) in &cleared {
+            let name = l.engines.get(id).map_or(id.clone(), |e| e.name.clone());
+            if problems.is_empty() {
+                l.engines.remove(id);
+                done.done.push(name);
+            } else {
+                let why = problems.join(" ");
+                if let Some(e) = l.engines.get_mut(id) {
+                    e.problem = Some(why.clone());
+                }
+                done.fail(&name, why);
+            }
+        }
+        l.unlinked.clear();
+        let left = l.orphans.len();
+        if left > 0 && done.failed.is_empty() {
+            done.fail(
+                &l.hub_label,
+                format!(
+                    "{} didn't revoke {left} of its links yet: Desk tries again.",
+                    l.hub_label
+                ),
             );
         }
-    }
-    if left.is_empty() {
+        l.engines.is_empty() && l.orphans.is_empty()
+    })
+    .await?;
+    if gone == Some(true) {
+        let _one = KEPT.lock().await;
+        let mut kept = read_kept(kept_at);
         kept.groups.remove(group_id);
-    } else {
-        entry.engines = left;
-        entry.paused = true;
+        write_kept(kept_at, &kept)?;
     }
-    write_kept(kept_at, &kept)?;
     tracing::info!(group = %group_id, done = done.done.len(), failed = done.failed.len(), "stopped a boss on another hub");
     Ok(done)
+}
+
+/// Brings group `group_id`'s boss up to date on every engine, as the
+/// person last said: what keeping alive, Try again, and each change do.
+///
+/// - **Stopping:** Stop's steps alone, again.
+/// - **Paused:** each engine that hasn't taken its stop is sent it again;
+///   no grant is written and no token renewed.
+/// - **Otherwise:** tokens no engine holds are revoked; each linked
+///   engine's grant written (the same revision when it says nothing new,
+///   which only renews it), and its token renewed with under
+///   [`RENEW_UNDER`] left, or made anew once expired; and each engine that
+///   holds sessions the boss may run, and isn't linked, linked.
+///
+/// `resume` (a grant stopped before goes on) only after the person said so
+/// natively. `hub` is none when Desk can't reach the boss's hub: nothing
+/// is minted or revoked then.
+async fn sync<E, H>(
+    kept_at: &Path,
+    engines: &Engines<E>,
+    hub: Option<(&H, &HubAt)>,
+    group_id: &str,
+    layout: &Value,
+    resume: bool,
+    done: &mut Done,
+) where
+    E: Engine,
+    H: BossHub,
+{
+    let Some(entry) = load_group(kept_at, group_id).await else {
+        return;
+    };
+    if entry.stopping {
+        match stop_all(kept_at, engines, hub.map(|(h, _)| h), group_id).await {
+            Ok(d) => *done = d,
+            Err(why) => done.fail(&entry.hub_label, why),
+        }
+        return;
+    }
+    if let Some((h, _)) = hub {
+        for t in &entry.orphans {
+            revoke_orphan(kept_at, h, group_id, t).await;
+        }
+    }
+    if entry.paused {
+        let ids: Vec<String> = entry
+            .engines
+            .iter()
+            .filter(|(_, e)| !e.stopped)
+            .map(|(id, _)| id.clone())
+            .collect();
+        let sent = stops(engines, group_id, &ids).await;
+        let _ = change_group(kept_at, group_id, |l| {
+            for (id, r) in sent {
+                if let Some(e) = l.engines.get_mut(&id) {
+                    match r {
+                        Ok(()) => {
+                            e.stopped = true;
+                            e.problem = None;
+                        }
+                        Err(why) => e.problem = Some(why),
+                    }
+                }
+            }
+        })
+        .await;
+        return;
+    }
+    let Ok(group) = group_of(layout, group_id) else {
+        // The group is gone from the sidebar: its grants expire on their
+        // own; Stop in Desk ends them now.
+        return;
+    };
+    if entry.choice.level >= Level::Act {
+        // What left the group is no longer the person's say-so: back in,
+        // it waits on them again.
+        let _ = change_group(kept_at, group_id, |l| {
+            for (e, said) in l.confirmed.iter_mut() {
+                let now = group.members.get(e);
+                said.retain(|s| now.is_some_and(|n| n.contains(s)));
+            }
+        })
+        .await;
+    }
+    let boss_key = entry.boss_key();
+    let now = Utc::now();
+    for (id, l) in &entry.engines {
+        let engine = match engines.get(id) {
+            Ok(e) => e,
+            Err(why) => {
+                done.fail(&l.name, why.clone());
+                let _ = change_group(kept_at, group_id, |g| {
+                    if let Some(e) = g.engines.get_mut(id) {
+                        e.problem = Some(why);
+                    }
+                })
+                .await;
+                continue;
+            }
+        };
+        let says = grant_says(
+            &boss_key,
+            &entry.choice,
+            &group.name,
+            entry.allowed(&group, id),
+        );
+        let same = (says == l.written).then_some(l.revision);
+        let written = write_grant(engine, &group, &says, same, resume).await;
+        let failed = written.as_ref().err().cloned();
+        let _ = change_group(kept_at, group_id, |g| {
+            if let Some(e) = g.engines.get_mut(id) {
+                match written {
+                    Ok(r) => {
+                        e.revision = r;
+                        e.written = says;
+                        e.reached_at = Some(now);
+                        e.problem = None;
+                    }
+                    Err(why) => e.problem = Some(why),
+                }
+            }
+        })
+        .await;
+        if let Some(why) = failed {
+            done.fail(&l.name, why);
+            continue;
+        }
+        if let Some((h, at)) = hub
+            && l.expires_at - now < RENEW_UNDER
+            && let Err(why) = renew(kept_at, engine, h, at, &entry, &group, id, l, now).await
+        {
+            let _ = change_group(kept_at, group_id, |g| {
+                if let Some(e) = g.engines.get_mut(id) {
+                    e.problem = Some(why.clone());
+                }
+            })
+            .await;
+            done.fail(&l.name, why);
+            continue;
+        }
+        done.done.push(l.name.clone());
+    }
+    let Some((h, at)) = hub else {
+        return;
+    };
+    // Engines with sessions the boss may run, not linked yet: a machine new
+    // to the group, or one that failed before.
+    for id in engines_of(&group) {
+        if entry.engines.contains_key(&id) || entry.allowed(&group, &id).is_empty() {
+            continue;
+        }
+        let shown = engines.name_of(&id);
+        let why = match link_engine(kept_at, engines, h, at, &entry, &group, &id, resume).await {
+            Linked::Yes => {
+                done.done.push(shown);
+                continue;
+            }
+            Linked::No(why) | Linked::Declined(why) => why,
+        };
+        let _ = change_group(kept_at, group_id, |l| {
+            l.unlinked.insert(
+                id.clone(),
+                NotLinked {
+                    name: shown.clone(),
+                    why: why.clone(),
+                },
+            );
+        })
+        .await;
+        done.fail(&shown, why);
+    }
+}
+
+/// Renews engine `id`'s token: minted again (as a renewal while it lasts,
+/// anew once it's gone), handed over, the old link taken off the engine
+/// when the new one is another, and the old token revoked. The old token
+/// is kept, as an orphan, until it is; a new one not handed over is
+/// revoked, and the old one stays the engine's.
+#[allow(clippy::too_many_arguments)]
+async fn renew<E: Engine, H: BossHub>(
+    kept_at: &Path,
+    engine: &E,
+    hub: &H,
+    at: &HubAt,
+    entry: &GroupLink,
+    group: &Group,
+    id: &str,
+    l: &EngineLink,
+    now: DateTime<Utc>,
+) -> Result<(), String> {
+    let renews = (l.expires_at > now).then_some(l.token_id.as_str());
+    let minted = match mint(engine, hub, at, &entry.agent, group, renews).await {
+        Ok(m) => m,
+        Err(MintError::Gone) => mint(engine, hub, at, &entry.agent, group, None)
+            .await
+            .map_err(MintError::words)?,
+        Err(e) => return Err(e.words()),
+    };
+    keep_orphan(kept_at, &group.id, &minted.token_id).await?;
+    if let Err(why) = hand(engine, at, &minted, &entry.agent, &group.id).await {
+        revoke_orphan(kept_at, hub, &group.id, &minted.token_id).await;
+        return Err(why);
+    }
+    if minted.link_id != l.link_id {
+        let _ = take_link_off(engine, &group.id, &l.link_id).await;
+    }
+    let old = l.token_id.clone();
+    change_group(kept_at, &group.id, |g| {
+        g.orphans.retain(|t| *t != minted.token_id);
+        if old != minted.token_id && !g.orphans.contains(&old) {
+            g.orphans.push(old.clone());
+        }
+        if let Some(e) = g.engines.get_mut(id) {
+            e.token_id = minted.token_id.clone();
+            e.link_id = minted.link_id.clone();
+            e.expires_at = minted.expires_at;
+        }
+    })
+    .await?;
+    if old != minted.token_id {
+        revoke_orphan(kept_at, hub, &group.id, &old).await;
+    }
+    Ok(())
+}
+
+/// Try again: group `group_id`'s boss brought up to date on every engine,
+/// linking those it failed on. Nothing it gives the boss is new: what the
+/// person said stands.
+pub async fn retry<E, H>(
+    kept_at: &Path,
+    engines: &Engines<E>,
+    hub: Option<(&H, &HubAt)>,
+    group_id: &str,
+) -> Result<Done, String>
+where
+    E: Engine,
+    H: BossHub,
+{
+    let layout = read_layout(&engines.here).await?;
+    let ops = ops_of(kept_at, group_id);
+    let _op = ops.lock().await;
+    let mut done = Done::default();
+    sync(kept_at, engines, hub, group_id, &layout, false, &mut done).await;
+    Ok(done)
+}
+
+/// Lets every boss on engine `id` go on after its own pause (`desk-helper
+/// bosses stop` there), once the person says so.
+pub async fn unpause_engine<E: Engine>(
+    engines: &Engines<E>,
+    id: &str,
+    ask: impl Ask,
+) -> Result<Done, String> {
+    let engine = engines.get(id)?;
+    let name = quoted(engine.name());
+    let question = format!(
+        "Every boss on {name} was paused there. Let them go on?\n\nEach goes on only as far as its own grant says; a group you paused or stopped in Desk stays as it is."
+    );
+    if !ask(
+        format!("Let the bosses on {name} go on"),
+        question,
+        "Go On".into(),
+    )
+    .await?
+    {
+        return Ok(Done::cancelled());
+    }
+    let mut done = Done::default();
+    match engine.call("DELETE", "/api/desk/bosses/paused", None).await {
+        Ok(a) if ok(a.status) => done.done.push(engine.name().to_string()),
+        Ok(a) => done.fail(engine.name(), said(a.status, a.body.as_bytes())),
+        Err(why) => done.fail(engine.name(), why),
+    }
+    Ok(done)
+}
+
+/// Stops every group whose boss is on hub `hub`, once Desk forgot it: its
+/// tokens went with the pairing, so none is revoked.
+pub async fn hub_gone<E: Engine, H: BossHub>(kept_at: &Path, engines: &Engines<E>, hub: &str) {
+    let groups: Vec<String> = load(kept_at)
+        .await
+        .groups
+        .into_iter()
+        .filter(|(_, l)| l.hub == hub)
+        .map(|(g, _)| g)
+        .collect();
+    for g in groups {
+        if let Err(e) = unlink::<E, H>(kept_at, engines, None, &g).await {
+            tracing::warn!(error = %e, "a removed hub's boss wasn't stopped everywhere");
+        }
+    }
 }
 
 // ── Status ──────────────────────────────────────────────────────────────
@@ -1314,17 +2099,24 @@ where
 pub struct EngineStatus {
     pub engine: String,
     pub name: String,
+    /// Whether a link is held there; when not, `problem` says why.
+    pub linked: bool,
     /// Its session count in the group.
     pub sessions: usize,
     /// Whether its grant serves the boss now; none when it couldn't be read.
     pub live: Option<bool>,
     /// Why not, in the engine's words.
     pub why: Option<String>,
-    pub expires_at: DateTime<Utc>,
+    /// Every boss there is paused by its own `desk-helper bosses stop`.
+    pub engine_paused: bool,
+    /// It took its stop since the group was paused.
+    pub stopped: bool,
+    pub expires_at: Option<DateTime<Utc>>,
     pub reached_at: Option<DateTime<Utc>>,
     pub problem: Option<String>,
     /// Other groups on this engine the same boss runs below Act fully, or
-    /// without a budget, by name: Act fully needs all of them at it.
+    /// without a budget, by name and level: Act fully needs all of them at
+    /// it.
     pub below_full: Vec<String>,
 }
 
@@ -1338,34 +2130,20 @@ pub struct Status {
     /// As the engines name it among their parties (`<hub>/<agent>`).
     pub party: String,
     pub choice: Choice,
+    /// Paused, and every engine took its stop.
     pub paused: bool,
+    /// Paused, but not every engine has taken its stop yet.
+    pub pausing: bool,
+    /// Stopped, but not every engine is clear yet.
+    pub stopping: bool,
+    /// The group's sessions the boss doesn't run until the person says so.
+    pub waiting: usize,
     pub engines: Vec<EngineStatus>,
 }
 
-/// Every group's boss on another hub, by group id, without asking the
-/// engines: what the sidebar and the session menus show.
-pub async fn bosses(kept_at: &Path) -> BTreeMap<String, Status> {
-    let _one = KEPT.lock().await;
-    read_kept(kept_at)
-        .groups
-        .into_iter()
-        .map(|(g, l)| {
-            let status = status_of(&l, Vec::new());
-            (g, status)
-        })
-        .collect()
-}
-
-fn status_of(l: &GroupLink, engines: Vec<EngineStatus>) -> Status {
-    Status {
-        hub: l.hub.clone(),
-        hub_label: l.hub_label.clone(),
-        agent: l.agent.clone(),
-        party: format!("{}/{}", l.hub, l.agent),
-        choice: l.choice.clone(),
-        paused: l.paused,
-        engines,
-    }
+/// What a grant's level is called to the person.
+fn level_words(v: &Value) -> &'static str {
+    serde_json::from_value::<Level>(v.clone()).map_or("Watch only", Level::words)
 }
 
 /// Group `group_id`'s boss on another hub, each engine asked how it
@@ -1375,20 +2153,21 @@ pub async fn status<E: Engine>(
     engines: &Engines<E>,
     group_id: &str,
 ) -> Option<Status> {
-    let l = {
-        let _one = KEPT.lock().await;
-        read_kept(kept_at).groups.get(group_id).cloned()
-    }?;
+    let l = load_group(kept_at, group_id).await?;
+    let group = layout_group(&engines.here, group_id).await.ok();
     let boss_key = l.boss_key();
     let mut shown = Vec::new();
     for (id, e) in &l.engines {
         let mut s = EngineStatus {
             engine: id.clone(),
             name: e.name.clone(),
+            linked: true,
             sessions: e.written["members"].as_array().map_or(0, Vec::len),
             live: None,
             why: None,
-            expires_at: e.expires_at,
+            engine_paused: false,
+            stopped: e.stopped,
+            expires_at: Some(e.expires_at),
             reached_at: e.reached_at,
             problem: e.problem.clone(),
             below_full: Vec::new(),
@@ -1397,6 +2176,7 @@ pub async fn status<E: Engine>(
             Ok(engine) => match engine.call("GET", "/api/desk/grants", None).await {
                 Ok(a) if ok(a.status) => {
                     let v = json_of(&a.body).unwrap_or(Value::Null);
+                    s.engine_paused = v["paused"].is_object();
                     for g in v["grants"].as_array().into_iter().flatten() {
                         if g["group"] == group_id {
                             s.live = g["live"].as_bool();
@@ -1408,9 +2188,9 @@ pub async fn status<E: Engine>(
                                     .as_f64()
                                     .is_none_or(|b| b <= 0.0))
                         {
-                            let name = g["name"].as_str().unwrap_or("another group").to_string();
-                            let level = g["level"].as_str().unwrap_or("watch");
-                            s.below_full.push(format!("{name} ({level})"));
+                            let name = g["name"].as_str().unwrap_or("another group");
+                            s.below_full
+                                .push(format!("{name} ({})", level_words(&g["level"])));
                         }
                     }
                     if s.live.is_none() {
@@ -1425,16 +2205,48 @@ pub async fn status<E: Engine>(
         }
         shown.push(s);
     }
-    Some(status_of(&l, shown))
+    for (id, n) in &l.unlinked {
+        if l.engines.contains_key(id) {
+            continue;
+        }
+        shown.push(EngineStatus {
+            engine: id.clone(),
+            name: n.name.clone(),
+            linked: false,
+            sessions: group
+                .as_ref()
+                .and_then(|g| g.members.get(id))
+                .map_or(0, Vec::len),
+            live: Some(false),
+            why: None,
+            engine_paused: false,
+            stopped: false,
+            expires_at: None,
+            reached_at: None,
+            problem: Some(n.why.clone()),
+            below_full: Vec::new(),
+        });
+    }
+    let all_stopped = l.engines.values().all(|e| e.stopped);
+    Some(Status {
+        hub: l.hub.clone(),
+        hub_label: l.hub_label.clone(),
+        agent: l.agent.clone(),
+        party: format!("{}/{}", l.hub, l.agent),
+        choice: l.choice.clone(),
+        paused: l.paused && !l.stopping && all_stopped,
+        pausing: l.paused && !l.stopping && !all_stopped,
+        stopping: l.stopping,
+        waiting: group.as_ref().map_or(0, |g| l.waiting(g)),
+        engines: shown,
+    })
 }
 
 // ── Keeping it alive ────────────────────────────────────────────────────
 
-/// Renews every group's grants and links: each grant written again (the
-/// same revision when it says nothing new, which only renews it; a new
-/// one when the group's sessions or name changed), and each link's token
-/// renewed with under [`RENEW_UNDER`] left (mint, hand over, then revoke
-/// the old one). What can't be reached is noted, and tried next time.
+/// Keeps every group's boss up to date ([`sync`]), passing over a group
+/// being changed, and one whose hub Desk can't reach (it is renewed again
+/// once it can; a hub Desk forgot has its groups stopped).
 pub async fn keep<E, H>(
     kept_at: &Path,
     engines: &Engines<E>,
@@ -1444,64 +2256,33 @@ where
     E: Engine,
     H: BossHub,
 {
-    let _one = KEPT.lock().await;
-    let mut kept = read_kept(kept_at);
+    let kept = load(kept_at).await;
     if kept.groups.is_empty() {
         return Ok(());
     }
-    let layout = match engines.here.call("GET", "/api/desk/layout", None).await {
-        Ok(a) if ok(a.status) => json_of(&a.body).ok_or("Desk couldn't read its sidebar.")?,
-        Ok(a) => return Err(said(a.status, a.body.as_bytes())),
-        Err(e) => return Err(e),
-    };
-    let now = Utc::now();
-    for (group_id, entry) in kept.groups.iter_mut() {
-        let Ok(group) = group_of(&layout, group_id) else {
-            // The group is gone from the sidebar: its grants expire on their
-            // own; Stop in Desk ends them now.
+    let layout = read_layout(&engines.here).await?;
+    for (group_id, entry) in &kept.groups {
+        let ops = ops_of(kept_at, group_id);
+        let Ok(_op) = ops.try_lock() else {
             continue;
         };
-        let boss_key = entry.boss_key();
         let hub = hub_of(&entry.hub);
-        for (id, l) in entry.engines.iter_mut() {
-            let engine = match engines.get(id) {
-                Ok(e) => e,
-                Err(why) => {
-                    l.problem = Some(why);
-                    continue;
-                }
-            };
-            let says = grant_says(&group, id, &boss_key, &entry.choice);
-            let same = (says == l.written).then_some(l.revision);
-            match write_grant(engine, &group.id, &says, same, false).await {
-                Ok(r) => {
-                    l.revision = r;
-                    l.written = says;
-                    l.reached_at = Some(now);
-                    l.problem = None;
-                }
-                Err(why) => {
-                    l.problem = Some(why);
-                    continue;
-                }
-            }
-            if l.expires_at - now < RENEW_UNDER
-                && let Some((hub, at)) = &hub
-            {
-                match mint_and_hand(engine, hub, at, &entry.agent, &group, Some(&l.token_id)).await
-                {
-                    Ok(m) => {
-                        let old = std::mem::replace(&mut l.token_id, m.token_id.clone());
-                        l.link_id = m.link_id.clone();
-                        l.expires_at = m.expires_at;
-                        let _ = revoke(hub, &old).await;
-                    }
-                    Err(why) => l.problem = Some(why),
-                }
-            }
+        if hub.is_none() && !entry.paused && !entry.stopping {
+            continue;
         }
+        let mut done = Done::default();
+        sync(
+            kept_at,
+            engines,
+            hub.as_ref().map(|(h, at)| (h, at)),
+            group_id,
+            &layout,
+            false,
+            &mut done,
+        )
+        .await;
     }
-    write_kept(kept_at, &kept)
+    Ok(())
 }
 
 // ── The native side's wiring ────────────────────────────────────────────
@@ -1724,19 +2505,23 @@ impl Drop for Asking<'_> {
 
 static GATE: BossGate = BossGate::with_quiet(QUIET_AFTER_CANCEL);
 
-/// The native question, Cancel first: true only on its yes.
-fn native_ask(
-    app: tauri::AppHandle,
-) -> impl FnOnce(String, String, String) -> std::pin::Pin<Box<dyn Future<Output = bool> + Send>> {
+/// The native question's answer, once the person gives it.
+type Answered = std::pin::Pin<Box<dyn Future<Output = Result<bool, String>> + Send>>;
+
+/// The native question, Cancel first: true only on its yes. The gate is
+/// held around the question alone, never the requests after it, so a
+/// Cancel quietens questions, not Pause, Stop or a narrowing.
+fn native_ask(app: tauri::AppHandle) -> impl FnOnce(String, String, String) -> Answered {
     move |title, question, yes| {
         Box::pin(async move {
+            let _asking = GATE.start()?;
             let confirm = crate::pair_gate::NativeConfirm(app);
             let said =
                 tauri::async_runtime::spawn_blocking(move || confirm.ask(&title, question, &yes))
                     .await
                     .unwrap_or(false);
             GATE.answered(said);
-            said
+            Ok(said)
         })
     }
 }
@@ -1765,10 +2550,10 @@ pub async fn boss_status(
     Ok(status(&kept_at, &engines, &group).await)
 }
 
-/// Every group's boss on another hub, as last kept (no engine is asked).
-#[tauri::command]
-pub async fn boss_list() -> CommandResult<BTreeMap<String, Status>> {
-    Ok(bosses(&kept_path()?).await)
+/// The paired hub group `group`'s boss is on, when Desk can reach it.
+async fn boss_hub_of(io: &HubIo, kept_at: &Path, group: &str) -> Option<HubAt> {
+    let hub = load_group(kept_at, group).await?.hub;
+    hub_at(io, &hub).await.ok()
 }
 
 /// Makes `agent` on paired hub `hub` group `group`'s boss ([`link`]).
@@ -1789,12 +2574,20 @@ pub async fn boss_link(
     let ids = machine_ids(&local, &kept_at, Some(&group)).await;
     let engines = engines_now(&local, &machines, &ids);
     let paired = PairedHub { io: &io, hub };
-    let _asking = GATE.start()?;
+    // The boss it replaces, when it is on a hub Desk still reaches.
+    let old = match boss_hub_of(&io, &kept_at, &group).await {
+        Some(old) => Some(PairedHub {
+            io: &io,
+            hub: old.id,
+        }),
+        None => None,
+    };
     link(
         &kept_at,
         &engines,
         &paired,
         &at,
+        old.as_ref(),
         &group,
         &agent,
         choice,
@@ -1809,14 +2602,20 @@ pub async fn boss_set(
     app: tauri::AppHandle,
     local: tauri::State<'_, Broker>,
     machines: tauri::State<'_, MachineIo>,
+    io: tauri::State<'_, HubIo>,
     group: String,
     choice: Choice,
 ) -> CommandResult<Done> {
     let kept_at = kept_path()?;
     let ids = machine_ids(&local, &kept_at, Some(&group)).await;
     let engines = engines_now(&local, &machines, &ids);
-    let _asking = GATE.start()?;
-    set(&kept_at, &engines, &group, choice, native_ask(app)).await
+    let at = boss_hub_of(&io, &kept_at, &group).await;
+    let paired = at.as_ref().map(|at| PairedHub {
+        io: &io,
+        hub: at.id.clone(),
+    });
+    let hub = paired.as_ref().zip(at.as_ref());
+    set(&kept_at, &engines, hub, &group, choice, native_ask(app)).await
 }
 
 /// Pauses group `group`'s boss on every engine ([`pause`]).
@@ -1838,13 +2637,40 @@ pub async fn boss_resume(
     app: tauri::AppHandle,
     local: tauri::State<'_, Broker>,
     machines: tauri::State<'_, MachineIo>,
+    io: tauri::State<'_, HubIo>,
     group: String,
 ) -> CommandResult<Done> {
     let kept_at = kept_path()?;
     let ids = machine_ids(&local, &kept_at, Some(&group)).await;
     let engines = engines_now(&local, &machines, &ids);
-    let _asking = GATE.start()?;
-    resume(&kept_at, &engines, &group, native_ask(app)).await
+    let at = boss_hub_of(&io, &kept_at, &group).await;
+    let paired = at.as_ref().map(|at| PairedHub {
+        io: &io,
+        hub: at.id.clone(),
+    });
+    let hub = paired.as_ref().zip(at.as_ref());
+    resume(&kept_at, &engines, hub, &group, native_ask(app)).await
+}
+
+/// Try again: group `group`'s boss brought up to date and linked where it
+/// failed, as the person last said ([`retry`]).
+#[tauri::command]
+pub async fn boss_retry(
+    local: tauri::State<'_, Broker>,
+    machines: tauri::State<'_, MachineIo>,
+    io: tauri::State<'_, HubIo>,
+    group: String,
+) -> CommandResult<Done> {
+    let kept_at = kept_path()?;
+    let ids = machine_ids(&local, &kept_at, Some(&group)).await;
+    let engines = engines_now(&local, &machines, &ids);
+    let at = boss_hub_of(&io, &kept_at, &group).await;
+    let paired = at.as_ref().map(|at| PairedHub {
+        io: &io,
+        hub: at.id.clone(),
+    });
+    let hub = paired.as_ref().zip(at.as_ref());
+    retry(&kept_at, &engines, hub, &group).await
 }
 
 /// Stop: ends group `group`'s boss on another hub ([`unlink`]).
@@ -1856,24 +2682,71 @@ pub async fn boss_unlink(
     group: String,
 ) -> CommandResult<Done> {
     let kept_at = kept_path()?;
-    let hub = {
-        let _one = KEPT.lock().await;
-        read_kept(&kept_at)
-            .groups
-            .get(&group)
-            .map(|l| l.hub.clone())
-    };
-    let Some(hub) = hub else {
+    let Some(link) = load_group(&kept_at, &group).await else {
         return Ok(Done::default());
     };
     let ids = machine_ids(&local, &kept_at, Some(&group)).await;
     let engines = engines_now(&local, &machines, &ids);
-    let paired = PairedHub { io: &io, hub };
-    unlink(&kept_at, &engines, &paired, &group).await
+    // A hub Desk is no longer paired with took its tokens with it.
+    let paired = hub_at(&io, &link.hub).await.ok().map(|at| PairedHub {
+        io: &io,
+        hub: at.id,
+    });
+    unlink(&kept_at, &engines, paired.as_ref(), &group).await
+}
+
+/// Lets every boss on engine `engine` go on after its own pause, once the
+/// person says so ([`unpause_engine`]).
+#[tauri::command]
+pub async fn boss_unpause_engine(
+    app: tauri::AppHandle,
+    local: tauri::State<'_, Broker>,
+    machines: tauri::State<'_, MachineIo>,
+    group: String,
+    engine: String,
+) -> CommandResult<Done> {
+    let kept_at = kept_path()?;
+    let ids = machine_ids(&local, &kept_at, Some(&group)).await;
+    let engines = engines_now(&local, &machines, &ids);
+    unpause_engine(&engines, &engine, native_ask(app)).await
+}
+
+/// The sidebar changed: keeping alive runs soon, so a session that joins or
+/// leaves a group with a boss is granted or taken out without waiting.
+#[tauri::command]
+pub fn boss_layout_changed() {
+    WAKE.notify_one();
+}
+
+/// Wakes keeping alive before its time.
+static WAKE: tokio::sync::Notify = tokio::sync::Notify::const_new();
+
+/// The least time between two runs of keeping alive, however often the
+/// sidebar changes.
+const KEEP_AT_MOST_EVERY: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Desk forgot paired hub `hub`: every group whose boss is there is
+/// stopped ([`hub_gone`]).
+pub fn hub_removed(app: tauri::AppHandle, hub: String) {
+    use tauri::Manager;
+    tauri::async_runtime::spawn(async move {
+        let Ok(kept_at) = kept_path() else {
+            return;
+        };
+        if !kept_at.exists() {
+            return;
+        }
+        let local = app.state::<Broker>();
+        let machines = app.state::<MachineIo>();
+        let ids = machine_ids(&local, &kept_at, None).await;
+        let engines = engines_now(&local, &machines, &ids);
+        hub_gone::<_, PairedHub<'_>>(&kept_at, &engines, &hub).await;
+    });
 }
 
 /// Keeps every group's boss on another hub alive while Desk is open
-/// ([`keep`]): at start, then every [`KEEP_EVERY`].
+/// ([`keep`]): a minute after it starts, then every [`KEEP_EVERY`], and
+/// soon after the sidebar changes.
 pub fn keep_alive(app: tauri::AppHandle) {
     use tauri::Manager;
     tauri::async_runtime::spawn(async move {
@@ -1889,7 +2762,8 @@ pub fn keep_alive(app: tauri::AppHandle) {
                 let ids = machine_ids(&local, &kept_at, None).await;
                 let engines = engines_now(&local, &machines, &ids);
                 let hubs: BTreeMap<String, HubAt> = {
-                    let names: Vec<String> = read_kept(&kept_at)
+                    let names: Vec<String> = load(&kept_at)
+                        .await
                         .groups
                         .values()
                         .map(|l| l.hub.clone())
@@ -1918,7 +2792,11 @@ pub fn keep_alive(app: tauri::AppHandle) {
                     tracing::warn!(error = %e, "couldn't keep the bosses on other hubs alive; trying again later");
                 }
             }
-            tokio::time::sleep(KEEP_EVERY).await;
+            tokio::select! {
+                () = tokio::time::sleep(KEEP_EVERY) => {}
+                () = WAKE.notified() => {}
+            }
+            tokio::time::sleep(KEEP_AT_MOST_EVERY).await;
         }
     });
 }
