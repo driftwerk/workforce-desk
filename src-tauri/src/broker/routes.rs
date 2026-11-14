@@ -321,11 +321,14 @@ pub fn native_only(method: &str, target: &str) -> bool {
 
 /// What only the native side asks of this computer's hub, never the page
 /// (they are on no list the page's requests are checked against): an
-/// account's sign-in, to copy it to one of the person's machines; and this
-/// computer's engine key, to register when an agent is linked for Desk work.
+/// account's sign-in, to copy it to one of the person's machines; this
+/// computer's engine key, to register when an agent is linked for Desk
+/// work; and the grants its group bosses should have on the machines
+/// (`crate::local_bosses`), so the page can neither read nor shape one.
 const NATIVE_LOCAL: &[Route] = &[
     route("POST", "/api/desk/accounts/{}/hand-over"),
     route("GET", "/api/desk/engine-key"),
+    route("GET", "/api/desk/machine-grants"),
 ];
 
 /// `method target` as one of the native side's own requests to this
@@ -1047,6 +1050,33 @@ mod tests {
         assert!(native_local("POST", path).is_err());
         assert!(native_local("GET", "/api/desk/engine-key?token=t").is_err());
         assert!(native_local("GET", "/api/desk/engine-key/x").is_err());
+    }
+
+    /// What a local boss's machine grants say is read by the native side
+    /// alone, of this computer's hub: never by the page, of any hub, nor
+    /// with a token in its address, nor written.
+    #[test]
+    fn a_local_boss_s_machine_grants_are_read_by_the_native_side_alone() {
+        let path = "/api/desk/machine-grants";
+        assert!(native_local("GET", path).is_ok());
+        for (method, target) in [
+            ("GET", path.to_string()),
+            ("GET", format!("{path}?token=t")),
+            ("PUT", path.to_string()),
+            ("GET", format!("{path}/devbox")),
+        ] {
+            assert!(http(method, &target).is_err(), "page: {method} {target}");
+            assert!(
+                machine_http(method, &target).is_err(),
+                "page on a machine: {method} {target}"
+            );
+            assert!(!native_only(method, &target), "{method} {target}");
+            assert!(native_boss(method, &target).is_err(), "{method} {target}");
+            assert!(relay_machine(method, &target).is_err(), "{method} {target}");
+        }
+        assert!(native_local("GET", &format!("{path}?token=t")).is_err());
+        assert!(native_local("PUT", path).is_err());
+        assert!(native_local("GET", &format!("{path}/devbox")).is_err());
     }
 
     /// A group's boss on another hub is linked, granted and stopped by the
