@@ -691,7 +691,7 @@ const inBrowser = (id = "dv-1"): EngineSignIn => ({
   instead: "Paste a code instead",
 });
 const DEVIN_ASKED_UNKNOWN = "Devin's sign-in asked something Desk doesn't know yet. Paste a code instead, or sign in in a terminal with `devin auth login`.";
-const DEVIN_TIMED_OUT = "Devin's sign-in timed out. Start it again, and finish signing in within 15 minutes.";
+const DEVIN_TIMED_OUT = "Devin's sign-in timed out. Start it again, and finish signing in within 16 minutes.";
 const DEVIN_TYPED_ALREADY = "Desk already typed a code into that sign-in. Start the sign-in again.";
 /** The headline of the problem said in Devin's block. */
 const said = () => within(devinBlock()).getByRole("alert").querySelector(".problem-plain")!;
@@ -832,7 +832,7 @@ it("says a second code's refusal as Devin's hub says it", async () => {
   expect(within(devinBlock()).getByText(DEVIN_TYPED_ALREADY)).toBeTruthy();
 });
 
-it("says Devin's failures in its hub's own words, and offers a code to paste where they say so", async () => {
+it("says Devin's failures in its hub's own words, and offers a code to paste where the hub's field does", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const e = devinHub();
   here(e);
@@ -844,8 +844,14 @@ it("says Devin's failures in its hub's own words, and offers a code to paste whe
   expect(within(devinBlock()).getAllByRole("button", { name: /^(Retry|Try again)$/ })).toHaveLength(1);
   expect(within(devinBlock()).queryByRole("button", { name: "Paste a code instead" })).toBeNull();
   await act(async () => fireEvent.click(within(devinBlock()).getByRole("button", { name: "Cancel" })));
-  // A prompt Desk doesn't know: its command drawn as code, and the way on.
+  // Words that say "paste a code instead" offer nothing by themselves: only
+  // the hub's field does.
   e.signIn.now = { id: "dv-1", engine: "devin", state: "failed", why: DEVIN_ASKED_UNKNOWN };
+  await act(async () => fireEvent.click(within(devinBlock()).getByRole("button", { name: "Sign in…" })));
+  expect(within(devinBlock()).queryByRole("button", { name: "Paste a code instead" })).toBeNull();
+  await act(async () => fireEvent.click(within(devinBlock()).getByRole("button", { name: "Cancel" })));
+  // A prompt Desk doesn't know: its command drawn as code, and the way on.
+  e.signIn.now = { id: "dv-1", engine: "devin", state: "failed", why: DEVIN_ASKED_UNKNOWN, instead: "Paste a code instead" };
   await act(async () => fireEvent.click(within(devinBlock()).getByRole("button", { name: "Sign in…" })));
   expect(said().textContent).toBe(DEVIN_ASKED_UNKNOWN.replace(/`/g, ""));
   expect(said().querySelector("code")?.textContent).toBe("devin auth login");

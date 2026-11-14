@@ -285,7 +285,7 @@ impl Secret {
 
     /// 32 random bytes: base64 for the vault key (the format the vault
     /// expects), URL-safe base64 for the rest.
-    fn generate(self) -> String {
+    pub fn generate(self) -> String {
         let mut bytes = [0u8; 32];
         rand::rng().fill(&mut bytes);
         match self {
@@ -547,7 +547,10 @@ impl Secrets {
         let accounts: Vec<String> = Secret::ALL
             .iter()
             .map(|s| s.account().to_string())
-            .chain([device_token_account(LOCAL_HUB_ID)])
+            .chain([
+                device_token_account(LOCAL_HUB_ID),
+                POSTGRES_PASSWORD_NEXT_ACCOUNT.to_string(),
+            ])
             .collect();
         self.forget(vault::KeyOwner::Helper, &accounts)
     }
@@ -582,6 +585,11 @@ pub fn device_token_account(hub_id: &str) -> String {
 }
 
 pub const LOCAL_HUB_ID: &str = "local";
+
+/// The account holding the Postgres password a rotation is changing to,
+/// from before the database takes it until it is the password
+/// ([`Secret::PostgresPassword`]) itself.
+pub const POSTGRES_PASSWORD_NEXT_ACCOUNT: &str = "hub-postgres-password-next";
 
 /// A name the system gave, if it gave one that says anything.
 fn named<E>(name: std::result::Result<String, E>) -> Option<String> {

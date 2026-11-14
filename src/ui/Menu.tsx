@@ -5,8 +5,16 @@ export type MenuEntry =
   /** `checked`: a setting it turns on or off, shown ticked while on. */
   /** `disabled`: said and reachable, but choosing it does nothing. */
   /** `hint`: a quiet word after the label ("Morning · the empty pane"). */
-  | { kind: "item"; label: string; hint?: string; kbd?: string; checked?: boolean; disabled?: boolean; onSelect?: () => void; submenu?: MenuEntry[] }
+  | { kind: "item"; label: string; hint?: string; kbd?: string; checked?: boolean; disabled?: boolean; onSelect?: () => void; submenu?: Submenu }
   | { kind: "separator" };
+
+/** A submenu's entries, or how to make them as it opens: for one that
+ *  follows what changes often (a list of sessions), so what offers it isn't
+ *  drawn again for each change. */
+export type Submenu = MenuEntry[] | (() => MenuEntry[]);
+
+/** A submenu's entries, made now when it makes them as it opens. */
+export const entriesOf = (submenu: Submenu): MenuEntry[] => (typeof submenu === "function" ? submenu() : submenu);
 
 const MARGIN = 8;
 
@@ -199,7 +207,7 @@ function MenuList({
               key={sub.index}
               label={entry.label}
               rect={sub.rect}
-              entries={entry.submenu}
+              entries={entriesOf(entry.submenu)}
               focus={sub.focus}
               onBack={() => {
                 setSub(null);

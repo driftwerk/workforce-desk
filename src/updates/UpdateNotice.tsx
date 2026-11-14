@@ -5,8 +5,9 @@ import { useSessionNames } from "../groups/names";
 import { useDesk, localSessions } from "../hub/store";
 import { inApp, openUrl } from "../platform";
 import { useMachines } from "../hub/engines";
-import { LOCAL } from "../hub/machines";
+import { LOCAL, type Machine } from "../hub/machines";
 import { accountsOn } from "../engines/accounts";
+import { ABANDONED_AFTER_MS } from "../engines/signIn";
 import { CHECK_EVERY_MS, cantResume, isLive, isPostponed, isWorking, useUpdates } from "./store";
 import { lastInputAt } from "./away";
 import { isRunning, useChat } from "../chat/store";
@@ -40,6 +41,9 @@ export { setLastInput } from "./away";
 export const restartsQuietly = (o: { live: Session[]; kept: boolean; voiceOff: boolean; turns: boolean }): boolean =>
   o.voiceOff && !o.turns && !o.live.some(isWorking) && (o.kept || o.live.length === 0);
 
+/** A machine Desk is setting up, updating or uninstalling now. */
+export const machineIsBusy = (m: Machine): boolean => m.state.kind === "adding" || m.state.kind === "updating" || m.removing === true;
+
 /** Installs a ready update by itself once restarting would take nothing
  *  from the person (`restartsQuietly`) and they've stepped away from every
  *  Desk window for a couple of minutes, unless they put it off. Called
@@ -56,9 +60,10 @@ export function useRestartWhenIdle() {
   const voiceOff = useVoiceStore((v) => v.status.state === "off" && Object.keys(v.waiting).length === 0);
   const fail = useDesk((s) => s.fail);
   const live = Object.values(sessions).filter(isLive);
-  // A machine being set up or updated, or an account signing in anywhere,
-  // goes through this Desk: it isn't cut off by the restart either.
-  const machineBusy = useMachines((m) => m.machines.some((x) => x.state.kind === "adding" || x.state.kind === "updating"));
+  // A machine being set up, updated or uninstalled, or an account signing
+  // in anywhere, goes through this Desk: it isn't cut off by the restart
+  // either.
+  const machineBusy = useMachines((m) => m.machines.some(machineIsBusy));
   const signingIn = useSigningIn(waiting);
   const quiet = restartsQuietly({ live, kept, voiceOff, turns: roomTurns || dmTurns }) && !machineBusy && !signingIn;
   const [tick, setTick] = useState(0);
@@ -79,15 +84,32 @@ export function useRestartWhenIdle() {
   }, [waiting, phase, quiet, tick, restart, fail]);
 }
 
+/** Whether any of the sign-ins `open` (by id) is still worth waiting for
+ *  at `now`: each is first seen at its first look (`seen`, kept between
+ *  looks and trimmed to those still open), and one that has run for longer
+ *  than a sign-in can is abandoned: it doesn't keep Desk from restarting. */
+export const signingInNow = (seen: Map<string, number>, open: string[], now: number): boolean => {
+  for (const id of [...seen.keys()]) if (!open.includes(id)) seen.delete(id);
+  for (const id of open) if (!seen.has(id)) seen.set(id, now);
+  return open.some((id) => now - seen.get(id)! < ABANDONED_AFTER_MS);
+};
+
 /** Whether an account signs in on this computer or any machine now, asked
- *  every 2 s while `watching`. */
+ *  every 2 s while `watching`. A sign-in left open past what one can take
+ *  is no longer counted. */
 function useSigningIn(watching: boolean): boolean {
   const [now, setNow] = useState(false);
+  const seen = useRef(new Map<string, number>());
   useEffect(() => {
     if (!watching) return;
     const look = () => {
       const ids = [LOCAL, ...useMachines.getState().machines.map((m) => m.id)];
-      setNow(ids.some((id) => Object.values(accountsOn(id).getState().signIns).some((s) => s.state !== "done" && s.state !== "failed")));
+      const open = ids.flatMap((id) =>
+        Object.values(accountsOn(id).getState().signIns)
+          .filter((s) => s.state !== "done" && s.state !== "failed")
+          .map((s) => `${id}/${s.id}`),
+      );
+      setNow(signingInNow(seen.current, open, Date.now()));
     };
     look();
     const every = setInterval(look, 2000);

@@ -132,13 +132,9 @@ const HTTP: &[Route] = &[
     route("GET", "/api/desk/features"),
     // Every engine read again at once, after Desk installed or signed one in.
     route("POST", "/api/desk/engines/read"),
-    // An engine's own sign-in, run by its hub: Codex's device page, Devin's
-    // page (this computer has no other way to sign Devin in). A pasted token
-    // is typed into the sign-in, and never read back.
-    route("POST", "/api/desk/engines/sign-ins"),
-    route("GET", "/api/desk/engines/sign-ins/{}"),
-    route("DELETE", "/api/desk/engines/sign-ins/{}"),
-    route("POST", "/api/desk/engines/sign-ins/{}/token"),
+    // An engine's own sign-in is on none of these lists: only the person
+    // whose Desk it is may run one, and the hub refuses its own token for
+    // it, so the page asks it by their paired Desk (`hub_io`) alone.
     // The person's engine accounts. A pasted sign-in is sent to the hub, and
     // never read back.
     route("GET", "/api/desk/accounts"),
@@ -1155,9 +1151,6 @@ mod tests {
             "not this computer's"
         );
         assert!(machine_http("GET", "/api/desk/terminals/t1/programs").is_ok());
-        assert!(machine_http("POST", "/api/desk/engines/sign-ins").is_ok());
-        assert!(machine_http("GET", "/api/desk/engines/sign-ins/e1").is_ok());
-        assert!(machine_http("DELETE", "/api/desk/engines/sign-ins/e1").is_ok());
         assert!(native_only("GET", "/api/desk/accounts/sign-ins/s1/direct"));
         assert!(
             native_only("GET", "/api/desk/accounts/sign-ins/s1/%64irect")
@@ -1169,17 +1162,20 @@ mod tests {
             http("GET", "/api/desk/folders").is_err(),
             "not this computer's"
         );
-        // An engine's own sign-in, on this computer as on a machine.
+        // An engine's own sign-in goes by the person's paired Desk alone,
+        // never with the hub's token, on this computer as on a machine.
         for (m, p) in [
             ("POST", "/api/desk/engines/sign-ins"),
             ("GET", "/api/desk/engines/sign-ins/e1"),
             ("DELETE", "/api/desk/engines/sign-ins/e1"),
             ("POST", "/api/desk/engines/sign-ins/e1/token"),
+            ("GET", "/api/desk/engines/sign-ins/e1/token"),
         ] {
-            assert!(http(m, p).is_ok() && machine_http(m, p).is_ok(), "{m} {p}");
+            assert!(
+                http(m, p).is_err() && machine_http(m, p).is_err(),
+                "{m} {p}"
+            );
         }
-        assert!(http("GET", "/api/desk/engines/sign-ins/e1/token").is_err());
-        assert!(http("POST", "/api/desk/engines/sign-ins/e1/token/x").is_err());
         for (m, p) in [
             ("GET", "/api/desk/folders?path=x&token=y"),
             ("POST", "/api/desk/folders?path=x"),

@@ -3,7 +3,7 @@ import { explain } from "../ui/problem";
 import { ProblemNote } from "../ui/ProblemNote";
 import { hasAccounts } from "../engines/accounts";
 import { defaultCaps, installedText, runsText, signInText } from "../engines/engines";
-import { CODEX_LOGIN, DEVIN_START_WITHIN_MS, offersPaste, useCodexSignIn, useDevinSignIn } from "../engines/signIn";
+import { CODEX_LOGIN, DEVIN_START_WITHIN_MS, useCodexSignIn, useDevinSignIn } from "../engines/signIn";
 import { LOCAL, type MachineId } from "../hub/machines";
 import { hubOf, useHubOf } from "../hub/store";
 import type { EngineInfo } from "../hub/types";
@@ -398,9 +398,9 @@ export function DevinSigningIn({ devin }: { devin: ReturnType<typeof useDevinSig
             <button type="button" className="btn btn-ghost" onClick={r.at === "failed" ? devin.reset : devin.cancel}>
               Cancel
             </button>
-            {r.at === "failed" && offersPaste(r.why) && (
+            {r.at === "failed" && r.instead && (
               <button type="button" className="btn btn-ghost" onClick={devin.withToken}>
-                Paste a code instead
+                {r.instead}
               </button>
             )}
             {r.at === "failed" && (

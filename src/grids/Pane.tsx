@@ -5,10 +5,10 @@ import { createPortal } from "react-dom";
 import { useChat } from "../chat/store";
 import { agentKey } from "../chat/types";
 import { lookOf, shownState, statusOf, type Look } from "../floor/background";
-import { useSessionName, useSessionNames } from "../groups/names";
+import { sessionName, useSessionName } from "../groups/names";
 import { hubFor, hubOf, localSessions, sortedSessions, useDesk } from "../hub/store";
 import { keyOf, machineOf, sessionKey, splitKey } from "../hub/machines";
-import type { Session, SessionState } from "../hub/types";
+import type { Session } from "../hub/types";
 import { DirectMessage } from "../rooms/Rooms";
 import { MicBadge } from "../voice/DmVoice";
 import { MemoryPanel } from "../memory/MemoryPanel";
@@ -645,18 +645,6 @@ function TerminalBody({ gridId, pane, content }: { gridId: string; pane: string;
  *  pane shows them in the session's own menu (`host`, then `close`, after
  *  the session's), any other pane as `entries`. */
 function usePaneMenu(gridId: string, pane: PaneData, onClose: () => void): { entries: MenuEntry[]; host: MenuEntry[]; close: MenuEntry[] } {
-  // What to put here: this computer's sessions (a machine's are put in a
-  // pane where they're shown with their machine), the first twelve, as one
-  // line each, so another session's event redraws the pane only when it
-  // changes what the menu lists.
-  const listed = useDesk((s) =>
-    JSON.stringify(
-      sortedSessions(localSessions(s.sessions))
-        .filter((x) => x.state !== "closed")
-        .slice(0, 12)
-        .map((x) => [x.id, x.name, shownState(x)]),
-    ),
-  );
   const roster = useChat((s) => s.roster);
   const rooms = arranged(
     useDesk((s) => s.rooms),
@@ -674,30 +662,36 @@ function usePaneMenu(gridId: string, pane: PaneData, onClose: () => void): { ent
   const grids = order.flatMap((id) => all[id] ?? []);
   const role = useGrids((s) => s.role);
   const keys = useSettings((s) => s.keys.newTerminal);
-  // Sessions by the names given them, as the sidebar shows them.
-  const names = useSessionNames();
-  const shown = JSON.parse(listed) as [string, string, SessionState][];
   const put = (content: PaneContent) => replacePane(gridId, pane.id, content);
   // A pane showing a terminal takes the keys it takes there.
   const inShell = pane.content?.kind === "terminal" || pane.content?.kind === "session";
-  const replace: MenuEntry[] = [
-    { kind: "item", label: "New terminal", kbd: shortcutLabel(inShell ? terminalKeys(keys) : keys), onSelect: () => (pane.content ? put({ kind: "terminal", terminalId: null }) : newTerminal(gridId)) },
-    ...(shown.length ? [{ kind: "separator" as const }] : []),
-    ...shown.map(([id, name, state]): MenuEntry => ({ kind: "item", label: names[id] ?? name, kbd: STATE_LABEL[state], onSelect: () => put({ kind: "session", sessionId: id }) })),
-    ...(roster.length ? [{ kind: "separator" as const }] : []),
-    ...roster.slice(0, 12).map((a): MenuEntry => ({ kind: "item", label: a.name, onSelect: () => put({ kind: "agent", agent: agentKey(a) }) })),
-    { kind: "separator" },
-    ...(rooms.length ? [{ kind: "item" as const, label: "Room", submenu: rooms.map((r): MenuEntry => ({ kind: "item", label: r.name, onSelect: () => put(roomContent(r.id)) })) }] : []),
-    ...(boards.length ? [{ kind: "item" as const, label: "Board", submenu: boards.map((b): MenuEntry => ({ kind: "item", label: b.name, onSelect: () => put(boardContent(b.id)) })) }] : []),
-    {
-      kind: "item",
-      label: "Floor",
-      submenu: [
-        { kind: "item", label: "Everything", onSelect: () => put(floorContent()) },
-        ...groups.map((g): MenuEntry => ({ kind: "item", label: g.name, onSelect: () => put(floorContent(g.id)) })),
-      ],
-    },
-  ];
+  // What to put here, read as the menu opens (each session's event would
+  // otherwise draw every pane's header again): this computer's sessions (a
+  // machine's are put in a pane where they're shown with their machine), the
+  // first twelve, by the names given them as the sidebar shows them.
+  const replace = (): MenuEntry[] => {
+    const shown = sortedSessions(localSessions(useDesk.getState().sessions))
+      .filter((x) => x.state !== "closed")
+      .slice(0, 12);
+    return [
+      { kind: "item", label: "New terminal", kbd: shortcutLabel(inShell ? terminalKeys(keys) : keys), onSelect: () => (pane.content ? put({ kind: "terminal", terminalId: null }) : newTerminal(gridId)) },
+      ...(shown.length ? [{ kind: "separator" as const }] : []),
+      ...shown.map((x): MenuEntry => ({ kind: "item", label: sessionName(x.id, x.name, x), kbd: STATE_LABEL[shownState(x)], onSelect: () => put({ kind: "session", sessionId: x.id }) })),
+      ...(roster.length ? [{ kind: "separator" as const }] : []),
+      ...roster.slice(0, 12).map((a): MenuEntry => ({ kind: "item", label: a.name, onSelect: () => put({ kind: "agent", agent: agentKey(a) }) })),
+      { kind: "separator" },
+      ...(rooms.length ? [{ kind: "item" as const, label: "Room", submenu: rooms.map((r): MenuEntry => ({ kind: "item", label: r.name, onSelect: () => put(roomContent(r.id)) })) }] : []),
+      ...(boards.length ? [{ kind: "item" as const, label: "Board", submenu: boards.map((b): MenuEntry => ({ kind: "item", label: b.name, onSelect: () => put(boardContent(b.id)) })) }] : []),
+      {
+        kind: "item",
+        label: "Floor",
+        submenu: [
+          { kind: "item", label: "Everything", onSelect: () => put(floorContent()) },
+          ...groups.map((g): MenuEntry => ({ kind: "item", label: g.name, onSelect: () => put(floorContent(g.id)) })),
+        ],
+      },
+    ];
+  };
   const others = grids.filter((g) => g.id !== gridId);
   const move: MenuEntry[] = [
     ...others.map((g): MenuEntry => ({ kind: "item", label: g.name, onSelect: () => movePane(gridId, pane.id, g.id) })),

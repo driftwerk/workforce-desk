@@ -28,6 +28,7 @@ const { GridCanvas } = await import("./GridView");
 const { MAIN_GRID } = await import("./model");
 const { createGrid, deliver, layOut, startGrids, useGrids } = await import("./store");
 const { putInGrid, whereInGrid, InGridRow, openFromRow } = await import("./putIn");
+const { entriesOf } = await import("../ui/Menu");
 const { roomItem, boardItem, floorItem } = await import("./where");
 const { ACME } = await import("../board/testing");
 const { hub } = await import("../floor/testing");
@@ -152,7 +153,7 @@ describe("Put in a grid ›, from a room's, a board's or a group's row", () => {
     deliver(third, room1);
     const entry = item(putInGrid(room1));
     expect(entry.label).toBe("Put in a grid");
-    expect(entry.submenu!.map((e) => (e.kind === "item" ? `${e.label}${e.hint ? ` · ${e.hint}` : ""}` : "—"))).toEqual([
+    expect(entriesOf(entry.submenu!).map((e) => (e.kind === "item" ? `${e.label}${e.hint ? ` · ${e.hint}` : ""}` : "—"))).toEqual([
       "Main · the empty pane",
       "Grid 2 · adds a pane",
       "Grid 3 · already in it",
@@ -163,11 +164,11 @@ describe("Put in a grid ›, from a room's, a board's or a group's row", () => {
   });
 
   it("puts it there and shows it; a new grid is made for it", () => {
-    act(() => item(item(putInGrid(room1)).submenu![0]!).onSelect!());
+    act(() => item(entriesOf(item(putInGrid(room1)).submenu!)[0]!).onSelect!());
     expect(grid().panes.map((p) => p.content)).toEqual([room1]);
     expect(useDesk.getState().view).toBe("grids");
     const before = useGrids.getState().order.length;
-    act(() => item(item(putInGrid({ kind: "board", board: ACME.id })).submenu!.at(-1)!).onSelect!());
+    act(() => item(entriesOf(item(putInGrid({ kind: "board", board: ACME.id })).submenu!).at(-1)!).onSelect!());
     const order = useGrids.getState().order;
     expect(order.length).toBe(before + 1);
     expect(useGrids.getState().grids[order.at(-1)!]!.panes.map((p) => p.content)).toEqual([{ kind: "board", board: ACME.id }]);
