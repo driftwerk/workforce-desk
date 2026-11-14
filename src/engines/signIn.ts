@@ -544,13 +544,11 @@ export const devinNotSigned = "Nobody signed in on Devin’s page within 10 minu
  *  token that wasn't one (400) is pasted again as the page shows it; a
  *  sign-in no longer waiting for one (409) needs the page again. */
 export const tokenRefused = (why: string, status?: number): string => {
+  if (status === 400) return "That token didn’t go through. Paste the token exactly as the page shows it.";
   const said = `That token didn’t go through: ${why.replace(/\.$/, "")}.`;
-  if (status === 400) return `${said} Paste the token exactly as the page shows it.`;
   if (status === 409) return `${said} Open the page again for a new one.`;
   return said;
 };
-/** What Devin asking for a token again, after one was sent, says. */
-export const tokenNotTaken = "Devin didn’t take that token; paste it again.";
 
 /** Signing in to Devin on `machine`'s engine, by Devin's own sign-in run by
  *  its hub: its page opened here once it's checked to be Devin's own, and
@@ -563,9 +561,6 @@ export function useDevinSignIn(machine: MachineId, where: Where, native: Machine
   runNow.current = run;
   /** The page opened for each sign-in, once per page it gives. */
   const opened = useRef<string | null>(null);
-  /** The token last sent and taken by the hub: for which sign-in, its page
-   *  then, and whether the sign-in has moved off asking for it since. */
-  const sent = useRef<{ id: string; url: string; left: boolean } | null>(null);
   const live = useLive();
   const done = useRef(onDone);
   done.current = onDone;
@@ -597,8 +592,6 @@ export function useDevinSignIn(machine: MachineId, where: Where, native: Machine
       if (!live.current) return;
       const now = runNow.current;
       if (!((now.at === "opening" && (now.id === null || now.id === s.id)) || (now.at === "page" && now.id === s.id))) return;
-      const token = sent.current?.id === s.id ? sent.current : null;
-      if (token && s.state !== "paste") token.left = true;
       switch (s.state) {
         case "starting":
           return setRun((now) => (now.at === "opening" ? { at: "opening", id: s.id } : now));
@@ -610,14 +603,7 @@ export function useDevinSignIn(machine: MachineId, where: Where, native: Machine
             openPage(s.url, s.id);
           }
           const paste = s.state === "paste";
-          // Asked again for a token after one went: Devin didn't take it.
-          const retake = paste && token !== null && (token.left || token.url !== s.url);
-          if (retake) sent.current = null;
-          return setRun((now) =>
-            !retake && now.at === "page" && now.id === s.id && now.paste === paste && now.url === s.url
-              ? now
-              : { at: "page", id: s.id, url: s.url, paste, why: retake ? tokenNotTaken : now.at === "page" ? now.why : null },
-          );
+          return setRun((now) => (now.at === "page" && now.id === s.id && now.paste === paste && now.url === s.url ? now : { at: "page", id: s.id, url: s.url, paste, why: now.at === "page" ? now.why : null }));
         }
         case "done":
           put({ at: "done" });
@@ -675,7 +661,6 @@ export function useDevinSignIn(machine: MachineId, where: Where, native: Machine
     const withToken = asked || machine !== LOCAL;
     const mine = ++gen.current;
     manual.current = withToken;
-    sent.current = null;
     const was = runNow.current;
     if (was.at === "opening" || was.at === "page") if (was.id) void hub.cancelEngineSignIn(was.id).catch(() => undefined);
     opened.current = null;
@@ -698,10 +683,8 @@ export function useDevinSignIn(machine: MachineId, where: Where, native: Machine
   const sendToken = async (token: string) => {
     const now = runNow.current;
     if (!hub || now.at !== "page") return;
-    sent.current = null;
     try {
       await hub.sendEngineSignInToken(now.id, token.trim());
-      sent.current = { id: now.id, url: now.url, left: false };
       if (live.current) setRun((r) => (r.at === "page" && r.id === now.id ? { ...r, why: null } : r));
       // The sign-in says when it's done; read it now rather than in a second.
       void hub

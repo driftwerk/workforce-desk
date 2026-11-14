@@ -606,42 +606,18 @@ it("signs Devin in on a machine with a token pasted back: sent at once, the fiel
   expect(document.body.innerHTML).not.toMatch(/tok-one|tok-two/);
 });
 
-it("says a malformed Devin token is to be pasted as the page shows it, and a token Devin asks for again after taking it", async () => {
+it("says a malformed Devin token is to be pasted as the page shows it, and nothing more", async () => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   const e = devinHub();
   e.signIn.now = { id: "dv-1", engine: "devin", state: "paste", url: DEVIN_PAGE };
-  const { n } = await onDevbox(e as unknown as ReturnType<typeof fakeHub>);
+  await onDevbox(e as unknown as ReturnType<typeof fakeHub>);
   await act(async () => fireEvent.click(within(devinBlock()).getByRole("button", { name: "Sign in…" })));
   const field = within(devinBlock()).getByLabelText("Token from Devin’s sign-in page") as HTMLInputElement;
-  const send = async (token: string) => {
-    fireEvent.change(field, { target: { value: token } });
-    await act(async () => fireEvent.click(within(devinBlock()).getByRole("button", { name: "Send" })));
-  };
-  // Malformed (400): pasted again as the page shows it, not a new page.
-  e.sendEngineSignInToken.mockRejectedValueOnce(new HubError(400, "that isn't a sign-in token"));
-  await send("tok-bad");
-  expect(within(devinBlock()).getByText("That token didn’t go through: that isn't a sign-in token. Paste the token exactly as the page shows it.")).toBeTruthy();
-  expect(within(devinBlock()).queryByText(/Open the page again/)).toBeNull();
-  // Taken by the hub, and Devin still asking on the same page while it checks: nothing said.
-  await send("tok-one");
-  await tick();
-  expect(within(devinBlock()).queryByText(/didn’t/)).toBeNull();
-  expect(screen.getByText("Sign in on the page that opened, then paste the token it shows here.")).toBeTruthy();
-  // Devin asks again, with a fresh page: said, and that page opened too.
-  const fresh = `${DEVIN_PAGE}2`;
-  e.signIn.now = { id: "dv-1", engine: "devin", state: "paste", url: fresh };
-  await tick();
-  expect(within(devinBlock()).getByText("Devin didn’t take that token; paste it again.")).toBeTruthy();
-  expect(n.fake.openSignInPage).toHaveBeenLastCalledWith("devin", fresh);
-  expect(n.fake.openSignInPage).toHaveBeenCalledTimes(2);
-  // Asked again after leaving the paste (same page): said too.
-  await send("tok-two");
-  expect(within(devinBlock()).queryByText(/didn’t/)).toBeNull();
-  e.signIn.now = { id: "dv-1", engine: "devin", state: "starting" };
-  await tick();
-  e.signIn.now = { id: "dv-1", engine: "devin", state: "paste", url: fresh };
-  await tick();
-  expect(within(devinBlock()).getByText("Devin didn’t take that token; paste it again.")).toBeTruthy();
+  e.sendEngineSignInToken.mockRejectedValueOnce(new HubError(400, "paste the token the sign-in page gives you"));
+  fireEvent.change(field, { target: { value: "tok-bad" } });
+  await act(async () => fireEvent.click(within(devinBlock()).getByRole("button", { name: "Send" })));
+  expect(within(devinBlock()).getByText("That token didn’t go through. Paste the token exactly as the page shows it.")).toBeTruthy();
+  expect(within(devinBlock()).queryByText(/Open the page again|the sign-in page gives you/)).toBeNull();
 });
 
 it("opens each page a local Devin sign-in gives: its page, then the one with a token to paste", async () => {
