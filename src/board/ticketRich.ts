@@ -3,7 +3,7 @@
 // sources once each, one timeline of its comments and history, which facts
 // it shows where, and how its description folds.
 
-import type { ActivityEvent, DevPr, HistoryEvent, SyncSystem, Ticket, TicketComment, TicketDev, TicketState } from "../hub/types";
+import type { ActivityEvent, DevPr, HistoryEvent, Progress, SyncSystem, Ticket, TicketChild, TicketComment, TicketDetails, TicketDev, TicketState } from "../hub/types";
 import { STATE_TITLE } from "./board";
 
 /** How the view lays itself out by its own width: two columns; one, with
@@ -219,6 +219,7 @@ export type FactId =
   | "assignee"
   | "reporter"
   | "priority"
+  | "children"
   | "points"
   | "sprint"
   | "labels"
@@ -232,7 +233,7 @@ export type FactId =
 /** The facts in the order the details column says them, by system; a
  *  ticket of your own has no system. */
 const ORDER: Record<SyncSystem | "local", FactId[]> = {
-  jira: ["type", "state", "working", "spent", "assignee", "reporter", "priority", "points", "sprint", "labels", "components", "fixVersion", "start", "due"],
+  jira: ["type", "state", "working", "spent", "assignee", "reporter", "priority", "children", "points", "sprint", "labels", "components", "fixVersion", "start", "due"],
   linear: ["state", "working", "spent", "assignee", "priority", "points", "labels", "project", "sprint", "created", "start", "due"],
   local: ["state", "assignee", "spent", "priority", "labels", "project", "due"],
 };
@@ -240,7 +241,7 @@ const ORDER: Record<SyncSystem | "local", FactId[]> = {
 /** The facts the stacked view's band shows first, two columns of four;
  *  the rest are a click away. */
 const BAND: Record<SyncSystem | "local", FactId[]> = {
-  jira: ["state", "working", "assignee", "priority", "type", "points", "sprint", "due"],
+  jira: ["state", "working", "assignee", "priority", "type", "children", "points", "sprint", "due"],
   linear: ["state", "working", "assignee", "priority", "points", "labels", "project", "sprint", "created", "due"],
   local: ["state", "assignee", "spent", "priority", "labels", "project", "due"],
 };
@@ -288,11 +289,18 @@ export const spanText = (starts: string, ends: string): string => {
 };
 
 /** The line under the title: what it is, who wrote it there and when, and
- *  (where there's room) when it last changed. */
-export const bylineText = (t: Ticket, layout: Layout): string | null => {
+ *  (where there's room) when it last changed. An epic says how many
+ *  children it has instead: `children`, as its progress counts them. */
+export const bylineText = (t: Ticket, layout: Layout, children?: number): string | null => {
   const e = t.external;
   const d = e?.details;
   if (!e || !d?.reporter) return null;
+  // An epic says how many children it has where a story says its dates.
+  if (isEpicDetails(e.system, d)) {
+    const n = children ?? 0;
+    const by = `${d.reporter} on ${SYSTEM[e.system]}`;
+    return [d.kind, layout === "compact" ? by : `written by ${by}`, n ? `${n} child item${n === 1 ? "" : "s"}` : null].filter(Boolean).join(" · ");
+  }
   const where = `${d.reporter} on ${SYSTEM[e.system]}${d.created ? `, ${dayText(d.created)}` : ""}`;
   const parts = [d.kind, layout === "compact" ? where : `written by ${where}`];
   if (layout === "wide" && e.remoteUpdatedAt && (!d.created || dayText(d.created) !== dayText(e.remoteUpdatedAt))) parts.push(`updated ${dayText(e.remoteUpdatedAt)}`);
@@ -333,3 +341,145 @@ export const firstParagraph = (body: string): string =>
     .split(/\n\s*\n/)
     .map((b) => b.trim())
     .find((b) => b && !/^#{1,6}\s/.test(b) && !/^(```|~~~)/.test(b)) ?? body;
+
+// ── An epic ─────────────────────────────────────────────────────────────
+
+/** Whether an issue is an epic: Jira's type at level 1, or named Epic.
+ *  Linear has no types; its "[Epic]" titles stay words. */
+export const isEpicDetails = (system: SyncSystem | undefined, d: TicketDetails | undefined): boolean =>
+  system === "jira" && !!d && (d.kindLevel === 1 || /^epic$/i.test(d.kind ?? ""));
+
+export const isEpic = (t: Pick<Ticket, "external">): boolean => isEpicDetails(t.external?.system, t.external?.details);
+
+/** The order an epic's children are grouped by state: what's moving first,
+ *  then what's next, then what's finished. */
+export const CHILD_STATE_ORDER: TicketState[] = ["doing", "review", "todo", "backlog", "done", "dropped"];
+
+/** The Desk column a child of an epic counts in: its own ticket's here,
+ *  else the column the board moves an issue to that state, else what its
+ *  state's name and kind say. A "Blocked" state that isn't done is to do. */
+export const childColumn = (c: TicketChild, here: TicketState | undefined, states: Partial<Record<TicketState, string>> = {}): TicketState => {
+  if (here) return here;
+  const name = (c.state ?? "").trim().toLowerCase();
+  const mapped = name ? (Object.entries(states) as [TicketState, string | undefined][]).find(([, s]) => s?.trim().toLowerCase() === name)?.[0] : undefined;
+  if (mapped) return mapped;
+  if (c.done || c.stateKind === "done" || c.stateKind === "completed") return /cancel|won.?t|declin|duplicate|reject/.test(name) ? "dropped" : "done";
+  if (c.stateKind === "canceled") return "dropped";
+  if (/review/.test(name)) return "review";
+  if (/backlog|triage/.test(name) || c.stateKind === "backlog") return "backlog";
+  if (c.started || c.stateKind === "indeterminate" || c.stateKind === "started") return /blocked/.test(name) ? "todo" : "doing";
+  return "todo";
+};
+
+/** An epic's progress by Desk's columns: done, doing and review, and to do
+ *  and backlog, and the points of those done of all; a dropped child isn't
+ *  counted. Its byline, its Children and Points facts and its list's head
+ *  all say these numbers. Without its children listed, what the hub
+ *  counted. */
+export interface EpicProgress {
+  total: number;
+  done: number;
+  moving: number;
+  rest: number;
+  /** Done of all, as a whole percent. */
+  pct: number;
+  points?: Progress;
+  blocked?: number;
+}
+
+export const epicProgress = (d: TicketDetails, columnOf: (c: TicketChild) => TicketState): EpicProgress => {
+  const children = d.children ?? [];
+  let done: number, moving: number, rest: number;
+  let points: Progress | undefined;
+  if (children.length) {
+    const cols = children.map(columnOf);
+    done = cols.filter((c) => c === "done").length;
+    moving = cols.filter((c) => c === "doing" || c === "review").length;
+    rest = cols.filter((c) => c === "todo" || c === "backlog").length;
+    const counted = children.filter((_, i) => cols[i] !== "dropped" && children[i]!.points !== undefined);
+    if (counted.length)
+      points = {
+        done: counted.filter((c) => columnOf(c) === "done").reduce((n, c) => n + c.points!, 0),
+        total: counted.reduce((n, c) => n + c.points!, 0),
+      };
+  } else {
+    done = d.subItems?.done ?? 0;
+    moving = d.subItems?.started ?? 0;
+    rest = Math.max(0, (d.subItems?.total ?? 0) - done - moving);
+    points = d.childPoints;
+  }
+  const total = done + moving + rest;
+  // Points that add up to none aren't said.
+  if (points && !points.total) points = undefined;
+  // 58%, never rounded up to done.
+  return { total, done, moving, rest, pct: total ? Math.floor((done / total) * 100) : 0, points, blocked: d.childBlocked };
+};
+
+export type ChildGrouping = "none" | "state" | "assignee" | "type";
+
+/** One group of an epic's children: its name (none when ungrouped), the
+ *  rows it shows, how many done ones are folded, and its points. */
+export interface ChildGroup {
+  id: string;
+  title: string | null;
+  rows: TicketChild[];
+  /** All its children, folded or not. */
+  count: number;
+  folded: number;
+  /** Its children's points summed; null when none has any. */
+  points: number | null;
+}
+
+/** How many done children a group shows before the rest fold. */
+export const DONE_SHOWN = 2;
+
+/** An epic's children in groups: by state in {@link CHILD_STATE_ORDER},
+ *  by who has them ("No one" last), by type, or one group. Within a group
+ *  the hub's order holds; grouped other than by state, they go by state
+ *  first. Done ones fold after two unless their group is in `unfold`;
+ *  `hideDone` leaves them
+ *  out, and a group left empty goes. */
+export const childGroups = (
+  children: readonly TicketChild[],
+  columnOf: (c: TicketChild) => TicketState,
+  by: ChildGrouping,
+  { hideDone = false, unfold = new Set<string>() }: { hideDone?: boolean; unfold?: ReadonlySet<string> } = {},
+): ChildGroup[] => {
+  const finished = (c: TicketChild) => {
+    const col = columnOf(c);
+    return col === "done" || col === "dropped";
+  };
+  const rank = (c: TicketChild) => CHILD_STATE_ORDER.indexOf(columnOf(c));
+  const keyOf = (c: TicketChild): string =>
+    by === "state" ? columnOf(c) : by === "assignee" ? (c.assignee ?? "") : by === "type" ? (c.kind ?? "") : "all";
+  const order: string[] = [];
+  const members = new Map<string, TicketChild[]>();
+  for (const c of children) {
+    if (hideDone && finished(c)) continue;
+    const k = keyOf(c);
+    if (!members.has(k)) {
+      members.set(k, []);
+      order.push(k);
+    }
+    members.get(k)!.push(c);
+  }
+  if (by === "state") order.sort((a, b) => CHILD_STATE_ORDER.indexOf(a as TicketState) - CHILD_STATE_ORDER.indexOf(b as TicketState));
+  if (by === "assignee") order.sort((a, b) => (a === "" ? 1 : b === "" ? -1 : a.localeCompare(b)));
+  if (by === "type") order.sort((a, b) => (a === "" ? 1 : b === "" ? -1 : 0));
+  return order.map((k) => {
+    const all = members.get(k)!;
+    const sorted = by === "state" ? all : [...all].sort((a, b) => rank(a) - rank(b));
+    const open = sorted.filter((c) => !finished(c));
+    const shut = sorted.filter(finished);
+    const keep = unfold.has(k) ? shut : shut.slice(0, DONE_SHOWN);
+    const pts = all.filter((c) => c.points !== undefined);
+    return {
+      id: k,
+      title: by === "none" ? null : by === "state" ? STATE_TITLE[k as TicketState] : by === "assignee" ? k || "No one" : k || "Other",
+      rows: [...open, ...keep],
+      count: all.length,
+      folded: shut.length - keep.length,
+      points: pts.length ? pts.reduce((n, c) => n + c.points!, 0) : null,
+    };
+  });
+};
