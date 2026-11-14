@@ -320,7 +320,7 @@ it("says Devin isn't signed in, and signs it in to Devin in place", async () => 
   expect(fix.textContent).toContain("a session would stop at its sign-in");
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sign in to Devin…" })));
   expect(startEngineSignIn).toHaveBeenCalledWith("devin");
-  expect(screen.getByText("Opening Devin’s sign-in page…")).toBeTruthy();
+  expect(screen.getByText("Starting Devin’s sign-in…")).toBeTruthy();
 });
 
 it("offers Install for Devin beside Claude Code and Codex when nothing is installed", async () => {

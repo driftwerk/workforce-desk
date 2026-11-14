@@ -533,6 +533,10 @@ export type EngineSignIn = { id: string; engine: Engine } & (
   | { state: "starting" }
   | { state: "device"; url: string; code: string }
   | { state: "page"; url: string }
+  /** Devin opened its page in this computer's browser itself (no address):
+   *  `say` is what to tell the person, `instead` the label of the way out,
+   *  a new sign-in with a code to paste (`manual`). */
+  | { state: "browser"; say: string; instead: string }
   | { state: "paste"; url: string }
   | { state: "done" }
   | { state: "failed"; why: string }
