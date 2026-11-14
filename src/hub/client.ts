@@ -360,7 +360,20 @@ const NO_BOSS = "There is no boss by that name here.";
 /** The local hub's admin surface: sessions, terminals, rooms, the crew and
  *  its agents. In the app `t` is `brokered`, which holds no token. */
 export class DeskHub {
-  constructor(private readonly t: DeskTransport) {}
+  /** `person`: this hub as the person reaches it, by their paired Desk
+   *  (none until Desk has paired with it), for what only they may do. */
+  constructor(
+    private readonly t: DeskTransport,
+    private readonly person: () => HubRef | undefined = () => undefined,
+  ) {}
+
+  /** A call only the person whose Desk this is may make: as them, by
+   *  their paired Desk; refused here until Desk has paired with the hub. */
+  private asPerson = <T>(method: string, path: string, body?: unknown): Promise<T> => {
+    const hub = this.person();
+    if (!hub) return Promise.reject(new HubError(503, "Desk hasn’t connected to this engine as you yet. Try again in a moment."));
+    return deskCall<T>(hub, method, path, body);
+  };
 
   private request = async <T>(method: string, path: string, body?: unknown): Promise<{ status: number; body: T }> =>
     answer<T>(await this.t.fetch(method, path, json(body)));
@@ -476,16 +489,20 @@ export class DeskHub {
   /** The code the sign-in page showed, for the sign-in waiting on it. */
   signInCode = (id: string, code: string): Promise<AccountSignIn> =>
     this.call("POST", `/api/desk/accounts/sign-ins/${id}/code`, { code });
-  /** An engine's own sign-in, run by the hub (Codex's device page). */
+  /** An engine's own sign-in, run by the hub (Codex's device page, Devin's
+   *  login). Only the person whose Desk it is may run one (the hub refuses
+   *  its own token for these), so each goes as them: by their paired Desk
+   *  to this hub (`person`), never through the broker. */
   /** `manual`: for a computer with no browser, the sign-in gives a token
    *  to paste back (Devin). */
   startEngineSignIn = (engine: Engine, opts: { manual?: boolean } = {}): Promise<EngineSignIn> =>
-    this.call("POST", "/api/desk/engines/sign-ins", opts.manual ? { engine, manual: true } : { engine });
+    this.asPerson("POST", "/api/desk/engines/sign-ins", opts.manual ? { engine, manual: true } : { engine });
   /** The token the sign-in's page gave, typed into the sign-in and kept
    *  nowhere. 204, or a 409 when it isn't waiting for one. */
-  sendEngineSignInToken = (id: string, token: string): Promise<void> => this.call("POST", `/api/desk/engines/sign-ins/${encodeURIComponent(id)}/token`, { token });
-  engineSignIn = (id: string): Promise<EngineSignIn> => this.call("GET", `/api/desk/engines/sign-ins/${encodeURIComponent(id)}`);
-  cancelEngineSignIn = (id: string): Promise<void> => this.call("DELETE", `/api/desk/engines/sign-ins/${encodeURIComponent(id)}`);
+  sendEngineSignInToken = (id: string, token: string): Promise<void> =>
+    this.asPerson("POST", `/api/desk/engines/sign-ins/${encodeURIComponent(id)}/token`, { token });
+  engineSignIn = (id: string): Promise<EngineSignIn> => this.asPerson("GET", `/api/desk/engines/sign-ins/${encodeURIComponent(id)}`);
+  cancelEngineSignIn = (id: string): Promise<void> => this.asPerson("DELETE", `/api/desk/engines/sign-ins/${encodeURIComponent(id)}`);
   /** "OK" on a sign-in problem the person has dealt with. */
   dismissSignInProblem = (account: string): Promise<void> => this.call("POST", `/api/desk/accounts/problems/${account}/dismiss`);
   cancelSignIn = (id: string): Promise<void> => this.call("DELETE", `/api/desk/accounts/sign-ins/${id}`);
