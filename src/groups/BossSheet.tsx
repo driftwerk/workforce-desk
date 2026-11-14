@@ -310,9 +310,10 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
                       <b>{LEVEL_NAME[l]}</b>
                       <span>{levelSays(l, bossName)}</span>
                       {i === 3 && choice.level === "full" && choice.budgetUsdPerDay !== null && (
-                        <span className="mono">
+                        <span>
                           {usd(choice.budgetUsdPerDay)} a day
-                          {linkedHere && status?.choice.level === "full" && ` · ${spentToday(status)}`}
+                          {/* Kept whole: it wraps at the dot, never inside. */}
+                          {linkedHere && status?.choice.level === "full" && ` · ${spentToday(status).replace(/ /g, "\u00a0")}`}
                         </span>
                       )}
                     </button>
@@ -547,8 +548,8 @@ export function ActFullySheet({
   const shown = bad && budget !== "" ? bad : null;
   const usdNow = on ? choice.budgetUsdPerDay : null;
   const why = notInForce(on ? status : null, next, boss, waits);
-  // Until it is, the Boss sheet's own footer has Pause and Stop.
-  const inForce = on && linked && !why;
+  // Before it is on, the Boss sheet's own footer has Pause and Stop.
+  const offers = on && linked;
   return (
     <Dialog
       onClose={onClose}
@@ -614,12 +615,12 @@ export function ActFullySheet({
         <div className="oversee-never">{fullLine(boss)}</div>
       </div>
       <footer className="dialog-foot">
-        {inForce && onPause && (
+        {offers && onPause && (
           <button type="button" className="btn btn-sm" disabled={busy} onClick={onPause}>
             {paused ? `Let ${boss} go on` : `Pause ${boss}`}
           </button>
         )}
-        {inForce && onStop && (
+        {offers && onStop && (
           <button type="button" className="btn btn-sm btn-danger" disabled={busy} onClick={onStop}>
             Stop {boss}
           </button>

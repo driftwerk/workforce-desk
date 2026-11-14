@@ -177,6 +177,15 @@ describe("what the sheet offers as the boss stands", () => {
     expect(screen.getByRole("radio", { name: "Status" }).getAttribute("aria-disabled")).toBe("true");
   });
 
+  it("offers Let Allan go on and Stop in the Act fully sheet while it is paused", async () => {
+    status = linked(FULL, { paused: true });
+    await open();
+    fireEvent.click(await screen.findByRole("radio", { name: /Act fully/ }));
+    const sheet = await screen.findByRole("dialog", { name: "Allan acts fully in Acme" });
+    expect(within(sheet).getByRole("button", { name: "Let Allan go on" })).toBeTruthy();
+    expect(within(sheet).getByRole("button", { name: "Stop Allan" })).toBeTruthy();
+  });
+
   it("says what Allan spent today at Act fully, and not known when an engine didn't say", async () => {
     status = linked(FULL, { spentTodayUsd: 12.5 });
     await open();
