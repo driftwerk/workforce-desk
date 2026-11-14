@@ -1,4 +1,5 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { Profiler } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
@@ -13,9 +14,10 @@ import { useTerminals } from "./terminals";
 import { SidebarGroups } from "../groups/SidebarGroups";
 import { useSettings } from "../settings/store";
 import { EMPTY_LAYOUT } from "../groups/model";
+import { STATE_LABEL } from "../session/words";
 
 const counts = { dm: 0 };
-// How often each grid's sidebar row was drawn.
+// How often each sidebar row (a grid's, an item's) was drawn.
 const rowDraws: Record<string, number> = {};
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
@@ -84,6 +86,33 @@ it("leaves a pane's conversation alone when another session changes or another a
     act(() => useChat.setState((s) => ({ conversations: { ...s.conversations, "local/other": { ...emptyConversation(), messages: [{ ...msg(1), content: "x".repeat(n++) }] } } })));
   }
   expect(counts.dm).toBe(0);
+});
+
+// Each pane's menu offers this computer's sessions newest first, with
+// where each stands: read as it opens, so a session no pane shows moving
+// (its state, its turn) draws no pane again.
+it("draws no pane again when a session it doesn't show moves", () => {
+  layOut(MAIN_GRID, "quarters");
+  deliver(MAIN_GRID, { kind: "agent", agent: "local/allan" });
+  deliver(MAIN_GRID, { kind: "session", sessionId: "s0" });
+  deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+  deliver(MAIN_GRID, { kind: "session", sessionId: "s2" });
+  let draws = 0;
+  render(
+    <Profiler id="grid" onRender={() => draws++}>
+      <GridsMain />
+    </Profiler>,
+  );
+  draws = 0;
+  let n = 0;
+  for (const state of ["working", "idle", "starting", "working", "blocked"] as const)
+    act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s5: { ...s.sessions.s5!, state, updatedAt: new Date(Date.UTC(2026, 9, 29, 10, 0, n++)).toISOString() } } })));
+  expect(draws).toBe(0);
+  // Opened now, Replace says where it stands now.
+  fireEvent.click(within(screen.getByRole("region", { name: "task-0" })).getByRole("button", { name: "Pane options" }));
+  fireEvent.click(screen.getByRole("menuitem", { name: "Replace" }));
+  const s5 = within(screen.getByRole("menu", { name: "Replace" })).getByRole("menuitem", { name: /^task-5/ });
+  expect(s5.textContent).toContain(STATE_LABEL.blocked);
 });
 
 // Every grid's row is in the sidebar whatever the main area shows, so a
