@@ -225,7 +225,7 @@ beforeEach(() => {
   startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
   useTerminals.setState({ byId: {}, known: true, programs: {}, problems: {} });
   useCharges.setState({ bySession: {}, supported: null });
-  useGrantBosses.setState({ byGroup: {}, readAt: {} });
+  useGrantBosses.setState({ byGroup: {}, bossed: {}, readAt: {} });
   useHubLayout.setState({ layout: null, kept: false });
   useLine.setState({ threads: {}, problems: {} });
   useChat.setState({
@@ -368,6 +368,18 @@ describe("a session Sarah runs", () => {
       kept: true,
     });
     useGrantBosses.setState({ byGroup: { acme: { id: "driftwerk/allan", name: "Allan", level: "watch", served: true } }, readAt: { acme: Date.now() } });
+    render(<SessionCard session={useDesk.getState().sessions.s1!} />);
+    fireEvent.click(screen.getByRole("button", { name: "Session options" }));
+    expect(screen.queryByRole("menuitem", { name: /^Hand to/ })).toBeNull();
+  });
+
+  it("offers no one while its group's boss on another hub is paused, not even this computer's own", async () => {
+    await connect();
+    useHubLayout.setState({
+      layout: { groups: [{ id: "acme", name: "Acme", collapsed: false, items: ["session:s1"] }], ungrouped: { collapsed: false, items: [] } },
+      kept: true,
+    });
+    useGrantBosses.setState({ byGroup: { acme: null }, bossed: { acme: true }, readAt: { acme: Date.now() } });
     render(<SessionCard session={useDesk.getState().sessions.s1!} />);
     fireEvent.click(screen.getByRole("button", { name: "Session options" }));
     expect(screen.queryByRole("menuitem", { name: /^Hand to/ })).toBeNull();

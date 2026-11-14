@@ -57,7 +57,7 @@ describe("the boss a group's grant names", () => {
 });
 
 describe("the groups' bosses, read", () => {
-  beforeEach(() => useGrantBosses.setState({ byGroup: {}, readAt: {} }));
+  beforeEach(() => useGrantBosses.setState({ byGroup: {}, bossed: {}, readAt: {} }));
   afterEach(() => vi.restoreAllMocks());
 
   it("are read once at a time, and not again while fresh", async () => {
@@ -70,7 +70,7 @@ describe("the groups' bosses, read", () => {
   });
 
   it("are not asked again at once after a read that failed, and keep what was read", async () => {
-    useGrantBosses.setState({ byGroup: { acme: bossOfStatus(allan()) }, readAt: { acme: 0 } });
+    useGrantBosses.setState({ byGroup: { acme: bossOfStatus(allan()) }, bossed: { acme: true }, readAt: { acme: 0 } });
     const status = vi.spyOn(remoteBosses, "status").mockRejectedValue(new Error("unreachable"));
     useGrantBosses.getState().ensure("acme");
     await vi.waitFor(() => expect(useGrantBosses.getState().readAt.acme).toBeGreaterThan(0));
@@ -83,11 +83,11 @@ describe("the groups' bosses, read", () => {
     let answer: (s: RemoteBoss | null) => void = () => {};
     vi.spyOn(remoteBosses, "status").mockReturnValue(new Promise((r) => (answer = r)));
     useGrantBosses.getState().ensure("acme");
-    await new Promise((r) => setTimeout(r, 2));
     useGrantBosses.getState().heard("acme", allan({ paused: true }));
     answer(allan());
     await new Promise((r) => setTimeout(r, 0));
     expect(useGrantBosses.getState().byGroup.acme).toBeNull();
+    expect(useGrantBosses.getState().bossed.acme).toBe(true);
   });
 
   it("never read the ungrouped", () => {

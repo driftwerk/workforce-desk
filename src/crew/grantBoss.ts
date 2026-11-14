@@ -21,6 +21,9 @@ interface GrantBossState {
   /** Each group's boss on another hub, as last read: null where it has
    *  none, or where it doesn't run sessions now (paused, stopping). */
   byGroup: Record<string, Boss | null>;
+  /** Groups a boss on another hub is linked to, offered or not: never
+   *  handed to this computer's own boss meanwhile (it doesn't run them). */
+  bossed: Record<string, boolean>;
   /** When each was read. */
   readAt: Record<string, number>;
   /** What `boss_status` said of `group` (the Boss sheet reads it too). */
@@ -46,9 +49,14 @@ const reading = new Set<string>();
 
 export const useGrantBosses = create<GrantBossState>((set, get) => ({
   byGroup: {},
+  bossed: {},
   readAt: {},
   heard: (group, status) =>
-    set((s) => ({ byGroup: { ...s.byGroup, [group]: bossOfStatus(status, nameOf(status)) }, readAt: { ...s.readAt, [group]: Date.now() } })),
+    set((s) => ({
+      byGroup: { ...s.byGroup, [group]: bossOfStatus(status, nameOf(status)) },
+      bossed: { ...s.bossed, [group]: status !== null },
+      readAt: { ...s.readAt, [group]: Date.now() },
+    })),
   ensure: (group) => {
     if (group === UNGROUPED || reading.has(group)) return;
     const asked = Date.now();
@@ -58,7 +66,7 @@ export const useGrantBosses = create<GrantBossState>((set, get) => ({
       .status(group)
       .then((s) => {
         // Read fresher meanwhile (the Boss sheet): that stands.
-        if ((get().readAt[group] ?? 0) <= asked) get().heard(group, s);
+        if ((get().readAt[group] ?? 0) < asked) get().heard(group, s);
       })
       // Kept as last read, and not asked again until it would be anyway.
       .catch(() => set((s) => ({ readAt: { ...s.readAt, [group]: Date.now() } })))
@@ -77,19 +85,26 @@ export const grantBossOf = (layout: Layout, s: Placed): Boss | null => {
   return g === UNGROUPED ? null : (useGrantBosses.getState().byGroup[g] ?? null);
 };
 
+/** Whether a boss on another hub is linked to `s`'s group, offered or not. */
+export const grantBossed = (layout: Layout, s: Placed): boolean => {
+  const g = groupOfSession(layout, s);
+  return g !== UNGROUPED && !!useGrantBosses.getState().bossed[g];
+};
+
 /** The same, kept current in a component, and read when it may have changed. */
-export const useGrantBossOf = (s: Placed | null | undefined): Boss | null => {
+export const useGrantBossOf = (s: Placed | null | undefined): { boss: Boss | null; bossed: boolean } => {
   const layout = useLayout();
   const group = s ? groupOfSession(layout, s) : UNGROUPED;
   const boss = useGrantBosses((st) => (group === UNGROUPED ? null : (st.byGroup[group] ?? null)));
+  const bossed = useGrantBosses((st) => group !== UNGROUPED && !!st.bossed[group]);
   useEffect(() => {
     useGrantBosses.getState().ensure(group);
   }, [group]);
-  return boss;
+  return { boss, bossed };
 };
 
 /** Whether `boss` is one on another hub, named by its grant. */
 export const isServed = (boss: Boss | null | undefined): boolean => !!boss?.served;
 
 /** How often the groups' bosses are read again while Desk is open. */
-export const REREAD_MS = FRESH_MS;
+export const REREAD_MS = FRESH_MS / 2;

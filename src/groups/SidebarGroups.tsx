@@ -47,7 +47,7 @@ import { ChargeBadge } from "../crew/ChargeBadge";
 import { SessionTicketChip } from "../board/TicketChip";
 import { chargeChoices } from "../crew/charge";
 import { useBoss, useCharge, useCharges } from "../crew/chargeStore";
-import { grantBossOf, REREAD_MS, useGrantBosses } from "../crew/grantBoss";
+import { grantBossed, grantBossOf, REREAD_MS, useGrantBosses } from "../crew/grantBoss";
 import { BossSheet } from "./BossSheet";
 import { remoteBosses } from "./remoteBoss";
 import { below, DragChip, isMenuKey, MoreIcon, PLUGINS, SENSORS, SortRow, step, type Operation } from "./rows";
@@ -540,7 +540,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     // Who runs a session: the boss its group's grant names on another hub,
     // wherever it runs; else this computer's, for its own.
     const sessionCharge = (session: Session, local: boolean): MenuEntry[] => {
-      const by = grantBossOf(layout, session) ?? (local ? boss : null);
+      const by = grantBossOf(layout, session) ?? (local && !grantBossed(layout, session) ? boss : null);
       const key = sessionKey(session);
       if (!by && !local) return [];
       return chargeChoices(session, useCharges.getState().bySession[key], by).map(

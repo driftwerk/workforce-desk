@@ -126,7 +126,9 @@ export const useCharge = (sessionId: string | null | undefined): ChargeView | un
 export const useBossOf = (s: { id: string; machine?: MachineId | null } | null | undefined): Boss | null => {
   const local = useBoss();
   const granted = useGrantBossOf(s);
-  if (granted) return granted;
+  if (granted.boss) return granted.boss;
+  // Linked to a boss on another hub that doesn't run sessions now: no one.
+  if (granted.bossed) return null;
   return machineOf(s) === LOCAL ? local : null;
 };
 
