@@ -1,3 +1,4 @@
+import { heardSettled } from "../rooms/settled";
 import { create } from "zustand";
 import { HubError, type DeskHub } from "../hub/client";
 import { deskListeners, useDesk } from "../hub/store";
@@ -184,7 +185,10 @@ const stub = (id: string): Suggestion => ({ id, at: "", text: "", action: {}, st
  *  in the overview soon after. */
 export const onDeskEvent = (e: DeskEvent): void => {
   const s = useOverview.getState();
-  if (e.type === "activity") s.receive(e.event);
+  if (e.type === "activity") {
+    heardSettled(e.event);
+    s.receive(e.event);
+  }
   else if (e.type === "snapshot") {
     void s.loadOverview();
     void s.loadManager();
