@@ -58,7 +58,8 @@ const FAST_NOTE =
 
 /** Whether `id` reads as a model's name, as the hub takes one: a letter or
  *  digit first, then letters, digits and `-_.:/[]@`. */
-export const isModelName = (id: string): boolean => id.length <= 100 && /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]*$/.test(id);
+export const isModelName = (id: string, engine?: Engine): boolean =>
+  id.length <= 100 && (engine === "devin" ? /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/ : /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]*$/).test(id);
 
 /** Why Start can't be pressed yet, in a line, with what puts it right. */
 export interface Blocked {
@@ -174,7 +175,7 @@ export function NewSession({
     if (c.approvals) setApprovals(c.approvals);
     if (c.approveForMe !== undefined) setApproveForMe(c.approveForMe);
     if (c.fast !== undefined) setFast(c.fast);
-    if (c.engine && c.model) setModels((m) => ({ ...m, [c.engine!]: c.model }));
+    if (c.engine && "model" in c) setModels((m) => ({ ...m, [c.engine!]: c.model ?? null }));
     if (c.copy !== undefined) setCopy(c.copy);
   };
   const setCwd = (folder: string) => {
@@ -317,7 +318,7 @@ export function NewSession({
   const again = useRef<(o?: { copy?: boolean }) => Promise<void>>(async () => {});
   const submit = async (e?: React.FormEvent, o: { copy?: boolean } = {}) => {
     e?.preventDefault();
-    if (!hub || (!folder && !remote) || working.current) return;
+    if (!hub || (!folder && !remote) || working.current || (model && !isModelName(model, engine))) return;
     working.current = true;
     setBusy(true);
     setProblem(null);
@@ -342,9 +343,11 @@ export function NewSession({
         ...(withCopy ? { worktree: branch, freshWorktree: true } : {}),
         env: remote ? await machineEnv(native, runOn) : await pluginEnv(),
       });
-      // Where no model was offered, the folder keeps the one it had.
-      const keptModel = canPickModel ? model : choicesFor(runOn, folder || "~").model;
-      const choices: Choices = { engine, group, approvals, approveForMe, fast, copy: withCopy, ...(account ? { account } : {}), ...(keptModel ? { model: keptModel } : {}) };
+      // Where no model was offered, the folder keeps what it said, and only
+      // for the engine it said it for: a model is its engine's.
+      const was = choicesFor(runOn, folder || "~");
+      const said = canPickModel ? { model } : was.engine === engine && "model" in was ? { model: was.model ?? null } : {};
+      const choices: Choices = { engine, group, approvals, approveForMe, fast, copy: withCopy, ...(account ? { account } : {}), ...said };
       remember(runOn, folder || "~", choices);
       const key = keyOf(runOn, s.id);
       // In its group whichever computer it runs on; Ungrouped takes it as it comes.
@@ -389,7 +392,7 @@ export function NewSession({
   };
   again.current = (o) => submit(undefined, o);
 
-  const badModel = model && !isModelName(model) ? model : null;
+  const badModel = model && !isModelName(model, engine) ? model : null;
   const blocked: Blocked | null = badModel && !busy
     ? { words: `“${badModel}” can’t be a model’s name: letters, digits and - _ . : / [ ] @, starting with a letter or digit.` }
     : whyNotStart({

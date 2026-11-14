@@ -13,8 +13,9 @@ export interface Choices {
   approvals?: "desk" | "terminal";
   approveForMe?: boolean;
   fast?: boolean;
-  /** The model picked for `engine`; absent, its default. */
-  model?: string;
+  /** The model picked for `engine`; null, its default; absent, nothing
+   *  said (a hub that offered no model). */
+  model?: string | null;
   copy?: boolean;
 }
 

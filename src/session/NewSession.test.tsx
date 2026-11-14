@@ -351,4 +351,26 @@ it("names what isn't installed in plain words", () => {
 it("reads a model's name as the hub does", () => {
   for (const ok of ["opus", "gpt-6.1-sol", "claude-opus-5-5[1m]", "us.anthropic.claude-sonnet-4-5:0"]) expect(isModelName(ok)).toBe(true);
   for (const bad of ["-p", "opus --x", "a\"b", "", "é"]) expect(isModelName(bad)).toBe(false);
+  expect(isModelName("x[1m]", "devin")).toBe(false);
+  expect(isModelName("swe-1.6", "devin")).toBe(true);
+});
+
+it("keeps a folder's model only for the engine it was said for, and its default as said", async () => {
+  const start = vi.fn(() => Promise.resolve({ id: "s-9" }));
+  const engines = vi.fn(async () => [
+    engine({ engine: "claude", title: "Claude Code", views: ["terminal"], caps: terminalCaps("desk") }),
+    engine({ engine: "codex", title: "Codex", views: ["terminal"], caps: terminalCaps("terminal") }),
+  ]);
+  localStorage.setItem("desk.newSession", JSON.stringify({ folders: [["local\n/work/atlas", { engine: "claude", model: "opus" }]] }));
+  // A hub that offers no model: Codex started there keeps no Claude model.
+  useDesk.setState({ hub: { start, engines, features: vi.fn(async () => []) } as unknown as DeskHub, openId: null });
+  const r = render(<NewSession onClose={vi.fn()} />);
+  await act(async () => {});
+  fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/work/atlas" } });
+  fireEvent.click(screen.getByRole("radio", { name: "Codex" }));
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
+  const kept = JSON.parse(localStorage.getItem("desk.newSession")!).folders.find(([f]: [string]) => f === "local\n/work/atlas")[1];
+  expect(kept).toEqual(expect.objectContaining({ engine: "codex" }));
+  expect("model" in kept).toBe(false);
+  r.unmount();
 });
