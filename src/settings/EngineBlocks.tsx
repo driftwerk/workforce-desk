@@ -3,7 +3,7 @@ import { explain } from "../ui/problem";
 import { ProblemNote } from "../ui/ProblemNote";
 import { hasAccounts } from "../engines/accounts";
 import { defaultCaps, installedText, runsText, signInText } from "../engines/engines";
-import { CODEX_LOGIN, useCodexSignIn, useDevinSignIn } from "../engines/signIn";
+import { CODEX_LOGIN, DEVIN_START_WITHIN_MS, offersPaste, useCodexSignIn, useDevinSignIn } from "../engines/signIn";
 import { LOCAL, type MachineId } from "../hub/machines";
 import { hubOf, useHubOf } from "../hub/store";
 import type { EngineInfo } from "../hub/types";
@@ -321,9 +321,10 @@ export function InstallEngine({
   );
 }
 
-/** Devin's sign-in under way, as Codex's is drawn: its page opening, open
- *  (with the field for the token it gives, where it gives one), done, or
- *  failed with why. */
+/** Devin's sign-in under way, as Codex's is drawn: starting, waiting in
+ *  the browser Devin opened (a code to paste instead beside it), its page
+ *  open (with the field for the code it gives, where it gives one), done,
+ *  or failed with why, said as its hub says it. */
 export function DevinSigningIn({ devin }: { devin: ReturnType<typeof useDevinSignIn> }) {
   const r = devin.run;
   if (r.at === "idle") return null;
@@ -332,21 +333,34 @@ export function DevinSigningIn({ devin }: { devin: ReturnType<typeof useDevinSig
       <b className="small">Signing in to Devin</b>
       {r.at === "opening" && (
         <>
-          <p className="small">Opening Devin’s sign-in page…</p>
-          <span className="faint small">If the page hasn’t opened in 30 s, Desk stops and says why.</span>
+          <p className="small">Starting Devin’s sign-in…</p>
+          <span className="faint small">If Devin hasn’t started it in {DEVIN_START_WITHIN_MS / 1000} s, Desk stops and says why.</span>
+        </>
+      )}
+      {r.at === "browser" && (
+        <>
+          <p className="small" role="status">
+            {r.say}
+          </p>
+          <span className="account-links">
+            <button type="button" className="btn btn-ghost" onClick={devin.withToken}>
+              {r.instead}
+            </button>
+          </span>
+          <span className="faint small">Desk carries on by itself once you’ve signed in there.</span>
         </>
       )}
       {r.at === "page" &&
         (r.paste ? (
           <>
-            {r.why ? <p className="small state-blocked">{r.why}</p> : <p className="small">Sign in on the page that opened, then paste the token it shows here.</p>}
-            <CodeField onSend={(token) => void devin.sendToken(token)} focus secret label="Token from Devin’s sign-in page" placeholder="Token from the page" />
+            {r.why ? <p className="small state-blocked">{r.why}</p> : <p className="small">Sign in on the page that opened, then paste the code it shows here.</p>}
+            <CodeField onSend={(code) => void devin.sendToken(code)} focus secret label="Code from Devin’s sign-in page" placeholder="Code from the page" />
             <span>
               <button type="button" className="btn btn-ghost" onClick={() => devin.openPage(r.url)}>
                 Open the sign-in page again
               </button>
             </span>
-            <span className="faint small">Desk passes the token straight to Devin, and keeps it nowhere. It waits up to 10 minutes, then stops the sign‑in.</span>
+            <span className="faint small">Desk passes the code straight to Devin, and keeps it nowhere. It waits up to 10 minutes, then stops the sign‑in.</span>
           </>
         ) : (
           <>
@@ -356,7 +370,7 @@ export function DevinSigningIn({ devin }: { devin: ReturnType<typeof useDevinSig
                 Open the sign-in page again
               </button>
               <button type="button" className="link small" onClick={devin.withToken}>
-                Paste a token instead
+                Paste a code instead
               </button>
             </span>
             <span className="faint small">Desk carries on by itself once you’ve signed in. It waits up to 10 minutes, then stops the sign‑in.</span>
@@ -368,8 +382,10 @@ export function DevinSigningIn({ devin }: { devin: ReturnType<typeof useDevinSig
         </p>
       )}
       {r.at === "failed" && (
+        // The hub's words are already plain: said as they are, not
+        // explained again. Try again below is the retry.
         <div role="alert">
-          <ProblemNote problem={explain(new Error(r.why), { what: "signing in to Devin", retry: devin.again })} />
+          <ProblemNote problem={{ plain: r.why, what: "signing in to Devin" }} />
         </div>
       )}
       <span className="account-actions">
@@ -382,6 +398,11 @@ export function DevinSigningIn({ devin }: { devin: ReturnType<typeof useDevinSig
             <button type="button" className="btn btn-ghost" onClick={r.at === "failed" ? devin.reset : devin.cancel}>
               Cancel
             </button>
+            {r.at === "failed" && offersPaste(r.why) && (
+              <button type="button" className="btn btn-ghost" onClick={devin.withToken}>
+                Paste a code instead
+              </button>
+            )}
             {r.at === "failed" && (
               <button type="button" className="btn" onClick={devin.again}>
                 Try again
