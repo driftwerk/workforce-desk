@@ -47,6 +47,7 @@ import { ChargeBadge } from "../crew/ChargeBadge";
 import { SessionTicketChip } from "../board/TicketChip";
 import { chargeChoices } from "../crew/charge";
 import { useBoss, useCharge, useCharges } from "../crew/chargeStore";
+import { BossSheet } from "./BossSheet";
 import { below, DragChip, isMenuKey, MoreIcon, PLUGINS, SENSORS, SortRow, step, type Operation } from "./rows";
 import {
   collapseGroup,
@@ -174,6 +175,8 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   // The group whose memory switches are open, on this computer's hub,
   // whose sidebar the groups are.
   const [memoryOf, setMemoryOf] = useState<string | null>(null);
+  /** The group whose Boss sheet is open. */
+  const [bossSheetOf, setBossSheetOf] = useState<string | null>(null);
   const localHub = useDesk((s) => s.hub);
   // Moves the hub previews need the hub to keep the groups.
   const keptOnHub = useHubLayout((s) => s.layout !== null);
@@ -587,6 +590,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
           ...choosing(id),
           // The group's Floor: what its sessions and agents need and do.
           putInGrid(floorContent(id), "its Floor"),
+          { kind: "item", label: "Boss…", onSelect: () => setBossSheetOf(id) },
           { kind: "item", label: "Memory…", onSelect: () => setMemoryOf(id) },
           { kind: "item", label: "Rename group", kbd: "F2", onSelect: () => setEditing({ kind: "group", id }) },
           { kind: "item", label: "Delete group", onSelect: () => removeGroup(id) },
@@ -800,6 +804,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
             </Confirm>
           );
         })()}
+      {bossSheetOf && <BossSheet group={bossSheetOf} onClose={() => setBossSheetOf(null)} />}
       {memoryOf && <GroupMemoryDialog group={{ id: memoryOf, name: groupName(memoryOf) }} hub={localHub} onClose={() => setMemoryOf(null)} />}
       {menu && (
         <Menu
