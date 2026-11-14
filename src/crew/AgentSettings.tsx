@@ -17,6 +17,7 @@ import { PictureField } from "../pictures/PictureField";
 import { useAgentImage } from "../pictures/who";
 import { CheckingIn, HowTheyRemember, HowTheyWork } from "./AgentAbilities";
 import { OverseesTheCrew } from "./OverseesTheCrew";
+import { WhatTheySee } from "./WhatTheySee";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
 
 const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
@@ -34,6 +35,7 @@ export function AgentSettings({ agent, hub, onOpenFiles }: { agent: Agent; hub: 
         <Sound agent={agent} local={local} />
         {local && <HowTheyRemember agent={agent} ago={ago} />}
         {local && <HowTheyWork agent={agent} />}
+        <WhatTheySee agent={agent} hub={hub} />
         {local && (
           <CheckingIn
             agent={agent}
@@ -58,6 +60,7 @@ const SECTIONS: { id: string; name: string }[] = [
   { id: "sound", name: "How they sound" },
   { id: "remember", name: "How they remember" },
   { id: "work", name: "How they work" },
+  { id: "sees", name: "What they see" },
   { id: "checkin", name: "Checking in" },
   { id: "tune", name: "Fine-tuning" },
 ];

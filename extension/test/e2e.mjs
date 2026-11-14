@@ -21,6 +21,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 // A made-up key for the fixture key page, built so no scanner takes it for one.
 const KEY = ["fx", "abcdefghijkl" + "mnopqrstuvwx"].join("_");
 const fixture = JSON.parse(readFileSync(join(here, "../protocol/v1.json"), "utf8"));
+const helper = JSON.parse(readFileSync(join(here, "../protocol/desk-helper.json"), "utf8"));
 
 // ── As the host Chrome starts: relay native messages to the test's socket.
 if (process.argv[2] === "host" || process.argv[2]?.startsWith("chrome-extension://")) {
@@ -91,21 +92,31 @@ async function main() {
 
   // The person's own tab, open before Desk: it must be left alone.
   const theirs = `${base}/`;
-  let hub;
-  const connected = new Promise((resolveConn) => {
-    hub = netServer((s) => resolveConn(s));
+  // Each host Chrome starts is a connection: a second comes after the
+  // extension reloads itself.
+  const conns = [];
+  const connWaiters = [];
+  const hub = netServer((s) => {
+    const w = connWaiters.shift();
+    if (w) w(s);
+    else conns.push(s);
   });
+  const nextConn = () => (conns.length ? Promise.resolve(conns.shift()) : new Promise((r) => connWaiters.push(r)));
   await new Promise((r) => hub.listen(socket, r));
   const proc = spawn(
     chrome,
-    [`--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", `--load-extension=${dist}`, `--disable-extensions-except=${dist}`, "--window-size=1200,900", theirs],
+    [`--user-data-dir=${profile}`, "--no-first-run", "--no-default-browser-check", `--load-extension=${dist}`, `--disable-extensions-except=${dist}`, "--remote-debugging-port=0", "--window-size=1200,900", theirs],
     { stdio: "ignore" },
   );
   const fail = (why) => {
     console.error(`e2e: ${why}`);
     void finish(1);
   };
+  // The build's own revision.json, put back however the run ends.
+  const onDisk = join(dist, "revision.json");
+  let built = null;
   const finish = async (code) => {
+    if (built !== null) writeFileSync(onDisk, built);
     // Chrome writes to its profile as it closes: wait for it, then remove
     // the throwaway profile.
     const exited = new Promise((r) => (proc.exitCode !== null ? r() : proc.once("exit", r)));
@@ -128,23 +139,30 @@ async function main() {
   };
   const timer = setTimeout(() => fail("timed out"), 90_000);
 
-  const conn = await connected;
-  const inbox = [];
-  const waiters = [];
-  let line = "";
-  conn.on("data", (d) => {
-    line += d.toString("utf8");
-    let i;
-    while ((i = line.indexOf("\n")) >= 0) {
-      const m = JSON.parse(line.slice(0, i));
-      line = line.slice(i + 1);
-      const w = waiters.shift();
-      if (w) w(m);
-      else inbox.push(m);
-    }
-  });
-  const next = () => (inbox.length ? Promise.resolve(inbox.shift()) : new Promise((r) => waiters.push(r)));
-  const send = (m) => conn.write(JSON.stringify(m) + "\n");
+  /** One host's connection: what the extension says, in order, and saying
+   *  something back. */
+  const wire = (conn) => {
+    const inbox = [];
+    const waiters = [];
+    let line = "";
+    conn.on("data", (d) => {
+      line += d.toString("utf8");
+      let i;
+      while ((i = line.indexOf("\n")) >= 0) {
+        const m = JSON.parse(line.slice(0, i));
+        line = line.slice(i + 1);
+        const w = waiters.shift();
+        if (w) w(m);
+        else inbox.push(m);
+      }
+    });
+    return {
+      next: () => (inbox.length ? Promise.resolve(inbox.shift()) : new Promise((r) => waiters.push(r))),
+      send: (m) => conn.write(JSON.stringify(m) + "\n"),
+    };
+  };
+  const { next, send } = wire(await nextConn());
+  await developerMode(profile);
   let callId = 0;
   const call = async (cmd, args = {}) => {
     const id = ++callId;
@@ -161,7 +179,9 @@ async function main() {
 
   // Who it is, and the proof.
   const hello = await next();
-  expect(hello.type === "hello" && hello.protocol === fixture.protocol && /^[0-9A-F]{4}(-[0-9A-F]{4}){3}$/.test(hello.label), "says hello with its key and code");
+  expect(hello.type === "hello" && hello.protocol === fixture.protocol && hello.revision === helper.revision && /^[0-9A-F]{4}(-[0-9A-F]{4}){3}$/.test(hello.label), "says hello with its key, code and revision");
+  // Desk Helper built with this revision: nothing to do.
+  send(helper.to_chrome.expects);
   const nonce = Buffer.from(webcrypto.getRandomValues(new Uint8Array(32))).toString("base64");
   send({ type: "challenge", nonce, state: "pending" });
   const proof = await next();
@@ -218,8 +238,60 @@ async function main() {
   expect(closed.ok && closed.value.closed === true, "closes its own tab");
   const stopped = await call("stop");
   expect(stopped.ok, "Stop closes Desk's window");
+
+  // A Desk Helper built after this extension: the unpacked build reloads
+  // itself from disk, once, and Chrome starts it again by itself.
+  const newer = helper.revision + 1;
+  // Not rebuilt yet: it waits, and keeps its one try.
+  send({ type: "expects", revision: newer });
+  const waits = await next();
+  expect(waits.type === "updating" && waits.outcome === "unbuilt", "an older unpacked build waits while its folder isn't rebuilt");
+  // Rebuilt (as far as it can tell): it finds that by itself, on this same
+  // connection, and reloads into it.
+  built = readFileSync(onDisk, "utf8");
+  writeFileSync(onDisk, JSON.stringify({ revision: newer }));
+  const told = await next();
+  expect(told.type === "updating" && told.revision === newer && told.outcome === "reloading", "an older unpacked build says it's reloading itself");
+  const back = wire(await nextConn());
+  const again = await back.next();
+  expect(again.type === "hello" && again.revision === helper.revision && again.key === hello.key, "it comes back by itself after the reload, the same profile");
+  back.send({ type: "expects", revision: newer });
+  const second = await back.next();
+  expect(second.type === "updating" && second.outcome === "tried", "the same old files after a reload are said, not reloaded again");
   clearTimeout(timer);
   await finish(0);
+}
+
+/** Developer mode on, as it is in a Chrome a person loaded an unpacked
+ *  build into: Chrome turns off an unpacked build that reloads itself
+ *  without it. Set from chrome://extensions, over the DevTools protocol. */
+async function developerMode(profile) {
+  let port;
+  for (let i = 0; i < 50 && !port; i++) {
+    try {
+      port = readFileSync(join(profile, "DevToolsActivePort"), "utf8").split("\n")[0];
+    } catch {
+      await new Promise((r) => setTimeout(r, 100));
+    }
+  }
+  const page = await (await fetch(`http://127.0.0.1:${port}/json/new?chrome://extensions`, { method: "PUT" })).json();
+  const ws = new WebSocket(page.webSocketDebuggerUrl);
+  await new Promise((r) => ws.addEventListener("open", r));
+  const ask = (id, expression) =>
+    new Promise((r) => {
+      ws.addEventListener("message", (e) => {
+        const m = JSON.parse(e.data);
+        if (m.id === id) r(m.result?.result?.value);
+      });
+      ws.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } }));
+    });
+  for (let i = 1; i < 50; i++) {
+    const on = await ask(i, "chrome.developerPrivate ? chrome.developerPrivate.updateProfileConfiguration({ inDeveloperMode: true }).then(() => chrome.developerPrivate.getProfileConfiguration()).then((c) => c.inDeveloperMode) : false");
+    if (on === true) break;
+    await new Promise((r) => setTimeout(r, 100));
+  }
+  ws.close();
+  await fetch(`http://127.0.0.1:${port}/json/close/${page.id}`).catch(() => undefined);
 }
 
 /** An unpacked extension's id: from its folder's path. */
