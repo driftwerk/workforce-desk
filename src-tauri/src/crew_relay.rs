@@ -79,6 +79,9 @@ const START_FIELDS: &[&str] = &[
 ];
 /// The most of a session's last reply read back.
 const MOST_REPLY: usize = 2000;
+/// How long Desk's plugin folder on a machine is waited for (read over
+/// SSH once).
+const PLUGIN_FOR: Duration = Duration::from_secs(8);
 /// The largest list of a machine's sessions read.
 const MOST_SESSIONS: usize = 8 * 1024 * 1024;
 
@@ -386,27 +389,61 @@ async fn carry_desk<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &
         if r.status != 200 {
             return refusal(name, &r);
         }
-        let Some(listed) = serde_json::from_str::<Value>(&r.body).ok().and_then(|v| {
+        let Some(mut listed) = serde_json::from_str::<Value>(&r.body).ok().and_then(|v| {
             v.as_array()
                 .map(|l| l.iter().filter_map(session_of).collect::<Vec<_>>())
         }) else {
             return refused(format!("{name}'s sessions couldn't be read"));
         };
-        let answer = json!({"status": "ok", "body": listed});
-        if answer.to_string().len() > MOST_BODY {
-            return refused(format!("{name} has too many sessions to read at once"));
+        // Too much to post: the replies shortened, then left out, before
+        // the list is.
+        for most in [MOST_REPLY, 200, 0] {
+            for s in &mut listed {
+                if let Some(r) = s["lastReply"].as_str() {
+                    s["lastReply"] = match most {
+                        0 => Value::Null,
+                        m => r.chars().take(m).collect::<String>().into(),
+                    };
+                }
+            }
+            let answer = json!({"status": "ok", "body": listed});
+            if answer.to_string().len() <= MOST_BODY {
+                return Outcome::Answer(answer);
+            }
         }
-        return Outcome::Answer(answer);
+        return refused(format!("{name} has too many sessions to read at once"));
     }
     let Some(given) = call.input.as_object() else {
         return refused("That start couldn't be read.".to_string());
     };
+    // Each as text, as New session says it.
+    if let Some(k) = START_FIELDS.iter().find(|k| {
+        given
+            .get(**k)
+            .is_some_and(|v| !v.is_string() && !v.is_null())
+    }) {
+        return refused(format!("That start's {k} couldn't be read."));
+    }
     let mut start: serde_json::Map<String, Value> = START_FIELDS
         .iter()
         .filter_map(|k| given.get(*k).map(|v| ((*k).to_string(), v.clone())))
         .collect();
-    if let Some(dir) = ends.plugin_dir(machine).await {
-        start.insert("env".into(), json!({"CLAUDE_CODE_PLUGIN_DIRS": dir}));
+    // Claude Code without Desk's plugin would tell Desk nothing of its
+    // turns: nothing is started until the folder is known.
+    let claude = given
+        .get("engine")
+        .and_then(Value::as_str)
+        .is_none_or(|e| e == "claude");
+    match tokio::time::timeout(PLUGIN_FOR, ends.plugin_dir(machine)).await {
+        Ok(Some(dir)) => {
+            start.insert("env".into(), json!({"CLAUDE_CODE_PLUGIN_DIRS": dir}));
+        }
+        _ if claude => {
+            return refused(format!(
+                "Desk couldn't read where its plugin is on {name}, so it started nothing there; it tries again."
+            ));
+        }
+        _ => {}
     }
     let Ok(body) = serde_json::to_vec(&start) else {
         return unreached(name);
@@ -1005,13 +1042,67 @@ mod tests {
             none_in(&mut rx, 300).await;
             let _ = stop.send(true);
         }
-        // Each start went once, with no plugin folder to give.
+        // Each start went once, with no plugin folder to give (Codex needs none).
         let sent = fake.desk_sent.lock().unwrap().clone();
         assert_eq!(sent.len(), 3);
         assert!(
             sent.iter()
                 .all(|(_, b)| b.as_ref().is_some_and(|b| b.get("env").is_none()))
         );
+    }
+
+    /// Claude Code is never started there without Desk's plugin, nor a
+    /// start whose fields aren't text.
+    #[tokio::test]
+    async fn a_plans_start_without_its_plugin_or_with_odd_fields_sends_nothing() {
+        let (fake, mut rx) = with_desk(vec![], None);
+        let stop = start(&fake.polled(vec![
+            desk_call(
+                A,
+                "desk.session_start",
+                json!({"engine": "claude", "name": "VEL-1", "cwd": "/x"}),
+            ),
+            desk_call(
+                B,
+                "desk.session_start",
+                json!({"engine": "codex", "name": "VEL-2", "cwd": ["/x"]}),
+            ),
+        ]));
+        let mut got = [next(&mut rx).await, next(&mut rx).await];
+        got.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(got[0].0, A);
+        assert!(
+            got[0].1["body"]["error"]
+                .as_str()
+                .unwrap()
+                .contains("plugin"),
+            "{got:?}"
+        );
+        assert_eq!(
+            got[1].1,
+            json!({"status": "refused", "body": {"error": "That start's cwd couldn't be read."}})
+        );
+        assert!(fake.desk_sent.lock().unwrap().is_empty());
+        let _ = stop.send(true);
+    }
+
+    /// A long list is posted with its replies shortened, not refused.
+    #[tokio::test]
+    async fn a_long_listing_shortens_its_replies() {
+        let many: Vec<Value> = (0..400)
+            .map(|i| {
+                json!({"id": format!("1a2b3c4d-0b0a-4909-8807-{i:012}"), "name": "x",
+                       "state": "idle", "lastReply": "y".repeat(3000)})
+            })
+            .collect();
+        let (fake, mut rx) = with_desk(vec![Does::Says(200, Value::Array(many))], None);
+        let stop = start(&fake.polled(vec![desk_call(A, "desk.sessions", json!({}))]));
+        let (_, answer) = next(&mut rx).await;
+        assert_eq!(answer["status"], "ok", "{}", answer["body"]);
+        let listed = answer["body"].as_array().unwrap();
+        assert_eq!(listed.len(), 400);
+        assert!(listed[0]["lastReply"].as_str().unwrap().len() <= 200);
+        let _ = stop.send(true);
     }
 
     /// A plan's listing reads the machine's sessions, each as much as a
