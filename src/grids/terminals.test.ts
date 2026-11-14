@@ -38,10 +38,12 @@ describe("grid terminals", () => {
     expect(env).toEqual({ CLAUDE_CODE_PLUGIN_DIRS: "/Applications/Desk.app/Contents/Resources/claude-plugin" });
   });
 
-  it("say what runs in them, and recognise Codex by its process", () => {
+  it("say what runs in them, and recognise Codex and Devin by their processes", () => {
     expect(describeTerminal(terminal("a"), undefined)).toMatchObject({ shell: "zsh", running: null, codex: false });
     expect(describeTerminal(terminal("a"), ["zsh", "node", "codex"])).toMatchObject({ shell: "zsh", running: "node", codex: true });
     expect(describeTerminal(terminal("a"), ["zsh", "claude", "sh"])).toMatchObject({ running: "claude", claude: true });
+    expect(describeTerminal(terminal("a"), ["zsh", "devin"])).toMatchObject({ running: "devin", devin: true, codex: false, claude: false });
+    expect(describeTerminal(terminal("a"), ["zsh", "devinish"])).toMatchObject({ devin: false });
   });
 
   it("know the session a terminal hosts while it runs", () => {

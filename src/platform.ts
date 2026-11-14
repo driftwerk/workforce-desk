@@ -411,12 +411,16 @@ export type InstallProgress =
    *  `details` is what the installer last printed. */
   | { state: "failed"; message: string; command?: string; hint?: string; details?: string };
 
+/** A CLI Desk installs on this computer: the one a plan signs in with
+ *  (`claude`, `chatgpt` for `codex`), or an engine's own (`devin`). */
+export type CliName = PlanName | "devin";
+
 /** Whether the CLI a plan signs in with (`claude`, `codex`) is on this computer. */
-export const cliInstalled = (plan: PlanName): Promise<boolean> => invoke("cli_installed", { plan });
+export const cliInstalled = (plan: CliName): Promise<boolean> => invoke("cli_installed", { plan });
 /** Runs its official installer; progress arrives through `onInstallProgress`. */
-export const installCli = (plan: PlanName): Promise<void> => invoke("cli_install", { plan });
-export const onInstallProgress = (f: (plan: PlanName, p: InstallProgress) => void): Promise<() => void> =>
-  listen<{ plan: PlanName } & InstallProgress>("cli-install", (e) => {
+export const installCli = (plan: CliName): Promise<void> => invoke("cli_install", { plan });
+export const onInstallProgress = (f: (plan: CliName, p: InstallProgress) => void): Promise<() => void> =>
+  listen<{ plan: CliName } & InstallProgress>("cli-install", (e) => {
     const { plan, ...progress } = e.payload;
     f(plan, progress as InstallProgress);
   });

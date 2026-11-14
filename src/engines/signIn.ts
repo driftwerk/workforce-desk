@@ -1,6 +1,7 @@
 // Signing an engine in, the same on this computer and on each machine:
 // Claude through a Desk account (`claude setup-token`, run by that engine's
-// hub), ChatGPT through Codex's device page (also run by that hub). Where
+// hub), ChatGPT through Codex's device page and Devin through its own page
+// (each also run by that hub). Where
 // it runs is the only difference: on a machine the page opens here, and
 // Claude's page comes back to the machine through Desk's forward of its one
 // port for as long as the sign-in runs.
@@ -8,7 +9,8 @@
 // Every wait has a limit, and every failure says why, with Try again:
 // - 30 s for the sign-in's page to open (Claude's, or Codex's device code);
 // - 10 minutes for the person to approve Claude's sign-in;
-// - 15 minutes for Codex's code to be typed (as long as the code lasts).
+// - 15 minutes for Codex's code to be typed (as long as the code lasts);
+// - 10 minutes for the person to sign in on Devin's page.
 // A sign-in that runs out of time is stopped on its hub.
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -361,12 +363,16 @@ export function useClaudeSignIn(machine: MachineId, where: Where, native: Machin
 /** What a refused code says: Claude's own words, and what to do. */
 export const codeRefused = (why: string): string => `That code didn’t work: ${why.replace(/\.$/, "")}. Open the page again for a new one.`;
 
-/** Codex's device sign-in, as the engine's hub runs it. */
-export const codexRoutes = (hub: DeskHub) => ({
-  start: () => hub.startEngineSignIn("codex"),
+/** An engine's own sign-in, as the engine's hub runs it: Codex's device
+ *  page, Devin's page (with a token to paste back when `manual`). */
+export const engineRoutes = (hub: DeskHub, engine: "codex" | "devin", opts: { manual?: boolean } = {}) => ({
+  start: () => (opts.manual ? hub.startEngineSignIn(engine, { manual: true }) : hub.startEngineSignIn(engine)),
   read: (id: string) => hub.engineSignIn(id),
   cancel: (id: string) => hub.cancelEngineSignIn(id),
 });
+
+/** Codex's device sign-in, as the engine's hub runs it. */
+export const codexRoutes = (hub: DeskHub) => engineRoutes(hub, "codex");
 
 export type CodexRun =
   | { at: "idle" }
@@ -434,6 +440,10 @@ export function useCodexSignIn(machine: MachineId, where: Where, native: Machine
           return done.current?.();
         case "failed":
           return setRun({ at: "failed", why: s.why });
+        // Devin's; Codex never says them.
+        case "page":
+        case "paste":
+          return;
       }
     },
     [openPage, live],
@@ -515,4 +525,193 @@ export function useCodexSignIn(machine: MachineId, where: Where, native: Machine
   const reset = () => setRun({ at: "idle" });
 
   return { run, begin, cancel, openPage, reset, busy: run.at === "opening" || run.at === "device" };
+}
+
+export type DevinRun =
+  | { at: "idle" }
+  /** Begun: its page isn't up yet (30 s). */
+  | { at: "opening"; id: string | null }
+  /** Its page is open: Devin carries on by itself once the person signs in
+   *  there (10 minutes), or (`paste`) the page gives a token to paste here.
+   *  `why`: a token that didn't go, said beside its field. */
+  | { at: "page"; id: string; url: string; paste: boolean; why: string | null }
+  | { at: "done" }
+  | { at: "failed"; why: string };
+
+export const devinNotOpened = (where: Where): string => `Devin’s sign-in page didn’t open within 30 s: Devin on ${where} didn’t answer.`;
+export const devinNotSigned = "Nobody signed in on Devin’s page within 10 minutes, so Desk stopped it.";
+/** What a token the hub refused says, by why it refused it (`status`): a
+ *  token that wasn't one (400) is pasted again as the page shows it; a
+ *  sign-in no longer waiting for one (409) needs the page again. */
+export const tokenRefused = (why: string, status?: number): string => {
+  if (status === 400) return "That token didn’t go through. Paste the token exactly as the page shows it.";
+  const said = `That token didn’t go through: ${why.replace(/\.$/, "")}.`;
+  if (status === 409) return `${said} Open the page again for a new one.`;
+  return said;
+};
+
+/** Signing in to Devin on `machine`'s engine, by Devin's own sign-in run by
+ *  its hub: its page opened here once it's checked to be Devin's own, and
+ *  on a machine (no browser there) the token the page gives pasted back.
+ *  The token is sent at once and kept nowhere: not in the run, nor a log. */
+export function useDevinSignIn(machine: MachineId, where: Where, native: MachineNative = realNative, onDone?: () => void) {
+  const hub = useHubOf(machine);
+  const [run, setRun] = useState<DevinRun>({ at: "idle" });
+  const runNow = useRef(run);
+  runNow.current = run;
+  /** The page opened for each sign-in, once per page it gives. */
+  const opened = useRef<string | null>(null);
+  const live = useLive();
+  const done = useRef(onDone);
+  done.current = onDone;
+  const gen = useRef(0);
+  /** The last begin asked for the token to paste. */
+  const manual = useRef(machine !== LOCAL);
+  const put = (r: DevinRun) => {
+    runNow.current = r;
+    setRun(r);
+  };
+
+  /** Devin's page, opened only once it is checked to be Devin's own; a page
+   *  that won't open stops the sign-in on its hub. */
+  const openPage = useCallback(
+    (url: string, signIn?: string) =>
+      void native.openSignInPage("devin", url).catch((e: unknown) => {
+        const now = runNow.current;
+        const id = signIn ?? (now.at === "page" ? now.id : null);
+        if (hub && id) void hub.cancelEngineSignIn(id).catch(() => undefined);
+        if (!live.current) return;
+        runNow.current = { at: "failed", why: plainError(e) };
+        setRun(runNow.current);
+      }),
+    [native, live, hub],
+  );
+
+  const follow = useCallback(
+    (s: EngineSignIn) => {
+      if (!live.current) return;
+      const now = runNow.current;
+      if (!((now.at === "opening" && (now.id === null || now.id === s.id)) || (now.at === "page" && now.id === s.id))) return;
+      switch (s.state) {
+        case "starting":
+          return setRun((now) => (now.at === "opening" ? { at: "opening", id: s.id } : now));
+        case "page":
+        case "paste": {
+          const page = `${s.id} ${s.url}`;
+          if (opened.current !== page) {
+            opened.current = page;
+            openPage(s.url, s.id);
+          }
+          const paste = s.state === "paste";
+          return setRun((now) => (now.at === "page" && now.id === s.id && now.paste === paste && now.url === s.url ? now : { at: "page", id: s.id, url: s.url, paste, why: now.at === "page" ? now.why : null }));
+        }
+        case "done":
+          put({ at: "done" });
+          return done.current?.();
+        case "failed":
+          return put({ at: "failed", why: s.why });
+        case "device":
+          return;
+      }
+    },
+    [openPage, live],
+  );
+
+  const id = run.at === "page" || run.at === "opening" ? (run.id ?? null) : null;
+  useEffect(() => {
+    if (!hub || !id) return;
+    const t = setInterval(() => {
+      void hub
+        .engineSignIn(id)
+        .then(follow)
+        .catch((e: unknown) => {
+          if (e instanceof HubError && e.status === 404) follow({ id, engine: "devin", state: "failed", why: `The sign-in ended on ${where} before it finished. Start it again.` });
+        });
+    }, SIGN_IN_POLL_MS);
+    return () => clearInterval(t);
+  }, [hub, id, follow, where]);
+
+  // Its limits: 30 s for the page, 10 minutes to sign in there.
+  const phase = run.at === "opening" ? "opening" : run.at === "page" ? `page:${run.id}` : null;
+  useEffect(() => {
+    if (!phase || !hub) return;
+    const t = setTimeout(
+      () => {
+        const now = runNow.current;
+        const stopIt = (signIn: string | null) => {
+          if (signIn) void hub.cancelEngineSignIn(signIn).catch(() => undefined);
+        };
+        if (phase === "opening" && now.at === "opening") {
+          put({ at: "failed", why: devinNotOpened(where) });
+          stopIt(now.id);
+        } else if (phase !== "opening" && now.at === "page") {
+          put({ at: "failed", why: devinNotSigned });
+          stopIt(now.id);
+        }
+      },
+      phase === "opening" ? OPEN_WITHIN_MS : APPROVE_WITHIN_MS,
+    );
+    return () => clearTimeout(t);
+  }, [phase, hub, where]);
+
+  /** Starts it: by the page alone, or (`asked`, and always on a
+   *  machine) with a token to paste back. */
+  const begin = async (asked = false) => {
+    if (!hub) return;
+    const withToken = asked || machine !== LOCAL;
+    const mine = ++gen.current;
+    manual.current = withToken;
+    const was = runNow.current;
+    if (was.at === "opening" || was.at === "page") if (was.id) void hub.cancelEngineSignIn(was.id).catch(() => undefined);
+    opened.current = null;
+    put({ at: "opening", id: null });
+    try {
+      const s = await engineRoutes(hub, "devin", withToken ? { manual: true } : {}).start();
+      if (!live.current || gen.current !== mine) {
+        void hub.cancelEngineSignIn(s.id).catch(() => undefined);
+        return;
+      }
+      follow(s);
+    } catch (e) {
+      if (!live.current || gen.current !== mine) return;
+      put({ at: "failed", why: plainError(e) });
+    }
+  };
+
+  /** Sends the token the page gave, straight to the sign-in. A refused
+   *  token is said, and the field stays (empty). */
+  const sendToken = async (token: string) => {
+    const now = runNow.current;
+    if (!hub || now.at !== "page") return;
+    try {
+      await hub.sendEngineSignInToken(now.id, token.trim());
+      if (live.current) setRun((r) => (r.at === "page" && r.id === now.id ? { ...r, why: null } : r));
+      // The sign-in says when it's done; read it now rather than in a second.
+      void hub
+        .engineSignIn(now.id)
+        .then(follow)
+        .catch(() => undefined);
+    } catch (e) {
+      if (!live.current) return;
+      const status = e instanceof HubError ? e.status : undefined;
+      const why = status === 409 ? "Devin wasn’t waiting for one just then" : plainError(e);
+      setRun((r) => (r.at === "page" && r.id === now.id ? { ...r, why: tokenRefused(why, status) } : r));
+    }
+  };
+
+  const cancel = () => {
+    gen.current++;
+    put({ at: "idle" });
+    if (hub && id) void hub.cancelEngineSignIn(id).catch(() => undefined);
+  };
+
+  /** "Try again": the same way as the last begin (on a machine, always
+   *  with a token to paste). */
+  const again = () => void begin(manual.current);
+  /** "Paste a token instead": the sign-in again, with a token to paste. */
+  const withToken = () => void begin(true);
+
+  const reset = () => put({ at: "idle" });
+
+  return { run, begin, again, withToken, sendToken, cancel, openPage, reset, busy: run.at === "opening" || run.at === "page" };
 }

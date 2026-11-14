@@ -63,6 +63,8 @@ dirs = { workspace = true }
 libc = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+# Devin's installer starts in a session of its own (`setsid`).
+libc = { workspace = true }
 objc2 = "0.6.5"
 plist = "1.10.3"
 objc2-foundation = "0.3.2"

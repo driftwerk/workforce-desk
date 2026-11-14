@@ -110,19 +110,24 @@
     "path": "/api/desk/accounts/sign-ins/i1"
   },
   {
-    "kind": "machine_http",
+    "kind": "http",
     "method": "POST",
     "path": "/api/desk/engines/sign-ins"
   },
   {
-    "kind": "machine_http",
+    "kind": "http",
     "method": "GET",
     "path": "/api/desk/engines/sign-ins/cx1"
   },
   {
-    "kind": "machine_http",
+    "kind": "http",
     "method": "DELETE",
     "path": "/api/desk/engines/sign-ins/cx1"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/engines/sign-ins/dv1/token"
   },
   {
     "kind": "http",

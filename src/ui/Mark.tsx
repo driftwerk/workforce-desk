@@ -12,8 +12,11 @@ const RING: Partial<Record<Look, string>> = {
   done: "ring-done",
 };
 
+/** An engine's own initials, on its mark. */
+const ENGINE_INITIALS: Partial<Record<string, string>> = { claude: "cc", codex: "cx", devin: "dv" };
+
 export const initialsFor = (name: string, engine?: string): string =>
-  engine === "claude" ? "cc" : engine === "codex" ? "cx" : (firstGrapheme(name.trim()) ?? "?").toUpperCase();
+  (engine ? ENGINE_INITIALS[engine] : undefined) ?? (firstGrapheme(name.trim()) ?? "?").toUpperCase();
 
 /** The board's initials: a person's first and last (`RL` for Richard
  *  Lucas), a session's word starts in small letters (`bo` for brisk-otter). */

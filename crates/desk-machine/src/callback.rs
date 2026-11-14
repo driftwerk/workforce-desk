@@ -82,6 +82,24 @@ pub const CODEX_PAGES: &[SignInPage] = &[SignInPage {
     query: false,
 }];
 
+/// Devin's sign-in page: `devin auth login` opens
+/// `https://app.devin.ai/auth/cli/continue?…` (the path is in the CLI
+/// 3000.12.57's own strings; the host is its default, still to be seen on a
+/// real sign-in).
+pub const DEVIN_PAGES: &[SignInPage] = &[
+    SignInPage {
+        host: "app.devin.ai",
+        paths: &["/auth/cli/continue"],
+        query: true,
+    },
+    // Its Windsurf sign-in, the hub's same list.
+    SignInPage {
+        host: "windsurf.com",
+        paths: &["/windsurf/signin"],
+        query: true,
+    },
+];
+
 /// `said` as one of `pages`, read as a browser reads it (so a `\`, an `@`,
 /// an escape or a `..` can't move its host or path): https, no user,
 /// password, port or fragment, on exactly its host and path. None for
@@ -374,6 +392,26 @@ mod tests {
     #[test]
     fn a_machines_page_is_opened_only_on_its_engines_own_hosts() {
         assert!(sign_in_page("https://auth.openai.com/codex/device", CODEX_PAGES).is_some());
+        assert!(
+            sign_in_page(
+                "https://app.devin.ai/auth/cli/continue?redirect_uri=http%3A%2F%2Flocalhost%3A4321%2Fcallback&state=s",
+                DEVIN_PAGES
+            )
+            .is_some()
+        );
+        for refused in [
+            "https://app.devin.ai/settings",
+            "https://app.devin.ai.evil.com/auth/cli/continue",
+            "https://evil.com/auth/cli/continue",
+            "http://app.devin.ai/auth/cli/continue",
+            "https://app.devin.ai/auth/cli/continue#x",
+            "https://user@app.devin.ai/auth/cli/continue",
+            "https://windsurf.com.evil.com/windsurf/signin",
+            "https://windsurf.com/editor/signin",
+        ] {
+            assert!(sign_in_page(refused, DEVIN_PAGES).is_none(), "{refused}");
+        }
+        assert!(sign_in_page("https://app.devin.ai/auth/cli/continue", CODEX_PAGES).is_none());
         assert!(
             sign_in_page(
                 "https://claude.com/cai/oauth/authorize?code=true",

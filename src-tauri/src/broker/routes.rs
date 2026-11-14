@@ -132,6 +132,13 @@ const HTTP: &[Route] = &[
     route("GET", "/api/desk/features"),
     // Every engine read again at once, after Desk installed or signed one in.
     route("POST", "/api/desk/engines/read"),
+    // An engine's own sign-in, run by its hub: Codex's device page, Devin's
+    // page (this computer has no other way to sign Devin in). A pasted token
+    // is typed into the sign-in, and never read back.
+    route("POST", "/api/desk/engines/sign-ins"),
+    route("GET", "/api/desk/engines/sign-ins/{}"),
+    route("DELETE", "/api/desk/engines/sign-ins/{}"),
+    route("POST", "/api/desk/engines/sign-ins/{}/token"),
     // The person's engine accounts. A pasted sign-in is sent to the hub, and
     // never read back.
     route("GET", "/api/desk/accounts"),
@@ -293,17 +300,13 @@ const HTTP: &[Route] = &[
 ];
 
 /// What the page may ask of a machine's hub besides: the folders there, to
-/// type a session's folder, what runs in one of its terminals (`ps` on
-/// this computer can't see it), and signing Codex in there by its device
-/// page (this computer signs its own Codex in itself).
+/// type a session's folder, and what runs in one of its terminals (`ps` on
+/// this computer can't see it).
 const MACHINE_HTTP: &[Route] = &[
     with_query("GET", "/api/desk/folders", &["path", "hidden"]),
     // Making one there for New session (the hub makes it in its home only).
     route("POST", "/api/desk/folders"),
     route("GET", "/api/desk/terminals/{}/programs"),
-    route("POST", "/api/desk/engines/sign-ins"),
-    route("GET", "/api/desk/engines/sign-ins/{}"),
-    route("DELETE", "/api/desk/engines/sign-ins/{}"),
     // Asked by the native side alone (see NATIVE_ONLY).
     route("GET", "/api/desk/accounts/sign-ins/{}/direct"),
 ];
@@ -370,7 +373,12 @@ const RELAY_LOCAL: &[Route] = &[
     route("GET", "/api/desk/crew/relay"),
     route("POST", "/api/desk/crew/relay/{}"),
 ];
-const RELAY_MACHINE: &[Route] = &[route("POST", "/api/desk/crew/served")];
+/// And a plan's sessions on a machine, as New session's own requests.
+const RELAY_MACHINE: &[Route] = &[
+    route("POST", "/api/desk/crew/served"),
+    route("GET", "/api/desk/sessions"),
+    route("POST", "/api/desk/sessions"),
+];
 
 /// `method target` as one of the relay's requests to this computer's hub.
 pub fn relay_local(method: &str, target: &str) -> Result<Allowed, Refused> {
@@ -866,6 +874,8 @@ mod tests {
         assert!(relay_local("GET", "/api/desk/crew/relay").is_ok());
         assert!(relay_local("POST", &relay).is_ok());
         assert!(relay_machine("POST", "/api/desk/crew/served").is_ok());
+        assert!(relay_machine("GET", "/api/desk/sessions").is_ok());
+        assert!(relay_machine("POST", "/api/desk/sessions").is_ok());
         for (method, target) in [
             ("POST", "/api/desk/crew/relay"),
             ("GET", relay.as_str()),
@@ -876,6 +886,8 @@ mod tests {
                 "/api/desk/accounts/0f0e0d0c-0b0a-4909-8807-060504030201/hand-over",
             ),
             ("GET", "/api/desk/engine-key"),
+            ("GET", "/api/desk/sessions"),
+            ("POST", "/api/desk/sessions"),
         ] {
             assert!(
                 relay_local(method, target).is_err(),
@@ -887,7 +899,16 @@ mod tests {
             ("POST", "/api/desk/crew/served?token=x"),
             ("GET", "/api/desk/crew/relay"),
             ("POST", relay.as_str()),
-            ("GET", "/api/desk/sessions"),
+            ("GET", "/api/desk/sessions?token=x"),
+            (
+                "GET",
+                "/api/desk/sessions/0f0e0d0c-0b0a-4909-8807-060504030201",
+            ),
+            ("DELETE", "/api/desk/sessions"),
+            (
+                "POST",
+                "/api/desk/sessions/0f0e0d0c-0b0a-4909-8807-060504030201/prompt",
+            ),
         ] {
             assert!(
                 relay_machine(method, target).is_err(),
@@ -1118,10 +1139,17 @@ mod tests {
             http("GET", "/api/desk/folders").is_err(),
             "not this computer's"
         );
-        assert!(
-            http("POST", "/api/desk/engines/sign-ins").is_err(),
-            "not this computer's"
-        );
+        // An engine's own sign-in, on this computer as on a machine.
+        for (m, p) in [
+            ("POST", "/api/desk/engines/sign-ins"),
+            ("GET", "/api/desk/engines/sign-ins/e1"),
+            ("DELETE", "/api/desk/engines/sign-ins/e1"),
+            ("POST", "/api/desk/engines/sign-ins/e1/token"),
+        ] {
+            assert!(http(m, p).is_ok() && machine_http(m, p).is_ok(), "{m} {p}");
+        }
+        assert!(http("GET", "/api/desk/engines/sign-ins/e1/token").is_err());
+        assert!(http("POST", "/api/desk/engines/sign-ins/e1/token/x").is_err());
         for (m, p) in [
             ("GET", "/api/desk/folders?path=x&token=y"),
             ("POST", "/api/desk/folders?path=x"),

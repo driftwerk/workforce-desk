@@ -520,11 +520,14 @@ export type AccountSignIn = {
   directReady?: boolean;
 } & AccountSignInState;
 
-/** An engine's own sign-in where it has no browser (Codex's device
- *  sign-in): the page to open and the code to type there. */
+/** An engine's own sign-in, run by its hub: Codex's device page and the
+ *  code to type there; Devin's page, which finishes by itself (`page`), or
+ *  gives a token to paste back (`paste`, on a computer with no browser). */
 export type EngineSignIn = { id: string; engine: Engine } & (
   | { state: "starting" }
   | { state: "device"; url: string; code: string }
+  | { state: "page"; url: string }
+  | { state: "paste"; url: string }
   | { state: "done" }
   | { state: "failed"; why: string }
 );
