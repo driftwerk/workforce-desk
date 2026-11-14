@@ -535,6 +535,12 @@ const here = (e: ReturnType<typeof devinHub>, n = fakeNative()) => {
   return n;
 };
 
+it("draws Devin's Sign in… as the signal button while it isn't signed in", async () => {
+  here(devinHub());
+  await act(async () => {});
+  expect(within(devinBlock()).getByRole("button", { name: "Sign in…" }).className).toContain("btn-signal");
+});
+
 it("installs Devin on this Mac from its row, by its own installer", async () => {
   installHeard.length = 0;
   const e = devinHub({ installed: false, version: null });

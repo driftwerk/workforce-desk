@@ -10,6 +10,7 @@ import { useDesk } from "../hub/store";
 import { useAccounts } from "../engines/accounts";
 import { useProviders } from "../providers/store";
 import { useSettings } from "../settings/store";
+import { useUi } from "../shell/ui";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 const startLogin = vi.hoisted(() => vi.fn(async (_plan: string, _to?: unknown) => {}));
@@ -89,7 +90,7 @@ it("signs the Claude plan in once for the crew and coding sessions, unless the p
   render(<Providers />);
   await act(async () => {});
   const row = screen.getByText("Claude plan").closest(".prov-row") as HTMLElement;
-  const also = within(row).getByRole("checkbox", { name: "Use this for coding sessions too" }) as HTMLInputElement;
+  const also = within(row).getByRole("checkbox", { name: "Also sign in Claude Code sessions with this plan" }) as HTMLInputElement;
   expect(also.checked).toBe(true);
   await act(async () => fireEvent.click(within(row).getByRole("button", { name: "Connect" })));
   expect(startLogin).toHaveBeenLastCalledWith("claude", { agents: true, account: { name: "Claude", makeDefault: true } });
@@ -99,6 +100,14 @@ it("signs the Claude plan in once for the crew and coding sessions, unless the p
   // ChatGPT's sign-in is the agents' alone.
   const chatgpt = screen.getByText("ChatGPT plan").closest(".prov-row") as HTMLElement;
   expect(within(chatgpt).queryByRole("checkbox")).toBeNull();
+});
+
+it("names its plans as the agents', and sends coding sessions' sign-in to Engines", async () => {
+  render(<Providers />);
+  await act(async () => {});
+  expect(screen.getByRole("heading", { name: "Plans your agents use" })).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Engines" }));
+  expect(useUi.getState().settings).toBe("engines");
 });
 
 it("won't make a second crew member of a name already on this computer, its case aside", async () => {
@@ -176,19 +185,19 @@ it("signs the Claude plan in once from an agent's brain too, with coding session
   const { ConnectForm } = await import("../providers/ConnectForm");
   render(<ConnectForm provider={plan("claude-code", "Claude plan", false)} submitLabel="Connect" />);
   await act(async () => {});
-  const also = screen.getByRole("checkbox", { name: "Use this for coding sessions too" }) as HTMLInputElement;
+  const also = screen.getByRole("checkbox", { name: "Also sign in Claude Code sessions with this plan" }) as HTMLInputElement;
   expect(also.checked).toBe(true);
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sign in to Claude" })));
   expect(startLogin).toHaveBeenLastCalledWith("claude", { agents: true, account: { name: "Claude", makeDefault: true } });
   cleanup();
   render(<ConnectForm provider={plan("claude-code", "Claude plan", false)} submitLabel="Connect" />);
   await act(async () => {});
-  fireEvent.click(screen.getByRole("checkbox", { name: "Use this for coding sessions too" }));
+  fireEvent.click(screen.getByRole("checkbox", { name: "Also sign in Claude Code sessions with this plan" }));
   await act(async () => fireEvent.click(screen.getByRole("button", { name: "Sign in to Claude" })));
   expect(startLogin).toHaveBeenLastCalledWith("claude", { agents: true, account: null });
   // ChatGPT's is the agents' alone: no such choice.
   cleanup();
   render(<ConnectForm provider={plan("chatgpt", "ChatGPT plan", false)} submitLabel="Connect" />);
   await act(async () => {});
-  expect(screen.queryByRole("checkbox", { name: "Use this for coding sessions too" })).toBeNull();
+  expect(screen.queryByRole("checkbox", { name: "Also sign in Claude Code sessions with this plan" })).toBeNull();
 });

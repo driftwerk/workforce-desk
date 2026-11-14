@@ -286,6 +286,7 @@ describe("Settings search", () => {
     expect(searchSections("calls")[0]).toBe("voices");
     expect(searchSections("machines")[0]).toBe("machines");
     expect(searchSections("github")).toEqual(["connections"]);
+    expect(searchSections("devin")).toEqual(["engines"]);
     expect(searchSections("api key")[0]).toBe("providers");
     expect(searchSections("set up")).toEqual(["help"]);
     expect(searchSections("zzz")).toEqual([]);

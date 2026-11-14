@@ -184,7 +184,7 @@ export function EngineBlocks({
               </button>
             )}
             {e.engine === "devin" && e.installed && e.signIn.state !== "in" && devin.run.at === "idle" && (
-              <button type="button" className="btn btn-sm engine-head-action" onClick={() => void devin.begin()}>
+              <button type="button" className="btn btn-sm btn-signal engine-head-action" onClick={() => void devin.begin()}>
                 Sign in…
               </button>
             )}

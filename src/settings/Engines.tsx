@@ -3,6 +3,7 @@ import { LOCAL, useMachines, type MachineId } from "../machines/engines";
 import type { MachineNative } from "../machines/native";
 import { offlineWord, thisComputer, usable } from "../machines/words";
 import { useHost } from "../shell/host";
+import { useUi } from "../shell/ui";
 import { EngineBlocks } from "./EngineBlocks";
 
 /** Settings → Engines: the engines on the computer Desk's sessions run
@@ -21,7 +22,14 @@ export function Engines({ native, on }: { native?: MachineNative; on?: MachineId
   return (
     <section className="settings-pane" aria-label="Engines">
       <h1 className="display-lg">Engines</h1>
-      <p className="muted">The coding CLIs on the computer Desk’s sessions run on. Desk reads each one’s version and sign-in every hour.</p>
+      <p className="muted">The coding tools Desk starts sessions in, with their install and sign-in: Claude Code, Codex and Devin. Desk reads each one’s version and sign-in every hour.</p>
+      <p className="small faint">
+        What your agents think with (plans, API keys, local models) is under{" "}
+        <button type="button" className="link small" onClick={() => useUi.getState().openSettings("providers")}>
+          Providers
+        </button>
+        .
+      </p>
       {machines.length > 0 && (
         <div className="field">
           <span className="ov-label muted">On</span>
