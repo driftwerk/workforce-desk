@@ -134,9 +134,11 @@ struct Call {
     level: Value,
     #[serde(default)]
     act: Value,
-    /// When the hub stops waiting for its answer (RFC 3339), when it says.
+    /// When the hub stops waiting for its answer (RFC 3339), when it says;
+    /// kept as it came, so one that isn't a time is said, not a call that
+    /// can't be read.
     #[serde(default)]
-    deadline: Option<String>,
+    deadline: Option<Value>,
 }
 
 impl Call {
@@ -158,15 +160,21 @@ impl Call {
     /// [`MARGIN`], at most `carry_for`; `None` when too little is left to
     /// send it at all.
     fn time(&self, carry_for: Duration, now: SystemTime) -> Option<Duration> {
-        let Some(deadline) = self.deadline.as_deref() else {
-            return Some(carry_for);
+        let deadline = match &self.deadline {
+            None | Some(Value::Null) => return Some(carry_for),
+            Some(d) => d.as_str(),
         };
-        let Ok(at) = chrono::DateTime::parse_from_rfc3339(deadline) else {
+        let Some(at) = deadline.and_then(|d| chrono::DateTime::parse_from_rfc3339(d).ok()) else {
             tracing::warn!(id = %self.id, "a relayed call's deadline couldn't be read");
             return Some(carry_for);
         };
-        let at = SystemTime::from(at.with_timezone(&chrono::Utc));
-        let left = at.duration_since(now).unwrap_or_default();
+        // In chrono's own terms, which hold any date (`SystemTime` may not
+        // on every platform).
+        let left = at
+            .with_timezone(&chrono::Utc)
+            .signed_duration_since(chrono::DateTime::<chrono::Utc>::from(now))
+            .to_std()
+            .unwrap_or_default();
         // Never past `carry_for`, whatever this computer's clock does.
         (left >= LEAST_LEFT).then(|| (left - MARGIN).min(carry_for))
     }
@@ -734,17 +742,17 @@ mod tests {
         tx
     }
 
-    /// Calls carried for 3 s, and the time of one with [`waits`]' deadline
-    /// (1.6 s): one waiting runs out before those it waits on.
+    /// Calls carried for 4 s, and the time of one with [`waits`]' deadline
+    /// (2.2 s): one waiting runs out well before those it waits on.
     fn longer() -> Timing {
         Timing {
-            carry_for: Duration::from_secs(3),
+            carry_for: Duration::from_secs(4),
             ..quick()
         }
     }
 
     fn waits() -> String {
-        chrono::DateTime::<chrono::Utc>::from(SystemTime::now() + Duration::from_millis(3600))
+        chrono::DateTime::<chrono::Utc>::from(SystemTime::now() + Duration::from_millis(4200))
             .to_rfc3339()
     }
 
@@ -1091,6 +1099,26 @@ mod tests {
         assert_eq!(fake.sent().len(), 20);
     }
 
+    /// A call's turns are given back before its answer is posted: while
+    /// posts hang, more calls than its machine's share are all sent at
+    /// once.
+    #[tokio::test]
+    async fn turns_are_given_back_before_the_answer_is_posted() {
+        let (fake, _rx) = Fake::with(&[("devbox", vec![says(json!({}))])]);
+        *fake.posts.lock().unwrap() = vec![Does::Hangs; 64].into();
+        let calls = (0..7)
+            .map(|i| call(&format!("0f0e0d0c-0b0a-4909-8807-06050403020{i}"), "devbox"))
+            .collect();
+        let slow_posts = Timing {
+            post_try: Duration::from_secs(5),
+            post_for: Duration::from_secs(5),
+            ..quick()
+        };
+        let _stop = start_with(&fake.polled(calls), slow_posts);
+        tokio::time::sleep(Duration::from_millis(1000)).await;
+        assert_eq!(fake.sent().len(), 7);
+    }
+
     /// A machine that never answers is given up on when the call's time
     /// runs out, and nothing is posted (it may have done it).
     #[tokio::test]
@@ -1108,9 +1136,9 @@ mod tests {
     async fn the_hubs_deadline_bounds_a_call() {
         let (fake, mut rx) = Fake::with(&[("devbox", vec![Does::Hangs])]);
         let mut late = call(A, "devbox");
-        late["deadline"] = json!(in_secs(2));
+        late["deadline"] = json!(in_secs(1));
         let mut soon = call(B, "devbox");
-        soon["deadline"] = json!(in_secs(4));
+        soon["deadline"] = json!(in_secs(6));
         let _stop = start(&fake.polled(vec![late, soon]));
         let (id, a) = next(&mut rx).await;
         assert_eq!(id, A);
@@ -1121,7 +1149,7 @@ mod tests {
                 .unwrap()
                 .contains("no time left")
         );
-        // B's time is its deadline less the margin (about 2 s), held to
+        // B's time is its deadline less the margin (about 4 s), held to
         // `carry_for` (1 s).
         tokio::time::sleep(Duration::from_millis(1300)).await;
         assert_eq!(fake.sent().len(), 1, "only B was sent");
@@ -1134,7 +1162,7 @@ mod tests {
     fn a_calls_time_is_the_hubs_deadline_less_the_margin_or_carry_for() {
         let now = SystemTime::now();
         let with = |d: Option<&str>| Call {
-            deadline: d.map(str::to_string),
+            deadline: d.map(|d| json!(d)),
             ..serde_json::from_value::<Call>(call(A, "devbox")).unwrap()
         };
         let carry_for = Duration::from_secs(25);
@@ -1158,6 +1186,25 @@ mod tests {
         assert_eq!(with(Some(&in2)).time(carry_for, now), None);
         let past = chrono::DateTime::<chrono::Utc>::from(now - Duration::from_secs(5)).to_rfc3339();
         assert_eq!(with(Some(&past)).time(carry_for, now), None);
+        // Any date at all, however far back.
+        assert_eq!(
+            with(Some("0001-01-01T00:00:00Z")).time(carry_for, now),
+            None
+        );
+        assert_eq!(
+            with(Some("9999-12-31T23:59:59Z")).time(carry_for, now),
+            Some(carry_for)
+        );
+        // A deadline that isn't a time, or isn't a string, is said and
+        // `carry_for` used; the call is still read.
+        let mut odd = call(A, "devbox");
+        odd["deadline"] = json!(5);
+        let odd: Call = serde_json::from_value(odd).unwrap();
+        assert_eq!(odd.time(carry_for, now), Some(carry_for));
+        let mut null = call(A, "devbox");
+        null["deadline"] = Value::Null;
+        let null: Call = serde_json::from_value(null).unwrap();
+        assert_eq!(null.time(carry_for, now), Some(carry_for));
     }
 
     /// A refusal after a send that may have reached the machine isn't
