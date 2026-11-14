@@ -204,6 +204,8 @@ describe("each window's capabilities", () => {
       "boss_pause",
       "boss_resume",
       "boss_unlink",
+      "boss_retry",
+      "boss_unpause_engine",
     ])
       expect(grid.has(c), c).toBe(false);
     expect(capability("grid").windows).toEqual(["grid-*"]);
