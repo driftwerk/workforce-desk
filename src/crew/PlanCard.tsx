@@ -34,6 +34,7 @@ import {
   type PlanChanges,
 } from "./plan";
 import { usePlans } from "./planStore";
+import { openPlanOnBoard } from "./PlanRow";
 
 /** The engines a plan's ticket may run on, as the hub reads this computer:
  *  each with why it can't, when it can't. */
@@ -106,8 +107,10 @@ function EngineSelect({ value, choices, label, disabled, onChange }: { value: En
 /** A boss's plan as its DM shows it: posted by the boss when it proposed or
  *  changed it. The newest card posted for a plan shows it whole (its goal,
  *  waves, each ticket's engine and folder, where it stands, and what the
- *  person may do with it); older ones say only what that revision changed. */
-export function PlanCard({ mentioned, text }: { mentioned: { id: string; revision: number }; text?: string }) {
+ *  person may do with it); older ones say only what that revision changed.
+ *  `onBoard`: the plan's lasting card on its board, always whole, and no
+ *  card of the DM's (so it never makes theirs older). */
+export function PlanCard({ mentioned, text, onBoard = false }: { mentioned: { id: string; revision: number }; text?: string; onBoard?: boolean }) {
   const { id } = mentioned;
   const supported = usePlans((s) => s.supported);
   const detail = usePlans((s) => s.details[id]);
@@ -116,7 +119,7 @@ export function PlanCard({ mentioned, text }: { mentioned: { id: string; revisio
   const posted = usePlans((s) => s.cards[id]);
   const hub = useDesk((s) => s.hub);
 
-  useEffect(() => usePlans.getState().showCard(id, mentioned.revision), [id, mentioned.revision]);
+  useEffect(() => (onBoard ? undefined : usePlans.getState().showCard(id, mentioned.revision)), [id, mentioned.revision, onBoard]);
   useEffect(() => {
     if (hub && supported !== false && !usePlans.getState().details[id]) void usePlans.getState().fetch(id);
   }, [hub, supported, id]);
@@ -132,8 +135,8 @@ export function PlanCard({ mentioned, text }: { mentioned: { id: string; revisio
     );
   }
   const plan = { ...detail, ...(summary && summary.updatedAt >= detail.updatedAt ? summary : {}) };
-  if (!liveCard(posted ?? [], mentioned.revision)) return <RevisionNotice detail={detail} plan={plan} revision={mentioned.revision} text={text} />;
-  return <WholePlan detail={detail} plan={plan} />;
+  if (!onBoard && !liveCard(posted ?? [], mentioned.revision)) return <RevisionNotice detail={detail} plan={plan} revision={mentioned.revision} text={text} />;
+  return <WholePlan detail={detail} plan={plan} onBoard={onBoard} />;
 }
 
 /** An older card of a plan: what that revision changed, by whom. */
@@ -154,7 +157,7 @@ function RevisionNotice({ detail, plan, revision, text }: { detail: BossPlanDeta
 
 type Asking = null | "approve" | "turnDown" | "continue" | "pause" | "resume" | "drop" | "save" | "engine";
 
-function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan }) {
+function WholePlan({ detail, plan, onBoard }: { detail: BossPlanDetail; plan: BossPlan; onBoard: boolean }) {
   const board = useBoard((s) => s.tickets);
   const boardName = useBoard((s) => s.boards[plan.board]?.name);
   const boss = useLocalAgent(plan.boss)?.name || plan.bossName || "The boss";
@@ -208,7 +211,8 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
   const ticketsRef = useRef<HTMLDivElement>(null);
   // Its budget and Approve: seen too, so the cap is never approved unseen.
   const footRef = useRef<HTMLDivElement>(null);
-  const looking = usePlans((s) => !!s.looking[plan.id]);
+  // The Floor's Look scrolls to the DM's card, never the board's.
+  const looking = usePlans((s) => !!s.looking[plan.id]) && !onBoard;
   useEffect(() => {
     const el = changeRef.current ?? ticketsRef.current;
     const foot = footRef.current;
@@ -313,9 +317,17 @@ function WholePlan({ detail, plan }: { detail: BossPlanDetail; plan: BossPlan })
             rev {detail.revision}
           </span>
         </div>
-        <span className="muted small">
-          {[boardName ? `Board: ${boardName}` : null, `${boss}'s plan`].filter(Boolean).join(" · ")}
-        </span>
+        <div className="pc-meta">
+          <span className="muted small">
+            {[boardName ? `Board: ${boardName}` : null, `${boss}'s plan`].filter(Boolean).join(" · ")}
+          </span>
+          {/* A dropped plan is on no board's list of plans. */}
+          {!onBoard && plan.state !== "dropped" && (
+            <button type="button" className="link small pc-open-board" onClick={() => openPlanOnBoard(plan)}>
+              Open on board
+            </button>
+          )}
+        </div>
       </div>
 
       {refusal && (

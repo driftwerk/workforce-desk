@@ -70,7 +70,7 @@ describe("a plan waiting for the person", () => {
     expect(within(c).getByText("~/code/acme-admin")).toBeTruthy();
     expect(within(c).getByText("· needs ACM-21, ACM-22")).toBeTruthy();
     expect(within(c).getByText("4 tickets")).toBeTruthy();
-    expect(within(c).getAllByRole("button").map((b) => b.textContent)).toEqual(["Drop", "Edit", "Approve and run"]);
+    expect(within(c).getAllByRole("button").map((b) => b.textContent)).toEqual(["Open on board", "Drop", "Edit", "Approve and run"]);
   });
 
   it("shows what each ticket starts with, folded away", async () => {
@@ -93,7 +93,7 @@ describe("a plan waiting for the person", () => {
     // Running, it can't be approved again, and its engines no longer change.
     expect(within(card()).queryByRole("button", { name: /Approve/ })).toBeNull();
     expect(within(card()).queryByRole("combobox")).toBeNull();
-    expect(within(card()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Drop", "Edit", "Pause"]);
+    expect(within(card()).getAllByRole("button").map((b) => b.textContent)).toEqual(["Open on board", "Drop", "Edit", "Pause"]);
   });
 
   it("shows the newer revision when the boss changed it first, and asks again", async () => {

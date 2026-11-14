@@ -124,7 +124,7 @@ beforeEach(() => {
   });
   useOverview.setState({ manager: null, managerSupport: "unknown", overviewSupport: "no", suggestions: {}, suggestionsLoaded: true });
   usePlans.setState({ supported: null, plans: {}, details: {}, unread: {}, refusals: {}, cards: {}, seen: {}, looking: {} });
-  useBoard.setState({ boards: {}, tickets: {} });
+  useBoard.setState({ boards: {}, tickets: {}, plan: null, shown: null });
   useFloor.setState({ hubs: {}, deciding: {}, problems: {}, answered: {} });
   stop = watchFloor();
 });
@@ -262,6 +262,74 @@ describe("the board's plan filter", () => {
     expect(screen.getAllByRole("button", { name: /^ACM-2\d: / })).toHaveLength(4);
     fireEvent.change(screen.getByRole("combobox", { name: "Plan" }), { target: { value: "" } });
     expect(screen.getByRole("button", { name: "ACM-7: Tidy the README" })).toBeTruthy();
+  });
+});
+
+describe("a plan's lasting place on its board", () => {
+  const onBoard = async () => {
+    disconnect = useDesk.getState().connect(hub);
+    await act(async () => {
+      await Promise.resolve();
+      hub.events!.say({ type: "snapshot", sessions: [], restore: [], rooms: [] } as DeskEvent);
+    });
+  };
+  const line = () => within(screen.getByRole("group", { name: `Plan: ${hub.plans.plan.goal}` }));
+  const whole = () => screen.queryByRole("article", { name: `Plan: ${hub.plans.plan.goal}` });
+
+  it("shows a line for the plan, which opens to its whole card, and closes", async () => {
+    await onBoard();
+    render(<Board />);
+    await waitFor(() => expect(line().getByText("Waiting for you")).toBeTruthy());
+    expect(line().getByText("0 of 4 done")).toBeTruthy();
+    expect(whole()).toBeNull();
+    fireEvent.click(line().getByRole("button", { name: hub.plans.plan.goal }));
+    // The whole card, with what the DM's has, and the board shows its tickets alone.
+    await waitFor(() => expect(within(whole()!).getByRole("button", { name: "Approve and run" })).toBeTruthy());
+    expect(within(whole()!).queryByRole("button", { name: "Open on board" })).toBeNull();
+    expect((screen.getByRole("combobox", { name: "Plan" }) as HTMLSelectElement).value).toBe(PLAN);
+    fireEvent.click(line().getByRole("button", { name: hub.plans.plan.goal, expanded: true }));
+    expect(whole()).toBeNull();
+    expect((screen.getByRole("combobox", { name: "Plan" }) as HTMLSelectElement).value).toBe("");
+  });
+
+  it("shows the plan's card from the Plan select, and from a ticket's plan chip", async () => {
+    await onBoard();
+    render(<Board />);
+    await waitFor(() => expect(screen.getByRole("combobox", { name: "Plan" })).toBeTruthy());
+    fireEvent.change(screen.getByRole("combobox", { name: "Plan" }), { target: { value: PLAN } });
+    await waitFor(() => expect(whole()).toBeTruthy());
+    fireEvent.change(screen.getByRole("combobox", { name: "Plan" }), { target: { value: "" } });
+    expect(whole()).toBeNull();
+    const ticket20 = await screen.findByRole("button", { name: "ACM-20: Refunds endpoint over Stripe refunds" });
+    fireEvent.click(await within(ticket20).findByText(hub.plans.plan.goal));
+    await waitFor(() => expect(whole()).toBeTruthy());
+    // The chip shows the plan; the ticket's panel isn't opened.
+    expect(useBoard.getState().open).toBeNull();
+  });
+
+  it("pauses and resumes from its line", async () => {
+    hub.plans.approve(1);
+    await onBoard();
+    render(<Board />);
+    await waitFor(() => expect(line().getByText("Running")).toBeTruthy());
+    await act(async () => fireEvent.click(line().getByRole("button", { name: "Pause" })));
+    await waitFor(() => expect(line().getByText("Paused")).toBeTruthy());
+    expect(hub.plans.plan.state).toBe("paused");
+    await act(async () => fireEvent.click(line().getByRole("button", { name: "Resume" })));
+    await waitFor(() => expect(line().getByText("Running")).toBeTruthy());
+  });
+
+  it("opens from the DM's card, which stays whole beside the board's", async () => {
+    await onBoard();
+    render(<DeskActions extras={{ plan: { id: PLAN, revision: 1 } }} text="Sarah proposes a plan." />);
+    await waitFor(() => expect(within(card()).getByText("Waiting for you")).toBeTruthy());
+    fireEvent.click(within(card()).getByRole("button", { name: "Open on board" }));
+    expect(useDesk.getState().view).toBe("board");
+    expect(useBoard.getState().plan).toBe(PLAN);
+    render(<Board />);
+    await waitFor(() => expect(screen.getAllByRole("article", { name: /^Plan: / })).toHaveLength(2));
+    // The DM's card is still the plan's whole card, not an older revision's notice.
+    for (const c of screen.getAllByRole("article", { name: /^Plan: / })) expect(within(c).getByRole("button", { name: /^Approve and run/ })).toBeTruthy();
   });
 });
 
