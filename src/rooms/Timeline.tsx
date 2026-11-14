@@ -315,6 +315,15 @@ export function Timeline({ room, thread }: { room: Room; thread: string | null }
   // Measured as the messages change, the pane scrolls or resizes: not as
   // an answer streams in below them.
   useLayoutEffect(measure, [measure, messages]);
+  useEffect(() => {
+    const el = scroller.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    // The pane itself resizing (the window, the composer taking room)
+    // brings more in sight with no scroll.
+    const ro = new ResizeObserver(() => measure());
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [measure]);
   const shownPill = pill({ shown: messages, read: readThen, lastVisible, window, unread: opened, name: (a) => author(a).name });
   const firstUnread = opened?.first;
   const jump = useCallback(async () => {

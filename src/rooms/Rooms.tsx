@@ -396,7 +396,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
     const r = readAtOpen.current;
     newLine.current = r ? (shown.find((m) => m.role === "assistant" && ms(m.at) > ms(r.at))?.id ?? null) : null;
   }
-  if (!stay.away) {
+  // Only while following the newest: held with the end in sight, what
+  // arrives next may land out of sight before the pill is measured.
+  if (stay.following()) {
     leftAt.current = shown.reduce((t, m) => Math.max(t, ms(m.at)), 0);
     // By id and by what it says: a kept copy that takes a live message's
     // place (another id, the hub's time) isn't new.
