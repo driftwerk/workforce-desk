@@ -619,6 +619,14 @@ mod tests {
         ] {
             assert!(sign_in_page(&devin(away), DEVIN_PAGES).is_none(), "{away}");
         }
+        // The page Devin 3000.12.57 prints for a pasted code: no redirect_uri.
+        assert!(
+            sign_in_page(
+                "https://app.devin.ai/auth/cli/continue?state=Zx8q3V1kQ2&prompt=select_account&code_challenge=Q1w2E3r4T5y6U7i8O9p0A1s2D3f4G5h6J7k8L9z0X1c&code_challenge_method=S256&cli_pkce_marker=1",
+                DEVIN_PAGES
+            )
+            .is_some()
+        );
         assert!(
             sign_in_page(
                 "https://windsurf.com/windsurf/signin?redirect_uri=https%3A%2F%2Fevil.example%2Fcb",
