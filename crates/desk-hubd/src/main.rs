@@ -35,6 +35,8 @@ mod moving;
 #[cfg(unix)]
 mod programs;
 #[cfg(unix)]
+mod rotate;
+#[cfg(unix)]
 mod supervise;
 
 #[cfg(unix)]
