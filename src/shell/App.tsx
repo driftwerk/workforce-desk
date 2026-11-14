@@ -487,8 +487,8 @@ export function App() {
 }
 
 /** The app icon's badge and the restart into a ready update follow most of
- *  Desk's stores (every session, timeline and Floor read): here, what they
- *  read draws nothing again but this, not the whole window. */
+ *  Desk's stores (every session, timeline and Floor read). Run here, a
+ *  change to what they read redraws only this, not the whole window. */
 function Watchers() {
   useAppBadge();
   useRestartWhenIdle();
