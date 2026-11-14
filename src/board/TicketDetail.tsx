@@ -1,11 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { useChat } from "../chat/store";
 import { useSessionName, useSessionNames } from "../groups/names";
 import { below } from "../groups/rows";
 import { useHubLayout } from "../groups/hubLayout";
 import { askMove, ticketSubject } from "../groups/move";
-import { deskListeners, sortedSessions, useDesk, localSessions } from "../hub/store";
-import type { ActivityEvent, ActivityParty, DeskEvent, Ticket, TicketLink, TicketState } from "../hub/types";
+import { sortedSessions, useDesk, localSessions } from "../hub/store";
+import type { ActivityParty, Ticket, TicketState } from "../hub/types";
 import { PopupPanel, SidePanel } from "../panels/Stage";
 import { openUrl } from "../platform";
 import { ticketLink } from "../shell/links";
@@ -14,13 +14,14 @@ import { Confirm } from "../ui/Confirm";
 import { useModal } from "../ui/Dialog";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { plainError } from "../ui/plainError";
-import { clock, dayClock } from "../floor/time";
-import { mergeEvents } from "../overview/activity";
-import { STATE_TITLE, historyLine, sessionsOf, spendOf } from "./board";
+import { dayClock } from "../floor/time";
+import { STATE_TITLE, sessionsOf, spendOf } from "./board";
 import { useWaiting } from "./BoardView";
+import { CalendarIcon, CycleIcon, ExtIcon, LabelChip, PriorityBars, StateGlyph, TypeGlyph } from "./cardFacts";
+import { sprintName } from "./facets";
 import { StartSession } from "./StartSession";
 import { TicketBody } from "./TicketBody";
-import { TicketComments } from "./TicketComments";
+import { TicketActivity } from "./TicketComments";
 import { TicketFiles, useUploads } from "./TicketFiles";
 import { useFileDrop } from "../attachments/Compose";
 import { localTicketView } from "./ticketView";
@@ -28,6 +29,19 @@ import { TicketOpener, TicketPopupContext, useOpenTicket, useTicketPopup, type T
 import { useBoard } from "./store";
 import { Assignee, TakeIt, Upstream } from "./TicketCard";
 import { issueUrl, SYSTEM_TITLE, takeable } from "../hub/boardSync";
+import {
+  bylineText,
+  dayText,
+  factOrder,
+  firstParagraph,
+  foldSections,
+  layoutOf,
+  remoteStateWord,
+  spanText,
+  type FactId,
+  type Layout,
+} from "./ticketRich";
+import { Crumbs, Development, Dotted, LinkedWork, Person, SectionHead, SubItems } from "./TicketSections";
 
 const STATES: TicketState[] = ["backlog", "todo", "doing", "review", "done", "dropped"];
 
@@ -95,54 +109,6 @@ const useTicketSpend = (t: Ticket): Spend | null => {
 };
 
 type Spend = { tokens: number; usd: number; calls: number; capped: boolean };
-
-/** A ticket's history, newest last as it happened; the next page older. */
-const useTicketHistory = (t: Ticket): { events: ActivityEvent[]; more: boolean; older: () => void; problem: string | null } => {
-  const hub = useDesk((s) => s.hub);
-  const [events, setEvents] = useState<ActivityEvent[]>([]);
-  const [more, setMore] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
-  // Older pages shown stay shown as the newest is read again.
-  const olderRead = useRef(false);
-  const changed = t.updatedAt;
-  useEffect(() => {
-    if (!hub) return;
-    let live = true;
-    hub
-      .ticketHistory(t.id)
-      .then((p) => {
-        if (!live) return;
-        setEvents((was) => mergeEvents(was, p.events));
-        if (!olderRead.current) setMore(p.more);
-        setProblem(null);
-      })
-      .catch((e) => live && setProblem(plainError(e)));
-    return () => {
-      live = false;
-    };
-  }, [hub, t.id, changed]);
-  // What happens to it meanwhile, as it happens.
-  useEffect(() => {
-    const listen = (e: DeskEvent) => {
-      if (e.type === "activity" && e.event.ticket === t.id) setEvents((was) => mergeEvents(was, [e.event]));
-    };
-    deskListeners.add(listen);
-    return () => void deskListeners.delete(listen);
-  }, [t.id]);
-  const older = () => {
-    const last = events.at(-1);
-    if (!hub || !last) return;
-    hub
-      .ticketHistory(t.id, last.id)
-      .then((p) => {
-        olderRead.current = true;
-        setEvents((was) => mergeEvents(was, p.events));
-        setMore(p.more);
-      })
-      .catch((e) => setProblem(plainError(e)));
-  };
-  return { events, more, older, problem };
-};
 
 /** The ticket open in its panel, kept current; the panel closes once it's
  *  gone. */
@@ -233,13 +199,29 @@ function TicketFrame({ label, chrome, ...props }: ComponentProps<typeof SidePane
   return <PopupPanel {...props} onClose={popup.close} onSidePanel={popup.toSidePanel} />;
 }
 
-/** A ticket beside the board: its state and who has it, what to do with
- *  it, what it needs and is needed by, its links, and its history with
- *  what it cost. */
+/** How wide the view is, as it resizes: two columns, stacked, or as short
+ *  as it goes. Unmeasured (no ResizeObserver, or not laid out), wide. */
+const useLayout = (): [(el: HTMLElement | null) => void, Layout] => {
+  const [el, setEl] = useState<HTMLElement | null>(null);
+  const [layout, setLayout] = useState<Layout>("wide");
+  // Measured before it paints, so a narrow popup never shows two columns first.
+  useLayoutEffect(() => {
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const measure = () => setLayout(layoutOf(el.getBoundingClientRect().width));
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [el]);
+  return [setEl, layout];
+};
+
+/** A ticket beside the board, or over a grid: where it sits, what it says,
+ *  its sub-items, development, links, files and one timeline of what
+ *  happened to it; beside them (or, narrow, in a band under its title)
+ *  what to do with it, what it needs, and its facts. */
 export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
   const all = useBoard((s) => s.tickets);
-  const sessions = useDesk((s) => localSessions(s.sessions));
-  const waiting = useWaiting()(t);
   const [menu, setMenu] = useState<{ kind: "hand" | "snooze"; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
   const [starting, setStarting] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -251,22 +233,18 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
    *  ticket's as it now is, for them to choose between. */
   const [conflict, setConflict] = useState<{ field: "title" | "body"; mine: string; theirs: string } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
+  const [whole, setWhole] = useState(false);
+  const [measured, layout] = useLayout();
   const handEntries = useHandEntries(t);
-  const spend = useTicketSpend(t);
-  const history = useTicketHistory(t);
   const movable = useHubLayout((s) => s.layout !== null);
-  const names = useSessionNames();
-  const roster = useChat((s) => s.roster);
   const store = useBoard.getState;
 
   const act = (p: Promise<void>) => {
     setProblem(null);
     p.catch((e) => setProblem(plainError(e)));
   };
-  const session = t.assignee?.kind === "session" ? sessions[t.assignee.id] : undefined;
   const board = useBoard((s) => s.boards[t.board]);
   const sync = board?.sync ?? null;
-  const canTake = takeable(board, t);
   const neededBy = useMemo(() => Object.values(all).filter((o) => o.needs.includes(t.id)), [all, t.id]);
   const save = () => {
     const field = editing;
@@ -287,17 +265,15 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
     ...snoozeChoices(new Date()).map((c) => ({ kind: "item" as const, label: c.label, onSelect: () => act(store().edit(t.id, { snoozedUntil: c.until.toISOString() })) })),
     ...(t.snoozedUntil ? [{ kind: "separator" as const }, { kind: "item" as const, label: "Wake it now", onSelect: () => act(store().edit(t.id, { snoozedUntil: null })) }] : []),
   ];
-  const agentName = (id: string) => roster.find((a) => a.id === id)?.name;
   const local = !t.external && !sync;
+  const synced = !!t.external?.synced;
   const uploads = useUploads(t, setProblem);
   // Files dropped on a ticket of your own: the system's drag and drop in
   // the app, the page's in the browser preview (drop/route.ts).
   const drop = useFileDrop((files) => void uploads.add(files), setProblem);
   const issue = t.external ? issueUrl(t) : null;
-  const details = t.external?.details;
-  const labels = details?.labels?.length ? details.labels : null;
-  // A synced ticket's issue is read whole for its files when it opens, now
-  // and then: what the pull doesn't bring (a file attached since).
+  // A synced ticket's issue is read whole when it opens, now and then:
+  // what the pull doesn't bring (a file attached since, its development).
   useEffect(() => {
     if (!t.external?.synced) return;
     localTicketView()
@@ -306,6 +282,93 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
       .catch(() => {});
   }, [t.id, t.external?.synced]);
   const popup = useTicketPopup();
+  const wide = layout === "wide";
+  const compact = layout === "compact";
+  const byline = bylineText(t, layout);
+  const working = t.assignee?.kind === "session" ? t.assignee.id : null;
+  const openHand = (e: React.MouseEvent<HTMLElement>) => setMenu({ kind: "hand", at: below(e.currentTarget), from: e.currentTarget });
+
+  const description = () => {
+    if (editing === "body")
+      return (
+        <textarea
+          className="board-textarea"
+          autoFocus
+          aria-label="What it's about"
+          rows={8}
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onBlur={save}
+          onKeyDown={(e) => {
+            if (e.key === "Escape") {
+              e.stopPropagation();
+              setEditing(null);
+            }
+          }}
+        />
+      );
+    if (!t.body)
+      return (
+        <button type="button" className="ticket-edit ticket-text" title="Change what it's about" onClick={() => startEditing("body")}>
+          <span className="faint">Add what it's about, and what done looks like</span>
+        </button>
+      );
+    // A long description shows its first sections (the shortest view, its
+    // first paragraph) until asked for all of it.
+    const first = compact ? firstParagraph(t.body) : null;
+    const fold = foldSections(t.body);
+    const cut = !whole && (compact ? first !== null && first !== t.body.trim() : fold.more > 0);
+    return (
+      <>
+        <div className={cut && compact ? "ticket-clamp" : undefined}>
+          <TicketBody text={cut ? (compact ? first! : fold.shown) : t.body} onEdit={() => startEditing("body")} />
+        </div>
+        {cut && (
+          <button type="button" className="link ticket-whole" onClick={() => setWhole(true)}>
+            Show all of it{!compact && fold.more ? ` · ${fold.more} more section${fold.more === 1 ? "" : "s"}` : ""}
+          </button>
+        )}
+      </>
+    );
+  };
+
+  const actions = (
+    <Actions
+      ticket={t}
+      band={!wide}
+      onStart={() => setStarting(true)}
+      onHand={openHand}
+      onDrop={() => act(store().move(t.id, { state: t.state === "dropped" ? "backlog" : "dropped" }))}
+    />
+  );
+  const needs = <Needs ticket={t} neededBy={neededBy} onProblem={setProblem} band={!wide} />;
+  const facts = <Facts ticket={t} layout={layout} onState={(state) => act(store().move(t.id, { state }))} />;
+  const foot = (
+    <div className="ticket-foot">
+      <button
+        type="button"
+        className="link"
+        title="A link that opens this ticket, to paste in a room"
+        onClick={() =>
+          void navigator.clipboard
+            .writeText(ticketLink(t.id))
+            .then(() => setProblem(null))
+            .catch(() => setProblem("Couldn't copy the link."))
+        }
+      >
+        Copy link
+      </button>
+      {movable && (
+        <button type="button" className="link" onClick={() => askMove(ticketSubject(t))}>
+          Move to group…
+        </button>
+      )}
+      <button type="button" className="link" onClick={() => setDeleting(true)}>
+        Delete…
+      </button>
+    </div>
+  );
+
   return (
     <TicketFrame
       className="ticket-panel"
@@ -316,255 +379,136 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
         <>
           {t.key && <span className="chip ticket-key">{t.key}</span>}
           {issue && t.external && (
-            <button type="button" className="link small ticket-open-issue" aria-label={`Open in ${SYSTEM_TITLE[t.external.system]}`} onClick={() => openUrl(issue)}>
-              Open in {SYSTEM_TITLE[t.external.system]} ↗
+            <button type="button" className="link ticket-open-issue" aria-label={`Open in ${SYSTEM_TITLE[t.external.system]}`} onClick={() => openUrl(issue)}>
+              Open in {SYSTEM_TITLE[t.external.system]} <ExtIcon />
             </button>
           )}
           <span className="rpanel-name" />
         </>
       }
       actions={
-        <>
-          <button type="button" className="chip-btn" aria-pressed={t.pinned} onClick={() => act(store().edit(t.id, { pinned: !t.pinned }))}>
-            {t.pinned ? "Pinned" : "Pin"}
-          </button>
-          <button
-            type="button"
-            className="chip-btn"
-            aria-pressed={t.snoozed}
-            aria-haspopup="menu"
-            title={t.snoozedUntil ? `Snoozed until ${dayClock(t.snoozedUntil)}` : "Hide it from the board for a while"}
-            onClick={(e) => setMenu({ kind: "snooze", at: below(e.currentTarget), from: e.currentTarget })}
-          >
-            {t.snoozed && t.snoozedUntil ? `Snoozed till ${dayClock(t.snoozedUntil)}` : "Snooze"}
-          </button>
-        </>
+        // Over a grid, it's a quick look: pinning and snoozing are on the
+        // board.
+        !popup && (
+          <>
+            <button type="button" className="btn btn-sm ticket-head-btn" aria-pressed={t.pinned} onClick={() => act(store().edit(t.id, { pinned: !t.pinned }))}>
+              {t.pinned ? "Pinned" : "Pin"}
+            </button>
+            <button
+              type="button"
+              className="btn btn-sm ticket-head-btn"
+              aria-pressed={t.snoozed}
+              aria-haspopup="menu"
+              title={t.snoozedUntil ? `Snoozed until ${dayClock(t.snoozedUntil)}` : "Hide it from the board for a while"}
+              onClick={(e) => setMenu({ kind: "snooze", at: below(e.currentTarget), from: e.currentTarget })}
+            >
+              {t.snoozed && t.snoozedUntil ? `Snoozed till ${dayClock(t.snoozedUntil)}` : "Snooze"}
+            </button>
+          </>
+        )
       }
     >
-      <div className="ticket-body ticket-view">
+      <div ref={measured} className={`ticket-body ticket-view ticket-${layout}`}>
         <div className={`ticket-read${local && drop.dragging ? " is-dropping" : ""}`} {...(local ? drop.handlers : {})}>
-          {editing === "title" ? (
-            <input
-              className="ticket-title-edit display"
-              autoFocus
-              aria-label="Title"
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onBlur={save}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") save();
-                else if (e.key === "Escape") {
-                  e.stopPropagation();
-                  setEditing(null);
-                }
-              }}
-            />
-          ) : (
-            <h1 className="ticket-title display">
-              <button type="button" className="ticket-edit" title="Change the title" onClick={() => startEditing("title")}>
-                {t.title}
-              </button>
-            </h1>
-          )}
-          {t.createdBy.kind !== "you" && <WrittenBy who={t.createdBy} />}
-          {t.external && !t.external.synced && <IssueLine ticket={t} />}
-          {t.pushProblem && (
-            <p className="small state-blocked ticket-push-problem" role="status">
-              {t.pushProblem}
-            </p>
-          )}
-          {conflict && (
-            <div className="ticket-conflict" role="alert">
-              <p className="small state-blocked">Changed meanwhile. The {conflict.field === "title" ? "title" : "description"} now says:</p>
-              <p className="ticket-text muted">{conflict.theirs || "(nothing)"}</p>
-              <div className="ticket-actions">
-                <button
-                  type="button"
-                  className="btn btn-sm"
-                  onClick={() => {
-                    act(store().edit(t.id, { [conflict.field]: conflict.mine }));
-                    setConflict(null);
-                  }}
-                >
-                  Keep mine
-                </button>
-                <button type="button" className="link" onClick={() => setConflict(null)}>
-                  Take the new one
-                </button>
-              </div>
-            </div>
-          )}
-          {problem && (
-            <p className="small state-blocked" role="alert">
-              {problem}
-            </p>
-          )}
-          <article className="ticket-description" aria-label="Description">
-            {editing === "body" ? (
-              <textarea
-                className="board-textarea"
+          <div className="ticket-top">
+            <Crumbs ticket={t} board={board} layout={layout} />
+            {editing === "title" ? (
+              <input
+                className="ticket-title-edit display"
                 autoFocus
-                aria-label="What it's about"
-                rows={8}
+                aria-label="Title"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
                 onBlur={save}
                 onKeyDown={(e) => {
-                  if (e.key === "Escape") {
+                  if (e.key === "Enter") save();
+                  else if (e.key === "Escape") {
                     e.stopPropagation();
                     setEditing(null);
                   }
                 }}
               />
-            ) : t.body ? (
-              <TicketBody text={t.body} onEdit={() => startEditing("body")} />
             ) : (
-              <button type="button" className="ticket-edit ticket-text" title="Change what it's about" onClick={() => startEditing("body")}>
-                <span className="faint">Add what it's about, and what done looks like</span>
-              </button>
+              <h1 className="ticket-title display">
+                <button type="button" className="ticket-edit" title="Change the title" onClick={() => startEditing("title")}>
+                  {t.title}
+                </button>
+              </h1>
             )}
-          </article>
-          <TicketFiles ticket={t} local={local} uploads={uploads} />
-          <TicketComments ticket={t} />
+            {byline ? <p className="ticket-byline">{byline}</p> : t.createdBy.kind !== "you" && <WrittenBy who={t.createdBy} />}
+            {t.external && !t.external.synced && <IssueLine ticket={t} />}
+            {t.pushProblem && (
+              <p className="small state-blocked ticket-push-problem" role="status">
+                {t.pushProblem}
+              </p>
+            )}
+            {conflict && (
+              <div className="ticket-conflict" role="alert">
+                <p className="small state-blocked">Changed meanwhile. The {conflict.field === "title" ? "title" : "description"} now says:</p>
+                <p className="ticket-text muted">{conflict.theirs || "(nothing)"}</p>
+                <div className="ticket-actions">
+                  <button
+                    type="button"
+                    className="btn btn-sm"
+                    onClick={() => {
+                      act(store().edit(t.id, { [conflict.field]: conflict.mine }));
+                      setConflict(null);
+                    }}
+                  >
+                    Keep mine
+                  </button>
+                  <button type="button" className="link" onClick={() => setConflict(null)}>
+                    Take the new one
+                  </button>
+                </div>
+              </div>
+            )}
+            {problem && (
+              <p className="small state-blocked" role="alert">
+                {problem}
+              </p>
+            )}
+          </div>
+          {!wide && (
+            <aside className="ticket-band" aria-label="Details">
+              {actions}
+              {t.needs.length > 0 && needs}
+              {facts}
+              {t.needs.length === 0 && needs}
+            </aside>
+          )}
+          <div className="ticket-reading">
+            <article className="ticket-description" aria-label="Description">
+              {description()}
+            </article>
+            {t.external?.system === "linear" ? (
+              <>
+                <Development ticket={t} layout={layout} />
+                <SubItems ticket={t} layout={layout} />
+              </>
+            ) : (
+              <>
+                <SubItems ticket={t} layout={layout} />
+                <Development ticket={t} layout={layout} />
+              </>
+            )}
+            {/* The shortest view of a synced ticket leaves its links and
+                files to the side panel (↗); your own keeps its files, where
+                you drop them. */}
+            {!(compact && synced) && <LinkedWork ticket={t} working={working} />}
+            {!(compact && synced) && <TicketFiles ticket={t} local={local} uploads={uploads} />}
+            <TicketActivity ticket={t} layout={layout} />
+            {!wide && foot}
+          </div>
         </div>
-        <aside className="ticket-side" aria-label="Details">
-          <div className="ticket-side-acts">
-            {canTake && <TakeIt ticket={t} className="btn btn-signal ticket-take" />}
-            {session && (
-              <button
-                type="button"
-                className="btn ticket-take"
-                onClick={() => {
-                  popup?.close();
-                  useDesk.getState().open(session.id);
-                }}
-              >
-                Go to session
-              </button>
-            )}
-            <div className="ticket-side-pair">
-              <button type="button" className="btn btn-sm" onClick={() => setStarting(true)}>
-                Start a session
-              </button>
-              <button type="button" className="btn btn-sm" aria-haspopup="menu" onClick={(e) => setMenu({ kind: "hand", at: below(e.currentTarget), from: e.currentTarget })}>
-                Hand to…
-              </button>
-            </div>
-          </div>
-          <dl className="ticket-facts">
-            <dt>
-              <label htmlFor={`ticket-state-${t.id}`}>State</label>
-            </dt>
-            <dd>
-              <select id={`ticket-state-${t.id}`} className="board-select" value={t.state} onChange={(e) => act(store().move(t.id, { state: e.target.value as TicketState }))}>
-                {STATES.map((s) => (
-                  <option key={s} value={s}>
-                    {STATE_TITLE[s]}
-                  </option>
-                ))}
-              </select>
-            </dd>
-            <dt>Assignee</dt>
-            <dd>{t.assignee ? <Assignee who={t.assignee} waiting={waiting} /> : <span className="muted">Unassigned</span>}</dd>
-            {sync && t.external && t.external.assignee !== undefined && (
-              <>
-                <dt>On {SYSTEM_TITLE[sync.system]}</dt>
-                <dd>
-                  <Upstream who={t.external.assignee} me={sync.me} system={sync.system} />
-                </dd>
-              </>
-            )}
-            {details?.priority && (
-              <>
-                <dt>Priority</dt>
-                <dd>{details.priority}</dd>
-              </>
-            )}
-            {labels && (
-              <>
-                <dt>Labels</dt>
-                <dd className="ticket-labels">
-                  {labels.map((l) => (
-                    <span key={l} className="ticket-label">
-                      {l}
-                    </span>
-                  ))}
-                </dd>
-              </>
-            )}
-            {details?.project && (
-              <>
-                <dt>Project</dt>
-                <dd>{details.project}</dd>
-              </>
-            )}
-            {details?.due && (
-              <>
-                <dt>Due</dt>
-                <dd>{dueText(details.due)}</dd>
-              </>
-            )}
-          </dl>
-          <Needs ticket={t} neededBy={neededBy} onProblem={setProblem} />
-          <Links links={t.links} />
-          <section aria-label="History">
-          <details className="ticket-history">
-            <summary className="ticket-history-head">
-              History · {history.events.length}
-              {history.more ? "+" : ""}
-              {spend && spend.calls > 0 && (
-                <span className="floor-time" title="What its sessions spent on it this month, at API prices">
-                  {spend.capped ? "at least " : ""}
-                  {tokensText(spend.tokens)} tokens · {usdText(spend.usd)} this month
-                </span>
-              )}
-            </summary>
-            {history.problem && <p className="small state-blocked">{history.problem}</p>}
-            <ol className="ticket-history-rows">
-              {[...history.events].reverse().map((e) => (
-                <HistoryRow key={e.id} event={e} ticketKey={t.key} names={names} agentName={agentName} />
-              ))}
-            </ol>
-            {history.more && (
-              <button type="button" className="link small" onClick={history.older}>
-                Show older
-              </button>
-            )}
-          </details>
-          </section>
-          <div className="ticket-foot">
-            <button
-              type="button"
-              className="link small"
-              title="A link that opens this ticket, to paste in a room"
-              onClick={() =>
-                void navigator.clipboard
-                  .writeText(ticketLink(t.id))
-                  .then(() => setProblem(null))
-                  .catch(() => setProblem("Couldn't copy the link."))
-              }
-            >
-              Copy link
-            </button>
-            {movable && (
-              <button type="button" className="link small" onClick={() => askMove(ticketSubject(t))}>
-                Move to group…
-              </button>
-            )}
-            {t.state === "dropped" ? (
-              <button type="button" className="link small" onClick={() => act(store().move(t.id, { state: "backlog" }))}>
-                Bring it back
-              </button>
-            ) : (
-              <button type="button" className="link small" onClick={() => act(store().move(t.id, { state: "dropped" }))}>
-                Drop
-              </button>
-            )}
-            <button type="button" className="link small" onClick={() => setDeleting(true)}>
-              Delete…
-            </button>
-          </div>
-        </aside>
+        {wide && (
+          <aside className="ticket-side" aria-label="Details">
+            {actions}
+            {needs}
+            {facts}
+            {foot}
+          </aside>
+        )}
       </div>
       {menu && (
         <Menu
@@ -587,11 +531,199 @@ export function TicketDetail({ ticket: t }: { ticket: Ticket }) {
   );
 }
 
-/** A due date as the details say it: "Fri 14 Nov". */
-export const dueText = (due: string): string => {
-  const d = new Date(`${due}T12:00:00`);
-  return Number.isNaN(d.getTime()) ? due : d.toLocaleDateString([], { weekday: "short", day: "numeric", month: "short" });
-};
+/** What to do with it: start a session on it, hand it to one, take it on
+ *  its issue (or that it's yours there already), drop it. */
+function Actions({
+  ticket: t,
+  band,
+  onStart,
+  onHand,
+  onDrop,
+}: {
+  ticket: Ticket;
+  band: boolean;
+  onStart: () => void;
+  onHand: (e: React.MouseEvent<HTMLElement>) => void;
+  onDrop: () => void;
+}) {
+  const board = useBoard((s) => s.boards[t.board]);
+  const sync = board?.sync;
+  const canTake = takeable(board, t);
+  const yours = !!sync?.me && !!t.external?.assignee && t.external.assignee.id === sync.me;
+  const take = canTake ? (
+    <TakeIt ticket={t} className={`btn ${band ? "btn-sm " : ""}ticket-act ticket-take-it`} />
+  ) : yours && sync ? (
+    <span className={`btn ${band ? "btn-sm " : ""}ticket-act ticket-yours`}>Yours on {SYSTEM_TITLE[sync.system]}</span>
+  ) : null;
+  const drop = (
+    <button type="button" className="link ticket-drop" onClick={onDrop}>
+      {t.state === "dropped" ? "Bring it back" : "Drop"}
+    </button>
+  );
+  const start = (
+    <button type="button" className={`btn btn-signal ${band ? "btn-sm " : ""}ticket-act ticket-start`} onClick={onStart}>
+      Start a session on it
+    </button>
+  );
+  const hand = (
+    <button type="button" className={`btn ${band ? "btn-sm " : ""}ticket-act ticket-hand`} aria-haspopup="menu" onClick={onHand}>
+      Hand to…
+    </button>
+  );
+  if (band)
+    return (
+      <div className="ticket-acts ticket-acts-band">
+        {start}
+        {hand}
+        {take}
+        {drop}
+      </div>
+    );
+  return (
+    <div className="ticket-acts">
+      {start}
+      <div className={`ticket-acts-row${take ? "" : " ticket-acts-row-two"}`}>
+        {hand}
+        {take}
+        {drop}
+      </div>
+    </div>
+  );
+}
+
+/** Its facts: Desk's own (its state, who works on it, what it cost), and
+ *  what its issue says, each with what the issue calls it, faint, where
+ *  Desk's word differs. Narrow, the first eight in two columns, the rest
+ *  a click away. */
+function Facts({ ticket: t, layout, onState }: { ticket: Ticket; layout: Layout; onState: (s: TicketState) => void }) {
+  const [all, setAll] = useState(false);
+  const waiting = useWaiting()(t);
+  const spend = useTicketSpend(t);
+  const sync = useBoard((s) => s.boards[t.board]?.sync ?? null);
+  const session = useDesk((s) => (t.assignee?.kind === "session" ? s.sessions[t.assignee.id] : undefined));
+  const popup = useTicketPopup();
+  const e = t.external;
+  const d = e?.details;
+  const system = sync && e ? e.system : null;
+  const wide = layout === "wide";
+  const compact = layout === "compact";
+  const on = (words: string) => (wide && system ? <span className="ticket-there">{words}</span> : null);
+  const remote = remoteStateWord(t.state, d?.remoteState);
+  const goToSession = session
+    ? () => {
+        popup?.close();
+        useDesk.getState().open(session.id);
+      }
+    : undefined;
+  const mine = (who: ActivityParty) => (
+    <button type="button" className="ticket-fact-who" disabled={!goToSession} title={goToSession ? "Go to the session" : undefined} onClick={goToSession}>
+      <Assignee who={who} waiting={waiting} />
+    </button>
+  );
+  const facts: Partial<Record<FactId, { label: string; value: ReactNode }>> = {};
+  if (d?.kind) facts.type = { label: "Type", value: <><TypeGlyph kind={d.kind} level={d.kindLevel} />{d.kind}</> };
+  facts.state = {
+    label: "State",
+    value: (
+      <>
+        {/* The state's word, as wide as it is, with the select over it. */}
+        <span className="ticket-select">
+          <span aria-hidden="true">{STATE_TITLE[t.state]}</span>
+          <select id={`ticket-state-${t.id}`} aria-label="State" value={t.state} onChange={(ev) => onState(ev.target.value as TicketState)}>
+            {STATES.map((s) => (
+              <option key={s} value={s}>
+                {STATE_TITLE[s]}
+              </option>
+            ))}
+          </select>
+        </span>
+        {remote && !compact && (
+          <span className="ticket-there" title={`What ${system ? SYSTEM_TITLE[system] : "its issue"} calls it`}>
+            {d?.stateKind && <StateGlyph kind={d.stateKind} name={remote} size={12} />}
+            {remote}
+            {!d?.stateKind && wide && system ? ` on ${SYSTEM_TITLE[system]}` : ""}
+          </span>
+        )}
+      </>
+    ),
+  };
+  if (system && t.assignee)
+    facts.working = {
+      label: "Working",
+      value: (
+        <>
+          {mine(t.assignee)}
+          {!compact && session?.state === "working" && <span className="ticket-there">working</span>}
+        </>
+      ),
+    };
+  if (spend && spend.calls > 0)
+    facts.spent = {
+      label: "Spent",
+      value: (
+        <span title="What its sessions spent on it this month, at API prices">
+          {spend.capped ? "at least " : ""}
+          {tokensText(spend.tokens)} tokens · {usdText(spend.usd)}
+        </span>
+      ),
+    };
+  if (system && e && e.assignee !== undefined)
+    facts.assignee = {
+      label: "Assignee",
+      value: (
+        <>
+          <Upstream who={e.assignee} me={sync?.me} system={system} />
+          {e.assignee && on(` on ${SYSTEM_TITLE[system]}`)}
+        </>
+      ),
+    };
+  else if (!system) facts.assignee = { label: "Assignee", value: t.assignee ? mine(t.assignee) : <span className="muted">Unassigned</span> };
+  if (d?.reporter && system === "jira") facts.reporter = { label: "Reporter", value: <Person name={d.reporter} me={sync?.meName} /> };
+  if (d?.priority || d?.priorityRank)
+    facts.priority = { label: "Priority", value: <>{d.priorityRank !== undefined && <PriorityBars rank={d.priorityRank} name={d.priority} />}{d.priority}</> };
+  if (d?.points !== undefined)
+    facts.points = system === "linear" ? { label: "Estimate", value: <><span className="mono">{d.points}</span> pts</> } : { label: "Points", value: <span className="mono">{d.points}</span> };
+  if (d?.sprint) {
+    const name = sprintName(d.sprint);
+    const when = d.sprint.starts && d.sprint.ends && system === "linear" ? spanText(d.sprint.starts, d.sprint.ends) : d.sprint.ends ? `ends ${dayText(d.sprint.ends)}` : null;
+    facts.sprint = { label: system === "linear" ? "Cycle" : "Sprint", value: <><CycleIcon size={12} />{name}{when && !compact && <span className="ticket-there">{when}</span>}</> };
+  }
+  if (d?.labels?.length) facts.labels = { label: "Labels", value: <>{d.labels.map((l) => <LabelChip key={l} name={l} />)}</> };
+  if (d?.project) facts.project = { label: "Project", value: system === "linear" ? <Dotted name={d.project} /> : d.project };
+  if (d?.components?.length) facts.components = { label: "Components", value: d.components.join(", ") };
+  if (d?.fixVersions?.length) facts.fixVersion = { label: "Fix version", value: <span className="mono ticket-version">{d.fixVersions.join(", ")}</span> };
+  if (d?.start) facts.start = { label: "Start", value: <><CalendarIcon />{dayText(d.start)}</> };
+  if (d?.due) facts.due = { label: "Due", value: <><CalendarIcon />{dayText(d.due)}</> };
+  if (d?.created && system === "linear") facts.created = { label: "Created", value: dayText(d.created) };
+  const has = (f: FactId) => !!facts[f];
+  const every = factOrder(system, has);
+  const shown = wide || all ? every : factOrder(system, has, true);
+  const list = (ids: FactId[]) => (
+    <dl className="ticket-facts">
+      {ids.map((f) => (
+        <Fragment key={f}>
+          <dt>{f === "state" ? <label htmlFor={`ticket-state-${t.id}`}>State</label> : facts[f]!.label}</dt>
+          <dd className={`ticket-fact-${f}`}>{facts[f]!.value}</dd>
+        </Fragment>
+      ))}
+    </dl>
+  );
+  if (wide) return list(shown);
+  const half = Math.ceil(shown.length / 2);
+  return (
+    <>
+      <div className="ticket-facts-cols">
+        {list(shown.slice(0, half))}
+        {list(shown.slice(half))}
+      </div>
+      {every.length > shown.length && (
+        <button type="button" className="link small ticket-all-facts" onClick={() => setAll(true)}>
+          All {every.length} details
+        </button>
+      )}
+    </>
+  );
+}
 
 /** Who wrote a ticket that wasn't the person: its words are theirs. */
 function WrittenBy({ who }: { who: ActivityParty }) {
@@ -626,37 +758,10 @@ const useHandEntries = (t: Ticket): MenuEntry[] => {
   ];
 };
 
-/** One row of a ticket's history: when, who, what happened to it; a note
- *  a session or an agent left, quoted as theirs. */
-function HistoryRow({
-  event: e,
-  ticketKey,
-  names,
-  agentName,
-}: {
-  event: ActivityEvent;
-  ticketKey: string | null;
-  names: Readonly<Record<string, string>>;
-  agentName: (id: string) => string | undefined;
-}) {
-  const line = historyLine(e, ticketKey);
-  const who = e.actor.kind === "you" ? "You" : e.actor.kind === "session" ? (names[e.actor.id] ?? e.actor.name) : e.actor.kind === "agent" ? (agentName(e.actor.id) ?? e.actor.name) : e.actor.name;
-  return (
-    <li className="ticket-history-row">
-      <time className="floor-time" dateTime={e.at} title={dayClock(e.at)}>
-        {clock(e.at)}
-      </time>
-      <span>
-        <span className={e.actor.kind === "session" ? "mono" : undefined}>{who}</span> {line.text}
-        {line.quote !== null && <span className="muted"> “{line.quote}”</span>}
-      </span>
-    </li>
-  );
-}
-
-/** What it needs done first, and what needs it; a need added by its key
- *  or words, or taken off. */
-function Needs({ ticket: t, neededBy, onProblem }: { ticket: Ticket; neededBy: Ticket[]; onProblem: (p: string | null) => void }) {
+/** What it needs done first (a need from its issue's "is blocked by" says
+ *  so), and what needs it; a need added by its key or words, or taken off.
+ *  In the band, one line each, or that it needs nothing yet. */
+function Needs({ ticket: t, neededBy, onProblem, band }: { ticket: Ticket; neededBy: Ticket[]; onProblem: (p: string | null) => void; band: boolean }) {
   const all = useBoard((s) => s.tickets);
   const hub = useDesk((s) => s.hub);
   const [adding, setAdding] = useState(false);
@@ -689,45 +794,69 @@ function Needs({ ticket: t, neededBy, onProblem }: { ticket: Ticket; neededBy: T
       .catch((e) => onProblem(plainError(e)));
   };
   const needs = t.needs.map((id) => all[id]).filter((o): o is Ticket => !!o);
+  // The needs its issue says it's blocked by there.
+  const system = t.external ? SYSTEM_TITLE[t.external.system] : null;
+  const fromThere = new Set((t.external?.details?.links ?? []).filter((l) => l.rel === "blockedBy").map((l) => l.issue.key));
+  const adder = adding ? (
+    <div className="ticket-need-add">
+      <input
+        ref={field}
+        autoFocus
+        className="board-search"
+        aria-label="A ticket it needs"
+        placeholder="Its key or words"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") {
+            e.stopPropagation();
+            setAdding(false);
+          } else if (e.key === "Enter" && found[0]) need(found[0].id, true);
+        }}
+      />
+      {found.map((o) => (
+        <button key={o.id} type="button" className="ticket-need ticket-need-pick" onClick={() => need(o.id, true)}>
+          <span className="mono board-key">{o.key}</span>
+          <span className="ticket-need-title">{o.title}</span>
+          <span className="small faint">{STATE_TITLE[o.state]}</span>
+        </button>
+      ))}
+    </div>
+  ) : null;
+  const rows = (
+    <>
+      {needs.map((o) => (
+        <NeedRow key={o.id} ticket={o} there={o.external && fromThere.has(o.external.key) ? `${system} link` : null} onRemove={() => need(o.id, false)} />
+      ))}
+    </>
+  );
+  if (band)
+    return (
+      <section className="ticket-needs ticket-needs-band" aria-label="Needs">
+        <div className="ticket-needs-line">
+          <h3 className="ticket-band-label">Needs</h3>
+          {needs.length ? <div className="ticket-needs-rows">{rows}</div> : <span className="faint">nothing yet</span>}
+          {!needs.length && !adding && (
+            <button type="button" className="link ticket-need-more" onClick={() => setAdding(true)}>
+              Add…
+            </button>
+          )}
+        </div>
+        {adder}
+      </section>
+    );
   return (
     <section className="ticket-needs" aria-label="Needs">
-      <h3 className="ov-label muted">Needs</h3>
-      {needs.map((o) => (
-        <NeedRow key={o.id} ticket={o} onRemove={() => need(o.id, false)} />
-      ))}
-      {adding ? (
-        <div className="ticket-need-add">
-          <input
-            ref={field}
-            autoFocus
-            className="board-search"
-            aria-label="A ticket it needs"
-            placeholder="Its key or words"
-            value={q}
-            onChange={(e) => setQ(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                e.stopPropagation();
-                setAdding(false);
-              } else if (e.key === "Enter" && found[0]) need(found[0].id, true);
-            }}
-          />
-          {found.map((o) => (
-            <button key={o.id} type="button" className="ticket-need ticket-need-pick" onClick={() => need(o.id, true)}>
-              <span className="mono board-key">{o.key}</span>
-              <span className="ticket-need-title">{o.title}</span>
-              <span className="small faint">{STATE_TITLE[o.state]}</span>
-            </button>
-          ))}
-        </div>
-      ) : (
-        <button type="button" className="link small ticket-need-more" onClick={() => setAdding(true)}>
-          {needs.length ? "Add another need…" : "Add a ticket it needs first…"}
+      <SectionHead title="Needs" note="done first" />
+      {rows}
+      {adder ?? (
+        <button type="button" className="link ticket-need-more" onClick={() => setAdding(true)}>
+          Add a ticket it needs first…
         </button>
       )}
       {neededBy.length > 0 && (
         <>
-          <h3 className="ov-label muted ticket-needed-by">Needed by</h3>
+          <SectionHead title="Needed by" />
           {neededBy.map((o) => (
             <NeedRow key={o.id} ticket={o} />
           ))}
@@ -737,17 +866,20 @@ function Needs({ ticket: t, neededBy, onProblem }: { ticket: Ticket; neededBy: T
   );
 }
 
-function NeedRow({ ticket: o, onRemove }: { ticket: Ticket; onRemove?: () => void }) {
+function NeedRow({ ticket: o, there, onRemove }: { ticket: Ticket; there?: string | null; onRemove?: () => void }) {
   const openTicket = useOpenTicket();
+  const d = o.external?.details;
   return (
     <div className="ticket-need">
       <button type="button" className="ticket-need-open" onClick={() => openTicket(o.id)}>
+        {d?.kind ? <TypeGlyph kind={d.kind} level={d.kindLevel} size={12} /> : d?.stateKind ? <StateGlyph kind={d.stateKind} name={d.remoteState} size={12} /> : null}
         <span className="mono board-key">{o.key}</span>
         <span className="ticket-need-title">{o.title}</span>
+        {there && <span className="ticket-there">{there}</span>}
         <span className={`small ${o.state === "done" ? "state-done" : "faint"}`}>{STATE_TITLE[o.state]}</span>
       </button>
       {onRemove && (
-        <button type="button" className="icon-btn-sm" aria-label={`It no longer needs ${o.key ?? "that ticket"}`} title="No longer needs it" onClick={onRemove}>
+        <button type="button" className="icon-btn-sm ticket-need-off" aria-label={`It no longer needs ${o.key ?? "that ticket"}`} title="No longer needs it" onClick={onRemove}>
           <svg width="12" height="12" viewBox="0 0 14 14" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
             <path d="M3 3l8 8M11 3l-8 8" />
           </svg>
@@ -755,69 +887,6 @@ function NeedRow({ ticket: o, onRemove }: { ticket: Ticket; onRemove?: () => voi
       )}
     </div>
   );
-}
-
-/** What it points at: its pull requests, sessions and room threads. */
-function Links({ links }: { links: TicketLink[] }) {
-  if (!links.length) return null;
-  return (
-    <section className="ticket-links" aria-label="Links">
-      <h3 className="ov-label muted">Links</h3>
-      {links.map((l) => (
-        <LinkRow key={`${l.kind}:${l.kind === "pr" ? l.number : l.kind === "session" ? l.session : l.kind === "room" ? `${l.room}/${l.thread ?? ""}` : l.message}`} link={l} />
-      ))}
-    </section>
-  );
-}
-
-function LinkRow({ link: l }: { link: TicketLink }) {
-  const sessionName = useSessionName(l.kind === "session" ? l.session : null, "");
-  const session = useDesk((s) => (l.kind === "session" ? s.sessions[l.session] : undefined));
-  const room = useDesk((s) => (l.kind === "room" ? s.rooms[l.room] : undefined));
-  // Going to a session or a room leaves the popup.
-  const popup = useTicketPopup();
-  switch (l.kind) {
-    case "pr":
-      return (
-        <div className="ticket-link">
-          <span className="chip chip-live">PR #{l.number}</span>
-          {/^https:\/\//i.test(l.url) && (
-            <button type="button" className="link ticket-link-url" onClick={() => void openUrl(l.url)}>
-              {l.url.replace(/^https?:\/\//, "")}
-            </button>
-          )}
-        </div>
-      );
-    case "session":
-      return (
-        <div className="ticket-link">
-          <span className="chip">session</span>
-          <button type="button" className="link mono" disabled={!session} onClick={() => {
-              popup?.close();
-              useDesk.getState().open(l.session);
-            }}
-          >
-            {sessionName || session?.name || "A session since forgotten"}
-          </button>
-        </div>
-      );
-    case "room":
-      return (
-        <div className="ticket-link">
-          <span className="chip">room</span>
-          <button type="button" className="link" disabled={!room} onClick={() => {
-              popup?.close();
-              void useDesk.getState().openRoom(l.room);
-            }}
-          >
-            {room ? `#${room.slug}` : "A room since deleted"}
-            {l.thread ? " ▸ thread" : ""}
-          </button>
-        </div>
-      );
-    case "message":
-      return null;
-  }
 }
 
 /** Where a synced ticket's words come from: its Jira or Linear issue, and
