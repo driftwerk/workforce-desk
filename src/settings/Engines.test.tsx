@@ -1,7 +1,8 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, it, vi } from "vitest";
 import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
+import { useUi } from "../shell/ui";
 import type { EngineInfo } from "../hub/types";
 import { Engines } from "./Engines";
 
@@ -70,4 +71,14 @@ it("says when the hub couldn't be asked", async () => {
   await act(async () => {});
   expect(screen.getByText(/^Couldn’t ask Desk about its engines just now: down/)).toBeTruthy();
   expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
+});
+
+it("says what Engines are, and sends what agents think with to Providers", async () => {
+  useDesk.setState({ hub: { engines: vi.fn(async () => []) } as unknown as DeskHub });
+  render(<Engines />);
+  await act(async () => {});
+  expect(screen.getByText(/The coding tools Desk starts sessions in/).textContent).toContain("Claude Code, Codex and Devin");
+  useUi.setState({ settings: "engines" });
+  fireEvent.click(screen.getByRole("button", { name: "Providers" }));
+  expect(useUi.getState().settings).toBe("providers");
 });

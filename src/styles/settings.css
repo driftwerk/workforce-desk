@@ -1600,7 +1600,7 @@ legend.set-label {
   flex-wrap: wrap;
   gap: 8px;
 }
-/* "Use this for coding sessions too", under the Claude plan. */
+/* "Also sign in Claude Code sessions with this plan", under the Claude plan. */
 .prov-also {
   display: inline-flex;
   align-items: center;

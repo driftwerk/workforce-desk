@@ -68,7 +68,7 @@ function PlanConnect({ provider, onConnected, onCancel }: { provider: Provider; 
       {plan === "claude" && keepsAccounts && !login.busy && (
         <label className="check small">
           <input type="checkbox" checked={sessionsToo} onChange={(e) => setForSessions(e.target.checked)} />
-          Use this for coding sessions too
+          Also sign in Claude Code sessions with this plan
         </label>
       )}
       <div className="connect-actions">

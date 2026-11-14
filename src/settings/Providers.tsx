@@ -7,12 +7,13 @@ import { useDesk } from "../hub/store";
 import { BrainDialog } from "../providers/BrainDialog";
 import { ConnectForm } from "../providers/ConnectForm";
 import { useProviderList, useProviders } from "../providers/store";
+import { useUi } from "../shell/ui";
 import { CLI_NAME, CopyInstall, PlanLoginAction, ReopenLink, usePlanLogin } from "./PlanLogin";
 import { useSettings } from "./store";
 import { accountsOf, freeName, useAccounts } from "../engines/accounts";
 
 const SECTIONS: { group: ProviderGroup; label: string }[] = [
-  { group: "plan", label: "Your plans" },
+  { group: "plan", label: "Plans your agents use" },
   { group: "key", label: "API keys" },
   { group: "local", label: "On this computer or your network" },
 ];
@@ -44,7 +45,14 @@ export function Providers() {
       <header>
         <h1 className="display-lg">Providers</h1>
         <p className="muted">
-          Connect what your agents on this computer can think with. Each agent picks its own provider, model and effort in its settings.
+          What your agents on this computer can think with. Each agent picks its own provider, model and effort in its settings.
+        </p>
+        <p className="small faint">
+          Coding sessions (Claude Code, Codex, Devin) sign in under{" "}
+          <button type="button" className="link small" onClick={() => useUi.getState().openSettings("engines")}>
+            Engines
+          </button>
+          , not here.
         </p>
       </header>
 
@@ -247,7 +255,7 @@ function ProviderRow({ provider, usedBy }: { provider: Provider; usedBy: string[
         )}
         {plan === "claude" && keepsAccounts && (!provider.connected || fallback) && !login.busy && (
           <label className="prov-also small">
-            <input type="checkbox" checked={sessionsToo} onChange={(e) => setForSessions(e.target.checked)} /> Use this for coding sessions too
+            <input type="checkbox" checked={sessionsToo} onChange={(e) => setForSessions(e.target.checked)} /> Also sign in Claude Code sessions with this plan
           </label>
         )}
       </span>

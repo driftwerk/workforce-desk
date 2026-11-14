@@ -11,7 +11,7 @@ const WORDS: Record<SettingsSection, string> = {
   machines: "machine machines server devbox ssh build box remote",
   providers: "plan plans claude chatgpt api key keys model models brain sign in openai anthropic bedrock",
   connections: "github jira linear slack google notion services connect integrations tokens",
-  engines: "claude code codex gemini cursor engines cli install sign in accounts",
+  engines: "claude code codex devin gemini cursor engines cli install sign in accounts",
   sessions: "sessions terminals worktrees",
   memory: "memory remember notes recall",
   budgets: "budget spend money cost limit",
