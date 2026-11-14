@@ -13,18 +13,19 @@
 //!
 //! - **Nothing is judged here.** Every call goes as the hub queued it,
 //!   whatever its tool: the machine decides. Its body is built again from
-//!   the call's own fields (all but `machine`), and so is the answer
-//!   posted (`status` and `body` alone).
+//!   the call's own fields (all but `machine` and `deadline`), and so is
+//!   the answer posted (`status` and `body` alone).
 //! - **Refused only when nothing reached the machine:** it isn't one of
-//!   Desk's, it can't be reached, it is busy, or the call is too large.
-//!   When the machine may have had it but no answer came, nothing is
-//!   posted: the hub tells the boss its outcome isn't known yet.
+//!   Desk's, it can't be reached, Desk was too busy to send it in time, it
+//!   is too late to, or the call is too large. When the machine may have
+//!   had it but no answer came, nothing is posted: the hub tells the boss
+//!   its outcome isn't known yet.
 //! - **Sent again with the same id**, never a new one: the machine records
 //!   each call by its id and never does one twice.
 //! - **Bounded:** at most [`MOST_IN_FLIGHT`] calls at once, and
 //!   [`MOST_PER_MACHINE`] to one machine, so a slow one never holds up the
-//!   others; each is given up after [`Timing::carry_for`], within the
-//!   hub's own wait.
+//!   others. A call waits for its turn within its time: until the hub's
+//!   `deadline` for it, less a margin, or [`Timing::carry_for`].
 //! - **Capped:** a call or an answer over [`MOST_BODY`] is never carried.
 //!
 //! These routes are on none of the lists the page's requests are checked
@@ -33,24 +34,29 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use desk_core::machine::MachineId;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use tokio::sync::{Semaphore, watch};
+use tokio::time::Instant;
 
 use crate::broker::{Answer, Unanswered};
 
 /// The most calls carried at once.
 pub const MOST_IN_FLIGHT: usize = 8;
 /// The most calls carried to one machine at once.
-pub const MOST_PER_MACHINE: usize = 4;
+pub const MOST_PER_MACHINE: usize = 3;
 /// The largest call sent to a machine, and the largest answer read from
 /// one or posted back: the hub's own cap on answers.
 pub const MOST_BODY: usize = 256 * 1024;
 /// The largest poll read: the hub hands out at most 16 calls at a time.
 const MOST_POLL: usize = 16 * MOST_BODY + 64 * 1024;
+/// With less than this left before the hub's deadline, a call isn't sent.
+const LEAST_LEFT: Duration = Duration::from_secs(3);
+/// What is kept back of the time left, to post the answer in.
+const MARGIN: Duration = Duration::from_secs(2);
 
 /// The statuses a machine answers with (the hub's `ServedStatus`).
 const STATUSES: &[&str] = &["ok", "suggested", "refused"];
@@ -58,8 +64,9 @@ const STATUSES: &[&str] = &["ok", "suggested", "refused"];
 /// How long things take.
 #[derive(Debug, Clone, Copy)]
 pub struct Timing {
-    /// How long one call is carried, sends again included: less than the
-    /// hub waits for its answer (30 s).
+    /// How long one call is carried, its wait for its turn and sends again
+    /// included, when the hub gives no deadline: less than the hub waits
+    /// for its answer (30 s).
     pub carry_for: Duration,
     /// The waits before each send again.
     pub again_after: [Duration; 2],
@@ -67,6 +74,13 @@ pub struct Timing {
     /// the longest.
     pub backoff: Duration,
     pub most_backoff: Duration,
+    /// How long each post of an answer waits, and all of them together.
+    pub post_try: Duration,
+    pub post_for: Duration,
+    /// An empty poll back sooner than `quick_poll` is followed by a pause
+    /// of `quick_gap`.
+    pub quick_poll: Duration,
+    pub quick_gap: Duration,
 }
 
 impl Default for Timing {
@@ -76,6 +90,10 @@ impl Default for Timing {
             again_after: [Duration::from_secs(1), Duration::from_secs(3)],
             backoff: Duration::from_secs(1),
             most_backoff: Duration::from_secs(30),
+            post_try: Duration::from_secs(10),
+            post_for: Duration::from_secs(20),
+            quick_poll: Duration::from_secs(1),
+            quick_gap: Duration::from_millis(200),
         }
     }
 }
@@ -100,8 +118,8 @@ pub trait Ends: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Answer, Unanswered>> + Send;
 }
 
-/// One call as this computer's hub queued it. All but `id` and `machine`
-/// go to the machine as they came.
+/// One call as this computer's hub queued it. All but `id`, `machine` and
+/// `deadline` go to the machine as they came.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Call {
@@ -116,6 +134,9 @@ struct Call {
     level: Value,
     #[serde(default)]
     act: Value,
+    /// When the hub stops waiting for its answer (RFC 3339), when it says.
+    #[serde(default)]
+    deadline: Option<String>,
 }
 
 impl Call {
@@ -131,6 +152,22 @@ impl Call {
             "level": self.level,
             "act": self.act,
         })
+    }
+
+    /// How long it may be carried from `now`: until the hub's deadline less
+    /// [`MARGIN`], else `carry_for`; `None` when too little is left to
+    /// send it at all.
+    fn time(&self, carry_for: Duration, now: SystemTime) -> Option<Duration> {
+        let Some(at) = self
+            .deadline
+            .as_deref()
+            .and_then(|d| chrono::DateTime::parse_from_rfc3339(d).ok())
+        else {
+            return Some(carry_for);
+        };
+        let at = SystemTime::from(at.with_timezone(&chrono::Utc));
+        let left = at.duration_since(now).unwrap_or_default();
+        (left >= LEAST_LEFT).then(|| left - MARGIN)
     }
 }
 
@@ -217,13 +254,10 @@ fn error_of(reply: &Answer) -> Option<String> {
     Some(e.chars().take(500).collect())
 }
 
-/// Call `call` carried to its machine, sent again (with its own id) when
-/// no answer came.
-async fn carry<E: Ends>(ends: &E, call: &Call, timing: Timing) -> Outcome {
+/// Call `call` carried to `machine`, sent again (with its own id) when no
+/// answer came.
+async fn carry<E: Ends>(ends: &E, call: &Call, machine: &MachineId, timing: Timing) -> Outcome {
     let name = call.machine.as_str();
-    let Some(machine) = MachineId::new(name).ok().filter(|m| ends.has(m)) else {
-        return unreached(name);
-    };
     let Ok(body) = serde_json::to_vec(&call.served()) else {
         return unreached(name);
     };
@@ -237,7 +271,7 @@ async fn carry<E: Ends>(ends: &E, call: &Call, timing: Timing) -> Outcome {
         if attempt > 0 {
             tokio::time::sleep(timing.again_after[attempt - 1]).await;
         }
-        match ends.serve(&machine, body.clone()).await {
+        match ends.serve(machine, body.clone()).await {
             Ok(r) if r.status == 200 => {
                 return match read_reply(name, &r) {
                     Ok(answer) if answer.to_string().len() <= MOST_BODY => Outcome::Answer(answer),
@@ -245,8 +279,12 @@ async fn carry<E: Ends>(ends: &E, call: &Call, timing: Timing) -> Outcome {
                     Err(why) => Outcome::Unknown(why),
                 };
             }
-            // Refused there before anything was done.
+            // Refused there before anything was done: unless an earlier
+            // send may have done it.
             Ok(r) if (400..500).contains(&r.status) && !matches!(r.status, 408 | 429) => {
+                if let Some(why) = maybe {
+                    return Outcome::Unknown(format!("{why}; then {name} answered {}", r.status));
+                }
                 return refused(
                     error_of(&r).unwrap_or_else(|| format!("{name} refused it ({})", r.status)),
                 );
@@ -267,74 +305,102 @@ async fn carry<E: Ends>(ends: &E, call: &Call, timing: Timing) -> Outcome {
     }
 }
 
-/// `answer` posted for call `id`: once it is taken, or no one waits for it.
+/// `answer` posted for call `id`: until it is taken, or no one waits for
+/// it, each post within `post_try` and all within `post_for`.
 async fn post<E: Ends>(ends: &E, id: &str, answer: &Value, timing: Timing) {
     let body = answer.to_string().into_bytes();
     if body.len() > MOST_BODY {
         tracing::warn!(id, "a relayed answer is too large to post");
         return;
     }
-    for attempt in 0..=timing.again_after.len() {
-        if attempt > 0 {
-            tokio::time::sleep(timing.again_after[attempt - 1]).await;
-        }
-        match ends.answer(id, body.clone()).await {
-            Ok(r) if r.status < 300 => return,
-            Ok(r) if r.status == 410 => {
-                tracing::info!(id, "a relayed answer came after no one waited for it");
-                return;
+    let posting = async {
+        for attempt in 0..=timing.again_after.len() {
+            if attempt > 0 {
+                tokio::time::sleep(timing.again_after[attempt - 1]).await;
             }
-            Ok(r) if r.status < 500 && r.status != 429 => {
-                tracing::warn!(id, status = r.status, "a relayed answer was refused");
-                return;
+            match tokio::time::timeout(timing.post_try, ends.answer(id, body.clone())).await {
+                Ok(Ok(r)) if r.status < 300 => return true,
+                Ok(Ok(r)) if r.status == 410 => {
+                    tracing::info!(id, "a relayed answer came after no one waited for it");
+                    return true;
+                }
+                Ok(Ok(r)) if r.status < 500 && !matches!(r.status, 408 | 429) => {
+                    tracing::warn!(id, status = r.status, "a relayed answer was refused");
+                    return true;
+                }
+                // Taken once by the hub: sending it again is safe.
+                _ => {}
             }
-            // Taken once by the hub: sending it again is safe.
-            Ok(_) | Err(_) => {}
         }
+        false
+    };
+    if !tokio::time::timeout(timing.post_for, posting)
+        .await
+        .unwrap_or(false)
+    {
+        tracing::warn!(id, "a relayed answer couldn't be posted");
     }
-    tracing::warn!(id, "a relayed answer couldn't be posted");
 }
 
-/// The calls being carried to each machine now.
+/// Each of Desk's machines' turns: [`MOST_PER_MACHINE`] calls at once.
 #[derive(Default)]
-struct Carrying(Mutex<HashMap<String, usize>>);
+struct Lanes(Mutex<HashMap<MachineId, Arc<Semaphore>>>);
 
-/// One of a machine's calls being carried, until dropped.
-struct Slot(Arc<Carrying>, String);
-
-impl Carrying {
-    fn take(self: &Arc<Self>, machine: &str) -> Option<Slot> {
+impl Lanes {
+    fn of(&self, machine: &MachineId) -> Arc<Semaphore> {
         let mut m = self.0.lock().unwrap_or_else(|e| e.into_inner());
-        let n = m.entry(machine.to_string()).or_default();
-        if *n >= MOST_PER_MACHINE {
-            return None;
-        }
-        *n += 1;
-        Some(Slot(Arc::clone(self), machine.to_string()))
+        Arc::clone(
+            m.entry(machine.clone())
+                .or_insert_with(|| Arc::new(Semaphore::new(MOST_PER_MACHINE))),
+        )
     }
 }
 
-impl Drop for Slot {
-    fn drop(&mut self) {
-        let mut m = (self.0).0.lock().unwrap_or_else(|e| e.into_inner());
-        if let Some(n) = m.get_mut(&self.1) {
-            *n -= 1;
-            if *n == 0 {
-                m.remove(&self.1);
-            }
-        }
-    }
+/// Call `call` carried within `time`: its turn on its machine and among
+/// all calls waited for, then sent. Its turns are given back as it ends,
+/// before its answer is posted.
+async fn carry_in_turn<E: Ends>(
+    ends: &E,
+    call: &Call,
+    time: Duration,
+    lanes: &Lanes,
+    in_flight: &Arc<Semaphore>,
+    timing: Timing,
+) -> Outcome {
+    let until = Instant::now() + time;
+    let name = call.machine.as_str();
+    // Only Desk's own machines have a lane.
+    let Some(machine) = MachineId::new(name).ok().filter(|m| ends.has(m)) else {
+        return unreached(name);
+    };
+    let lane = lanes.of(&machine);
+    let Ok(Ok(_turn)) = tokio::time::timeout_at(until, lane.acquire_owned()).await else {
+        return refused(format!(
+            "Desk is already sending {name} as much as it can. Try again in a moment."
+        ));
+    };
+    let Ok(Ok(_carrying)) =
+        tokio::time::timeout_at(until, Arc::clone(in_flight).acquire_owned()).await
+    else {
+        return refused(
+            "Desk is carrying too many calls just now. Try again in a moment.".to_string(),
+        );
+    };
+    tokio::time::timeout_at(until, carry(ends, call, &machine, timing))
+        .await
+        .unwrap_or_else(|_| Outcome::Unknown("no answer in time".into()))
 }
 
 /// Carries calls until `stop` says Desk is quitting.
 pub async fn run<E: Ends>(ends: Arc<E>, mut stop: watch::Receiver<bool>, timing: Timing) {
     let in_flight = Arc::new(Semaphore::new(MOST_IN_FLIGHT));
-    let carrying = Arc::new(Carrying::default());
+    let lanes = Arc::new(Lanes::default());
     let mut backoff = timing.backoff;
     loop {
         if *stop.borrow() {
             return;
         }
+        let polled = Instant::now();
         let taken = tokio::select! {
             _ = stop.changed() => return,
             t = ends.take() => t,
@@ -354,44 +420,37 @@ pub async fn run<E: Ends>(ends: Arc<E>, mut stop: watch::Receiver<bool>, timing:
                 continue;
             }
         };
+        // Back at once with nothing: not asked again at once.
+        if listed.is_empty() && polled.elapsed() < timing.quick_poll {
+            tokio::select! {
+                _ = stop.changed() => return,
+                () = tokio::time::sleep(timing.quick_gap) => {}
+            }
+            continue;
+        }
         for call in listed {
             let ends = Arc::clone(&ends);
-            let call = match call {
-                Ok(c) => c,
-                Err(id) => {
-                    tokio::spawn(async move {
+            let (lanes, in_flight) = (Arc::clone(&lanes), Arc::clone(&in_flight));
+            tokio::spawn(async move {
+                let call = match call {
+                    Ok(c) => c,
+                    Err(id) => {
                         let why = "Desk couldn't read that call.".to_string();
                         if let Outcome::Answer(a) = refused(why) {
                             post(&*ends, &id, &a, timing).await;
                         }
-                    });
-                    continue;
-                }
-            };
-            let slot = carrying.take(&call.machine);
-            let permit = slot
-                .as_ref()
-                .and_then(|_| Arc::clone(&in_flight).try_acquire_owned().ok());
-            let (Some(slot), Some(permit)) = (slot, permit) else {
-                // Busy: nothing was sent, so it is refused now rather than
-                // left to wait.
-                tracing::info!(id = %call.id, machine = %call.machine, "a relayed call waited on a busy machine");
-                tokio::spawn(async move {
-                    let why = format!(
-                        "Desk is already sending {} as much as it can. Try again in a moment.",
-                        call.machine
-                    );
-                    if let Outcome::Answer(a) = refused(why) {
-                        post(&*ends, &call.id, &a, timing).await;
+                        return;
                     }
-                });
-                continue;
-            };
-            tokio::spawn(async move {
-                let _held = (slot, permit);
-                let outcome = tokio::time::timeout(timing.carry_for, carry(&*ends, &call, timing))
-                    .await
-                    .unwrap_or_else(|_| Outcome::Unknown("no answer in time".into()));
+                };
+                let outcome = match call.time(timing.carry_for, SystemTime::now()) {
+                    None => refused(format!(
+                        "There's no time left to send it to {}.",
+                        call.machine
+                    )),
+                    Some(time) => {
+                        carry_in_turn(&*ends, &call, time, &lanes, &in_flight, timing).await
+                    }
+                };
                 match outcome {
                     Outcome::Answer(a) => {
                         tracing::info!(
@@ -498,10 +557,14 @@ mod tests {
 
     fn quick() -> Timing {
         Timing {
-            carry_for: Duration::from_secs(5),
+            carry_for: Duration::from_secs(1),
             again_after: [Duration::from_millis(10), Duration::from_millis(10)],
             backoff: Duration::from_millis(10),
             most_backoff: Duration::from_millis(40),
+            post_try: Duration::from_millis(100),
+            post_for: Duration::from_millis(300),
+            quick_poll: Duration::from_secs(1),
+            quick_gap: Duration::from_millis(50),
         }
     }
 
@@ -530,6 +593,8 @@ mod tests {
         machines: HashMap<String, Mutex<VecDeque<Does>>>,
         sent: Mutex<Vec<(String, Value)>>,
         answered: Mutex<Vec<(String, Value)>>,
+        /// What this computer's hub answers each post, in turn; 204 after.
+        posts: Mutex<VecDeque<Does>>,
         answers: Option<tokio::sync::mpsc::UnboundedSender<(String, Value)>>,
     }
 
@@ -590,7 +655,15 @@ mod tests {
             if let Some(tx) = &self.answers {
                 let _ = tx.send((id.to_string(), v));
             }
-            async { ok(204, Value::Null) }
+            let does = self.posts.lock().unwrap().pop_front();
+            async move {
+                match does {
+                    Some(Does::Says(s, b)) => ok(s, b),
+                    Some(Does::Fails(u)) => Err(u),
+                    Some(Does::Hangs) => std::future::pending().await,
+                    None => ok(204, Value::Null),
+                }
+            }
         }
 
         fn has(&self, machine: &MachineId) -> bool {
@@ -638,6 +711,12 @@ mod tests {
             "level": "act",
             "act": {"nudge": true},
         })
+    }
+
+    /// RFC 3339, `secs` from now.
+    fn in_secs(secs: u64) -> String {
+        chrono::DateTime::<chrono::Utc>::from(SystemTime::now() + Duration::from_secs(secs))
+            .to_rfc3339()
     }
 
     fn says(body: Value) -> Does {
@@ -689,7 +768,9 @@ mod tests {
                 )],
             ),
         ]);
-        let stop = start(&fake.polled(vec![call(A, "devbox"), call(B, "laptop")]));
+        let mut a = call(A, "devbox");
+        a["deadline"] = json!(in_secs(20));
+        let stop = start(&fake.polled(vec![a, call(B, "laptop")]));
         let mut got = [next(&mut rx).await, next(&mut rx).await];
         got.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(
@@ -890,36 +971,281 @@ mod tests {
         let ids: Vec<String> = (0..6)
             .map(|i| format!("0f0e0d0c-0b0a-4909-8807-06050403020{i}"))
             .collect();
-        let mut calls: Vec<Value> = ids.iter().map(|id| call(id, "slow")).collect();
+        // The first it takes have long; those after wait theirs out first.
+        let mut calls: Vec<Value> = ids
+            .iter()
+            .enumerate()
+            .map(|(i, id)| {
+                let mut c = call(id, "slow");
+                if i < MOST_PER_MACHINE {
+                    c["deadline"] = json!(in_secs(20));
+                }
+                c
+            })
+            .collect();
         calls.push(call(A, "fast"));
         let _stop = start(&fake.polled(calls).polled(vec![call(B, "fast")]));
-        let mut got = Vec::new();
-        for _ in 0..4 {
-            got.push(next(&mut rx).await);
+        // The fast machine's come first, while the slow one's wait.
+        let mut fast = [next(&mut rx).await, next(&mut rx).await];
+        fast.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(fast[0].0, A);
+        assert_eq!(fast[1].0, B);
+        assert!(fast.iter().all(|(_, a)| a["status"] == "ok"));
+        // Past its share, the slow one's waited their turn, and when their
+        // time ran out were refused as never sent; those it took post
+        // nothing.
+        let mut busy = Vec::new();
+        for _ in 0..(6 - MOST_PER_MACHINE) {
+            busy.push(next(&mut rx).await);
         }
-        let busy: Vec<_> = got
-            .iter()
-            .filter(|(_, a)| a["status"] == "refused")
-            .collect();
-        assert_eq!(busy.len(), 6 - MOST_PER_MACHINE);
         assert!(busy.iter().all(|(id, a)| {
             ids.contains(id)
+                && a["status"] == "refused"
                 && a["body"]["error"]
                     .as_str()
                     .unwrap()
                     .contains("already sending slow")
         }));
-        let fast: Vec<_> = got
-            .iter()
-            .filter(|(_, a)| a["status"] == "ok")
-            .map(|(id, _)| id.as_str())
-            .collect();
-        assert_eq!(fast.len(), 2);
-        assert!(fast.contains(&A) && fast.contains(&B));
+        none_in(&mut rx, 300).await;
         assert_eq!(
             fake.sent().iter().filter(|(m, _)| m == "slow").count(),
             MOST_PER_MACHINE
         );
+    }
+
+    /// Past all the calls Desk carries at once, one waits its turn and,
+    /// when its time runs out, is refused as Desk being busy (not its
+    /// machine).
+    #[tokio::test]
+    async fn past_the_most_in_flight_a_call_waits_then_is_refused_as_desk_busy() {
+        let (fake, mut rx) = Fake::with(&[
+            ("m1", vec![Does::Hangs]),
+            ("m2", vec![Does::Hangs]),
+            ("m3", vec![Does::Hangs]),
+        ]);
+        let calls: Vec<Value> = (0..9)
+            .map(|i| {
+                let id = format!("0f0e0d0c-0b0a-4909-8807-06050403020{i}");
+                let mut c = call(&id, &format!("m{}", i % 3 + 1));
+                // Those carried have long; the last waits its out first.
+                if i < MOST_IN_FLIGHT {
+                    c["deadline"] = json!(in_secs(20));
+                }
+                c
+            })
+            .collect();
+        let _stop = start(&fake.polled(calls));
+        let (_, a) = next(&mut rx).await;
+        assert_eq!(a["status"], "refused");
+        assert!(
+            a["body"]["error"]
+                .as_str()
+                .unwrap()
+                .contains("carrying too many calls"),
+            "{a}"
+        );
+        none_in(&mut rx, 300).await;
+        assert_eq!(fake.sent().len(), MOST_IN_FLIGHT);
+    }
+
+    /// A call's turns are given back when it ends: many more calls than
+    /// fit at once to one machine are each carried in turn.
+    #[tokio::test]
+    async fn turns_are_given_back_as_calls_end() {
+        let (fake, mut rx) = Fake::with(&[("devbox", vec![says(json!({}))])]);
+        let mut polls = Arc::clone(&fake);
+        for p in 0..4 {
+            let calls = (0..5)
+                .map(|i| {
+                    call(
+                        &format!("0f0e0d0c-0b0a-4909-8807-0605040302{p}{i}"),
+                        "devbox",
+                    )
+                })
+                .collect();
+            polls = polls.polled(calls);
+        }
+        let _stop = start(&polls);
+        for _ in 0..20 {
+            assert_eq!(next(&mut rx).await.1["status"], "ok");
+        }
+        assert_eq!(fake.sent().len(), 20);
+    }
+
+    /// A machine that never answers is given up on when the call's time
+    /// runs out, and nothing is posted (it may have done it).
+    #[tokio::test]
+    async fn a_call_out_of_time_posts_nothing() {
+        let (fake, mut rx) = Fake::with(&[("devbox", vec![Does::Hangs])]);
+        let _stop = start(&fake.polled(vec![call(A, "devbox")]));
+        none_in(&mut rx, 1500).await;
+        assert_eq!(fake.sent().len(), 1);
+    }
+
+    /// `deadline`, when the hub gives one, bounds a call: too little left
+    /// and it isn't sent; else it is given up on before the hub stops
+    /// waiting, posting nothing.
+    #[tokio::test]
+    async fn the_hubs_deadline_bounds_a_call() {
+        let (fake, mut rx) = Fake::with(&[("devbox", vec![Does::Hangs])]);
+        let mut late = call(A, "devbox");
+        late["deadline"] = json!(in_secs(2));
+        let mut soon = call(B, "devbox");
+        soon["deadline"] = json!(in_secs(4));
+        let _stop = start(&fake.polled(vec![late, soon]));
+        let (id, a) = next(&mut rx).await;
+        assert_eq!(id, A);
+        assert_eq!(a["status"], "refused");
+        assert!(
+            a["body"]["error"]
+                .as_str()
+                .unwrap()
+                .contains("no time left")
+        );
+        // B's time is about 2 s (4 s less the margin), longer than
+        // `carry_for`: it is still being tried after it.
+        tokio::time::sleep(Duration::from_millis(1300)).await;
+        assert_eq!(fake.sent().len(), 1, "only B was sent");
+        assert_eq!(fake.sent()[0].1["id"], B);
+        assert!(fake.sent()[0].1.get("deadline").is_none());
+        none_in(&mut rx, 1500).await;
+    }
+
+    #[test]
+    fn a_calls_time_is_the_hubs_deadline_less_the_margin_or_carry_for() {
+        let now = SystemTime::now();
+        let with = |d: Option<&str>| Call {
+            deadline: d.map(str::to_string),
+            ..serde_json::from_value::<Call>(call(A, "devbox")).unwrap()
+        };
+        let carry_for = Duration::from_secs(25);
+        assert_eq!(with(None).time(carry_for, now), Some(carry_for));
+        assert_eq!(
+            with(Some("not a time")).time(carry_for, now),
+            Some(carry_for)
+        );
+        let in10 =
+            chrono::DateTime::<chrono::Utc>::from(now + Duration::from_secs(10)).to_rfc3339();
+        assert_eq!(
+            with(Some(&in10)).time(carry_for, now),
+            Some(Duration::from_secs(8))
+        );
+        let in2 = chrono::DateTime::<chrono::Utc>::from(now + Duration::from_secs(2)).to_rfc3339();
+        assert_eq!(with(Some(&in2)).time(carry_for, now), None);
+        let past = chrono::DateTime::<chrono::Utc>::from(now - Duration::from_secs(5)).to_rfc3339();
+        assert_eq!(with(Some(&past)).time(carry_for, now), None);
+    }
+
+    /// A refusal after a send that may have reached the machine isn't
+    /// said as refused: the first may have been done.
+    #[tokio::test]
+    async fn a_refusal_after_a_maybe_posts_nothing() {
+        let (fake, mut rx) = Fake::with(&[(
+            "devbox",
+            vec![
+                Does::Fails(Unanswered::MaybeSent("dropped".into())),
+                Does::Says(403, json!({"error": "not yours"})),
+            ],
+        )]);
+        let _stop = start(&fake.polled(vec![call(A, "devbox")]));
+        none_in(&mut rx, 300).await;
+        assert_eq!(fake.sent().len(), 2);
+    }
+
+    /// A machine's 408 or 429 may have come after it had the call: sent
+    /// again, and nothing posted if that's all it says.
+    #[tokio::test]
+    async fn a_machines_408_or_429_is_maybe_sent() {
+        let (fake, mut rx) = Fake::with(&[
+            ("devbox", vec![Does::Says(408, json!({}))]),
+            (
+                "laptop",
+                vec![Does::Says(429, json!({})), says(json!({"done": true}))],
+            ),
+        ]);
+        let _stop = start(&fake.polled(vec![call(A, "devbox"), call(B, "laptop")]));
+        assert_eq!(
+            next(&mut rx).await,
+            (B.into(), json!({"status": "ok", "body": {"done": true}}))
+        );
+        none_in(&mut rx, 300).await;
+        assert_eq!(fake.sent().iter().filter(|(m, _)| m == "devbox").count(), 3);
+    }
+
+    /// A machine's replay of a call it already did is posted as it says,
+    /// with what it said; suggested goes through.
+    #[test]
+    fn replays_and_suggestions_are_posted_as_said() {
+        let reply = |v: Value| Answer {
+            status: 200,
+            content_type: None,
+            body: v.to_string(),
+        };
+        for (status, body) in [
+            ("ok", json!({"again": true, "said": "Interrupted."})),
+            ("refused", json!({"again": true, "said": "Not yours."})),
+            ("suggested", json!({"suggestion": "s1"})),
+        ] {
+            assert_eq!(
+                read_reply("devbox", &reply(json!({"status": status, "body": body}))),
+                Ok(json!({"status": status, "body": body}))
+            );
+        }
+        assert!(
+            read_reply(
+                "devbox",
+                &reply(json!({"status": "refused", "body": {"again": true, "said": null}}))
+            )
+            .is_err()
+        );
+    }
+
+    /// Posting an answer: sent again after a 5xx or no answer; done at a
+    /// 2xx, a 410 (no one waits) or another 4xx (dropped).
+    #[tokio::test]
+    async fn an_answer_is_posted_until_taken_or_turned_away() {
+        let answer = json!({"status": "ok", "body": {}});
+        for (posts, tries) in [
+            (
+                vec![Does::Says(503, json!({})), Does::Says(204, json!({}))],
+                2,
+            ),
+            (
+                vec![
+                    Does::Fails(Unanswered::MaybeSent("dropped".into())),
+                    Does::Says(204, json!({})),
+                ],
+                2,
+            ),
+            (vec![Does::Says(410, json!({}))], 1),
+            (vec![Does::Says(400, json!({}))], 1),
+            (vec![Does::Hangs, Does::Says(204, json!({}))], 2),
+            (vec![Does::Says(502, json!({})); 3], 3),
+        ] {
+            let (fake, _rx) = Fake::with(&[]);
+            *fake.posts.lock().unwrap() = posts.into();
+            post(&*fake, A, &answer, quick()).await;
+            assert_eq!(fake.answered.lock().unwrap().len(), tries);
+        }
+        // All posts together are bounded too.
+        let (fake, _rx) = Fake::with(&[]);
+        *fake.posts.lock().unwrap() = vec![Does::Hangs; 3].into();
+        let t = Instant::now();
+        post(&*fake, A, &answer, quick()).await;
+        assert!(t.elapsed() < Duration::from_millis(600));
+    }
+
+    /// An empty poll back at once isn't followed by another at once.
+    #[tokio::test]
+    async fn an_empty_poll_back_at_once_waits_a_moment() {
+        let (fake, _rx) = Fake::with(&[]);
+        for _ in 0..50 {
+            fake.polls.lock().unwrap().push_back(ok(200, json!([])));
+        }
+        let _stop = start(&fake);
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let took = *fake.took.lock().unwrap();
+        assert!((2..=8).contains(&took), "{took} polls");
     }
 
     /// A call whose fields can't be read is refused by its id; one with no

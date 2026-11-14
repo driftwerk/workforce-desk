@@ -1426,6 +1426,40 @@ mod tests {
         )));
     }
 
+    /// A poll or a post the hub turns away for its token (401) is sent
+    /// again once with the token read again.
+    #[tokio::test]
+    async fn the_relay_reads_a_refused_token_again() {
+        const NO: &str =
+            "HTTP/1.1 401 Unauthorized\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+        const GONE: &str = "HTTP/1.1 204 No Content\r\nconnection: close\r\n\r\n";
+        let (url, mut seen) = hub(vec![NO, OK_JSON, NO, GONE]).await;
+        let broker = broker_at(&url, vec!["old", "new", "newer"]);
+        let polled = broker
+            .relay_local("GET", "/api/desk/crew/relay", None, 1024)
+            .await
+            .unwrap();
+        assert_eq!(polled.status, 200);
+        let posted = broker
+            .relay_local(
+                "POST",
+                "/api/desk/crew/relay/0f0e0d0c-0b0a-4909-8807-060504030201",
+                Some(br#"{"status":"ok","body":{}}"#.to_vec()),
+                1024,
+            )
+            .await
+            .unwrap();
+        assert_eq!(posted.status, 204);
+        for token in ["old", "new", "new", "newer"] {
+            let got = seen.recv().await.unwrap();
+            assert!(
+                got.headers.contains(&format!("bearer {token}")),
+                "{token}: {}",
+                got.headers
+            );
+        }
+    }
+
     /// Whether a relayed call may have reached the machine is said: not
     /// when nothing listens, maybe when the request was taken and dropped,
     /// and an answer over the cap isn't read.

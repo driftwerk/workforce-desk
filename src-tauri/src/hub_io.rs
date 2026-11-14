@@ -673,6 +673,9 @@ fn page_refused(method: &str, target: &str) -> bool {
         ("POST", ["api", "me", "desk-knows-tokens"])
             | ("POST", ["api", "me", "remote-mcp-tokens", "desk"])
             | ("PUT", ["api", "desk", "knows-links", _, _])
+            // A boss's relayed calls: the native side's alone, as any
+            // method, on any hub (`crate::crew_relay`).
+            | (_, ["api", "desk", "crew", "relay" | "served", ..])
     )
 }
 
@@ -1449,6 +1452,27 @@ mod tests {
         ] {
             assert!(!page_refused(method, target), "{method} {target}");
         }
+    }
+
+    /// A boss's relayed calls are never the page's, on any hub, however
+    /// spelled.
+    #[test]
+    fn the_relay_is_never_asked_of_a_workspace_for_the_page() {
+        for (method, target) in [
+            ("GET", "/api/desk/crew/relay"),
+            ("get", "/api/desk/crew/relay?token=x"),
+            (
+                "POST",
+                "/api/desk/crew/relay/0f0e0d0c-0b0a-4909-8807-060504030201",
+            ),
+            ("POST", "//api/Desk/Crew/%72elay/x/"),
+            ("POST", "/api/desk/crew/served"),
+            ("PUT", "/api/desk/crew/served/x"),
+        ] {
+            assert!(page_refused(method, target), "{method} {target}");
+        }
+        assert!(!page_refused("GET", "/api/desk/crew"));
+        assert!(!page_refused("GET", "/api/desk/overview"));
     }
 
     #[test]
