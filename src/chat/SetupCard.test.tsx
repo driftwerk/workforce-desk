@@ -124,6 +124,21 @@ it("is one card saying the one thing to do now: use the sign-in on this Mac", as
   expect(screen.getAllByRole("region")).toHaveLength(1);
 });
 
+it("sends a connection kept but not turned on to Connections, never back to the agent", async () => {
+  const sent: string[] = [];
+  useChat.setState({ send: (_k: string, c: string) => (sent.push(c), true) } as never);
+  const kept = setup({
+    now: now({ kind: "failed", title: "GitHub isn't on yet", detail: "It didn't turn on. It's kept: turn it on for Allan in Connections.", action: "open_connections" }),
+  });
+  await show(api([kept]));
+  useUi.setState({ settings: null });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Open Connections" }));
+  });
+  expect(useUi.getState().settings).toBe("connections");
+  expect(sent).toEqual([]);
+});
+
 it("shows GitHub's code, copies it and opens GitHub in one press", async () => {
   const wrote: string[] = [];
   Object.assign(navigator, { clipboard: { writeText: async (t: string) => void wrote.push(t) } });

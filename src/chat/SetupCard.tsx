@@ -196,6 +196,7 @@ const LABEL: Record<SetupAction, string> = {
   other_way: "Sign in another way",
   retry: "Try again",
   paste_token: "Paste a token",
+  open_connections: "Open Connections",
 };
 
 /** "in 14 min", while a code lasts. */
@@ -320,6 +321,8 @@ export function SetupCard({
         return void show();
       case "paste_token":
         return void startPaste(false);
+      case "open_connections":
+        return void useUi.getState().openSettings("connections");
       case "retry":
         return void (async () => {
           setBusy(true);

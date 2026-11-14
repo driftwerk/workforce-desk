@@ -221,7 +221,7 @@ export function readKey(
     // A shape with no prefix of its own (Jira's: any long run of
     // characters) is looked for only where keys are shown, read-only
     // fields and code, and never in an address or an email.
-    const broad = shape.startsWith("[");
+    const broad = shape.startsWith("[!#-&(-~]");
     const found = new Map<string, HTMLElement>();
     for (const at of Array.from(document.body.querySelectorAll("*")) as HTMLElement[]) {
       if (at.isContentEditable) continue;

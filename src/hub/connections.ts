@@ -159,7 +159,7 @@ export interface SetupStep {
 export type SetupNowKind = "working" | "offer" | "code" | "sign_in" | "connected" | "failed" | "ended";
 
 /** The card's one button. */
-export type SetupAction = "use_cli" | "open_code" | "show_page" | "new_code" | "other_way" | "retry" | "paste_token";
+export type SetupAction = "use_cli" | "open_code" | "show_page" | "new_code" | "other_way" | "retry" | "paste_token" | "open_connections";
 
 /** The one thing a setup's card shows now: the hub's words, never the
  *  agent's. */
