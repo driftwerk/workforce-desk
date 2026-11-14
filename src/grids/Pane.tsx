@@ -47,7 +47,7 @@ import { GroupChip } from "../groups/GroupChip";
 import { itemOf } from "./where";
 import { baseName, homeShort } from "../ui/paths";
 import { withAccount } from "../engines/accounts";
-import { ENGINE_TITLE } from "../engines/engines";
+import { ENGINE_TITLE, modelTitle } from "../engines/engines";
 
 import { STATE_LABEL } from "../session/words";
 import { setSectionOpen } from "../shell/SideSection";
@@ -123,7 +123,7 @@ export function usePaneLabel(content: PaneContent | null): Label {
   if (session) {
     return {
       name,
-      meta: `${withAccount(ENGINE[session.engine], session)} · ${statusOf(session, STATE_LABEL)}`,
+      meta: [withAccount(ENGINE[session.engine], session), session.model && modelTitle(session.engine, session.model), statusOf(session, STATE_LABEL)].filter(Boolean).join(" · "),
       state: lookOf(session),
       tracked,
       asking: session.pending || session.state === "asking" ? session : null,

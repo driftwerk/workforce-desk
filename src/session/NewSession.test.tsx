@@ -4,7 +4,7 @@ import type { DeskHub } from "../hub/client";
 import type { Caps, EngineAccount, EngineInfo, View } from "../hub/types";
 import { useDesk } from "../hub/store";
 import { installCli } from "../platform";
-import { NewSession, noneOf, whyNotStart } from "./NewSession";
+import { isModelName, NewSession, noneOf, whyNotStart } from "./NewSession";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("../platform", () => ({
@@ -167,6 +167,61 @@ it("starts Codex at the usual speed unless Fast is chosen", async () => {
   expect(start).toHaveBeenCalledWith(expect.objectContaining({ engine: "codex", fast: undefined }));
 });
 
+it("starts a session on the model chosen for its engine, and offers the choice only where the hub runs it", async () => {
+  const start = vi.fn(() => Promise.resolve({ id: "s-6" }));
+  const engines = vi.fn(async () => [
+    engine({ engine: "claude", title: "Claude Code", views: ["terminal"], caps: terminalCaps("desk") }),
+    engine({ engine: "codex", title: "Codex", views: ["terminal"], caps: terminalCaps("terminal") }),
+  ]);
+  const features = vi.fn(async () => ["fresh-worktree", "session-model"]);
+  useDesk.setState({ hub: { start, engines, features } as unknown as DeskHub, openId: null });
+  render(<NewSession onClose={vi.fn()} />);
+  await act(async () => {});
+  const picker = screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement;
+  expect(picker.value).toBe("");
+  expect([...picker.options].map((o) => o.textContent)).toEqual(["Engine default", "Opus", "Sonnet", "Haiku", "Other…"]);
+  fireEvent.change(picker, { target: { value: "sonnet" } });
+  expect(screen.getByText(/Claude Code · Sonnet/)).toBeTruthy();
+  // Codex's names aren't Claude Code's: it starts on its own default.
+  fireEvent.click(screen.getByRole("radio", { name: "Codex" }));
+  expect((screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement).value).toBe("");
+  fireEvent.click(screen.getByRole("radio", { name: "Claude Code" }));
+  expect((screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement).value).toBe("sonnet");
+  fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/work/atlas" } });
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
+  expect(start).toHaveBeenCalledWith(expect.objectContaining({ engine: "claude", model: "sonnet" }));
+});
+
+it("takes a model's exact id with Other…", async () => {
+  const start = vi.fn(() => Promise.resolve({ id: "s-7" }));
+  const engines = vi.fn(async () => [engine({ engine: "codex", title: "Codex", views: ["terminal"], caps: terminalCaps("terminal") })]);
+  const features = vi.fn(async () => ["session-model"]);
+  useDesk.setState({ hub: { start, engines, features } as unknown as DeskHub, openId: null });
+  render(<NewSession onClose={vi.fn()} />);
+  await act(async () => {});
+  fireEvent.change(screen.getByRole("combobox", { name: "Model" }), { target: { value: "\u0000other" } });
+  const field = screen.getByLabelText("Model: the model's exact id");
+  fireEvent.change(field, { target: { value: " gpt-6.1-sol " } });
+  fireEvent.keyDown(field, { key: "Enter" });
+  expect((screen.getByRole("combobox", { name: "Model" }) as HTMLSelectElement).value).toBe("gpt-6.1-sol");
+  fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/work/atlas" } });
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
+  expect(start).toHaveBeenCalledWith(expect.objectContaining({ engine: "codex", model: "gpt-6.1-sol" }));
+});
+
+it("offers no model where the hub would start on its engine's default anyway, and sends none", async () => {
+  const start = vi.fn(() => Promise.resolve({ id: "s-8" }));
+  const engines = vi.fn(async () => [engine({ engine: "claude", title: "Claude Code", views: ["terminal"], caps: terminalCaps("desk") })]);
+  const features = vi.fn(async () => ["fresh-worktree"]);
+  useDesk.setState({ hub: { start, engines, features } as unknown as DeskHub, openId: null });
+  render(<NewSession onClose={vi.fn()} />);
+  await act(async () => {});
+  expect(screen.queryByRole("combobox", { name: "Model" })).toBeNull();
+  fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/work/atlas" } });
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
+  expect(start).toHaveBeenCalledWith(expect.not.objectContaining({ model: expect.anything() }));
+});
+
 const account = (id: string, name: string, isDefault = false): EngineAccount => ({
   id,
   engine: "claude",
@@ -291,4 +346,31 @@ it("names what isn't installed in plain words", () => {
   expect(whyNotStart({ hub: true, folder: "", remote: false, where: "", noFolder: false, cantSignIn: null, starting: false, noEngine: true })?.words).toBe(
     "Install Claude Code or Codex above, then start.",
   );
+});
+
+it("reads a model's name as the hub does", () => {
+  for (const ok of ["opus", "gpt-6.1-sol", "claude-opus-5-5[1m]", "us.anthropic.claude-sonnet-4-5:0"]) expect(isModelName(ok)).toBe(true);
+  for (const bad of ["-p", "opus --x", "a\"b", "", "é"]) expect(isModelName(bad)).toBe(false);
+  expect(isModelName("x[1m]", "devin")).toBe(false);
+  expect(isModelName("swe-1.6", "devin")).toBe(true);
+});
+
+it("keeps a folder's model only for the engine it was said for, and its default as said", async () => {
+  const start = vi.fn(() => Promise.resolve({ id: "s-9" }));
+  const engines = vi.fn(async () => [
+    engine({ engine: "claude", title: "Claude Code", views: ["terminal"], caps: terminalCaps("desk") }),
+    engine({ engine: "codex", title: "Codex", views: ["terminal"], caps: terminalCaps("terminal") }),
+  ]);
+  localStorage.setItem("desk.newSession", JSON.stringify({ folders: [["local\n/work/atlas", { engine: "claude", model: "opus" }]] }));
+  // A hub that offers no model: Codex started there keeps no Claude model.
+  useDesk.setState({ hub: { start, engines, features: vi.fn(async () => []) } as unknown as DeskHub, openId: null });
+  const r = render(<NewSession onClose={vi.fn()} />);
+  await act(async () => {});
+  fireEvent.change(screen.getByLabelText("Folder"), { target: { value: "/work/atlas" } });
+  fireEvent.click(screen.getByRole("radio", { name: "Codex" }));
+  await act(async () => fireEvent.click(screen.getByRole("button", { name: "Start" })));
+  const kept = JSON.parse(localStorage.getItem("desk.newSession")!).folders.find(([f]: [string]) => f === "local\n/work/atlas")[1];
+  expect(kept).toEqual(expect.objectContaining({ engine: "codex" }));
+  expect("model" in kept).toBe(false);
+  r.unmount();
 });

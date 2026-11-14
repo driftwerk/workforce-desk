@@ -140,6 +140,9 @@ export interface Session {
   approveForMe?: boolean;
   /** Codex asks its plan's faster tier ("Fast mode"); absent from older hubs. */
   fast?: boolean;
+  /** The model it runs, as its engine names it; null is the engine's own
+   *  default. Absent from older hubs. */
+  model?: string | null;
   /** The person's account it runs on; null: the CLI's own sign-in. */
   account?: AccountRef | null;
   /** The account it moves to once its turn ends, while a switch waits. */
@@ -204,6 +207,9 @@ export interface NewSession {
   approveForMe?: boolean;
   /** Codex asks its plan's faster tier ("Fast mode"). */
   fast?: boolean;
+  /** The model it runs, as its engine names it; absent, the engine's own
+   *  default. Only a hub with the `session-model` feature applies it. */
+  model?: string;
   /** The person's account it runs on: absent, the engine's default;
    *  null, the CLI's own sign-in on the hub's computer. */
   account?: string | null;
