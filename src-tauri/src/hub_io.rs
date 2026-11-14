@@ -760,6 +760,8 @@ fn page_refused(method: &str, target: &str) -> bool {
             // A boss's relayed calls: the native side's alone, as any
             // method, on any hub (`crate::crew_relay`).
             | (_, ["api", "desk", "crew", "relay" | "served", ..])
+            // What a local boss's machine grants say (`crate::local_bosses`).
+            | (_, ["api", "desk", "machine-grants", ..])
     )
 }
 
@@ -1570,6 +1572,22 @@ pub(crate) mod tests {
         }
         assert!(!page_refused("GET", "/api/desk/crew"));
         assert!(!page_refused("GET", "/api/desk/overview"));
+    }
+
+    /// What a local boss's machine grants say is never the page's, on any
+    /// hub, however spelled.
+    #[test]
+    fn a_local_boss_s_machine_grants_are_never_asked_of_a_workspace_for_the_page() {
+        for (method, target) in [
+            ("GET", "/api/desk/machine-grants"),
+            ("get", "/api/desk/machine-grants?token=x"),
+            ("GET", "//api/Desk/Machine-Grants/"),
+            ("GET", "/api/desk/machine%2Dgrants"),
+            ("PUT", "/api/desk/machine-grants/devbox"),
+        ] {
+            assert!(page_refused(method, target), "{method} {target}");
+        }
+        assert!(!page_refused("GET", "/api/desk/machines"));
     }
 
     #[test]
