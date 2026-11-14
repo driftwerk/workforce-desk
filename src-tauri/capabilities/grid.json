@@ -102,6 +102,7 @@
     "allow-voice-kokoro-voices",
     "allow-voice-engine-voices",
     "allow-voice-lookup",
-    "allow-voice-status"
+    "allow-voice-status",
+    "allow-boss-status"
   ]
 }

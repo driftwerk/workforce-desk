@@ -8,6 +8,7 @@ import { useLine } from "../line/store";
 import { useOverview } from "../overview/store";
 import { useLocalAgent } from "../overview/people";
 import type { Boss, ChargeVerb } from "./charge";
+import { isServed, useGrantBossOf } from "./grantBoss";
 
 interface ChargeState {
   /** The sessions a boss runs now, by session key (see `keyOf`): each
@@ -21,8 +22,9 @@ interface ChargeState {
   /** A charge `machine`'s engine announced, or answered with. */
   heard: (c: ChargeView, machine?: MachineId) => void;
   /** Does what the person chose for session `key`, on its engine; the
-   *  engine's refusal is thrown in its own words. */
-  act: (key: string, verb: ChargeVerb) => Promise<void>;
+   *  engine's refusal is thrown in its own words. A hand to a boss on
+   *  another hub names it, so the engine hands it to that one or none. */
+  act: (key: string, verb: ChargeVerb, boss?: Boss | null) => Promise<void>;
 }
 
 /** `all` with `c` (on `machine`) as it now stands: a released one gone. */
@@ -73,13 +75,13 @@ export const useCharges = create<ChargeState>((set, get) => ({
     // as Desk can tell, then as the hub says on reading the thread again.
     if (!was || was.wheel !== c.wheel || !!c.releasedAt) rewait(key, c.session, !c.releasedAt && c.wheel !== "boss");
   },
-  act: async (key, verb) => {
+  act: async (key, verb, boss) => {
     const { machine, id } = splitKey(key);
     const hub = hubOf(machine);
     if (!hub) return;
     const c =
       verb === "hand"
-        ? await hub.handTo(id)
+        ? await hub.handTo(id, isServed(boss) ? boss?.id : undefined)
         : verb === "release"
           ? await hub.releaseCharge(id)
           : await hub.setWheel(id, verb === "drive" ? "person_pinned" : "boss");
@@ -116,11 +118,17 @@ const rewait = (key: string, id: string, driving: boolean) => {
 export const useCharge = (sessionId: string | null | undefined): ChargeView | undefined =>
   useCharges((s) => (sessionId ? s.bySession[sessionId] : undefined));
 
-/** The boss session `s` can be handed to: this computer's, for its own
- *  sessions. A machine has no boss of its own (its hub serves no agents),
- *  so its sessions are handed to none and ask the person. */
-export const useBossOf = (s: { machine?: MachineId | null } | null | undefined): Boss | null => {
+/** The boss session `s` can be handed to: the one its group's grant names
+ *  on another hub, wherever the session runs (machines' sessions too); else
+ *  this computer's, for its own sessions. A machine has no boss of its own
+ *  (its hub serves no agents), so its other sessions are handed to none
+ *  and ask the person. */
+export const useBossOf = (s: { id: string; machine?: MachineId | null } | null | undefined): Boss | null => {
   const local = useBoss();
+  const granted = useGrantBossOf(s);
+  if (granted.boss) return granted.boss;
+  // Linked to a boss on another hub that doesn't run sessions now: no one.
+  if (granted.bossed) return null;
   return machineOf(s) === LOCAL ? local : null;
 };
 

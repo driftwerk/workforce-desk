@@ -22,6 +22,8 @@ import { useLine } from "../line/store";
 import { useOverview } from "../overview/store";
 import { SessionCard } from "../session/SessionCard";
 import { useCharges } from "./chargeStore";
+import { useGrantBosses } from "./grantBoss";
+import { useHubLayout } from "../groups/hubLayout";
 
 const terms: { field?: HTMLTextAreaElement }[] = [];
 vi.mock("@xterm/xterm", () => ({
@@ -103,6 +105,7 @@ class FakeHub implements DeskTransport {
   thread: LineMessage[] = [];
   requests: string[] = [];
   typed = "";
+  said: { route: string; said: Record<string, unknown> }[] = [];
   events: Socket | null = null;
   session: Session = lined({ state: "working" });
 
@@ -110,6 +113,7 @@ class FakeHub implements DeskTransport {
     const route = `${method} ${path}`;
     this.requests.push(route);
     const said = body ? (JSON.parse(String(body.data)) as Record<string, unknown>) : {};
+    this.said.push({ route, said });
     if (route === "GET /api/desk/charges") return json(this.charge ? [this.charge] : []);
     if (route === "GET /api/desk/sessions") return json([this.session]);
     if (route === "GET /api/desk/manager") return json({ agentId: "sarah", level: "act" });
@@ -221,6 +225,8 @@ beforeEach(() => {
   startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
   useTerminals.setState({ byId: {}, known: true, programs: {}, problems: {} });
   useCharges.setState({ bySession: {}, supported: null });
+  useGrantBosses.setState({ byGroup: {}, bossed: {}, readAt: {} });
+  useHubLayout.setState({ layout: null, kept: false });
   useLine.setState({ threads: {}, problems: {} });
   useChat.setState({
     hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" }],
@@ -329,6 +335,54 @@ describe("a session Sarah runs", () => {
     expect(hub.requests.filter((r) => r === "POST /api/desk/sessions/s1/charge")).toHaveLength(1);
     await waitFor(() => expect(within(pane).getByText("Sarah has it")).toBeTruthy());
     expect(chip()).toBeTruthy();
+  });
+
+  it("is handed to the boss its group's grant names on another hub, by name and party id", async () => {
+    await connect();
+    // Acme's boss is Allan on Driftwerk (its Boss sheet), read as boss_status says him.
+    useHubLayout.setState({
+      layout: { groups: [{ id: "acme", name: "Acme", collapsed: false, items: ["session:s1"] }], ungrouped: { collapsed: false, items: [] } },
+      kept: true,
+    });
+    useGrantBosses.setState({ byGroup: { acme: { id: "driftwerk/allan", name: "Allan", level: "act", served: true } }, readAt: { acme: Date.now() } });
+    render(<SessionCard session={useDesk.getState().sessions.s1!} />);
+    fireEvent.click(screen.getByRole("button", { name: "Session options" }));
+    expect(screen.queryByRole("menuitem", { name: "Hand to Sarah" })).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("menuitem", { name: "Hand to Allan" })));
+    const hand = hub.said.filter((r) => r.route === "POST /api/desk/sessions/s1/charge");
+    expect(hand).toEqual([{ route: "POST /api/desk/sessions/s1/charge", said: { boss: "driftwerk/allan" } }]);
+  });
+
+  it("is handed to this computer's own boss naming none, in a group no grant bosses", async () => {
+    await connect();
+    render(<SessionCard session={useDesk.getState().sessions.s1!} />);
+    fireEvent.click(screen.getByRole("button", { name: "Session options" }));
+    await act(async () => fireEvent.click(screen.getByRole("menuitem", { name: "Hand to Sarah" })));
+    expect(hub.said.filter((r) => r.route === "POST /api/desk/sessions/s1/charge")).toEqual([{ route: "POST /api/desk/sessions/s1/charge", said: {} }]);
+  });
+
+  it("offers no boss of a group's grant while it only watches", async () => {
+    await connect();
+    useHubLayout.setState({
+      layout: { groups: [{ id: "acme", name: "Acme", collapsed: false, items: ["session:s1"] }], ungrouped: { collapsed: false, items: [] } },
+      kept: true,
+    });
+    useGrantBosses.setState({ byGroup: { acme: { id: "driftwerk/allan", name: "Allan", level: "watch", served: true } }, readAt: { acme: Date.now() } });
+    render(<SessionCard session={useDesk.getState().sessions.s1!} />);
+    fireEvent.click(screen.getByRole("button", { name: "Session options" }));
+    expect(screen.queryByRole("menuitem", { name: /^Hand to/ })).toBeNull();
+  });
+
+  it("offers no one while its group's boss on another hub is paused, not even this computer's own", async () => {
+    await connect();
+    useHubLayout.setState({
+      layout: { groups: [{ id: "acme", name: "Acme", collapsed: false, items: ["session:s1"] }], ungrouped: { collapsed: false, items: [] } },
+      kept: true,
+    });
+    useGrantBosses.setState({ byGroup: { acme: null }, bossed: { acme: true }, readAt: { acme: Date.now() } });
+    render(<SessionCard session={useDesk.getState().sessions.s1!} />);
+    fireEvent.click(screen.getByRole("button", { name: "Session options" }));
+    expect(screen.queryByRole("menuitem", { name: /^Hand to/ })).toBeNull();
   });
 
   it("says the hub's refusal in its own words", async () => {

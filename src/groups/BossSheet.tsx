@@ -40,6 +40,7 @@ import {
   type RemoteBoss,
 } from "./remoteBoss";
 import { useLayout } from "./store";
+import { useGrantBosses } from "../crew/grantBoss";
 
 /** Who runs the group, as picked. */
 type Who = { kind: "desk" } | { kind: "local"; agent: Agent } | { kind: "remote"; agent: Agent };
@@ -90,6 +91,8 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
     try {
       const s = await remoteBosses.status(group);
       setStatus(s);
+      // Its sessions' menus hand them to the boss as it now stands.
+      useGrantBosses.getState().heard(group, s);
       if (s) setChoice(s.choice);
       return s;
     } catch {
