@@ -116,22 +116,45 @@ function Expand({ label, children }: { label: ReactNode; children: ReactNode }) 
   );
 }
 
-/** A directive in a ticket's text, drawn; none it doesn't know (that one
- *  reads as written). */
+/** The directives the hub writes, which Desk draws. */
+export const TICKET_DIRECTIVES = ["mention", "status", "date", "panel", "details"] as const;
+
+/** `inline` where the directive stands: in a paragraph as it is; a leaf
+ *  directive's line a paragraph of it; a container's that line over its
+ *  content. */
+const standing = (d: Directive, inline: ReactNode): ReactNode =>
+  d.kind === "text" ? (
+    inline
+  ) : d.kind === "leaf" ? (
+    <p>{inline}</p>
+  ) : (
+    <>
+      <p>{inline}</p>
+      {d.children}
+    </>
+  );
+
+/** A directive in a ticket's text, drawn: every name the hub writes, in
+ *  every form, whatever its label; one it isn't is never asked for. */
 export const ticketDirective = (d: Directive): ReactNode => {
-  switch (`${d.kind}:${d.name}`) {
-    case "text:mention":
-      return d.labelText.trim() ? <span className="ticket-mention">@{d.labelText.trim().replace(/^@/, "")}</span> : undefined;
-    case "text:status":
-      return d.labelText.trim() ? <span className={`ticket-lozenge tone-${toneOf(d.attributes.tone)}`}>{d.labelText.trim()}</span> : undefined;
-    case "text:date":
-      return d.labelText.trim() ? (
-        <span className="ticket-inline-chip ticket-date">
-          <CalendarIcon />
-          {dateWords(d.labelText)}
-        </span>
-      ) : undefined;
-    case "container:panel": {
+  const said = d.labelText.trim();
+  switch (d.name) {
+    case "mention":
+      return standing(d, <span className="ticket-mention">@{said.replace(/^@/, "") || "someone"}</span>);
+    case "status":
+      return standing(d, said ? <span className={`ticket-lozenge tone-${toneOf(d.attributes.tone)}`}>{said}</span> : null);
+    case "date":
+      return standing(
+        d,
+        said ? (
+          <span className="ticket-inline-chip ticket-date">
+            <CalendarIcon />
+            {dateWords(said)}
+          </span>
+        ) : null,
+      );
+    case "panel": {
+      if (d.kind !== "container") return standing(d, d.label);
       const tone = toneOf(d.attributes.tone);
       return (
         <div className={`ticket-panel-note tone-${tone}`} role="note" aria-label={PANEL_NAME[tone]}>
@@ -142,10 +165,10 @@ export const ticketDirective = (d: Directive): ReactNode => {
         </div>
       );
     }
-    case "container:details":
-      return <Expand label={d.label}>{d.children}</Expand>;
+    case "details":
+      return d.kind === "container" ? <Expand label={d.label}>{d.children}</Expand> : standing(d, d.label);
     default:
-      return undefined;
+      return d.kind === "text" ? d.label : standing(d, d.label);
   }
 };
 

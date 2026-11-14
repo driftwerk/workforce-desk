@@ -1911,7 +1911,8 @@ button.ticket-row:not(:disabled):hover {
   vertical-align: top;
   cursor: zoom-in;
 }
-.ticket-md .ticket-md-picture img {
+.ticket-md .ticket-md-picture img,
+.ticket-md .ticket-md-picture-plain {
   display: block;
   max-width: 100%;
   max-height: 360px;

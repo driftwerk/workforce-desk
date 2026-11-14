@@ -121,6 +121,23 @@ describe("a synced description's directives", () => {
   });
 });
 
+describe("every name the hub writes is drawn, whatever its form", () => {
+  it("never shows a hub directive's syntax", () => {
+    const { container } = body(":mention[] and :panel[a note] and :details[more]\n\n::status[Done]{tone=success}\n\n:::date\nInside.\n:::");
+    expect(container.textContent).not.toMatch(/:(mention|panel|details|status|date)/);
+    expect(container.querySelector(".ticket-mention")?.textContent).toBe("@someone");
+    expect(container.querySelector(".ticket-lozenge")?.textContent).toBe("Done");
+    expect(container.textContent).toContain("a note");
+    expect(container.textContent).toContain("Inside.");
+  });
+
+  it("leaves addresses after a colon linked as before", () => {
+    const { container } = body("Write to mailto:a@b.c or user:name@example.com at 10:30.");
+    expect([...container.querySelectorAll("a")].map((a) => a.getAttribute("href"))).toEqual(["mailto:a@b.c", "mailto:name@example.com"]);
+    expect(container.textContent).toBe("Write to mailto:a@b.c or user:name@example.com at 10:30.Edit description");
+  });
+});
+
 describe("a synced description's links", () => {
   it("draws an issue link to a ticket here as its chip: the key alone, or the link's words as its title", () => {
     const { container } = body("After [ACME-875](https://acme.example/browse/ACME-875) and [Patchwork login](https://ACME.example/browse/ACME-875/).");
@@ -194,6 +211,12 @@ describe("a picture of the ticket's own", () => {
     expect(container.querySelector(".ticket-md-file-missing")?.textContent).toBe("gone.png");
     expect(container.querySelector("img")).toBeNull();
     expect(hub.fileBlob).not.toHaveBeenCalled();
+  });
+
+  it("is the link's content, not a button, inside a link", async () => {
+    const { container } = body(`[![boot.png](desk-file:${FILE_ID})](https://example.com/x)`);
+    await waitFor(() => expect(container.querySelector("a img.ticket-md-picture-plain")?.getAttribute("src")).toMatch(/^blob:/));
+    expect(container.querySelector("a button")).toBeNull();
   });
 
   it("names only a file id", () => {

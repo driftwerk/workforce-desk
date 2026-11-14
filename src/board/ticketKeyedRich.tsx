@@ -5,7 +5,7 @@ import { parseTicketLink } from "../shell/links";
 import { DESK_RICH_HOST } from "../shell/richHost";
 import { IssueChip } from "./IssueChip";
 import { useBoard } from "./store";
-import { SmartLink, ticketDirective } from "./ticketDirectives";
+import { SmartLink, TICKET_DIRECTIVES, ticketDirective } from "./ticketDirectives";
 import { linkTicketKeys } from "./ticketKeys";
 
 /** The site and issue key an `https` address to an issue names: Jira's
@@ -53,6 +53,7 @@ export const TICKET_RICH_HOST = {
   imageSchemes: ["desk-file"],
   // Read when called: this module and the board's are in a cycle.
   directive: (d: Directive) => ticketDirective(d),
+  directiveNames: TICKET_DIRECTIVES,
   link: (href: string, children: ReactNode) => {
     const tickets = useBoard.getState().tickets;
     const id = parseTicketLink(href) ?? ticketAt(href, tickets);

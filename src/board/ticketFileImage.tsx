@@ -12,7 +12,7 @@ export const deskFileId = (src: string): string | null => /^desk-file:([0-9a-f-]
  *  drawn from its bytes (fetched through Desk, never by the page from
  *  anywhere), or the file's chip; either opens it. Not among its files,
  *  its name. */
-export function TicketFileImage({ ticket, id, alt }: { ticket: string; id: string; alt: string }) {
+export function TicketFileImage({ ticket, id, alt, inLink = false }: { ticket: string; id: string; alt: string; inLink?: boolean }) {
   const t = useBoard((s) => s.tickets[ticket]);
   const file = t?.files?.find((f) => f.id.toLowerCase() === id) ?? null;
   const picture = file && fileKind(file) === "image" ? file : null;
@@ -27,6 +27,8 @@ export function TicketFileImage({ ticket, id, alt }: { ticket: string; id: strin
     </span>
   );
   const name = alt || file.name;
+  // Inside a link it is that link's content: drawn, nothing to press.
+  if (inLink) return picture && shown.url ? <img className="ticket-md-picture-plain" src={shown.url} alt={name} /> : <span>{name}</span>;
   return (
     <>
       {picture ? (
@@ -47,8 +49,8 @@ export function TicketFileImage({ ticket, id, alt }: { ticket: string; id: strin
 /** The image hook for ticket `ticket`'s text: its own files drawn. */
 export const ticketImage =
   (ticket: string | undefined) =>
-  (src: string, alt: string): ReactNode => {
+  (src: string, alt: string, at?: { inLink: boolean }): ReactNode => {
     const id = deskFileId(src);
     if (!id) return undefined;
-    return ticket ? <TicketFileImage ticket={ticket} id={id} alt={alt} /> : <span className="ticket-md-file-missing">{alt || "attachment"}</span>;
+    return ticket ? <TicketFileImage ticket={ticket} id={id} alt={alt} inLink={at?.inLink} /> : <span className="ticket-md-file-missing">{alt || "attachment"}</span>;
   };
