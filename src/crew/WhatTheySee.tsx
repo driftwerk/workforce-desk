@@ -123,7 +123,8 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
       // An agent elsewhere linked in an earlier run: its rule is kept by
       // the id its hub gave, which may differ in case from the roster's.
       if (remote && !linked.has(self) && !known.has(self)) {
-        const kept = (await k.rules()).find((r) => r.agent.toLowerCase() === self.toLowerCase());
+        const as = [self, `local/${agent.id}`].map((x) => x.toLowerCase());
+        const kept = (await k.rules()).find((r) => as.includes(r.agent.toLowerCase()));
         if (kept) known.set(self, kept.agent);
       }
       const v = await k.rule(keyOf());
@@ -136,7 +137,7 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
       if (e instanceof HubError && (e.status === 404 || e.status === 405)) setLoad("missing");
       else setLoad({ problem: said(e) });
     }
-  }, [api, keyOf, remote, self]);
+  }, [api, keyOf, remote, self, agent.id]);
 
   useEffect(() => {
     setView(null);
@@ -208,7 +209,10 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
       try {
         const changed = await k.setRule(keyOf(), next);
         if (n === seq.current) setStatus({ state: "idle" });
-        if (narrows(was, next) && changed.heldOutside.items > 0)
+        // Asked only when it now holds more outside the rule than before:
+        // what was kept earlier was asked about then.
+        const before = confirmed.current?.heldOutside.items ?? 0;
+        if (narrows(was, next) && changed.heldOutside.items > before)
           setAsking({
             held: changed.heldOutside,
             why:
@@ -289,8 +293,8 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
       )}
       {rule && (
         <>
-          <div className="sees-rows">
-            <div className="sees-modes" role="radiogroup" aria-label={`What ${name} sees`}>
+          <div className="ability-card">
+            <div className="pick-list" role="radiogroup" aria-label={`What ${name} sees`}>
               {modes.map((m, i) => (
                 <div key={m.id} className="sees-mode">
                   <button
@@ -309,7 +313,7 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
                     </span>
                   </button>
                   {m.id === "chosen" && (
-                    <button type="button" className="link small sees-change" onClick={() => setPicking(true)}>
+                    <button type="button" className="link link-signal small sees-change" onClick={() => setPicking(true)}>
                       {mode === "chosen" ? "Change…" : "Choose…"}
                     </button>
                   )}
@@ -362,14 +366,14 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
             <p className="small muted">
               {shared.length > 0 ? `Shared today: ${andSaid(shared.map((s) => countSaid(s.items, s.kind)))}` : "Nothing shared today."}
               {" · "}
-              <button type="button" className="link small" aria-expanded={showLog} onClick={() => setShowLog((x) => !x)}>
+              <button type="button" className="link link-signal small" aria-expanded={showLog} onClick={() => setShowLog((x) => !x)}>
                 {showLog ? "Hide what was shared" : "See what was shared"}
               </button>
             </p>
             {held && held.items > 0 && !asking && (
               <p className="small muted">
                 {name} holds {heldSaid(held)} that they no longer see.{" "}
-                <button type="button" className="link small" onClick={() => setAsking({ held, why: "earlier" })}>
+                <button type="button" className="link link-signal small" onClick={() => setAsking({ held, why: "earlier" })}>
                   Delete them…
                 </button>
               </p>
@@ -386,7 +390,7 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
               </p>
             )}
           </div>
-          {showLog && <SharedLog log={log} today={view?.sharedToday ?? []} />}
+          {showLog && <SharedLog log={log} />}
         </>
       )}
       {picking && rule && (
@@ -467,20 +471,10 @@ const items = (x: unknown): string => (typeof x === "number" ? `${n(x)} ${x === 
 
 /** What was shared today by kind, and the rule's log: counts and places,
  *  never content. */
-function SharedLog({ log, today }: { log: KnowsLogEntry[] | null; today: { kind: string; items: number }[] }) {
-  const kinds = today.filter((t) => t.items > 0);
+function SharedLog({ log }: { log: KnowsLogEntry[] | null }) {
+  // What was shared today is the line above it: the changes alone here.
   return (
     <div className="sees-log">
-      {kinds.length > 0 && (
-        <ul className="sees-log-list" aria-label="Shared today">
-          {kinds.map((t) => (
-            <li key={t.kind}>
-              <span>{countSaid(t.items, t.kind)}</span>
-              <span className="faint">today</span>
-            </li>
-          ))}
-        </ul>
-      )}
       {log === null ? (
         <p className="small faint">…</p>
       ) : log.length === 0 ? (

@@ -983,64 +983,35 @@ button.card-icon:hover:not(:disabled) {
   white-space: nowrap;
 }
 /* ── What they see (Sees) ─────────────────────────────────────────────────
-   Rows divided by hairlines, no box around them: the choices are `.pick`s
-   flattened as How they work's are. */
+   One ability card, as How they work's: the choices its rows, "Choose…"
+   beside the one it opens. */
 .sees-head {
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-.sees-rows {
-  display: flex;
-  flex-direction: column;
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-}
-.sees-rows > * + *,
-.sees-modes > * + * {
-  border-top: 1px solid var(--border);
-}
-.sees-rows > .ability-row {
-  padding: 14px 0;
-}
-.sees-rows .seg {
-  background: var(--sunken);
-}
-.sees-rows .seg button[aria-checked="true"] {
-  background: var(--raised);
-}
 .sees-mode {
   display: flex;
   align-items: center;
-  gap: 12px;
+}
+.sees-mode + .sees-mode,
+.ability-card > .pick-list + .ability-row {
+  border-top: 1px solid var(--border);
 }
 .sees-mode .pick {
   flex: 1;
   min-width: 0;
-  padding: 14px 8px 14px 0;
-  border: 0;
-  border-radius: 0;
-  background: none;
-}
-.sees-mode .pick:hover,
-.sees-mode .pick[aria-checked="true"] {
-  background: none;
-}
-.sees-mode .pick:hover .radio-ring {
-  border-color: var(--muted);
-}
-.sees-mode .pick[aria-checked="true"]:hover .radio-ring {
-  border-color: var(--signal);
 }
 .sees-change {
   flex: none;
+  margin-right: 16px;
 }
-/* Its links in the signal's text colour, as Appearance's are (`.link-signal`,
-   which lives with Settings' own styles). */
-.sees .link {
+/* Settings' `.link-signal` (its links in the signal's text colour), here
+   where settings.css may load before app.css's `.link` and lose to it. */
+.sees .link-signal {
   color: var(--signal-soft-text);
 }
-.sees .link:hover {
+.sees .link-signal:hover {
   color: var(--text);
 }
 .sees-foot {
@@ -1081,6 +1052,9 @@ button.card-icon:hover:not(:disabled) {
   background: var(--bg);
   border-radius: var(--radius-sm);
   padding: 10px 12px;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
   outline: none;
 }
 .sees-pick-filter:focus {

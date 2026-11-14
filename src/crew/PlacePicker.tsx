@@ -33,8 +33,11 @@ export function PlacePicker({
 
   // Picked before but not listed now: kept listed, so they can be unticked
   // and ticked again.
-  const [gone] = useState<Place[]>(() =>
-    initial.filter((p) => kindOf(p) && !places.has(p)).map((p) => ({ place: p, kind: kindOf(p)!, name: "One that’s gone", sub: "picked before" })),
+  // Keyed on what was picked when it opened, so one unticked stays listed;
+  // one that was only still loading leaves once it is.
+  const gone = useMemo<Place[]>(
+    () => initial.filter((p) => kindOf(p) && !places.has(p)).map((p) => ({ place: p, kind: kindOf(p)!, name: "One that’s gone", sub: "picked before" })),
+    [initial, places],
   );
   const words = filter.trim().toLowerCase();
   const shown = useMemo(() => {
@@ -72,8 +75,8 @@ export function PlacePicker({
     >
       <div className="dialog-scroll sees-pick">
         <input
-          type="search"
-          className="sees-pick-filter field-input"
+          type="text"
+          className="sees-pick-filter"
           placeholder="Filter"
           aria-label="Filter places"
           data-autofocus

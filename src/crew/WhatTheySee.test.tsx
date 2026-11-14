@@ -104,6 +104,16 @@ describe("What they see", () => {
     expect(await screen.findByText(/that they no longer see/)).toBeTruthy();
   });
 
+  it("doesn't ask again about what was kept earlier when a change adds nothing to it", async () => {
+    const earlier: KnowsHeld = { items: 40, transcripts: 0, sessions: 2, by_kind: { account: 40 } };
+    kept = viewOf(ruleOf("local/ledger", { places: ["all"], transcripts: true }), earlier);
+    await show();
+    fireEvent.click(screen.getByRole("switch", { name: "Include transcripts" }));
+    await waitFor(() => expect(api.setRule).toHaveBeenCalledWith("local/ledger", { places: ["all"], transcripts: false, digest: "off" }));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Include transcripts" }).getAttribute("aria-checked")).toBe("false"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("deletes them when asked", async () => {
     kept = viewOf(ruleOf("local/ledger"), { items: 3, transcripts: 0, sessions: 1, by_kind: { account: 3 } });
     await show();
@@ -197,7 +207,7 @@ describe("What they see", () => {
     fireEvent.click(screen.getByRole("button", { name: "Choose…" }));
     const dialog = await screen.findByRole("dialog", { name: "What Ledger sees" });
     expect((within(dialog).getByRole("button", { name: "Use these" }) as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.change(within(dialog).getByRole("searchbox", { name: "Filter places" }), { target: { value: "all" } });
+    fireEvent.change(within(dialog).getByRole("textbox", { name: "Filter places" }), { target: { value: "all" } });
     fireEvent.click(within(dialog).getByRole("checkbox", { name: /Allan/ }));
     fireEvent.click(within(dialog).getByRole("button", { name: "Use these" }));
     await waitFor(() => expect(api.setRule).toHaveBeenCalledWith("local/ledger", { places: ["agent:dw/Allan"], transcripts: false, digest: "off" }));
