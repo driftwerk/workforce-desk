@@ -329,7 +329,12 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
 
               <div className="oversee-part">
                 <h3>What {bossName} sees</h3>
-                <SeesChips value={choice.sees} disabled={busy} onChange={(sees) => setChoice((c) => ({ ...c, sees }))} />
+                <SeesChips
+                  value={choice.sees}
+                  disabled={busy}
+                  needsReplies={choice.level === "full"}
+                  onChange={(sees) => setChoice((c) => ({ ...c, sees }))}
+                />
                 <span className="oversee-sub">
                   {picked.agent.hubId === status?.hub ? status.hubLabel : (hubs.find((h) => h.id === picked.agent.hubId)?.label ?? "Its hub")} receives what{" "}
                   {bossName} sees of {name}, and its model reads it.
@@ -481,7 +486,7 @@ function SeesChips({ value, disabled, onChange, needsReplies = false }: { value:
             key={s}
             type="button"
             role="radio"
-            className="chip-btn"
+            className={value === s ? "chip-btn on" : "chip-btn"}
             aria-checked={value === s}
             aria-disabled={off || undefined}
             tabIndex={value === s ? 0 : -1}

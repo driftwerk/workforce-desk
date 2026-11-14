@@ -167,6 +167,14 @@ describe("what the sheet offers as the boss stands", () => {
     await waitFor(() => expect(calls.invoke).toHaveBeenCalledWith("boss_set", { group: "acme", choice: { level: "act", sees: "replies", budgetUsdPerDay: null } }));
   });
 
+  it("marks the Sees chosen, and keeps Status out of reach at Act fully", async () => {
+    status = linked(FULL);
+    await open();
+    const replies = await screen.findByRole("radio", { name: "Status and replies" });
+    expect(replies.classList.contains("on")).toBe(true);
+    expect(screen.getByRole("radio", { name: "Status" }).getAttribute("aria-disabled")).toBe("true");
+  });
+
   it("says what Allan spent today at Act fully, and not known when an engine didn't say", async () => {
     status = linked(FULL, { spentTodayUsd: 12.5 });
     await open();
