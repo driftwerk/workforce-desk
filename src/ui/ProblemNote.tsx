@@ -1,6 +1,7 @@
 import { askDesk, useCanAskDesk } from "./askDesk";
 import { fullDetailsOf } from "./plainError";
 import type { Problem } from "./problem";
+import { withCommands } from "./withCommands";
 
 /** A problem in the one shape Desk uses everywhere: the headline in plain
  *  words, the button most likely to fix it, and the raw text folded under
@@ -15,7 +16,7 @@ export function ProblemNote({ problem, onDone, className = "" }: { problem: Prob
   const primary = !fix ? null : fix.ask ? (canAsk ? fix : (fix.alt ?? null)) : fix;
   return (
     <div className={`problem ${className}`.trim()}>
-      <p className="problem-plain">{problem.plain}</p>
+      <p className="problem-plain">{withCommands(problem.plain)}</p>
       {(primary || canAsk || onDone) && (
         <div className="problem-actions">
           {primary && (

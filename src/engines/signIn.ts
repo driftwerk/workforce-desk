@@ -8,7 +8,7 @@
 //
 // Every wait has a limit, and every failure says why, with Try again:
 // - 30 s for the sign-in's page to open (Claude's, or Codex's device code),
-//   or for Devin's to say where it is;
+//   and 45 s for Devin's to say where it is (past its hub's own limits);
 // - 10 minutes for the person to approve Claude's sign-in;
 // - 15 minutes for Codex's code to be typed (as long as the code lasts);
 // - 10 minutes for the person to sign in on Devin's page;
@@ -532,7 +532,7 @@ export function useCodexSignIn(machine: MachineId, where: Where, native: Machine
 
 export type DevinRun =
   | { at: "idle" }
-  /** Begun: Devin hasn't said where it is yet (30 s). */
+  /** Begun: Devin hasn't said where it is yet (45 s). */
   | { at: "opening"; id: string | null }
   /** Its page is open: Devin carries on by itself once the person signs in
    *  there (10 minutes), or (`paste`) the page gives a code to paste here.
@@ -549,9 +549,14 @@ export type DevinRun =
  *  limit (16 minutes), whose plain words come first. */
 export const BROWSER_WITHIN_MS = 17 * 60_000;
 
-/** Its hub never said the sign-in started. */
-export const devinNotOpened = (where: Where): string =>
-  `Devin on ${where} didn’t start its sign-in within 30 s, so Desk stopped it. Try again, or paste a code instead.`;
+/** How long Devin's hub has to say its sign-in started: a backstop past
+ *  the hub's own limits there (up to about 40 s: 20 s for Devin's picker,
+ *  then 20 s for its browser), whose plain words come first. */
+export const DEVIN_START_WITHIN_MS = 45_000;
+/** Its hub never said the sign-in started; on the way with a code to
+ *  paste (`manual`), Try again is that way already. */
+export const devinNotOpened = (where: Where, manual = false): string =>
+  `Devin on ${where} didn’t start its sign-in within ${DEVIN_START_WITHIN_MS / 1000} s, so Desk stopped it. ${manual ? "Try again." : "Try again, or paste a code instead."}`;
 export const devinNotSigned = "Nobody signed in on Devin’s page within 10 minutes, so Desk stopped it.";
 export const devinNotFinished = "Nobody finished signing in in Devin’s browser window, so Desk stopped it. Try again, or paste a code instead.";
 /** Whether a failure says a pasted code is the way on. */
@@ -664,7 +669,7 @@ export function useDevinSignIn(machine: MachineId, where: Where, native: Machine
     return () => clearInterval(t);
   }, [hub, id, follow, where]);
 
-  // Its limits: 30 s to start, 10 minutes to sign in on its page, and in
+  // Its limits: 45 s to start, 10 minutes to sign in on its page, and in
   // Devin's own browser window past its hub's limit.
   const phase = run.at === "opening" ? "opening" : run.at === "page" ? `page:${run.id}` : run.at === "browser" ? `browser:${run.id}` : null;
   useEffect(() => {
@@ -676,8 +681,8 @@ export function useDevinSignIn(machine: MachineId, where: Where, native: Machine
           if (signIn) void hub.cancelEngineSignIn(signIn).catch(() => undefined);
         };
         if (phase === "opening" && now.at === "opening") {
-          console.warn(`Devin's sign-in on ${where} didn't start within ${OPEN_WITHIN_MS / 1000} s: stopped it`);
-          put({ at: "failed", why: devinNotOpened(where) });
+          console.warn(`Devin's sign-in on ${where} didn't start within ${DEVIN_START_WITHIN_MS / 1000} s: stopped it`);
+          put({ at: "failed", why: devinNotOpened(where, manual.current) });
           stopIt(now.id);
         } else if (phase.startsWith("page:") && now.at === "page") {
           put({ at: "failed", why: devinNotSigned });
@@ -688,7 +693,7 @@ export function useDevinSignIn(machine: MachineId, where: Where, native: Machine
           stopIt(now.id);
         }
       },
-      phase === "opening" ? OPEN_WITHIN_MS : phase.startsWith("browser:") ? BROWSER_WITHIN_MS : APPROVE_WITHIN_MS,
+      phase === "opening" ? DEVIN_START_WITHIN_MS : phase.startsWith("browser:") ? BROWSER_WITHIN_MS : APPROVE_WITHIN_MS,
     );
     return () => clearTimeout(t);
   }, [phase, hub, where]);

@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { explain } from "../ui/problem";
 import { ProblemNote } from "../ui/ProblemNote";
 import { hasAccounts } from "../engines/accounts";
 import { defaultCaps, installedText, runsText, signInText } from "../engines/engines";
-import { CODEX_LOGIN, offersPaste, useCodexSignIn, useDevinSignIn } from "../engines/signIn";
+import { CODEX_LOGIN, DEVIN_START_WITHIN_MS, offersPaste, useCodexSignIn, useDevinSignIn } from "../engines/signIn";
 import { LOCAL, type MachineId } from "../hub/machines";
 import { hubOf, useHubOf } from "../hub/store";
 import type { EngineInfo } from "../hub/types";
@@ -321,19 +321,6 @@ export function InstallEngine({
   );
 }
 
-/** `text` with each `command` in it drawn as code: the hub's plain words
- *  name a command to run by hand that way. */
-export const withCommands = (text: string): ReactNode[] =>
-  text.split(/`([^`]+)`/).map((part, i) =>
-    i % 2 ? (
-      <code key={i} className="mono">
-        {part}
-      </code>
-    ) : (
-      part
-    ),
-  );
-
 /** Devin's sign-in under way, as Codex's is drawn: starting, waiting in
  *  the browser Devin opened (a code to paste instead beside it), its page
  *  open (with the field for the code it gives, where it gives one), done,
@@ -347,7 +334,7 @@ export function DevinSigningIn({ devin }: { devin: ReturnType<typeof useDevinSig
       {r.at === "opening" && (
         <>
           <p className="small">Starting Devin’s sign-in…</p>
-          <span className="faint small">If Devin hasn’t started it in 30 s, Desk stops and says why.</span>
+          <span className="faint small">If Devin hasn’t started it in {DEVIN_START_WITHIN_MS / 1000} s, Desk stops and says why.</span>
         </>
       )}
       {r.at === "browser" && (
@@ -395,9 +382,10 @@ export function DevinSigningIn({ devin }: { devin: ReturnType<typeof useDevinSig
         </p>
       )}
       {r.at === "failed" && (
-        // The hub's words are already plain: said as they are.
-        <div role="alert" className="problem">
-          <p className="problem-plain">{withCommands(r.why)}</p>
+        // The hub's words are already plain: said as they are, not
+        // explained again. Try again below is the retry.
+        <div role="alert">
+          <ProblemNote problem={{ plain: r.why, what: "signing in to Devin" }} />
         </div>
       )}
       <span className="account-actions">
