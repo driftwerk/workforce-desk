@@ -14,8 +14,9 @@ import { useLayout } from "../groups/store";
 import { sessionKey, type MachineId } from "../hub/machines";
 import type { Boss } from "./charge";
 
-/** How long a group's boss, as read, is taken as still so. */
-const FRESH_MS = 60_000;
+/** How long a group's boss, as read, is taken as still so: under the
+ *  re-read interval, so each tick reads it again. */
+const FRESH_MS = 25_000;
 
 interface GrantBossState {
   /** Each group's boss on another hub, as last read: null where it has
@@ -106,5 +107,6 @@ export const useGrantBossOf = (s: Placed | null | undefined): { boss: Boss | nul
 /** Whether `boss` is one on another hub, named by its grant. */
 export const isServed = (boss: Boss | null | undefined): boolean => !!boss?.served;
 
-/** How often the groups' bosses are read again while Desk is open. */
-export const REREAD_MS = FRESH_MS / 2;
+/** How often the groups' bosses are read again while Desk is open (each
+ *  tick finds the last read older than `FRESH_MS`). */
+export const REREAD_MS = 30_000;
