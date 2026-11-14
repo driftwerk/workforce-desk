@@ -195,6 +195,7 @@ const LABEL: Record<SetupAction, string> = {
   new_code: "Get a new code",
   other_way: "Sign in another way",
   retry: "Try again",
+  paste_token: "Paste a token",
 };
 
 /** "in 14 min", while a code lasts. */
@@ -224,6 +225,9 @@ export function SetupCard({
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  /** The field a token of the person's own is pasted in: open or not. */
+  const [pasting, setPasting] = useState(false);
+  const [token, setToken] = useState("");
   const live = useLive();
   const card = useRef<HTMLElement>(null);
   const named = useChat((c) => c.roster.find((a) => a.hubId === origin.hub && a.id === origin.agent)?.name);
@@ -314,6 +318,8 @@ export function SetupCard({
         return void openCode();
       case "show_page":
         return void show();
+      case "paste_token":
+        return void startPaste(false);
       case "retry":
         return void (async () => {
           setBusy(true);
@@ -322,6 +328,33 @@ export function SetupCard({
           setBusy(false);
           if (!told) setProblem(`Desk couldn’t reach ${named ?? "the agent"} just now. Try again in a moment.`);
         })();
+    }
+  };
+
+  /** Opens GitHub's token page, filled in, and the field to paste it in. */
+  const startPaste = (open: boolean) => {
+    setProblem(null);
+    setPasting(true);
+    if (open && now.paste) openUrl(now.paste);
+  };
+
+  /** The pasted token goes to the hub alone: never into the chat. */
+  const paste = async () => {
+    const given = token.trim();
+    if (!given) return;
+    setBusy(true);
+    setProblem(null);
+    setToken("");
+    try {
+      const next = await api.pasteToken(s.id, given);
+      if (!live.current) return;
+      onChange(next);
+      setPasting(false);
+    } catch (e) {
+      if (!live.current) return;
+      setProblem(e instanceof HubError && e.status === 400 ? e.message : ended(e));
+    } finally {
+      if (live.current) setBusy(false);
     }
   };
 
@@ -373,11 +406,53 @@ export function SetupCard({
           )}
         </p>
       )}
-      {(now.action || now.other || escape) && (
+      {pasting && now.paste != null && (
+        <form
+          className="setup-paste"
+          onSubmit={(e) => {
+            e.preventDefault();
+            void paste();
+          }}
+        >
+          <label className="small muted" htmlFor={`token-${s.id}`}>
+            Paste the token GitHub shows you. It goes straight to the vault on this computer, never into the chat.
+          </label>
+          <span className="setup-paste-row">
+            <input
+              id={`token-${s.id}`}
+              className="mono"
+              type="password"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder="github_pat_…"
+              value={token}
+              disabled={busy}
+              onChange={(e) => setToken(e.target.value)}
+            />
+            <button type="submit" className="btn btn-approve" disabled={busy || !token.trim()}>
+              {busy ? "Checking…" : "Connect"}
+            </button>
+            <button type="button" className="link small" disabled={busy} onClick={() => (setPasting(false), setToken(""))}>
+              Cancel
+            </button>
+          </span>
+        </form>
+      )}
+      {!pasting && (now.action || now.other || escape || now.paste) && (
         <div className="setup-actions">
-          {now.action && (
+          {now.action && now.action !== "paste_token" && (
             <button type="button" className={primary ? "btn btn-approve" : "btn"} disabled={busy} onClick={() => act(now.action!)}>
               {now.action === "open_code" && copied ? "Copied · open GitHub again" : LABEL[now.action]}
+            </button>
+          )}
+          {(now.paste || now.action === "paste_token") && (
+            <button
+              type="button"
+              className={now.action === "paste_token" ? "btn btn-approve" : "btn"}
+              disabled={busy}
+              onClick={() => startPaste(now.action !== "paste_token")}
+            >
+              {LABEL.paste_token}
             </button>
           )}
           {now.other && (

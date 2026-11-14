@@ -62,6 +62,7 @@ const api = (list: Connector[], over: Partial<ConnectionsApi> = {}): Connections
   setups: vi.fn(async () => []),
   signedIn: vi.fn(),
   choose: vi.fn(),
+  pasteToken: vi.fn(),
   ...over,
 });
 

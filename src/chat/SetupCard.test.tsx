@@ -80,6 +80,7 @@ const api = (setups: Setup[], over: Partial<ConnectionsApi> = {}): ConnectionsAp
     setups: vi.fn(async () => setups),
     signedIn: vi.fn(async () => setups[0]),
     choose: vi.fn(async () => setups[0]),
+    pasteToken: vi.fn(async () => setups[0]),
     ...over,
   }) as unknown as ConnectionsApi;
 
@@ -305,4 +306,49 @@ it("asks less often while the hub keeps failing, and not at all once it says it 
     await vi.advanceTimersByTimeAsync(60_000);
   });
   expect(old.setups).toHaveBeenCalledTimes(1);
+});
+
+const PAGE = "https://github.com/settings/personal-access-tokens/new?name=Desk&contents=read";
+
+it("offers a token of the person's own beside the primary action, pasted on the card and never into the chat", async () => {
+  const sent: string[] = [];
+  useChat.setState({ send: (_k: string, c: string) => (sent.push(c), true) } as never);
+  const a = api([setup({ now: { ...CODE, paste: PAGE } })], {
+    pasteToken: vi.fn(async () => setup({ way: "browser", now: CONNECTED })),
+  });
+  await show(a);
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Copy code and open GitHub", "Paste a token"]);
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Paste a token" }));
+  });
+  expect(opened).toEqual([PAGE]);
+  const field = screen.getByLabelText(/Paste the token GitHub shows you/) as HTMLInputElement;
+  expect(field.type).toBe("password");
+  expect(field.autocomplete).toBe("off");
+  fireEvent.change(field, { target: { value: " github_pat_secretvalue " } });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+  });
+  expect(a.pasteToken).toHaveBeenCalledWith("s1", "github_pat_secretvalue");
+  expect(sent).toEqual([]);
+  expect(screen.getByText("GitHub connected as sarah")).toBeTruthy();
+  expect(screen.queryByLabelText(/Paste the token/)).toBeNull();
+  expect(document.body.innerHTML).not.toContain("github_pat_secretvalue");
+});
+
+it("says what was wrong with a pasted token, and keeps nothing of it on screen", async () => {
+  const a = api([setup({ way: "cli", now: { ...OFFER, paste: PAGE } })], {
+    pasteToken: vi.fn(async () => Promise.reject(new HubError(400, "That doesn't look like a GitHub token: it starts github_pat_ or ghp_."))),
+  });
+  await show(a);
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Use it", "Paste a token", "Sign in another way"]);
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Paste a token" }));
+  });
+  fireEvent.change(screen.getByLabelText(/Paste the token/), { target: { value: "hunter2" } });
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Connect" }));
+  });
+  expect(screen.getByRole("alert").textContent).toMatch(/doesn't look like a GitHub token/);
+  expect((screen.getByLabelText(/Paste the token/) as HTMLInputElement).value).toBe("");
 });

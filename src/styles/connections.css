@@ -397,6 +397,21 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
+.setup-paste {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.setup-paste-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.setup-paste-row input {
+  flex: 1 1 260px;
+  min-width: 0;
+}
 .setup-actions {
   display: flex;
   flex-wrap: wrap;
