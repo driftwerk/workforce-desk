@@ -43,6 +43,7 @@ export function Mark({
   src,
   person = false,
   tone = "mark",
+  you = false,
 }: {
   name: string;
   engine?: string;
@@ -52,6 +53,10 @@ export function Mark({
   src?: string | null;
   person?: boolean;
   tone?: MarkTone;
+  /** It stands for the person themselves: on the board, their first
+   *  initial only, as their own comments show it (its colour still by
+   *  their whole name). */
+  you?: boolean;
 }) {
   const [broken, setBroken] = useState<string | null>(null);
   const picture = src && src !== broken ? src : null;
@@ -63,7 +68,7 @@ export function Mark({
   return (
     <span className={`mark mark-${size} ${person && !series ? "mark-person" : ""} ${state ? (RING[state] ?? "") : ""}`}>
       <span className="mark-face" style={picture ? undefined : face}>
-        {picture ? <img src={picture} alt="" draggable={false} onError={() => setBroken(picture)} /> : series ? markText(name, false) : initialsFor(name, engine)}
+        {picture ? <img src={picture} alt="" draggable={false} onError={() => setBroken(picture)} /> : series ? markText(you ? (name.trim().split(/\s+/)[0] ?? name) : name, false) : initialsFor(name, engine)}
       </span>
     </span>
   );

@@ -26,6 +26,12 @@ describe("a mark's fill", () => {
     expect(face(container).textContent).toBe("RL");
   });
 
+  it("is the first initial alone for the person themselves, coloured by their whole name", () => {
+    const { container } = render(<Mark name="Kai Moreno" size="xs" person tone="series" you />);
+    expect(face(container).textContent).toBe("K");
+    expect(face(container).style.background).toBe(tokenVar(markFor("Kai Moreno", SERIES_MARK_TOKENS)));
+  });
+
   it("spreads names over the same slots in both lists", () => {
     for (const name of ["Kingsley", "Matt", "Richard Lucas", "Pia", "atlas"])
       expect(SERIES_MARK_TOKENS.indexOf(markFor(name, SERIES_MARK_TOKENS) as never)).toBe(MARK_TOKENS.indexOf(markFor(name) as never));
