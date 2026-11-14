@@ -17,7 +17,7 @@ use tokio::process::{Child, Command};
 use tokio::signal::unix::{SignalKind, signal};
 
 use crate::handover::HubSecrets;
-use crate::{bootstrap, commands, config, holder, memory, model, moving};
+use crate::{bootstrap, commands, config, holder, memory, model, moving, rotate};
 
 const HEALTHY_AFTER: Duration = Duration::from_secs(300);
 const MAX_BACKOFF: Duration = Duration::from_secs(60);
@@ -869,13 +869,22 @@ async fn run_helper(
         env = with_plugin_dir(env, &plugin.to_string_lossy());
     }
     let person = bootstrap::Named::from_env(&process_env);
-    let secrets = HubSecrets::load(&keys)?;
+    let mut secrets = HubSecrets::load(&keys)?;
     let pg = start_postgres(
         &paths,
         ports.postgres,
         secrets.get(Secret::PostgresPassword).to_owned(),
     )
     .await?;
+    // Before anything is handed the password: an install from before it was
+    // kept out of readable places has it changed, once.
+    let database = rotate::Local {
+        port: ports.postgres,
+        user: config::DATABASE_USER,
+    };
+    let current = secrets.get(Secret::PostgresPassword).to_owned();
+    let password = rotate::run(&paths.hub().join(rotate::MARKER), &keys, &database, current).await;
+    secrets.set(Secret::PostgresPassword, password);
 
     let node = match &store {
         _ if machine => None,
