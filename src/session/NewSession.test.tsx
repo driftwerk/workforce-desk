@@ -4,7 +4,7 @@ import type { DeskHub } from "../hub/client";
 import type { Caps, EngineAccount, EngineInfo, View } from "../hub/types";
 import { useDesk } from "../hub/store";
 import { installCli } from "../platform";
-import { NewSession, noneOf, whyNotStart } from "./NewSession";
+import { isModelName, NewSession, noneOf, whyNotStart } from "./NewSession";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 vi.mock("../platform", () => ({
@@ -346,4 +346,9 @@ it("names what isn't installed in plain words", () => {
   expect(whyNotStart({ hub: true, folder: "", remote: false, where: "", noFolder: false, cantSignIn: null, starting: false, noEngine: true })?.words).toBe(
     "Install Claude Code or Codex above, then start.",
   );
+});
+
+it("reads a model's name as the hub does", () => {
+  for (const ok of ["opus", "gpt-6.1-sol", "claude-opus-5-5[1m]", "us.anthropic.claude-sonnet-4-5:0"]) expect(isModelName(ok)).toBe(true);
+  for (const bad of ["-p", "opus --x", "a\"b", "", "é"]) expect(isModelName(bad)).toBe(false);
 });

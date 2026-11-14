@@ -56,6 +56,10 @@ export const groupSays = (group: string, startedIn: string, name: string, machin
 const FAST_NOTE =
   "Codex asks ChatGPT for its faster tier where your model has one: up to twice the speed, and on most models it uses up your plan’s limits sooner.";
 
+/** Whether `id` reads as a model's name, as the hub takes one: a letter or
+ *  digit first, then letters, digits and `-_.:/[]@`. */
+export const isModelName = (id: string): boolean => id.length <= 100 && /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]*$/.test(id);
+
 /** Why Start can't be pressed yet, in a line, with what puts it right. */
 export interface Blocked {
   words: string;
@@ -170,7 +174,7 @@ export function NewSession({
     if (c.approvals) setApprovals(c.approvals);
     if (c.approveForMe !== undefined) setApproveForMe(c.approveForMe);
     if (c.fast !== undefined) setFast(c.fast);
-    if (c.engine) setModels((m) => ({ ...m, [c.engine!]: c.model ?? null }));
+    if (c.engine && c.model) setModels((m) => ({ ...m, [c.engine!]: c.model }));
     if (c.copy !== undefined) setCopy(c.copy);
   };
   const setCwd = (folder: string) => {
@@ -338,7 +342,9 @@ export function NewSession({
         ...(withCopy ? { worktree: branch, freshWorktree: true } : {}),
         env: remote ? await machineEnv(native, runOn) : await pluginEnv(),
       });
-      const choices: Choices = { engine, group, approvals, approveForMe, fast, copy: withCopy, ...(account ? { account } : {}), ...(model ? { model } : {}) };
+      // Where no model was offered, the folder keeps the one it had.
+      const keptModel = canPickModel ? model : choicesFor(runOn, folder || "~").model;
+      const choices: Choices = { engine, group, approvals, approveForMe, fast, copy: withCopy, ...(account ? { account } : {}), ...(keptModel ? { model: keptModel } : {}) };
       remember(runOn, folder || "~", choices);
       const key = keyOf(runOn, s.id);
       // In its group whichever computer it runs on; Ungrouped takes it as it comes.
@@ -383,7 +389,10 @@ export function NewSession({
   };
   again.current = (o) => submit(undefined, o);
 
-  const blocked = whyNotStart({
+  const badModel = model && !isModelName(model) ? model : null;
+  const blocked: Blocked | null = badModel && !busy
+    ? { words: `“${badModel}” can’t be a model’s name: letters, digits and - _ . : / [ ] @, starting with a letter or digit.` }
+    : whyNotStart({
     hub: !!hub,
     folder,
     remote,
