@@ -154,11 +154,7 @@ pub fn wsl_user_name() -> String {
 pub async fn wsl_create_user(distro: String) -> CommandResult<Option<String>> {
     tauri::async_runtime::spawn_blocking(move || {
         let user = desk_wsl::fix::user_name(&std::env::var("USERNAME").unwrap_or_default());
-        Ok(desk_wsl::fix::create_user(
-            &WslExe::system(),
-            &distro,
-            &user,
-        )?)
+        desk_wsl::fix::create_user(&WslExe::system(), &distro, &user)
     })
     .await
     .map_err(text)?
