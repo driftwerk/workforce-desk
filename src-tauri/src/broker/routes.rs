@@ -316,8 +316,12 @@ pub fn native_only(method: &str, target: &str) -> bool {
 
 /// What only the native side asks of this computer's hub, never the page
 /// (they are on no list the page's requests are checked against): an
-/// account's sign-in, to copy it to one of the person's machines.
-const NATIVE_LOCAL: &[Route] = &[route("POST", "/api/desk/accounts/{}/hand-over")];
+/// account's sign-in, to copy it to one of the person's machines; and this
+/// computer's engine key, to register when an agent is linked for Desk work.
+const NATIVE_LOCAL: &[Route] = &[
+    route("POST", "/api/desk/accounts/{}/hand-over"),
+    route("GET", "/api/desk/engine-key"),
+];
 
 /// `method target` as one of the native side's own requests to this
 /// computer's hub, or why it isn't one.
@@ -642,6 +646,18 @@ mod tests {
             ("POST", "/api/desk/boards/b1/sync"),
             ("POST", "/api/desk/tickets/t1/take"),
             ("POST", "/api/me/remote-mcp-tokens/desk"),
+            // What an agent sees of Desk work is the person's to set, as
+            // the person (the hub refuses the hub's token for it); its
+            // links are the native side's; the engine key too.
+            ("GET", "/api/desk/knows"),
+            ("GET", "/api/desk/knows/atlas/allan"),
+            ("GET", "/api/desk/knows/atlas/allan/log"),
+            ("PUT", "/api/desk/knows/atlas/allan"),
+            ("POST", "/api/desk/knows/atlas/allan/held"),
+            ("PUT", "/api/desk/knows-links/atlas/allan"),
+            ("DELETE", "/api/desk/knows-links/atlas/allan"),
+            ("POST", "/api/me/desk-knows-tokens"),
+            ("GET", "/api/desk/engine-key"),
             // Plans, the wrong way: a boss proposes and changes its plans
             // with its crew tools, never through the page.
             ("POST", "/api/desk/plans"),
@@ -852,6 +868,21 @@ mod tests {
         // Nothing else of this computer's hub through this list.
         assert!(native_local("GET", "/api/desk/accounts").is_err());
         assert!(native_local("POST", "/api/desk/accounts").is_err());
+    }
+
+    /// This computer's engine key is read by the native side alone, to
+    /// link an agent for Desk work (Sees K5); never by the page, nor of a
+    /// machine.
+    #[test]
+    fn the_engine_key_is_asked_by_the_native_side_alone() {
+        let path = "/api/desk/engine-key";
+        assert!(native_local("GET", path).is_ok());
+        assert!(http("GET", path).is_err());
+        assert!(machine_http("GET", path).is_err());
+        assert!(!native_only("GET", path));
+        assert!(native_local("POST", path).is_err());
+        assert!(native_local("GET", "/api/desk/engine-key?token=t").is_err());
+        assert!(native_local("GET", "/api/desk/engine-key/x").is_err());
     }
 
     /// A machine's hub takes what this computer's does, and its folders

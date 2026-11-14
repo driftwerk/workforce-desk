@@ -1186,6 +1186,7 @@ pub fn run() {
             broker::socket_close,
             hub_io::hub_fetch,
             hub_io::board_sync_mint,
+            hub_io::knows_link,
             hub_io::hub_socket_open,
             hub_io::pair_request,
             hub_io::pair_collect,
