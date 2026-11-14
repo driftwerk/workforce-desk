@@ -40,8 +40,6 @@ impl Plan {
     }
 }
 
-/// Devin's own installer: it ends by running `devin setup`, a wizard.
-const DEVIN_INSTALLER: &str = "https://cli.devin.ai/install.sh";
 /// Where Devin's manifest and bundles are, as its installer reads them.
 const DEVIN_MANIFEST: &str = "https://static.devin.ai/cli/current/manifest.json";
 const DEVIN_BUNDLES: &str = "https://static.devin.ai/cli/";
@@ -74,41 +72,27 @@ impl Cli {
         }
     }
 
-    /// What Desk runs: the installer, except Devin's, which is downloaded
-    /// first and run with nothing to read, so the `devin setup` it ends with
-    /// can't wait for an answer nobody will type (it is never fed the rest
-    /// of the script, as `curl | bash` would).
+    /// What Desk runs: the installer, except Devin's, whose own steps Desk
+    /// does itself ([`devin_unpack`]): its installer ends with `devin
+    /// setup`, which signs in, and can wait on a browser nobody is at or
+    /// write the person's Devin config unasked. Sign-in is Desk's own step.
     fn run(self) -> String {
         match self {
-            Cli::Devin => format!(
-                "s=$(curl -fsSL {DEVIN_INSTALLER}) && bash -c \"$s\" devin-install </dev/null"
-            ),
+            Cli::Devin => devin_unpack(DEVIN_MANIFEST, DEVIN_BUNDLES),
             _ => self.installer().to_string(),
         }
-    }
-
-    /// Whether the CLI found after its installer stopped is installed,
-    /// whatever the installer's exit: Devin's ends with `devin setup`,
-    /// which can stop with nothing typed after the install itself is done.
-    fn found_is_done(self) -> bool {
-        self == Cli::Devin
     }
 
     /// The other ways each one's own docs give, tried in turn when the
     /// installer can't be downloaded: npm into `~/.local` (no sudo; its
     /// `bin` is where Desk looks), then Homebrew. Each exits 127 when its
-    /// tool isn't there, and is passed over. Devin's: its installer's own
-    /// steps, done by Desk (its checked bundle, without `setup`).
+    /// tool isn't there, and is passed over. Devin's docs give none: its
+    /// checked download is already what Desk runs.
     fn alternatives(self) -> Vec<(&'static str, String)> {
         let (package, cask) = match self {
             Cli::Claude => ("@anthropic-ai/claude-code", "claude-code"),
             Cli::Chatgpt => ("@openai/codex", "codex"),
-            Cli::Devin => {
-                return vec![(
-                    "Devin's checked download",
-                    devin_unpack(DEVIN_MANIFEST, DEVIN_BUNDLES),
-                )];
-            }
+            Cli::Devin => return Vec::new(),
         };
         vec![
             (
@@ -132,6 +116,12 @@ impl Cli {
 /// linked from `~/.local/bin/devin`. A `~/.local/bin/devin` that isn't
 /// Devin's own link is left as it is, and said.
 fn devin_unpack(manifest: &str, bundles: &str) -> String {
+    // Over HTTPS, each stays HTTPS through every redirect.
+    let https_of = |url: &str| match url.starts_with("https://") {
+        true => "--proto '=https' --proto-redir '=https' ",
+        false => "",
+    };
+    let (https_manifest, https) = (https_of(manifest), https_of(bundles));
     format!(
         r#"set -eu
 case "$(uname -s)/$(uname -m)" in
@@ -141,7 +131,7 @@ case "$(uname -s)/$(uname -m)" in
   Linux/aarch64|Linux/arm64) target=aarch64-unknown-linux ;;
   *) echo "Devin doesn't run on $(uname -s) $(uname -m)."; exit 1 ;;
 esac
-manifest=$(curl -fsSL --max-time 30 '{manifest}') || {{ echo "Failed to fetch Devin's manifest"; exit 1; }}
+manifest=$(curl -fsSL {https_manifest}--max-time 30 '{manifest}') || {{ echo "Failed to fetch Devin's manifest"; exit 1; }}
 field() {{ grep -o "\"$1\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" | head -1 | sed 's/.*"\([^"]*\)"$/\1/'; }}
 version=$(printf '%s' "$manifest" | field version || true)
 entry=$(printf '%s' "$manifest" | grep -o "\"$target\"[[:space:]]*:[[:space:]]*{{[^}}]*}}" | head -1 || true)
@@ -162,12 +152,15 @@ mkdir -p "$versions" "$HOME/.local/bin"
 if [ ! -x "$dir/bin/devin" ]; then
   tmp=$(mktemp -d "$versions/_desk.XXXXXX")
   trap 'rm -rf "$tmp"' EXIT
-  curl -fsSL --max-time 900 "$url" -o "$tmp/bundle.tar.gz" || {{ echo "Failed to download Devin"; exit 1; }}
+  curl -fsSL {https}-g --max-time 900 "$url" -o "$tmp/bundle.tar.gz" || {{ echo "Failed to download Devin"; exit 1; }}
   if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum "$tmp/bundle.tar.gz" | cut -d' ' -f1)
   else got=$(shasum -a 256 "$tmp/bundle.tar.gz" | cut -d' ' -f1); fi
   [ "$got" = "$sha" ] || {{ echo "Devin's download didn't match its checksum, so Desk didn't install it."; exit 1; }}
+  if tar tzf "$tmp/bundle.tar.gz" | grep -Eq '^/|(^|/)\.\.(/|$)'; then
+    echo "Devin's download names files outside its own folder, so Desk didn't install it."; exit 1
+  fi
   mkdir "$tmp/x"
-  tar xzf "$tmp/bundle.tar.gz" -C "$tmp/x"
+  tar xzf "$tmp/bundle.tar.gz" --no-same-owner -C "$tmp/x"
   [ -x "$tmp/x/bin/devin" ] || {{ echo "Devin's download has no devin in it."; exit 1; }}
   rm -rf "$dir"
   mv "$tmp/x" "$dir"
@@ -335,10 +328,7 @@ impl Installs {
             // the same way. If none works, what's said and offered stays
             // the installer's; theirs goes under Details.
             let mut also = None;
-            // Installed is installed, even when what came after it (`devin
-            // setup`) failed or ran out of time.
-            let found = |_: &Outcome| plan.found_is_done() && installed(&backend, plan);
-            if worth_other_ways(&outcome, plan) && !found(&outcome) {
+            if worth_other_ways(&outcome, plan) {
                 match other_ways(&backend, plan, &report, brew_here(&backend)) {
                     Other::Installed(other) => outcome = other,
                     Other::Failed { name, last } => also = Some((name, last)),
@@ -350,7 +340,6 @@ impl Installs {
                 !outcome.ok() && (outcome.timed_out || probe::is_download_failure(&outcome.last));
             let last = outcome.last.trim().to_string();
             let mut progress = match &outcome.status {
-                _ if found(&outcome) => Progress::Done,
                 _ if outcome.timed_out => Progress::failed(format!(
                     "{}'s installer didn't finish within {} minutes.",
                     plan.cli_name(),
@@ -840,25 +829,19 @@ mod tests {
     #[test]
     fn devins_installer_runs_with_nothing_to_read_and_its_own_steps_come_after() {
         let run = Cli::Devin.run();
-        assert!(run.starts_with("s=$(curl -fsSL https://cli.devin.ai/install.sh) && bash -c"));
+        assert!(run.contains("https://static.devin.ai/cli/current/manifest.json"));
+        assert!(!run.contains("setup"), "Desk signs in itself");
+        assert!(!run.contains("install.sh"));
         assert!(
-            run.ends_with("</dev/null"),
-            "devin setup can't wait on stdin"
+            run.contains("--proto '=https' --proto-redir '=https'"),
+            "HTTPS all the way"
         );
-        assert!(!run.contains('|'), "never fed the rest of its script");
+        // What the person runs by hand when Desk can't.
         assert_eq!(
             Cli::Devin.installer(),
             "curl -fsSL https://cli.devin.ai/install.sh | bash"
         );
-        let ways = Cli::Devin.alternatives();
-        assert_eq!(ways.len(), 1);
-        assert!(
-            ways[0]
-                .1
-                .contains("https://static.devin.ai/cli/current/manifest.json")
-        );
-        assert!(!ways[0].1.contains("setup"));
-        assert!(Cli::Devin.found_is_done() && !Cli::Claude.found_is_done());
+        assert!(Cli::Devin.alternatives().is_empty());
         assert_eq!(Cli::from(Plan::Chatgpt), Cli::Chatgpt);
         assert_eq!(
             serde_json::from_str::<Cli>("\"devin\"").unwrap(),

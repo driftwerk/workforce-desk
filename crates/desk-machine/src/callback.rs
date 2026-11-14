@@ -86,11 +86,19 @@ pub const CODEX_PAGES: &[SignInPage] = &[SignInPage {
 /// `https://app.devin.ai/auth/cli/continue?…` (the path is in the CLI
 /// 3000.12.57's own strings; the host is its default, still to be seen on a
 /// real sign-in).
-pub const DEVIN_PAGES: &[SignInPage] = &[SignInPage {
-    host: "app.devin.ai",
-    paths: &["/auth/cli/continue"],
-    query: true,
-}];
+pub const DEVIN_PAGES: &[SignInPage] = &[
+    SignInPage {
+        host: "app.devin.ai",
+        paths: &["/auth/cli/continue"],
+        query: true,
+    },
+    // Its Windsurf sign-in, the hub's same list.
+    SignInPage {
+        host: "windsurf.com",
+        paths: &["/windsurf/signin"],
+        query: true,
+    },
+];
 
 /// `said` as one of `pages`, read as a browser reads it (so a `\`, an `@`,
 /// an escape or a `..` can't move its host or path): https, no user,
@@ -398,6 +406,8 @@ mod tests {
             "http://app.devin.ai/auth/cli/continue",
             "https://app.devin.ai/auth/cli/continue#x",
             "https://user@app.devin.ai/auth/cli/continue",
+            "https://windsurf.com.evil.com/windsurf/signin",
+            "https://windsurf.com/editor/signin",
         ] {
             assert!(sign_in_page(refused, DEVIN_PAGES).is_none(), "{refused}");
         }

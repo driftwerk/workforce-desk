@@ -494,6 +494,11 @@ export function NewSession({
                     </button>
                   ))}
                 </div>
+                {caps?.notes.map((n) => (
+                  <span key={n} className="muted small">
+                    {n}
+                  </span>
+                ))}
               </div>
             )}
             {accountChoices > 1 && (
@@ -513,11 +518,6 @@ export function NewSession({
                 </div>
               </div>
             )}
-            {caps?.notes.map((n) => (
-              <p key={n} className="muted small">
-                {n}
-              </p>
-            ))}
             {inDesk && (
               <div className="field">
                 <span className="ov-label muted">Approvals</span>

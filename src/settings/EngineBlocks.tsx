@@ -346,7 +346,7 @@ export function DevinSigningIn({ devin }: { devin: ReturnType<typeof useDevinSig
                 Open the sign-in page again
               </button>
             </span>
-            <span className="faint small">Desk passes the token straight to Devin, and keeps it nowhere. It waits up to 10 minutes, then stops the sign-in.</span>
+            <span className="faint small">Desk passes the token straight to Devin, and keeps it nowhere. It waits up to 10 minutes, then stops the sign‑in.</span>
           </>
         ) : (
           <>
@@ -359,7 +359,7 @@ export function DevinSigningIn({ devin }: { devin: ReturnType<typeof useDevinSig
                 Paste a token instead
               </button>
             </span>
-            <span className="faint small">Desk carries on by itself once you’ve signed in. It waits up to 10 minutes, then stops the sign-in.</span>
+            <span className="faint small">Desk carries on by itself once you’ve signed in. It waits up to 10 minutes, then stops the sign‑in.</span>
           </>
         ))}
       {r.at === "done" && (

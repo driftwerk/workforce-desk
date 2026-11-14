@@ -245,6 +245,11 @@ it("starts Devin like its siblings: approvals in Desk, its notes, and no Approve
 it("doesn't offer a Devin the hub can't start, or one that isn't installed", async () => {
   const engines = vi.fn(async () => [engine({ engine: "claude", title: "Claude Code", views: ["terminal"], caps: terminalCaps("desk") }), devinEngine({ views: [] })]);
   useDesk.setState({ hub: { start: vi.fn(), engines } as unknown as DeskHub, openId: null });
+  const { unmount } = render(<NewSession onClose={vi.fn()} />);
+  await act(async () => {});
+  expect(screen.queryByRole("radio", { name: "Devin" })).toBeNull();
+  unmount();
+  engines.mockImplementation(async () => [engine({ engine: "claude", title: "Claude Code", views: ["terminal"], caps: terminalCaps("desk") }), devinEngine({ installed: false })]);
   render(<NewSession onClose={vi.fn()} />);
   await act(async () => {});
   expect(screen.queryByRole("radio", { name: "Devin" })).toBeNull();
