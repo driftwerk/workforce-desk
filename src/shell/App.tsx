@@ -173,7 +173,6 @@ export function App() {
   }, []);
   useHubLinks();
   useEffect(() => startUnread(), []);
-  useAppBadge();
   useEffect(() => forgetHubs(hubs), [hubs]);
   const settings = useUi((u) => u.settings !== null);
   const platform = useHost((h) => h.platform);
@@ -189,7 +188,6 @@ export function App() {
   useTuple(tupleOn);
   useVoice(useSettings((s) => s.voice));
   useUpdateChecks();
-  useRestartWhenIdle();
 
   useEffect(() => {
     applyTheme(theme);
@@ -478,6 +476,7 @@ export function App() {
       <SetupLauncher />
       {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
       <DeskReadyBanner readiness={readiness} onRetry={retryReady} />
+      <Watchers />
       {error && (
         <div className="toast toast-error toast-problem" role="alert">
           <ProblemNote problem={error} onDone={clearError} />
@@ -485,4 +484,13 @@ export function App() {
       )}
     </div>
   );
+}
+
+/** The app icon's badge and the restart into a ready update follow most of
+ *  Desk's stores (every session, timeline and Floor read). Run here, a
+ *  change to what they read redraws only this, not the whole window. */
+function Watchers() {
+  useAppBadge();
+  useRestartWhenIdle();
+  return null;
 }
