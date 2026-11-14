@@ -1,5 +1,6 @@
 mod attachments;
 mod badge;
+mod bosses;
 mod broker;
 mod chrome_host;
 #[cfg(test)]
@@ -1099,6 +1100,8 @@ pub fn run() {
                 Arc::new(pair_gate::NativeConfirm(app.handle().clone())),
             ));
             app.manage(sockets);
+            // A group's boss on another hub: its grants and links renewed.
+            bosses::keep_alive(app.handle().clone());
             app.manage(App {
                 paths,
                 backend,
@@ -1187,6 +1190,14 @@ pub fn run() {
             hub_io::hub_fetch,
             hub_io::board_sync_mint,
             hub_io::knows_link,
+            bosses::boss_offer,
+            bosses::boss_status,
+            bosses::boss_list,
+            bosses::boss_link,
+            bosses::boss_set,
+            bosses::boss_pause,
+            bosses::boss_resume,
+            bosses::boss_unlink,
             hub_io::hub_socket_open,
             hub_io::pair_request,
             hub_io::pair_collect,

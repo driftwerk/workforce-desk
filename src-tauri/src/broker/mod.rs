@@ -284,6 +284,25 @@ impl Broker {
         })
     }
 
+    /// One of the native side's requests about a group's boss on another
+    /// hub ([`routes::native_boss`]), to this computer's hub or, through
+    /// its forward, a machine's: never the page's. `body` is JSON, which
+    /// may hold a link token; the answer is kept as a native one is.
+    pub async fn fetch_boss(
+        &self,
+        method: &str,
+        target: &str,
+        body: Option<&zeroize::Zeroizing<String>>,
+    ) -> Result<NativeAnswer, String> {
+        let allowed = routes::native_boss(method, target).map_err(|e| e.to_string())?;
+        let body = body.map(|b| ("application/json".to_string(), b.as_bytes().to_vec()));
+        let Answer { status, body, .. } = self.send_allowed(allowed, body).await?;
+        Ok(NativeAnswer {
+            status,
+            body: zeroize::Zeroizing::new(body),
+        })
+    }
+
     async fn send_allowed(
         &self,
         allowed: routes::Allowed,

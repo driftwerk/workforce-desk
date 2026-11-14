@@ -329,6 +329,31 @@ pub fn native_local(method: &str, target: &str) -> Result<Allowed, Refused> {
     allowed(NATIVE_LOCAL, method, target)
 }
 
+/// What only the native side asks of an engine (this computer's hub, or a
+/// machine's through its forward) to make an agent on another hub a
+/// group's boss (RBD1): its key, the boss links it holds, the home's
+/// grants, and a stop. They are on no list the page's requests are checked
+/// against, so the page can neither hand an engine a link, nor write,
+/// widen or read a grant. The layout is read here too, so what a grant
+/// names comes from the hub, never from the page.
+const NATIVE_BOSS: &[Route] = &[
+    route("GET", "/api/desk/layout"),
+    route("GET", "/api/desk/engine-key"),
+    route("GET", "/api/desk/boss-links"),
+    route("PUT", "/api/desk/boss-links/{}"),
+    route("DELETE", "/api/desk/boss-links/{}/{}"),
+    route("GET", "/api/desk/grants"),
+    route("PUT", "/api/desk/grants/{}"),
+    route("DELETE", "/api/desk/grants/{}"),
+    route("POST", "/api/desk/bosses/stop"),
+];
+
+/// `method target` as one of the native side's requests about a group's
+/// boss on another hub, or why it isn't one.
+pub fn native_boss(method: &str, target: &str) -> Result<Allowed, Refused> {
+    allowed(NATIVE_BOSS, method, target)
+}
+
 /// The sockets the page keeps open to the local hub.
 const SOCKETS: &[Route] = &[
     route("GET", "/api/desk/events"),
@@ -883,6 +908,50 @@ mod tests {
         assert!(native_local("POST", path).is_err());
         assert!(native_local("GET", "/api/desk/engine-key?token=t").is_err());
         assert!(native_local("GET", "/api/desk/engine-key/x").is_err());
+    }
+
+    /// A group's boss on another hub is linked, granted and stopped by the
+    /// native side alone (RBD1): the page can't ask any of it of this
+    /// computer's hub or a machine's, however spelled.
+    #[test]
+    fn boss_links_and_grants_are_the_native_side_s_alone() {
+        for (method, target) in [
+            ("GET", "/api/desk/engine-key"),
+            ("GET", "/api/desk/boss-links"),
+            ("PUT", "/api/desk/boss-links/acme"),
+            (
+                "DELETE",
+                "/api/desk/boss-links/acme/0f6c1a2e-1b2c-4d5e-8f90-a1b2c3d4e5f6",
+            ),
+            ("GET", "/api/desk/grants"),
+            ("PUT", "/api/desk/grants/acme"),
+            ("DELETE", "/api/desk/grants/acme"),
+            ("POST", "/api/desk/bosses/stop"),
+        ] {
+            assert!(native_boss(method, target).is_ok(), "{method} {target}");
+            assert!(http(method, target).is_err(), "page: {method} {target}");
+            assert!(
+                machine_http(method, target).is_err(),
+                "page on a machine: {method} {target}"
+            );
+            assert!(!native_only(method, target), "{method} {target}");
+        }
+        for (method, target) in [
+            // What the hub has but Desk never asks: the engine-wide pause's
+            // end, a grant read alone, the status, and a renaming of verbs.
+            ("DELETE", "/api/desk/bosses/paused"),
+            ("GET", "/api/desk/grants/acme"),
+            ("GET", "/api/desk/bosses"),
+            ("POST", "/api/desk/grants/acme"),
+            ("PUT", "/api/desk/boss-links"),
+            ("PUT", "/api/desk/grants/acme?token=t"),
+            ("PUT", "/api/desk/grants/acme/x"),
+            ("PUT", "/api/desk/grants/.."),
+            ("DELETE", "/api/desk/boss-links/acme"),
+            ("POST", "/api/me/desk-boss-links"),
+        ] {
+            assert!(native_boss(method, target).is_err(), "{method} {target}");
+        }
     }
 
     /// A machine's hub takes what this computer's does, and its folders
