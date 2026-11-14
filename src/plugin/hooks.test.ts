@@ -32,6 +32,17 @@ describe("Desk's Claude Code plugin hooks", () => {
     }
   });
 
+  it("keeps reaching for the hub a minute with a permission request, so one raised while it restarts still reaches Desk", () => {
+    // Without the second argument a request raised during an install fell
+    // to Claude Code's own dialog, which Desk and its boss never see.
+    const asked = events.PermissionRequest?.[0];
+    expect(asked?.hooks[0]?.args).toEqual(["${CLAUDE_PLUGIN_ROOT}/hooks/desk-hook.sh", "86400", "60"]);
+    expect(asked?.hooks[0]?.timeout).toBe(86400 + 60 + 10);
+    for (const [event, entries] of Object.entries(events)) {
+      if (event !== "PermissionRequest") expect(entries[0]?.hooks[0]?.args.length, event).toBe(2);
+    }
+  });
+
   it("tells the hub of a turn an API error ended, which fires StopFailure and never Stop", () => {
     // Claude Code 2.1.319: a turn its plan's limit (or another API error)
     // ended fires StopFailure alone; without it the session stays working.
