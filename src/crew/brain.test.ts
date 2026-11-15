@@ -287,6 +287,9 @@ describe("When an agent's accounts can't serve", () => {
     expect(usesAnotherProvider('[llm]\nprovider = "claude-code"\n', "claude-code")).toBe(false);
     expect(usesAnotherProvider('[llm]\nfailover = ["chatgpt"]\n', "claude-code")).toBe(true);
     expect(usesAnotherProvider('[llm]\nfailover = ["claude-code:standard"]\n', "claude-code")).toBe(false);
+    // A bare model, or a Bedrock id with its version colon, is on the agent's own provider.
+    expect(usesAnotherProvider('[llm]\nfailover = ["claude-haiku-4-5", "anthropic.claude-haiku-4-5-v1:0"]\n', "claude-code")).toBe(false);
+    expect(usesAnotherProvider('[llm]\nfailover = ["anthropic:cheap"]\n', "claude-code")).toBe(true);
     expect(usesAnotherProvider("", "claude-code")).toBe(false);
   });
 
