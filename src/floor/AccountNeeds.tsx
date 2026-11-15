@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { accountsOf, needText, useAccounts } from "../engines/accounts";
 import { useDesk } from "../hub/store";
+import { openSettingsAt } from "../ui/problem";
 import type { AccountNeed } from "../hub/types";
 import { dayClock } from "./time";
 
@@ -80,6 +81,15 @@ function Need({ need }: { need: AccountNeed }) {
           <button type="button" className="btn btn-ghost" onClick={() => need.account.id && hub?.dismissSignInProblem(need.account.id).catch(fail)}>
             OK
           </button>
+        ) : need.kind === "refused" ? (
+          <>
+            <button type="button" className="btn btn-ghost" onClick={() => hub?.putOffNeed(need.id).catch(fail)}>
+              Not now
+            </button>
+            <button type="button" className="btn btn-approve" onClick={() => openSettingsAt("engines")}>
+              Open Engines
+            </button>
+          </>
         ) : (
           <button type="button" className="btn btn-ghost" onClick={() => hub?.putOffNeed(need.id).catch(fail)}>
             Not now

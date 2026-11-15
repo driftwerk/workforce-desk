@@ -11,6 +11,7 @@ import { useSettings } from "../settings/store";
 import { plainError } from "../ui/plainError";
 import { useAgentBrain, useAgentConfigs } from "./agentBrain";
 import { backgroundOf, effortShort, isDefaultEffort, isDefaultModel, modelName, modelOf, SAME_AS_CHAT, type Work } from "./brain";
+import { Failover } from "./Failover";
 import { AGENT_FILES, ago, useDrafts } from "./files";
 import { NAME_TAKEN, nameTaken, purposeOf, renameLocalAgent, setAgentBackground, setAgentBrain, setAgentPurpose, setAgentVoice } from "./local";
 import { tickFloor, useFloor } from "../floor/store";
@@ -329,6 +330,7 @@ function Thinking({ agent }: { agent: Agent }) {
             <BackgroundRow agent={agent} work="heavy" config={config} provider={provider} chat={chatName} />
           </>
         )}
+        <Failover agent={agent} />
       </div>
       <div>
         <button type="button" className="btn" disabled={!brain} onClick={() => setChoosing(true)}>

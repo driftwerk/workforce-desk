@@ -317,6 +317,10 @@ function AutoSwitch({ machine, store }: { machine: MachineId; store: AccountsSto
   );
 }
 
+/** "kim@example.com · Acme · Max": what is known of whose account it is. */
+export const identityText = (i: EngineAccount["identity"]): string =>
+  [i?.email, i?.orgName, i?.plan ? i.plan.charAt(0).toUpperCase() + i.plan.slice(1) : null].filter(Boolean).join(" · ");
+
 function AccountRow({
   account,
   machine,
@@ -339,6 +343,7 @@ function AccountRow({
   // Its sign-in gone: signed in again, keeping the account as it is.
   const [again, setAgain] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const who = identityText(account.identity);
   const makeDefault = async (isDefault: boolean) => {
     try {
       await hub?.updateAccount(account.id, { isDefault });
@@ -369,12 +374,18 @@ function AccountRow({
       <span className="account-name">
         <b>{account.name}</b>
         {account.isDefault && <span className="chip chip-default">Default</span>}
+        {who && <span className="faint small">{who}</span>}
       </span>
       <span className={account.signedIn ? "faint small" : "state-blocked small"}>
         {account.signedIn ? sessionsText(account) : "Its sign-in is gone."}
       </span>
+      {account.refused && (
+        <span className="state-blocked small" role="status">
+          Refused: {account.refused.reason}. Desk tries it again hourly.
+        </span>
+      )}
       <span className="account-actions">
-        {!account.signedIn && !again && (
+        {(!account.signedIn || account.refused) && !again && (
           <button type="button" className="btn btn-sm btn-signal" onClick={() => setAgain(true)}>
             Sign in again
           </button>
