@@ -309,7 +309,6 @@ function Thinking({ agent }: { agent: Agent }) {
           </b>
           {brain && isDefaultModel(provider, brain.model) ? <span className="chip chip-default">Default</span> : <span />}
         </div>
-        <Failover agent={agent} />
         {brain?.effort && (
           <div className="think-row">
             <span>Effort</span>
@@ -319,6 +318,7 @@ function Thinking({ agent }: { agent: Agent }) {
             {isDefaultEffort(provider, brain.effort, brain.model) ? <span className="chip chip-default">Default</span> : <span />}
           </div>
         )}
+        <Failover agent={agent} />
       </div>
       <div>
         <button type="button" className="btn" disabled={!brain} onClick={() => setChoosing(true)}>
