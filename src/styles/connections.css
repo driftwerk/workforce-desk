@@ -441,6 +441,117 @@
   padding: 0 10px;
 }
 
+/* A paired hub's offer of the person's own connections there: the service
+   card's shape, on the signal's soft ground. */
+.copy-offer {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid var(--signal);
+  border-radius: var(--radius-lg);
+  background: var(--signal-soft);
+}
+.copy-offer h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+.copy-offer > p {
+  margin: 0;
+}
+.copy-lead {
+  color: var(--signal-soft-text);
+}
+.copy-picks {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.copy-pick {
+  display: flex;
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--raised);
+  min-width: 0;
+}
+.copy-pick-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+  flex: 1;
+  cursor: pointer;
+}
+.copy-pick-label input {
+  accent-color: var(--signal);
+  margin-top: 3px;
+}
+.copy-pick-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.copy-site {
+  font-size: 11.5px;
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.copy-res {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.copy-res-ok {
+  color: var(--done);
+}
+.copy-res-bad {
+  color: var(--blocked);
+}
+.copy-res-wait {
+  color: var(--working);
+}
+.copy-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.copy-note {
+  font-size: 12px;
+  color: var(--muted);
+}
+.copy-newer {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.copy-newer-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--signal);
+}
+.copy-newer-text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.copy-newer-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+
 /* Setups no message on screen shows: at the top of the stage, whatever it
    shows, in its flow (below the update notice while one shows). */
 .setup-dock {

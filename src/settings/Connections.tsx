@@ -21,6 +21,7 @@ import { useUi } from "../shell/ui";
 import "../styles/connections.css";
 import { askDeskTo } from "../ui/askDesk";
 import { useLive } from "../ui/useLive";
+import { CopyOffers } from "./CopyOffers";
 
 const SAVED_WHERE = "Saved in Desk’s vault on this computer. Never in a file.";
 const CANCELLED = "Sign-in was cancelled. Nothing was saved.";
@@ -242,6 +243,8 @@ export function Connections({
           </button>
         </div>
       )}
+
+      {api && list && list.length > 0 && <CopyOffers local={list} reload={load} />}
 
       {api && list && list.length > 0 && (
         <div className="conn-services" role="list" aria-label="Services">

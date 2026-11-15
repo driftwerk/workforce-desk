@@ -14,6 +14,7 @@ mod grid_windows;
 mod helper;
 mod hub_io;
 mod hubs;
+mod key_copies;
 mod knows_machines;
 mod links;
 mod local_bosses;
@@ -1260,6 +1261,8 @@ pub fn run() {
             hub_io::hub_fetch,
             hub_io::board_sync_mint,
             hub_io::knows_link,
+            key_copies::key_copies_take,
+            key_copies::key_copies_kept,
             bosses::boss_offer,
             bosses::boss_status,
             bosses::boss_link,

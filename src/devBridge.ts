@@ -72,6 +72,15 @@ const store = (key: string, v: unknown) => {
     /* private window: kept for this page only */
   }
 };
+/** What a screenshot seeded at `key`, if anything. */
+const seededJson = (key: string): unknown => {
+  try {
+    const v = localStorage.getItem(key);
+    return v ? (JSON.parse(v) as unknown) : null;
+  } catch {
+    return null;
+  }
+};
 const FILE = "desk.dev.stateFile";
 const HUB_STATE = "desk.dev.hubState";
 const stateFile = stored<DevEntry>(FILE);
@@ -323,6 +332,13 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
       return answer(params.helper === "failed" ? "Postgres failed: port 5433 is busy" : null);
     case "helper_move_to_applications":
       throw new Error("Moving Desk needs the Desk app.");
+    // Copying keys from a paired hub is the app's native side alone; for
+    // screenshots, `desk.dev.keyCopies.kept` and `.take` in localStorage
+    // stand in for what it would say.
+    case "key_copies_kept":
+      return answer(seededJson("desk.dev.keyCopies.kept") ?? []);
+    case "key_copies_take":
+      return answer(seededJson("desk.dev.keyCopies.take") ?? { kind: "unavailable" });
     case "fonts_list":
       // What a computer's own list looks like; the app reads the real one.
       return answer(["Arial", "Avenir Next", "Courier New", "Georgia", "Helvetica Neue", "IBM Plex Sans", "Inter", "JetBrains Mono", "Menlo", "Times New Roman", "Verdana"]);

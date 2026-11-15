@@ -198,6 +198,10 @@ describe("each window's capabilities", () => {
       "board_sync_mint",
       // Linking an agent for Desk work: Settings, in the main window only.
       "knows_link",
+      // Copying the person's own keys from a paired hub: Settings →
+      // Connections, in the main window only.
+      "key_copies_take",
+      "key_copies_kept",
       // A group's boss on another hub: the main window's Boss sheet only.
       "boss_link",
       "boss_set",

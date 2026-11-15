@@ -47,6 +47,7 @@ import { NewSession } from "../session/NewSession";
 import { SessionCard } from "../session/SessionCard";
 import { LedgerPanel } from "../spend/Ledger";
 import { Board } from "../board/BoardView";
+import { liveCopier, setCopier } from "../hub/keyCopies";
 import { linkKnows, setKnowsLinker, setKnowsTeller, tellMachines } from "../hub/knows";
 import { BrowserPill } from "../browser/BrowserPill";
 import { useBrowserWatch, useLocalBrowser } from "../browser/store";
@@ -162,9 +163,11 @@ export function App() {
   useEffect(() => {
     setKnowsLinker(linkKnows);
     setKnowsTeller(tellMachines);
+    setCopier(liveCopier);
     return () => {
       setKnowsLinker(null);
       setKnowsTeller(null);
+      setCopier(null);
     };
   }, []);
   // A privacy pane that wouldn't open is said, not only logged.
