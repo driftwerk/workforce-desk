@@ -817,9 +817,52 @@ button.card-icon:hover:not(:disabled) {
 .think-row + .think-row {
   border-top: 1px solid var(--border);
 }
-.think-row > span:first-child {
+.think-row > span:first-child,
+.think-row > label:first-child {
   font-size: 13px;
   color: var(--muted);
+}
+/* A kind of background work: its picker, and what it covers under it. */
+.think-work {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.think-work .ability-select {
+  max-width: 100%;
+}
+/* The hold on a settings file changed outside Desk, and its two answers. */
+.settings-held {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  background: var(--blocked-soft);
+  border: 1px solid color-mix(in srgb, var(--blocked) 30%, var(--border));
+  color: var(--text);
+}
+.settings-held .dot {
+  margin-top: 6px;
+}
+.settings-held-text {
+  flex: 1 1 260px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.settings-held-buttons {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+/* On the amber wash, the plain answer sits on the page's own surface. */
+.settings-held-keep {
+  background: var(--surface);
 }
 .think-row b {
   font-weight: 600;

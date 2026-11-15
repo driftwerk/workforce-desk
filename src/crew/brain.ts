@@ -116,11 +116,58 @@ export const brainOf = (
   return provider ? withRunsOn(brain, provider) : brain;
 };
 
+/** An agent's background work, by weight: light (accounts, gists, memory
+ *  notes) and heavy (compaction, the boss's own turns and decisions). */
+export type Work = "light" | "heavy";
+
+/** The `[llm]` key each kind of background work is set by. */
+const WORK_KEY: Record<Work, string> = { light: "light_model", heavy: "heavy_model" };
+
+/** What a background setting says to mean the agent's own (chat) model. */
+export const SAME_AS_CHAT = "chat";
+
+/** What each kind of background work runs on, as the config says: a model
+ *  id, `chat`, a tier name, or null for the hub's default (the provider's
+ *  cheap tier for light work, its standard tier for heavy). */
+export const backgroundOf = (source: string): Record<Work, string | null> => {
+  const llm = (parseDoc(source).llm ?? {}) as Doc;
+  const read = (key: string): string | null => {
+    const v = llm[key];
+    return typeof v === "string" && v.trim() ? v.trim() : null;
+  };
+  return { light: read(WORK_KEY.light), heavy: read(WORK_KEY.heavy) };
+};
+
+/** An agent's config with `work` on `model` (null: the default). Anything
+ *  else in the file stays. */
+export const withBackground = (source: string, work: Work, model: string | null): string => {
+  const doc = parseDoc(source);
+  const llm: Doc = { ...((doc.llm ?? {}) as Doc) };
+  if (model) llm[WORK_KEY[work]] = model;
+  else delete llm[WORK_KEY[work]];
+  doc.llm = llm;
+  return stringify(doc) + "\n";
+};
+
+/** Whether a background setting still means something on another
+ *  provider: the default, `chat`, a tier, or a model named with its own
+ *  provider (`claude-code:haiku`); never one provider's bare model. */
+const portable = (v: unknown): boolean =>
+  typeof v !== "string" || v === SAME_AS_CHAT || TIERS.has(v) || v.includes(":");
+
+/** A provider's name as the hub reads it: `claude_code` is `claude-code`. */
+const providerKey = (v: unknown): string => (typeof v === "string" ? v.replace(/_/g, "-") : "");
+
 /** An agent's config thinking with `brain`; an effort is dropped where the
- *  brain has none. Anything else in the file stays. */
+ *  brain has none, and a background model of the provider it leaves. Anything
+ *  else in the file stays. */
 export const withBrain = (source: string, brain: Brain): string => {
   const doc = parseDoc(source);
-  const llm: Doc = { ...((doc.llm ?? {}) as Doc), provider: brain.runsOn ?? brain.provider, default_model: brain.model };
+  const was = (doc.llm ?? {}) as Doc;
+  const llm: Doc = { ...was, provider: brain.runsOn ?? brain.provider, default_model: brain.model };
+  if (was.provider !== undefined && providerKey(was.provider) !== providerKey(llm.provider)) {
+    for (const key of Object.values(WORK_KEY)) if (!portable(llm[key])) delete llm[key];
+  }
   if (brain.effort) llm.effort = brain.effort;
   else delete llm.effort;
   if (brain.fast) llm.fast = true;

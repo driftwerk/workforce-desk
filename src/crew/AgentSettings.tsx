@@ -4,15 +4,18 @@ import { agentKey, providerLabel, type Agent, type HubAccount } from "../chat/ty
 import { effortName } from "../hub/providers";
 import { useDesk } from "../hub/store";
 import type { VoiceSpec } from "../platform";
+import type { Provider } from "../hub/providers";
 import { BrainDialog } from "../providers/BrainDialog";
 import { useProviders } from "../providers/store";
 import { useSettings } from "../settings/store";
 import { plainError } from "../ui/plainError";
 import { useAgentBrain, useAgentConfigs } from "./agentBrain";
-import { effortShort, isDefaultEffort, isDefaultModel, modelName, modelOf } from "./brain";
+import { backgroundOf, effortShort, isDefaultEffort, isDefaultModel, modelName, modelOf, SAME_AS_CHAT, type Work } from "./brain";
 import { Failover } from "./Failover";
 import { AGENT_FILES, ago, useDrafts } from "./files";
-import { NAME_TAKEN, nameTaken, purposeOf, renameLocalAgent, setAgentBrain, setAgentPurpose, setAgentVoice } from "./local";
+import { NAME_TAKEN, nameTaken, purposeOf, renameLocalAgent, setAgentBackground, setAgentBrain, setAgentPurpose, setAgentVoice } from "./local";
+import { tickFloor, useFloor } from "../floor/store";
+import type { Choice, Need } from "../hub/types";
 import { useUi } from "../shell/ui";
 import { PictureField } from "../pictures/PictureField";
 import { useAgentImage } from "../pictures/who";
@@ -32,6 +35,7 @@ export function AgentSettings({ agent, hub, onOpenFiles }: { agent: Agent; hub: 
     <div className="agent-page">
       <div className="agent-settings">
         {local && <SectionLinks />}
+        {local && <ChangedElsewhere agent={agent} />}
         <About agent={agent} hub={hub} local={local} />
         {local ? <Thinking agent={agent} /> : <ThinkingElsewhere agent={agent} hub={hub} />}
         <Sound agent={agent} local={local} />
@@ -284,6 +288,8 @@ function Thinking({ agent }: { agent: Agent }) {
   const fallback = useProviders((s) => s.fallback);
   const [choosing, setChoosing] = useState(false);
   const model = brain ? modelOf(provider, brain.model) : undefined;
+  const config = useAgentConfigs((s) => s.configs[agentKey(agent)]) ?? "";
+  const chatName = brain ? modelName(provider, brain.model) : "";
 
   return (
     <section id="think" className="agent-section" aria-labelledby="think-head">
@@ -318,6 +324,12 @@ function Thinking({ agent }: { agent: Agent }) {
             {isDefaultEffort(provider, brain.effort, brain.model) ? <span className="chip chip-default">Default</span> : <span />}
           </div>
         )}
+        {brain && desk && (
+          <>
+            <BackgroundRow agent={agent} work="light" config={config} provider={provider} chat={chatName} />
+            <BackgroundRow agent={agent} work="heavy" config={config} provider={provider} chat={chatName} />
+          </>
+        )}
         <Failover agent={agent} />
       </div>
       <div>
@@ -342,6 +354,144 @@ function Thinking({ agent }: { agent: Agent }) {
         />
       )}
     </section>
+  );
+}
+
+/** What each kind of background work is for, as its row says it. */
+const WORK: Record<Work, { name: string; what: string; tier: string; byDefault: string }> = {
+  light: {
+    name: "Light background",
+    what: "Session notes, gists, memory and running accounts",
+    tier: "cheap",
+    byDefault: "cheapest model",
+  },
+  heavy: {
+    name: "Heavy background",
+    what: "Check-ins, decisions on sessions, updates and compaction",
+    tier: "standard",
+    byDefault: "everyday model",
+  },
+};
+
+/** The default's value in the picker: the setting left unset. */
+const DEFAULT = "";
+
+/** One kind of background work: what it runs on, beside the chat model.
+ *  The default (unset) is the provider's cheap or standard tier; a model of
+ *  the provider, or the chat model itself, can be picked instead. */
+function BackgroundRow({
+  agent,
+  work,
+  config,
+  provider,
+  chat,
+}: {
+  agent: Agent;
+  work: Work;
+  config: string;
+  provider: Provider | undefined;
+  chat: string;
+}) {
+  const desk = useDesk((s) => s.hub);
+  const putConfig = useAgentConfigs((s) => s.put);
+  const [saving, setSaving] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+  const w = WORK[work];
+  const set = backgroundOf(config)[work];
+  // A tier the file names is the default when it is the default's tier.
+  const value = set === null || set === w.tier ? DEFAULT : set;
+  const models = provider?.models ?? [];
+  const known = value === DEFAULT || value === SAME_AS_CHAT || models.some((m) => m.id === value);
+  const id = `${agentKey(agent)}-${work}-model`;
+
+  const choose = async (next: string) => {
+    if (!desk || next === value) return;
+    setSaving(true);
+    setProblem(null);
+    try {
+      putConfig(agentKey(agent), await setAgentBackground(desk, agent.id, work, next === DEFAULT ? null : next));
+    } catch (e) {
+      setProblem(plainError(e));
+      // A file changed elsewhere holds the save: its choice shows above.
+      tickFloor();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="think-row think-row-work">
+      <label htmlFor={id}>{w.name}</label>
+      <span className="think-work">
+        <select
+          id={id}
+          className="ability-select"
+          value={value}
+          disabled={saving}
+          aria-describedby={`${id}-what`}
+          onChange={(e) => void choose(e.target.value)}
+        >
+          <option value={DEFAULT}>Default · {w.byDefault}</option>
+          {models.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+            </option>
+          ))}
+          <option value={SAME_AS_CHAT}>Same as chat{chat ? ` · ${chat}` : ""}</option>
+          {!known && <option value={value}>{value}</option>}
+        </select>
+        <span id={`${id}-what`} className={problem ? "small state-blocked" : "small faint"} role={problem ? "alert" : undefined}>
+          {problem ?? w.what}
+        </span>
+      </span>
+      {value === DEFAULT ? <span className="chip chip-default">Default</span> : <span />}
+    </div>
+  );
+}
+
+/** Whether `need` is the hold on `agent`'s settings file, changed outside
+ *  Desk: every save for them waits on it. */
+const holdsSettings = (need: Need, agent: Agent): boolean =>
+  need.answer.kind === "decide" && need.answer.at.kind === "config" && need.answer.at.agentId === agent.id;
+
+/** A settings file changed outside Desk holds every save for this agent
+ *  until the person chooses, so the choice is right here: Use it takes the
+ *  file as it is now, Keep saved puts Desk's saved settings back. */
+function ChangedElsewhere({ agent }: { agent: Agent }) {
+  const desk = useDesk((s) => s.hub);
+  const need = useFloor((s) => s.hubs[agent.hubId]?.floor?.needs.find((n) => holdsSettings(n, agent)));
+  const key = need ? `${agent.hubId}/${need.id}` : "";
+  const deciding = useFloor((s) => (key ? s.deciding[key] : undefined));
+  const problem = useFloor((s) => (key ? s.problems[key] : undefined));
+  if (!need) return null;
+  const decide = (choice: Choice) => () =>
+    void useFloor
+      .getState()
+      .decide(agent.hubId, need, choice)
+      .then(() => desk && useAgentConfigs.getState().load(desk, agent));
+  return (
+    <div className="settings-held" role="region" aria-label="Settings changed outside Desk">
+      <span className="dot dot-blocked" aria-hidden="true" />
+      <span className="settings-held-text">
+        <b>{agent.name}’s settings file was changed outside Desk</b>
+        <span className="small">
+          Nothing here can be saved until you choose. Use it to run on the file as it is now, or keep the settings Desk saved.
+        </span>
+        {problem && (
+          <span className="small state-blocked" role="alert">
+            {problem}
+          </span>
+        )}
+      </span>
+      <span className="settings-held-buttons">
+        <button type="button" className="btn btn-blocked" disabled={!!deciding} onClick={decide("allow")}>
+          {deciding === "allow" ? "Using it…" : "Use it"}
+        </button>
+        <button type="button" className="btn settings-held-keep" disabled={!!deciding} onClick={decide("deny")}>
+          {deciding === "deny" ? "Keeping saved…" : "Keep saved"}
+        </button>
+      </span>
+    </div>
   );
 }
 

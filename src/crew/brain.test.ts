@@ -4,6 +4,7 @@ import type { Provider } from "../hub/providers";
 import { fallbackProviders } from "../providers/store";
 import { defaultEffort, effortLine, effortsFor, fastLine } from "../hub/providers";
 import {
+  backgroundOf,
   brainOf,
   brainSummary,
   isDefaultBrain,
@@ -14,6 +15,7 @@ import {
   resolveBrain,
   usesAnotherProvider,
   withAnotherProvider,
+  withBackground,
   withBrain,
   withDeskSettings,
 } from "./brain";
@@ -310,5 +312,34 @@ describe("When an agent's accounts can't serve", () => {
     const only = withAnotherProvider('[llm]\nprovider = "claude-code"\nfailover = ["chatgpt"]\n', "claude-code", "chatgpt", false);
     expect("failover" in llmOf(only)!).toBe(false);
     expect(llmOf(withAnotherProvider("", "chatgpt", "claude-code", true))?.failover).toEqual(["claude-code"]);
+  });
+});
+
+describe("background work", () => {
+  const file = '[llm]\nprovider = "claude-code"\ndefault_model = "fable"\n\n[compaction]\ncompaction_model = "sonnet"\n';
+
+  it("is the default until the file names a model for it", () => {
+    expect(backgroundOf(file)).toEqual({ light: null, heavy: null });
+    expect(backgroundOf('[llm]\nlight_model = " haiku "\nheavy_model = ""\n')).toEqual({ light: "haiku", heavy: null });
+  });
+
+  it("is written into [llm] beside the chat model, leaving the rest of the file", () => {
+    const set = withBackground(withBackground(file, "light", "haiku"), "heavy", "chat");
+    const doc = parse(set) as { llm: Record<string, unknown>; compaction: Record<string, unknown> };
+    expect(doc.llm).toEqual({ provider: "claude-code", default_model: "fable", light_model: "haiku", heavy_model: "chat" });
+    expect(doc.compaction).toEqual({ compaction_model: "sonnet" });
+    expect(backgroundOf(withBackground(set, "light", null))).toEqual({ light: null, heavy: "chat" });
+  });
+
+  it("keeps what still means something on a new provider, and drops the old provider's models", () => {
+    const set = withBackground(withBackground(file, "light", "haiku"), "heavy", "chat");
+    const moved = withBrain(set, { provider: "chatgpt", model: "gpt-6.1-sol" });
+    expect(backgroundOf(moved)).toEqual({ light: null, heavy: "chat" });
+    const same = withBrain(set, { provider: "claude-code", model: "opus" });
+    expect(backgroundOf(same)).toEqual({ light: "haiku", heavy: "chat" });
+    const named = withBackground(file, "light", "claude-code:haiku");
+    expect(backgroundOf(withBrain(named, { provider: "chatgpt", model: "gpt-6.1-sol" })).light).toBe("claude-code:haiku");
+    const alias = withBackground(file.replace('"claude-code"', '"claude_code"'), "light", "haiku");
+    expect(backgroundOf(withBrain(alias, { provider: "claude-code", model: "opus" })).light).toBe("haiku");
   });
 });

@@ -26,7 +26,7 @@ import { useProviders } from "../providers/store";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { AgentMark } from "../ui/Mark";
 import { WorkingRow } from "../chat/WorkingRow";
-import { setupsStarted } from "../chat/SetupCard";
+import { PendingSetups, setupsStarted } from "../chat/SetupCard";
 import { EmojiButton } from "../emoji/EmojiButton";
 import { useEmojiInput } from "../emoji/useEmojiInput";
 import { Message } from "./Message";
@@ -610,8 +610,12 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                     onAnswer={(choice) => answerPrompt(activeAgent, p.requestId, choice)}
                   />
                 ))}
-                {convo.working && !answering && (
-                  <WorkingRow agent={agentKey(agent)} name={agent.name} working={convo.working} tools={pending?.tools} />
+                {convo.working && !answering ? (
+                  <WorkingRow agent={agentKey(agent)} name={agent.name} working={convo.working} tools={pending?.tools}>
+                    <PendingSetups origin={origin} message={pending} before={shown.findLast((m) => m.role === "user")?.at} />
+                  </WorkingRow>
+                ) : (
+                  <PendingSetups origin={origin} message={pending} before={shown.findLast((m) => m.role === "user")?.at} />
                 )}
               </div>
             </div>

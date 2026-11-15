@@ -1393,7 +1393,11 @@ export type DecideRef =
   | { kind: "breaker"; subject: string }
   /** A boss's plan, or a change of scope to it, as of `revision`: allow is
    *  Approve and run; deny leaves it as it is. Only the person answers it. */
-  | { kind: "plan"; plan: string; revision: number };
+  | { kind: "plan"; plan: string; revision: number }
+  /** An agent's settings file changed outside Desk, as it was when shown
+   *  (`hash`): allow is Use it, deny is Keep saved. Every save for the agent
+   *  waits on it. */
+  | { kind: "config"; agentId: string; hash: string };
 
 /** An answer to a need: Codex's requests take the last two as well. */
 export type Choice = "allow" | "deny" | "allow_for_session" | "cancel";
