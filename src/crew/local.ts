@@ -1,5 +1,5 @@
 import { HubError, type DeskHub } from "../hub/client";
-import { withBrain, withDeskSettings, type Brain } from "./brain";
+import { withBackground, withBrain, withDeskSettings, type Brain, type Work } from "./brain";
 import { withVoice } from "./voice";
 import { withDeskWelcome } from "./welcome";
 
@@ -306,6 +306,14 @@ export async function renameLocalAgent(hub: DeskHub, id: string, name: string, p
 /** Writes `brain` to the agent's config; answers with the config as written. */
 export async function setAgentBrain(hub: DeskHub, id: string, brain: Brain): Promise<string> {
   const toml = withBrain(await hub.agentConfig(id), brain);
+  await hub.saveAgentConfig(id, toml);
+  return toml;
+}
+
+/** Sets what an agent's `work` runs on (null: the default); the config as
+ *  saved. */
+export async function setAgentBackground(hub: DeskHub, id: string, work: Work, model: string | null): Promise<string> {
+  const toml = withBackground(await hub.agentConfig(id), work, model);
   await hub.saveAgentConfig(id, toml);
   return toml;
 }
