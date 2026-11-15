@@ -16,6 +16,7 @@ import { pairedHub } from "../hub/net";
 import { backoff, detach, keepAlive, OPEN } from "../hub/socket";
 import type { DeskSocket } from "../hub/transport";
 import { clip } from "../ui/graphemes";
+import { sameCall } from "./toolLine";
 
 /** What a turn is doing: sending, waiting on the model, writing, running a
  *  tool, tidying its context, or held by a rate limit or a model switch. */
@@ -359,6 +360,14 @@ const foldPrompts = (prompts: Prompt[], msg: ServerMessage): Prompt[] => {
   return prompts;
 };
 
+/** `tools` once the tool `name` has started at `now`: one more, unless it
+ *  is the hub's heartbeat saying again the one still running. */
+const started = (tools: ToolCall[], name: string, now: number): ToolCall[] => {
+  const last = tools.at(-1);
+  if (last && !last.done && sameCall(last.name, name)) return tools;
+  return [...tools, { name, done: false, startedAt: now }];
+};
+
 const newTurn = (ref: string, now: number): Turn => ({
   ref,
   replyId: null,
@@ -379,7 +388,7 @@ const foldTurn = (turns: Record<string, Turn>, ref: string, msg: ServerMessage, 
   const next = ((): Turn => {
     switch (msg.type) {
       case "tool_start":
-        return { ...t, working, tools: [...t.tools, { name: msg.content ?? "tool", done: false, startedAt: now }] };
+        return { ...t, working, tools: started(t.tools, msg.content ?? "tool", now) };
       case "tool_end": {
         const i = t.tools.findIndex((x) => !x.done);
         return { ...t, working, tools: t.tools.map((x, j) => (j === i ? { ...x, done: true, endedAt: now } : x)) };
@@ -564,11 +573,11 @@ const fold = (s: ConversationState, msg: ServerMessage, now: number): Conversati
       };
     }
     case "tool_start": {
-      const tool = { name: msg.content ?? "tool", done: false };
+      const name = msg.content ?? "tool";
       const hasAnswer = s.messages.at(-1)?.role === "assistant";
       const messages = hasAnswer
-        ? updateLast(s.messages, (m) => ({ ...m, tools: [...m.tools, tool] }))
-        : [...s.messages, { ...message("assistant", "", "streaming"), tools: [tool] }];
+        ? updateLast(s.messages, (m) => ({ ...m, tools: started(m.tools, name, now) }))
+        : [...s.messages, { ...message("assistant", "", "streaming"), tools: started([], name, now) }];
       return { ...s, messages, working: step(s, msg, now) };
     }
     case "tool_end":

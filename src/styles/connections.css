@@ -440,3 +440,41 @@
   height: 40px;
   padding: 0 10px;
 }
+
+/* Setups no message on screen shows: at the top of the stage, whatever it
+   shows, in its flow (below the update notice while one shows). */
+.setup-dock {
+  flex: none;
+  margin: 30px 16px 0 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.update-notice + .setup-dock {
+  margin-top: 10px;
+}
+.setup-dock-item {
+  display: flex;
+  flex-direction: column;
+}
+.setup-dock-item .setup-card {
+  margin-top: 4px;
+  max-width: none;
+}
+/* A link to a setup brings its card to the front, and marks it a moment. */
+.setup-card.setup-flash {
+  animation: setup-flash 1.2s ease-out;
+}
+@keyframes setup-flash {
+  from {
+    box-shadow: 0 0 0 3px var(--focus-ring);
+  }
+  to {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .setup-card.setup-flash {
+    animation: none;
+  }
+}

@@ -2,6 +2,7 @@ import { useDesk } from "../hub/store";
 import { openUrl } from "../platform";
 import { openTarget } from "./navigate";
 import { useBoard } from "../board/store";
+import { revealSetup } from "../chat/SetupCard";
 
 // Links to a room message, within Desk: `desk://room/<room>/msg/<message>`.
 // Copy link writes one; a click on one, in your messages or an agent's,
@@ -10,6 +11,11 @@ import { useBoard } from "../board/store";
 const UUID = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
 const DESK_LINK = new RegExp(`^desk://room/(${UUID})/msg/(${UUID})$`, "i");
 const TICKET_LINK = new RegExp(`^desk://ticket/(${UUID})$`, "i");
+const SETUP_LINK = /^desk:\/\/setup\/([0-9a-f]{32})$/i;
+
+/** The connection setup a `desk:` link names (the card an agent says it
+ *  put up: `desk://setup/<id>`); null for anything else. */
+export const parseSetupLink = (url: string): string | null => SETUP_LINK.exec(url.trim())?.[1]?.toLowerCase() ?? null;
 
 /** A link to a board's ticket, within Desk: `desk://ticket/<ticket>`. */
 export const ticketLink = (id: string): string => `desk://ticket/${id}`;
@@ -30,6 +36,13 @@ export const openLink = (url: string): void => {
   if (!/^desk:/i.test(url)) return openUrl(url);
   const ticket = parseTicketLink(url);
   if (ticket) return useBoard.getState().openTicket(ticket);
+  const setup = parseSetupLink(url);
+  if (setup) {
+    // Its card is in the chat that asked for it, else at the top of the
+    // stage: brought into view either way.
+    if (!revealSetup(setup)) useDesk.getState().fail("That setup has ended. Ask again to start over.");
+    return;
+  }
   const at = parseDeskLink(url);
   if (!at || !useDesk.getState().rooms[at.room]) {
     useDesk.getState().fail("That message isn’t in any of your rooms.");

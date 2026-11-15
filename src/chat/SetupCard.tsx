@@ -7,6 +7,8 @@ import { openUrl } from "../platform";
 import { useUi } from "../shell/ui";
 import { useLive } from "../ui/useLive";
 import { useChat } from "./store";
+import { toolNameOf } from "./toolLine";
+import type { ToolCall } from "./types";
 import "../styles/connections.css";
 
 /** How often a setup under way is asked about. */
@@ -38,7 +40,7 @@ const nowOf = (s: Setup): SetupNow => {
 };
 
 /** Whether a setup has nothing left to show changing. */
-const settled = (s: Setup): boolean => s.ended != null || ["connected", "failed", "ended"].includes(nowOf(s).kind);
+export const settled = (s: Setup): boolean => s.ended != null || ["connected", "failed", "ended"].includes(nowOf(s).kind);
 
 /** What the card asks of the person now. */
 const NEEDS_YOU = new Set(["offer", "code", "sign_in", "failed"]);
@@ -52,7 +54,7 @@ const changed = () => {
   version += 1;
   for (const l of listeners) l();
 };
-const claim = (anchor: symbol, since: number, ids: string[]) => {
+export const claim = (anchor: symbol, since: number, ids: string[]) => {
   let moved = false;
   for (const [id, by] of claims) {
     if (!ids.includes(id) && by.delete(anchor)) moved = true;
@@ -68,12 +70,12 @@ const claim = (anchor: symbol, since: number, ids: string[]) => {
   }
   if (moved) changed();
 };
-const ownerOf = (id: string): symbol | undefined => {
+export const ownerOf = (id: string): symbol | undefined => {
   let best: [symbol, number] | undefined;
   for (const [anchor, since] of claims.get(id) ?? []) if (!best || since > best[1]) best = [anchor, since];
   return best?.[0];
 };
-const useClaims = () =>
+export const useClaims = () =>
   useSyncExternalStore(
     (l) => {
       listeners.add(l);
@@ -81,6 +83,20 @@ const useClaims = () =>
     },
     () => version,
   );
+
+/** Each setup's card on screen, to bring to the front for a link to it. */
+const cards = new Map<string, HTMLElement>();
+
+/** Brings setup `id`'s card into view, where one shows: false where none. */
+export const revealSetup = (id: string): boolean => {
+  const el = cards.get(id);
+  if (!el) return false;
+  el.scrollIntoView?.({ block: "center", behavior: "smooth" });
+  el.classList.remove("setup-flash");
+  void el.offsetWidth;
+  el.classList.add("setup-flash");
+  return true;
+};
 
 /** The setups an agent's message started or asked for again (`count` of
  *  them, between `since` and `until`), as the hub keeps them: never what
@@ -237,6 +253,15 @@ export function SetupCard({
   const n = s.steps.length;
   const done = s.steps.filter((x) => x.state === "done").length;
   const needsYou = NEEDS_YOU.has(now.kind);
+
+  useEffect(() => {
+    const el = card.current;
+    if (!el) return;
+    cards.set(s.id, el);
+    return () => {
+      if (cards.get(s.id) === el) cards.delete(s.id);
+    };
+  }, [s.id]);
 
   // When it starts needing the person, it comes into view.
   const kindSeen = useRef<string | null>(null);
@@ -487,18 +512,31 @@ export function SetupCard({
 /** What Desk tells the agent once the person says they're signed in. */
 export const SIGNED_IN = "I’m signed in.";
 
+/** The tool that sets a connection up. */
+const SETUP_TOOL = "connections.setup";
+const isSetupCall = (t: { name?: string; tool?: string }): boolean => toolNameOf(t.name ?? t.tool ?? "") === SETUP_TOOL;
+
 /** How many setups a turn's tools started. */
-export const setupsStarted = (tools: readonly { name?: string; tool?: string }[] | undefined): number =>
-  (tools ?? []).filter((t) => (t.name ?? t.tool) === "connections.setup").length;
+export const setupsStarted = (tools: readonly { name?: string; tool?: string }[] | undefined): number => (tools ?? []).filter(isSetupCall).length;
 
 /** When a message's setups started, at the latest: its first setup call,
  *  timed live; else when the message before it came (a kept message's own
  *  time is when its turn ended); else an hour before it, as long as the
  *  hub keeps a setup. */
 export const setupsSince = (m: { at: string; tools?: readonly { name: string; startedAt?: number }[] }, before?: string): string => {
-  const calls = (m.tools ?? []).filter((t) => t.name === "connections.setup" && t.startedAt !== undefined).map((t) => t.startedAt!);
+  const calls = (m.tools ?? []).filter((t) => isSetupCall(t) && t.startedAt !== undefined).map((t) => t.startedAt!);
   if (calls.length > 0) return new Date(Math.min(...calls)).toISOString();
   if (before && !Number.isNaN(Date.parse(before))) return before;
   const at = Date.parse(m.at);
   return Number.isNaN(at) ? new Date(0).toISOString() : new Date(at - SETUP_LIFE_MS).toISOString();
 };
+
+/** The cards of an answer still under way that has said nothing yet (the
+ *  working row): the setups its tools started, shown while the turn waits
+ *  on them (`connections.wait`), not only once it ends. `before`: when the
+ *  message it answers came. */
+export function PendingSetups({ origin, message, before }: { origin?: FileHome; message?: { at: string; tools?: ToolCall[] }; before?: string }) {
+  const count = setupsStarted(message?.tools);
+  if (!origin || !message || count === 0) return null;
+  return <SetupCards origin={origin} since={setupsSince(message, before)} count={count} />;
+}

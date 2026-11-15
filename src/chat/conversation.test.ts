@@ -85,7 +85,7 @@ describe("conversation", () => {
       { type: "message", content: "Right." },
     ]);
     expect(s.messages.map((m) => m.content)).toEqual(["Right."]);
-    expect(s.messages[0]!.tools).toEqual([{ name: "memory.recall", done: true }]);
+    expect(s.messages[0]!.tools).toEqual([{ name: "memory.recall", done: true, startedAt: expect.any(Number) }]);
   });
 
   it("says what the agent is doing until the answer is in", () => {
