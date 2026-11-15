@@ -72,9 +72,13 @@ export const readableError = (raw: string, now = Date.now()): ReadableError => {
   const said = raw.trim();
   const failed = TURN_FAILED.test(said);
   // A Claude login the provider turned away: which, and why.
-  if (/subscription unavailable/i.test(said) && planOf(said) === "claude") {
+  if (/subscription unavailable/i.test(said)) {
     const m = LOGIN_REFUSED.exec(said);
-    if (m && m[2]?.trim()) {
+    // Claude's only when the clause it is in says so: another route's
+    // ChatGPT words after it don't hide it, and a refused ChatGPT login
+    // is never read as Claude's.
+    const clause = m ? said.slice(said.toLowerCase().lastIndexOf("subscription unavailable", m.index), m.index + m[0].length) : "";
+    if (m && m[2]?.trim() && planOf(clause) === "claude") {
       const who = m[1]?.trim();
       const reason = m[2].trim().replace(/\.$/, "");
       return { text: `Your Claude login${who ? ` (${who})` : ""} was refused: ${reason}. Sign in again in Settings → Engines → Claude.`, signIn: "claude", details: said };
