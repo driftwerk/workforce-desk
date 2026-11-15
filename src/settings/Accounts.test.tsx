@@ -314,3 +314,18 @@ it("asks which account an unmatched sign-in is, and takes none of them", async (
   await act(async () => fireEvent.change(screen.getByRole("combobox"), { target: { value: "none" } }));
   expect(setOwnSignIn).toHaveBeenCalledWith(null);
 });
+
+it("shows whose each account is, and a refused one with why and a way to sign in again", async () => {
+  const kim = account("a-k", "Kim", {
+    identity: { key: "k", email: "kim@example.com", orgName: "Acme", plan: "max", linkedBy: "usage", thisComputer: false },
+    refused: { reason: "its organisation has turned off Claude Code access", recheckAt: "2026-11-15T12:00:00Z" },
+  });
+  const bare = account("a-b", "Bare", { identity: { key: "k2", email: "bob@example.com", linkedBy: "manual", thisComputer: false } });
+  withHub({}, [kim, bare]);
+  render(<Accounts engine={claude} />);
+  await act(async () => {});
+  expect(screen.getByText("kim@example.com · Acme · Max")).toBeTruthy();
+  expect(screen.getByText("bob@example.com")).toBeTruthy();
+  expect(screen.getByText(/Refused: its organisation has turned off Claude Code access\. Desk tries it again hourly\./)).toBeTruthy();
+  expect(screen.getAllByRole("button", { name: "Sign in again" })).toHaveLength(1);
+});
