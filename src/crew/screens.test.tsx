@@ -11,6 +11,7 @@ import { AgentFiles } from "./AgentFiles";
 import { AgentSettings } from "./AgentSettings";
 import { useDrafts } from "./files";
 import { useSettings } from "../settings/store";
+import { useFloor } from "../floor/store";
 
 // The roster's read of a hub's agents: the agent is built again after a
 // new name (left out once), then serves.
@@ -357,5 +358,73 @@ describe("A picture in About", () => {
     const about = screen.getByRole("region", { name: "About" });
     expect(within(about).getByText("From Slack (Acme)")).toBeTruthy();
     expect(within(about).queryByRole("button", { name: "Choose a picture…" })).toBeNull();
+  });
+});
+
+describe("Background work in Settings", () => {
+  const agent: Agent = { hubId: "local", id: "ledger", name: "Ledger", model: null, provider: null, isDefault: false };
+  const local = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" };
+  const FILE = '[llm]\nprovider = "claude-code"\ndefault_model = "claude-code-big"\n';
+
+  const show = (hub: DeskHub) => {
+    useDesk.setState({ hub });
+    useChat.setState({ hubs: [local], roster: [agent], refreshRoster: vi.fn(() => Promise.resolve()) });
+    render(<AgentSettings agent={agent} hub={local} onOpenFiles={() => {}} />);
+  };
+
+  it("runs each kind on its default until the person picks a model, or the chat model, beside the chat model", async () => {
+    let saved = FILE;
+    const saveAgentConfig = vi.fn((_: string, toml: string) => {
+      saved = toml;
+      return Promise.resolve();
+    });
+    show(fakeHub({ agentConfig: vi.fn(() => Promise.resolve(saved)), saveAgentConfig } as Partial<DeskHub>));
+    const light = (await screen.findByLabelText("Light background work")) as HTMLSelectElement;
+    const heavy = screen.getByLabelText("Heavy background work") as HTMLSelectElement;
+    expect(light.value).toBe("");
+    expect(within(light).getByRole("option", { name: "Default · cheapest model" })).toBeTruthy();
+    expect(within(heavy).getByRole("option", { name: "Same as chat · Big" })).toBeTruthy();
+
+    await act(async () => fireEvent.change(light, { target: { value: "claude-code-mid" } }));
+    expect(saved).toContain('light_model = "claude-code-mid"');
+    await act(async () => fireEvent.change(heavy, { target: { value: "chat" } }));
+    expect(saved).toContain('heavy_model = "chat"');
+    await act(async () => fireEvent.change(light, { target: { value: "" } }));
+    expect(saved).not.toContain("light_model");
+    expect(saveAgentConfig).toHaveBeenCalledTimes(3);
+  });
+
+  it("says why a save was held, and offers Use it and Keep saved right there", async () => {
+    const decide = vi.fn(() => Promise.resolve());
+    useFloor.setState({
+      decide,
+      hubs: {
+        local: {
+          state: "ready",
+          floor: {
+            needs: [
+              {
+                id: "config:ledger:abc",
+                kind: "approval",
+                who: { kind: "agent", id: "ledger", name: "Ledger" },
+                ask: "Ledger's settings file was changed outside Desk.",
+                options: null,
+                since: "2026-11-15T10:00:00Z",
+                place: { kind: "dm" },
+                answer: { kind: "decide", at: { kind: "config", agentId: "ledger", hash: "abc" } },
+              },
+            ],
+          },
+        },
+      },
+    } as unknown as Partial<ReturnType<typeof useFloor.getState>>);
+    const held = new HubError(409, "The settings file was changed outside the hub.");
+    show(fakeHub({ agentConfig: vi.fn(() => Promise.resolve(FILE)), saveAgentConfig: vi.fn(() => Promise.reject(held)) } as Partial<DeskHub>));
+    const banner = await screen.findByRole("status", { name: "Settings changed outside Desk" });
+    expect(within(banner).getByText("Ledger’s settings file was changed outside Desk")).toBeTruthy();
+    await act(async () => fireEvent.click(within(banner).getByRole("button", { name: "Use it" })));
+    expect(decide).toHaveBeenCalledWith("local", expect.objectContaining({ id: "config:ledger:abc" }), "allow");
+    await act(async () => fireEvent.click(within(banner).getByRole("button", { name: "Keep saved" })));
+    expect(decide).toHaveBeenLastCalledWith("local", expect.objectContaining({ id: "config:ledger:abc" }), "deny");
   });
 });
