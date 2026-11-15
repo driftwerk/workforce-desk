@@ -26,7 +26,18 @@ export function SetupDock() {
   return <Dock key={hub.id} hub={hub.id} api={api} showPage={(agent) => browserOf(hub).show(agent)} />;
 }
 
-export function Dock({ hub, api, showPage }: { hub: string; api: ConnectionsApi; showPage: (agent: string) => Promise<boolean> }) {
+export function Dock({
+  hub,
+  api,
+  showPage,
+  every = { busy: BUSY_MS, idle: IDLE_MS },
+}: {
+  hub: string;
+  api: ConnectionsApi;
+  showPage: (agent: string) => Promise<boolean>;
+  /** How often it asks (tests ask faster). */
+  every?: { busy: number; idle: number };
+}) {
   const [setups, setSetups] = useState<Setup[]>([]);
   /** The ones shown here once, kept until closed when they settle: the
    *  person sees what came of what they did. */
@@ -43,12 +54,17 @@ export function Dock({ hub, api, showPage }: { hub: string; api: ConnectionsApi;
     let stop = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let failures = 0;
+    let before = new Set<string>();
     const tick = async () => {
-      let wait = IDLE_MS;
+      let wait = every.idle;
       try {
-        const all = (await api.setups()).filter((s) => s.ended == null);
+        const listed = (await api.setups()).filter((s) => s.ended == null);
         if (stop || !live.current) return;
         failures = 0;
+        // Listed twice running: the message that started one has had its
+        // own look first, so a card in the chat doesn't flash up here.
+        const all = listed.filter((s) => before.has(s.id));
+        before = new Set(listed.map((s) => s.id));
         setSetups(all);
         // Claimed last of all (from the start of time): any message that
         // shows one shows it instead.
@@ -57,13 +73,13 @@ export function Dock({ hub, api, showPage }: { hub: string; api: ConnectionsApi;
           0,
           all.map((s) => s.id),
         );
-        if (all.some((s) => !settled(s))) wait = BUSY_MS;
+        if (listed.some((s) => !settled(s))) wait = every.busy;
       } catch (e) {
         if (stop) return;
         // A hub without setups has none to show.
         if (e instanceof HubError && e.status === 404) return;
         failures += 1;
-        wait = Math.min(IDLE_MS * 2 ** failures, MOST_MS);
+        wait = Math.min(every.idle * 2 ** failures, MOST_MS);
       }
       timer = setTimeout(() => void tick(), wait);
     };
@@ -72,13 +88,19 @@ export function Dock({ hub, api, showPage }: { hub: string; api: ConnectionsApi;
       stop = true;
       if (timer) clearTimeout(timer);
     };
-  }, [api, anchor]);
+  }, [api, anchor, every.busy, every.idle]);
 
   const mine = setups.filter((s) => ownerOf(s.id) === anchor && !closed.has(s.id) && (!settled(s) || kept.has(s.id)));
   const fresh = mine.filter((s) => !settled(s) && !kept.has(s.id)).map((s) => s.id);
+  // One a message shows now is the message's: once it settles there, it
+  // doesn't come back here.
+  const taken = [...kept].filter((id) => {
+    const owner = ownerOf(id);
+    return owner !== undefined && owner !== anchor;
+  });
   useEffect(() => {
-    if (fresh.length) setKept((k) => new Set([...k, ...fresh]));
-  }, [fresh.join(" ")]);
+    if (fresh.length || taken.length) setKept((k) => new Set([...k, ...fresh].filter((id) => !taken.includes(id))));
+  }, [fresh.join(" "), taken.join(" ")]);
 
   if (mine.length === 0) return null;
   return (

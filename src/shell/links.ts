@@ -40,7 +40,7 @@ export const openLink = (url: string): void => {
   if (setup) {
     // Its card is in the chat that asked for it, else at the top of the
     // stage: brought into view either way.
-    if (!revealSetup(setup)) useDesk.getState().fail("That setup has ended. Ask again to start over.");
+    if (!revealSetup(setup)) useDesk.getState().fail("That setup’s card isn’t open any more. Ask the agent to show it again.");
     return;
   }
   const at = parseDeskLink(url);

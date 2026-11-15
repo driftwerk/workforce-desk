@@ -74,6 +74,8 @@ const FRAMES: ServerMessage[] = [
   { type: "tool_start", content: "connections.wait: 0123456789abcdef0123456789abcdef · 10s" },
 ];
 
+const FAST = { busy: 20, idle: 20 };
+
 const live = (): ConversationState => FRAMES.reduce(reduce, { ...emptyConversation(), connected: true, messages: [asked] });
 
 beforeEach(() => {
@@ -107,15 +109,35 @@ it("shows the setup's card while the turn still waits on it, before the agent ha
 });
 
 it("puts a setup no message on screen shows at the top of the stage, and gives it back to the message that shows it", async () => {
-  const dock = render(<Dock hub="local" api={api} showPage={async () => false} />);
+  const dock = render(<Dock hub="local" api={api} showPage={async () => false} every={FAST} />);
   expect(await screen.findByText("GitHub is signed in on this computer as kingsleyh")).toBeTruthy();
   expect(screen.getByText(/Desk is setting up GitHub/)).toBeTruthy();
   // The conversation that asked for it opens: its message shows it, and the
   // stage's top no longer does.
-  render(<SetupCards origin={{ hub: "local", agent: "desk" }} since={asked.at} count={1} api={api} showPage={async () => false} />);
+  const chat = render(<SetupCards origin={{ hub: "local", agent: "desk" }} since={asked.at} count={1} api={api} showPage={async () => false} />);
   await act(async () => {
     await new Promise((r) => setTimeout(r, 0));
   });
   expect(screen.getAllByText("GitHub is signed in on this computer as kingsleyh")).toHaveLength(1);
+  expect(dock.container.querySelector(".setup-card")).toBeNull();
+  // It connects there; the person leaves the chat: done, it doesn't follow them.
+  setups[0] = { ...setups[0]!, connected: { connection: "github-1", account: "kingsleyh", onFor: "Desk", write: false }, now: { ...setups[0]!.now!, kind: "connected", title: "GitHub connected as kingsleyh", action: null, other: null } };
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 2100));
+  });
+  chat.unmount();
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 100));
+  });
+  expect(dock.container.querySelector(".setup-card")).toBeNull();
+});
+
+it("leaves a setup just started to the chat that started it, rather than flash it at the top first", async () => {
+  const dock = render(<Dock hub="local" api={api} showPage={async () => false} every={{ busy: 60_000, idle: 60_000 }} />);
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 50));
+  });
+  // Listed once: not shown yet.
+  expect(api.setups).toHaveBeenCalled();
   expect(dock.container.querySelector(".setup-card")).toBeNull();
 });
