@@ -1006,6 +1006,41 @@ export interface DeskExtras {
   update?: MentionedUpdate;
   /** A catch-up on your return, beside its `update`. */
   away?: MentionedAway;
+  /** Act fully's directives card: the boss whose directives it asks, read
+   *  live. */
+  directives?: { bossScope: string };
+  /** The one line an update adds on the directives still open. */
+  directivesOpen?: DirectivesOpen;
+}
+
+/** What an update says of the directives still open. */
+export interface DirectivesOpen {
+  bossScope: string;
+  open: number;
+  topics?: string[];
+}
+
+/** One of Act fully's directives, as it stands for a boss. */
+export interface DirectiveQuestion {
+  key: string;
+  topic: string;
+  question: string;
+  answers: { key: string; label: string }[];
+  /** The answer's key, when answered. */
+  answer: string | null;
+  /** Answered for Desk's main boss, not this group's own. */
+  inherited: boolean;
+  preferenceId: string | null;
+  applied: number;
+}
+
+/** A boss's directives: the starter questions, your own, and the asking. */
+export interface Directives {
+  bossScope: string;
+  questions: DirectiveQuestion[];
+  own: { id: string; text: string; inherited: boolean }[];
+  stopAsking: boolean;
+  skipped: boolean;
 }
 
 /** A decision of the boss's, said as its row says it. */
@@ -1190,6 +1225,10 @@ export interface Preference {
   lastAppliedAt: string | null;
   overruledCount: number;
   state: "active" | "paused" | "retired";
+  /** The Act fully directive it answers ("own" for one in your words),
+   *  when one: listed under Directives, not here. */
+  directive?: string | null;
+  directiveAnswer?: string | null;
 }
 
 export interface PreferencePatch {

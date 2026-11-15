@@ -712,6 +712,26 @@
   {
     "kind": "http",
     "method": "GET",
+    "path": "/api/desk/directives?boss=main"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/directives/answer"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/directives/own"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/directives/asking"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
     "path": "/api/desk/rooms"
   },
   {
