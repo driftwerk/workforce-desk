@@ -43,9 +43,10 @@
             "command": "/bin/sh",
             "args": [
               "${CLAUDE_PLUGIN_ROOT}/hooks/desk-hook.sh",
-              "86400"
+              "86400",
+              "60"
             ],
-            "timeout": 86400
+            "timeout": 86470
           }
         ]
       }
