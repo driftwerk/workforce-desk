@@ -11,6 +11,7 @@ import { useStayPut } from "../restore/scroll";
 import { SidePanel } from "../panels/Stage";
 import { useUi } from "../shell/ui";
 import { WorkingRow } from "../chat/WorkingRow";
+import { PendingSetups } from "../chat/SetupCard";
 import { relayedOf } from "../chat/relayed";
 import { DmMessage } from "./Rooms";
 import { QueuedMessages } from "./QueuedMessages";
@@ -217,7 +218,13 @@ export function DmThreadPanel({ agent, hub, parent }: { agent: Agent; hub: HubAc
                   <DmMessage message={m} author={agent.name} authorKey={base} youOn={agent.hubId} home={hub.label} sentOn={sentOn} origin={origin} onSubmitForm={submitForm} onRetry={onRetry} onRemove={onRemove} />
                 </div>
               ))}
-              {convo?.working && !answering && <WorkingRow agent={base} name={agent.name} working={convo.working} tools={pending?.tools} />}
+              {convo?.working && !answering ? (
+                <WorkingRow agent={base} name={agent.name} working={convo.working} tools={pending?.tools}>
+                  <PendingSetups origin={origin} message={pending} before={replies.findLast((m) => m.role === "user")?.at ?? first?.at} />
+                </WorkingRow>
+              ) : (
+                <PendingSetups origin={origin} message={pending} before={replies.findLast((m) => m.role === "user")?.at ?? first?.at} />
+              )}
             </div>
           </div>
         </div>

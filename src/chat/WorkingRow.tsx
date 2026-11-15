@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { AgentMark } from "../ui/Mark";
 import { statusOf, type Working } from "./conversation";
 import { Actions } from "./Actions";
@@ -47,7 +47,21 @@ export function ToolChips({ tools, live = true }: { tools: ToolCall[]; live?: bo
 }
 
 /** The reply-in-progress row: who, what they've run, and what they're doing. */
-export function WorkingRow({ agent, name, working, tools = [] }: { agent: string; name: string; working: Working; tools?: ToolCall[] }) {
+export function WorkingRow({
+  agent,
+  name,
+  working,
+  tools = [],
+  children,
+}: {
+  agent: string;
+  name: string;
+  working: Working;
+  tools?: ToolCall[];
+  /** What the turn shows the person while it runs: the cards of the setups
+   *  it started, waiting on them. */
+  children?: ReactNode;
+}) {
   return (
     <article className="msg msg-working" aria-live="polite" aria-label={`${name} is ${working.step.toLowerCase()}`}>
       <AgentMark agent={agent} name={name} state="working" />
@@ -57,6 +71,7 @@ export function WorkingRow({ agent, name, working, tools = [] }: { agent: string
         </span>
         <ToolChips tools={tools} />
         <StatusLine working={working} />
+        {children}
       </div>
     </article>
   );

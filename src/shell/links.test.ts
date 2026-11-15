@@ -6,7 +6,7 @@ vi.mock("./navigate", () => ({ openTarget: vi.fn() }));
 const { openUrl } = await import("../platform");
 const { openTarget } = await import("./navigate");
 const { useDesk } = await import("../hub/store");
-const { deskLink, linkParts, openLink, parseDeskLink, parseTicketLink, ticketLink } = await import("./links");
+const { deskLink, linkParts, openLink, parseDeskLink, parseSetupLink, parseTicketLink, ticketLink } = await import("./links");
 const { useBoard } = await import("../board/store");
 
 const ROOM = "6f1c2a4e-0b7d-4c55-9a51-3d2e8f9b1c07";
@@ -27,6 +27,16 @@ describe("desk links", () => {
     openLink(ticketLink(MSG));
     expect(useBoard.getState().open).toBe(MSG);
     expect(openTarget).not.toHaveBeenCalled();
+    expect(openUrl).not.toHaveBeenCalled();
+  });
+
+  it("name a setup's card, and say so where it has ended", () => {
+    const id = "0123456789abcdef0123456789abcdef";
+    expect(parseSetupLink(`desk://setup/${id.toUpperCase()}`)).toBe(id);
+    expect(parseSetupLink("desk://setup/nope")).toBeNull();
+    // No card for it on screen: it has ended.
+    openLink(`desk://setup/${id}`);
+    expect(useDesk.getState().error).toBeTruthy();
     expect(openUrl).not.toHaveBeenCalled();
   });
 

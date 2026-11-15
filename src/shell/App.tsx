@@ -72,6 +72,7 @@ import { useSetup } from "../setup/store";
 import { WindowsSetup } from "../setup/WindowsSetup";
 import { useHost } from "./host";
 import { resumeAfterUpdate } from "../updates/store";
+import { SetupDock } from "../chat/SetupDock";
 import { UpdateNotice, useRestartWhenIdle, useUpdateChecks } from "../updates/UpdateNotice";
 import { useSidebarJumps } from "./jump";
 
@@ -450,7 +451,12 @@ export function App() {
             mainKey={mainKey}
             mainName={mainName}
             panels={panels}
-            notice={<UpdateNotice />}
+            notice={
+              <>
+                <UpdateNotice />
+                <SetupDock />
+              </>
+            }
             main={
               <ErrorBoundary name="main">
                 {view === "floor" ? (
