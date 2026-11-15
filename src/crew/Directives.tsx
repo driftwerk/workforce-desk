@@ -269,15 +269,16 @@ export function DirectivesOpenLine({ open }: { open: DirectivesOpen }) {
 
 /** The Boss sheet's Directives: each with its answer to change or clear,
  *  your own to forget, one to add, and whether the boss asks again. */
-export function BossDirectives({ boss, name }: { boss: string; name: string }) {
+export function BossDirectives({ boss, name, shared = false }: { boss: string; name: string; shared?: boolean }) {
   const d = useDirectives(boss);
   const connected = useDesk((s) => !!s.hub);
   if (d.loaded.state === "none" || d.loaded.state === "loading") return null;
   return (
-    <div className="oversee-part">
+    <div className="oversee-part dir-section">
       <h3>Directives</h3>
       <span className="oversee-sub">
         Your standing answers for {name}. They’re orders: they win over its own judgment. Unanswered ones it decides itself, and says so.
+        {shared && " These are Desk’s main boss’s, for every group it runs."}
       </span>
       {d.loaded.state === "failed" ? (
         <p className="small state-blocked" role="alert">

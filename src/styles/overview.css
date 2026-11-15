@@ -1410,6 +1410,8 @@ a.ref {
   gap: 6px 16px;
 }
 .dir-foot .link,
+.dir-note .link,
+.dir-own-row .link,
 .dir-open-answer {
   text-decoration: underline;
   text-underline-offset: 2px;
@@ -1427,7 +1429,7 @@ a.ref {
   flex-wrap: wrap;
   gap: 8px 10px;
 }
-.oversee-part .sec-label {
+.dir-section .sec-label {
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.05em;

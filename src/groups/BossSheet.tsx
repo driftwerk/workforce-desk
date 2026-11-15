@@ -288,7 +288,7 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
 
           {/* Act fully's directives, for a boss on this computer's hub. */}
           {now && picked && !changed && now.kind !== "remote" && (now.kind === "local" || mainBoss) && (
-            <BossDirectives boss={now.kind === "local" ? group : "main"} name={bossName} />
+            <BossDirectives boss={now.kind === "local" ? group : "main"} name={bossName} shared={now.kind === "desk"} />
           )}
           {linkedHere && status && !changed && (
             <div className="oversee-part">
