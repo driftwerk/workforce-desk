@@ -50,6 +50,8 @@ import { withAccount } from "../engines/accounts";
 import { ENGINE_TITLE, modelTitle } from "../engines/engines";
 
 import { STATE_LABEL } from "../session/words";
+// A session its boss closes as finished leaves the grids.
+import "./finished";
 import { setSectionOpen } from "../shell/SideSection";
 
 const ENGINE = ENGINE_TITLE;

@@ -494,6 +494,12 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 checked={o.work.preferSessions}
                 onChange={(v) => update((x) => ({ ...x, work: { ...x.work, preferSessions: v } }))}
               />
+              <Check
+                label="Close sessions I started when their work is done"
+                sub={`When its PR merges, its ticket is done, it says it’s finished, or it sits a day with nothing open, ${name} closes it: off the grid, its conversation kept to resume. At Act fully, also the ones you handed it. Never one you’ve typed in lately or with work not committed or pushed; below Act it suggests it instead`}
+                checked={o.work.closeFinished}
+                onChange={(v) => update((x) => ({ ...x, work: { ...x.work, closeFinished: v } }))}
+              />
               <div className="oversee-row">
                 <label className="oversee-check" htmlFor={`${ids}-engine`}>
                   <span className="oversee-check-text">
