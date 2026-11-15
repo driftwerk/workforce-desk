@@ -134,15 +134,28 @@ export const withBrain = (source: string, brain: Brain): string => {
  *  stand in for each other. */
 export const OTHER_PLAN: Record<string, string> = { "claude-code": "chatgpt", chatgpt: "claude-code", codex: "claude-code" };
 
-/** The providers a `[llm] failover` entry can name, as the hub routes them. */
-const PROVIDERS = new Set(["anthropic", "openrouter", "grok", "ollama", "gemini", "vllm", "cerebras", "zai", "bedrock", "vertex-anthropic", "openai", "chatgpt", "claude-code", "codex"]);
+/** Each name a `[llm] failover` entry can give a provider, and the
+ *  provider it is: the hub's own table (`ProviderKind::parse`). */
+const PROVIDERS: Record<string, string> = {
+  anthropic: "anthropic", claude: "anthropic",
+  openrouter: "openrouter", "open-router": "openrouter", or: "openrouter",
+  grok: "grok", xai: "grok", "x-ai": "grok",
+  ollama: "ollama", local: "ollama",
+  gemini: "gemini", google: "gemini", "google-ai": "gemini",
+  vllm: "vllm", "vllm-server": "vllm", "self-hosted": "vllm", runpod: "vllm",
+  cerebras: "cerebras", "cerebras-ai": "cerebras",
+  zai: "zai", "z-ai": "zai", zhipu: "zai", bigmodel: "zai",
+  bedrock: "bedrock", aws: "bedrock", "aws-bedrock": "bedrock",
+  "vertex-anthropic": "vertex-anthropic", "vertex-claude": "vertex-anthropic", "gcp-claude": "vertex-anthropic", vertex: "vertex-anthropic",
+  chatgpt: "chatgpt", "claude-code": "claude-code", claude_code: "claude-code", codex: "codex",
+};
 
 /** The provider a `[llm] failover` entry routes to: "chatgpt", the part of
  *  "chatgpt:model" before the colon, or (a bare model, or a Bedrock id with
  *  a version colon) the agent's own, `own`. */
 const failoverProvider = (entry: string, own: string): string => {
   const head = entry.split(":")[0]!.trim().toLowerCase();
-  return PROVIDERS.has(head) ? head : own;
+  return Object.hasOwn(PROVIDERS, head) ? PROVIDERS[head]! : PROVIDERS[own] ?? own;
 };
 
 const failoverOf = (llm: Doc): string[] =>
@@ -151,7 +164,7 @@ const failoverOf = (llm: Doc): string[] =>
 /** Whether a config's `[llm] failover` names a provider other than `own`:
  *  when its accounts can't serve, the agent goes to another provider. */
 export const usesAnotherProvider = (source: string, own: string): boolean =>
-  failoverOf((parseDoc(source).llm ?? {}) as Doc).some((e) => failoverProvider(e, own) !== own);
+  failoverOf((parseDoc(source).llm ?? {}) as Doc).some((e) => failoverProvider(e, own) !== (PROVIDERS[own] ?? own));
 
 /** A config that falls back to `other` (on), or to no other provider (off,
  *  which keeps the entries on the agent's own provider). Anything else in

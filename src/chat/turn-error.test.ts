@@ -121,6 +121,20 @@ describe("an error a turn ended with, in plain words", () => {
     expect(e.text).not.toContain("no route");
   });
 
+  it("names whose a skipped login is, and stops its reason at the next tier or route", () => {
+    const raw = `Agent error: no route could serve this turn: claude-code:standard — subscription unavailable: no Claude login for ${ID}: agent_user none stored; system_shared (kim@example.com, Acme) was refused: ${ORG}; agent_shared none stored; chatgpt:fast — subscription unavailable: no ChatGPT login for ${ID}: agent_user none stored`;
+    expect(readableError(raw, NOW).text).toBe(`Your Claude login (kim@example.com, Acme) was refused: ${ORG}. Sign in again in Settings → Engines → Claude.`);
+    const routed = `Agent error: no route could serve this turn: claude-code:standard — subscription unavailable: no Claude login for ${ID}: system_shared was refused: ${ORG} — chatgpt:fast — subscription unavailable: no ChatGPT login for ${ID}: agent_user none stored`;
+    expect(readableError(routed, NOW).text).toBe(`Your Claude login was refused: ${ORG}. Sign in again in Settings → Engines → Claude.`);
+  });
+
+  it("never reads a refused ChatGPT login as a Claude one", () => {
+    const raw = `Agent error: subscription unavailable: no ChatGPT login for ${ID}: agent_user was refused: the account is suspended`;
+    const e = readableError(raw, NOW);
+    expect(e.text).not.toContain("Claude");
+    expect(e.signIn).not.toBe("claude");
+  });
+
   it("says no login is signed in, and offers to sign in", () => {
     const raw = `Agent error: subscription unavailable: no Claude login for ${ID}: agent_user none stored; system_shared none stored`;
     const e = readableError(raw, NOW);
