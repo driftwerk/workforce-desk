@@ -90,6 +90,11 @@ pub struct Record {
     pub connection: String,
     /// When the copied key last changed there, as it said.
     pub updated_at: Option<String>,
+    /// When this computer's hub kept the copy. A connection kept again
+    /// since (by hand, or removed and made anew with the same id) is no
+    /// longer the copy, and a newer key never goes over it.
+    #[serde(default)]
+    pub connected_at: Option<String>,
 }
 
 fn file(paths: &Paths) -> std::path::PathBuf {
@@ -217,6 +222,40 @@ fn keep_body(copy: &Copy, from: &str, new: bool) -> Zeroizing<Vec<u8>> {
     Zeroizing::new(serde_json::to_vec(&body).expect("JSON"))
 }
 
+/// When each connection on this computer's hub `local` was kept, by
+/// connector and id: names and times only, never a value.
+async fn kept_here(
+    io: &HubIo,
+    local: &str,
+) -> Result<BTreeMap<(String, String), Option<String>>, String> {
+    let (meta, body) = io
+        .fetch(local, "GET", "/api/desk/connections", None)
+        .await?;
+    if !(200..300).contains(&meta.status) {
+        return Err(format!("This computer's hub answered {}.", meta.status));
+    }
+    Ok(connected_times(&body))
+}
+
+fn connected_times(body: &[u8]) -> BTreeMap<(String, String), Option<String>> {
+    let v: serde_json::Value = serde_json::from_slice(body).unwrap_or_default();
+    let mut out = BTreeMap::new();
+    for c in v["connectors"].as_array().into_iter().flatten() {
+        let Some(connector) = c["id"].as_str() else {
+            continue;
+        };
+        for k in c["connections"].as_array().into_iter().flatten() {
+            if let Some(id) = k["id"].as_str() {
+                out.insert(
+                    (connector.to_string(), id.to_string()),
+                    k["connectedAt"].as_str().map(str::to_string),
+                );
+            }
+        }
+    }
+    out
+}
+
 /// Copies `picks` from paired hub `remote` into this computer's hub
 /// `local`, recording each in `paths`.
 pub async fn take(
@@ -231,18 +270,25 @@ pub async fn take(
     }
     let from = io.remote_label(remote).await?;
     let mut records = read(paths);
-    // A newer key goes only over the connection it was copied into.
-    for p in picks.iter().filter(|p| p.into.is_some()) {
-        let known = records.iter().any(|r| {
-            r.hub == remote
-                && r.connector == p.connector
-                && r.remote_key == p.key
-                && Some(&r.connection) == p.into.as_ref()
-        });
-        if !known {
-            return Err(format!(
-                "Desk only updates a connection it copied from {from}."
-            ));
+    // A newer key goes only over the connection it was copied into, and
+    // only while that is still the copy, unchanged here since.
+    if picks.iter().any(|p| p.into.is_some()) {
+        let here = kept_here(io, local).await?;
+        for p in picks.iter().filter(|p| p.into.is_some()) {
+            let still = records.iter().any(|r| {
+                r.hub == remote
+                    && r.connector == p.connector
+                    && r.remote_key == p.key
+                    && Some(&r.connection) == p.into.as_ref()
+                    && r.connected_at.is_some()
+                    && here.get(&(r.connector.clone(), r.connection.clone()))
+                        == Some(&r.connected_at)
+            });
+            if !still {
+                return Err(format!(
+                    "Desk only updates a connection it copied from {from}, unchanged here since."
+                ));
+            }
         }
     }
     let ask: Vec<serde_json::Value> = picks
@@ -325,6 +371,7 @@ pub async fn take(
                                 remote_key: copy.key.clone(),
                                 connection: connection.clone(),
                                 updated_at: copy.updated_at.clone(),
+                                connected_at: s("connectedAt"),
                             },
                         );
                         Copied::Saved {
@@ -356,10 +403,10 @@ pub async fn take(
     tracing::info!(hub = %remote, saved, of = picks.len(), "connections copied from a paired hub");
     // What was saved stays saved; only a later "newer key" offer needs the
     // record, so a record that couldn't be written is said in the log.
-    if saved > 0 {
-        if let Err(e) = write(paths, &records) {
-            tracing::warn!(error = %e, "copied connections' record wasn't written");
-        }
+    if saved > 0
+        && let Err(e) = write(paths, &records)
+    {
+        tracing::warn!(error = %e, "copied connections' record wasn't written");
     }
     Ok(Taken::Done { results })
 }
@@ -419,11 +466,11 @@ mod tests {
 
     #[test]
     fn a_hubs_answer_is_read_and_a_value_never_stays_in_an_error() {
-        let body = br#"{"copies":[{"connector":"jira","service":"Jira","key":"default","name":"Jira","updatedAt":"2026-11-01T00:00:00Z","fields":{"api_token":"tok-secret-1234","site":"acme.atlassian.net"}}],"missing":[{"connector":"github","key":"acme"}]}"#;
+        let body = br#"{"copies":[{"connector":"jira","service":"Jira","key":"default","name":"Jira","updatedAt":"2026-11-01T00:00:00Z","fields":{"api_token":"not-a-real-value","site":"acme.atlassian.net"}}],"missing":[{"connector":"github","key":"acme"}]}"#;
         let (copies, missing) = copies_of(body).unwrap();
         assert_eq!(copies.len(), 1);
         assert_eq!(missing, [("github".to_string(), "acme".to_string())]);
-        let said = scrub("Jira said tok-secret-1234 is wrong", &copies[0].fields);
+        let said = scrub("Jira said not-a-real-value is wrong", &copies[0].fields);
         assert_eq!(said, "Jira said [secret] is wrong");
         // A connection named only by its service is named here as by hand.
         let body: serde_json::Value =
@@ -431,7 +478,7 @@ mod tests {
         assert_eq!(body["name"], serde_json::Value::Null);
         assert_eq!(body["level"], "all");
         assert_eq!(body["copied_from"], "Patchwork");
-        assert_eq!(body["fields"]["api_token"], "tok-secret-1234");
+        assert_eq!(body["fields"]["api_token"], "not-a-real-value");
         let again: serde_json::Value =
             serde_json::from_slice(&keep_body(&copies[0], "Patchwork", false)).unwrap();
         assert!(again.get("level").is_none());
@@ -450,6 +497,7 @@ mod tests {
             remote_key: "default".into(),
             connection: connection.into(),
             updated_at: None,
+            connected_at: Some("2026-11-01T00:00:00Z".into()),
         };
         let mut records = vec![r("all:default")];
         upsert(&mut records, r("all:acme"));
@@ -458,5 +506,18 @@ mod tests {
         assert_eq!(read(&paths), records);
         let text = std::fs::read_to_string(file(&paths)).unwrap();
         assert!(!text.contains("token"));
+    }
+
+    #[test]
+    fn when_each_connection_here_was_kept_is_read_by_connector_and_id() {
+        let body = br#"{"connectors":[{"id":"jira","connections":[{"id":"all~~default","connectedAt":"2026-11-01T00:00:00Z"},{"id":"all~~old","connectedAt":null}]},{"id":"github","connections":[]}]}"#;
+        let times = connected_times(body);
+        assert_eq!(times.len(), 2);
+        assert_eq!(
+            times[&("jira".to_string(), "all~~default".to_string())].as_deref(),
+            Some("2026-11-01T00:00:00Z")
+        );
+        assert_eq!(times[&("jira".to_string(), "all~~old".to_string())], None);
+        assert!(connected_times(b"not json").is_empty());
     }
 }

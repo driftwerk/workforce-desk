@@ -117,8 +117,11 @@ describe("what a paired hub offers", () => {
       remoteKey: "default",
       connection: "all~~acme",
       updatedAt: "2026-11-01T00:00:00Z",
+      connectedAt: "2026-11-01T00:00:05Z",
     };
-    const local = [service("jira", "Jira", [conn({ id: "all~~acme", name: "Acme", site: "acme.atlassian.net" })])];
+    const local = [
+      service("jira", "Jira", [conn({ id: "all~~acme", name: "Acme", site: "acme.atlassian.net", connectedAt: "2026-11-01T00:00:05Z" })]),
+    ];
     expect(offerOf("patchwork", [JIRA], [record], local)).toEqual([]);
     const changed = { ...JIRA, updatedAt: "2026-11-10T00:00:00Z" };
     expect(offerOf("patchwork", [changed], [record], local)).toEqual([{ ...changed, state: "newer", into: "all~~acme", localName: "Acme" }]);
@@ -126,6 +129,10 @@ describe("what a paired hub offers", () => {
     expect(offerOf("driftwerk", [changed], [record], local)).toEqual([]);
     // The copy removed here: offered anew, unless one by hand stands in for it.
     expect(offerOf("patchwork", [changed], [record], [service("jira", "Jira")]).map((i) => i.state)).toEqual(["new"]);
+    // Kept again here by hand since, under the same id: no longer the copy,
+    // and never written over.
+    const byHand = [service("jira", "Jira", [conn({ id: "all~~acme", site: "acme.atlassian.net", connectedAt: "2026-11-12T00:00:00Z" })])];
+    expect(offerOf("patchwork", [changed], [record], byHand)).toEqual([]);
   });
 });
 
@@ -190,9 +197,10 @@ describe("Settings → Connections' offer", () => {
       remoteKey: "default",
       connection: "all~~acme",
       updatedAt: "2026-10-01T00:00:00Z",
+      connectedAt: "2026-10-01T00:00:05Z",
     };
     const copier = fakeNative({ kept: vi.fn(async () => [record]) });
-    const local = [service("jira", "Jira", [conn({ id: "all~~acme", name: "Acme" })])];
+    const local = [service("jira", "Jira", [conn({ id: "all~~acme", name: "Acme", connectedAt: "2026-10-01T00:00:05Z" })])];
     await act(async () => {
       render(<CopyOffers local={local} reload={async () => {}} hubs={[hub()]} copier={copier} list={async () => [JIRA]} />);
     });

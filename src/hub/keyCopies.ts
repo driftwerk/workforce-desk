@@ -30,6 +30,9 @@ export interface CopyRecord {
   remoteKey: string;
   connection: string;
   updatedAt: string | null;
+  /** When this computer's hub kept the copy: kept again since, it's no
+   *  longer the copy. */
+  connectedAt?: string | null;
 }
 
 /** What the offer holds: a connection not here yet, or one copied here
@@ -134,7 +137,10 @@ export const offerOf = (hub: string, remote: RemoteConnection[], records: CopyRe
     const here = local.find((c) => c.id === r.connector);
     if (!here) continue;
     const record = records.find((x) => x.hub === hub && x.connector === r.connector && x.remoteKey === r.key);
-    const copy = record && here.connections.find((x) => x.id === record.connection);
+    // Still the copy: not kept again here since (by hand, or removed and
+    // made anew under the same id).
+    const copy =
+      record && record.connectedAt ? here.connections.find((x) => x.id === record.connection && x.connectedAt === record.connectedAt) : undefined;
     if (record && copy) {
       if (later(r.updatedAt, record.updatedAt)) out.push({ ...r, state: "newer", into: copy.id, localName: copy.name });
       continue;

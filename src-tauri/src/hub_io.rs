@@ -241,12 +241,6 @@ impl HubIo {
         self.legacy.clear();
     }
 
-    /// Mints a token for board sync on paired hub `remote` (named `name`)
-    /// with this Desk's device token there, and hands it to hub `local`,
-    /// this computer's, as its sync hub `id`. The token goes from one hub to
-    /// the other here and nowhere else: what the page is told never holds
-    /// it. A hub that doesn't let devices mint says so in its words, and the
-    /// page asks the person to paste one made there instead.
     /// What the person calls paired hub `id`, when it is another hub than
     /// this computer's and a machine's: one whose keys of theirs Desk may
     /// copy here (`crate::key_copies`).
@@ -273,6 +267,12 @@ impl HubIo {
             .unwrap_or_else(|| "your workspace".to_string()))
     }
 
+    /// Mints a token for board sync on paired hub `remote` (named `name`)
+    /// with this Desk's device token there, and hands it to hub `local`,
+    /// this computer's, as its sync hub `id`. The token goes from one hub to
+    /// the other here and nowhere else: what the page is told never holds
+    /// it. A hub that doesn't let devices mint says so in its words, and the
+    /// page asks the person to paste one made there instead.
     pub async fn mint_for_sync(
         &self,
         remote: &str,

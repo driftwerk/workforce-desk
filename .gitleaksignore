@@ -18,3 +18,6 @@
 # into its tests as literals; later commits build them so nothing reads as one.
 aa5916ef01f40ca8a75377e3029e233fdbd2d47f:src-tauri/src/hub_io.rs:generic-api-key:1280
 aa5916ef01f40ca8a75377e3029e233fdbd2d47f:src-tauri/src/hub_io.rs:generic-api-key:1327
+# A test fixture in a commit already pushed: the made-up field value in
+# key_copies' answer test (src-tauri/src/key_copies.rs), never a real one.
+247e3b20d51baeaf10ed828c1884c5b8e3c41e1e:src-tauri/src/key_copies.rs:generic-api-key:422
