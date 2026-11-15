@@ -2,6 +2,7 @@ import { useId, useState } from "react";
 import { useDesk } from "../hub/store";
 import { HubError } from "../hub/client";
 import type {
+  DirectivesOpen,
   AnswerOption,
   BriefGroup,
   DecisionLine,
@@ -20,6 +21,7 @@ import type { DeliveryKind } from "../chat/types";
 import { openLink } from "../shell/links";
 import { plainError } from "../ui/plainError";
 import { Brief } from "./Brief";
+import { DirectivesCard, DirectivesOpenLine } from "../crew/Directives";
 import { useSettledBy } from "./settled";
 import { UNDO_LABEL, useUndo } from "./undo";
 
@@ -49,7 +51,7 @@ import { UNDO_LABEL, useUndo } from "./undo";
  *  markdown: an update, something it asks of you, or a decision of its
  *  own. */
 export const overseerShown = (extras: DeskExtras | undefined): boolean =>
-  !!extras && (!!extras.update || !!extras.away || !!extras.item || !!extras.decisions?.length);
+  !!extras && (!!extras.update || !!extras.away || !!extras.item || !!extras.decisions?.length || !!extras.directives);
 
 /** Whether the boss's message is one of what the chat shows unboxed: an
  *  update, a decision, or something it asks of you (its own, or a
@@ -61,7 +63,8 @@ export const overseerPost = (extras: DeskExtras | undefined, delivery: DeliveryK
  *  extras; `content` stands in for anything they don't say. */
 export function OverseerBody({ extras, content }: { extras: DeskExtras; content: string }) {
   if (extras.away) return <CatchUp away={extras.away} update={extras.update ?? {}} />;
-  if (extras.update) return <Update update={extras.update} />;
+  if (extras.directives) return <DirectivesCard boss={extras.directives.bossScope} />;
+  if (extras.update) return <Update update={extras.update} open={extras.directivesOpen} />;
   if (extras.item?.forYou) return <ForYouPost item={extras.item} content={content} />;
   if (extras.item) return <NeedsYouPost item={extras.item} content={content} />;
   if (extras.decisions?.length)
@@ -449,7 +452,7 @@ function More({ n }: { n?: number }) {
   return <p className="faint small">{n === 1 ? "1 more" : `${n} more`}: ask “what else?”</p>;
 }
 
-function Update({ update }: { update: MentionedUpdate }) {
+function Update({ update, open }: { update: MentionedUpdate; open?: DirectivesOpen }) {
   if (update.brief?.length)
     return (
       <div className="msg-text overseer is-brief">
@@ -458,6 +461,7 @@ function Update({ update }: { update: MentionedUpdate }) {
         <Brief groups={update.brief} />
         <More n={update.moreItems} />
         {update.footer && <p className="faint small">{update.footer}</p>}
+        {open && <DirectivesOpenLine open={open} />}
       </div>
     );
   return (
@@ -466,6 +470,7 @@ function Update({ update }: { update: MentionedUpdate }) {
       <WaitingAll update={update} />
       {(update.decisions ?? []).length > 0 && <WhatIDid decisions={update.decisions!} />}
       {update.footer && <p className="faint small">{update.footer}</p>}
+      {open && <DirectivesOpenLine open={open} />}
     </div>
   );
 }

@@ -41,6 +41,7 @@ import {
 } from "./remoteBoss";
 import { useLayout } from "./store";
 import { useGrantBosses } from "../crew/grantBoss";
+import { BossDirectives } from "../crew/Directives";
 
 /** Who runs the group, as picked. */
 type Who = { kind: "desk" } | { kind: "local"; agent: Agent } | { kind: "remote"; agent: Agent };
@@ -284,6 +285,11 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
               ))}
             </div>
           </div>
+
+          {/* Act fully's directives, for a boss on this computer's hub. */}
+          {now && picked && !changed && now.kind !== "remote" && (now.kind === "local" || mainBoss) && (
+            <BossDirectives boss={now.kind === "local" ? group : "main"} name={bossName} />
+          )}
 
           {remote && (
             <>

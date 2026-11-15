@@ -253,6 +253,11 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/preferences/{}/pause"),
     route("POST", "/api/desk/preferences/{}/resume"),
     route("POST", "/api/desk/preferences/{}/retire"),
+    // Act fully's directives.
+    with_query("GET", "/api/desk/directives", &["boss"]),
+    route("POST", "/api/desk/directives/answer"),
+    route("POST", "/api/desk/directives/own"),
+    route("POST", "/api/desk/directives/asking"),
     // Rooms.
     route("GET", "/api/desk/rooms"),
     route("POST", "/api/desk/rooms"),

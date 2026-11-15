@@ -72,6 +72,7 @@ import type {
   MemorySettings,
   NoteChange,
   SessionMemory,
+  Directives,
   Preference,
   PreferencePatch,
 } from "./types";
@@ -814,6 +815,17 @@ export class DeskHub {
   /** Pauses, resumes or forgets (retires) a preference. */
   setPreference = (id: string, to: "pause" | "resume" | "retire"): Promise<Preference> =>
     this.desk("POST", `/api/desk/preferences/${encodeURIComponent(id)}/${to}`);
+  /** A boss's directives ("main", or the group it bosses), as they stand. */
+  directives = (boss: string): Promise<Directives> =>
+    this.desk("GET", `/api/desk/directives?boss=${encodeURIComponent(boss)}`);
+  /** Answers one directive (null clears it): the directives as they now are. */
+  answerDirective = (boss: string, key: string, answer: string | null): Promise<Directives> =>
+    this.desk("POST", "/api/desk/directives/answer", { boss, key, answer });
+  /** Keeps a directive in your own words. */
+  addDirective = (boss: string, text: string): Promise<Directives> => this.desk("POST", "/api/desk/directives/own", { boss, text });
+  /** Skip for now, and Stop asking (or asking again). */
+  directivesAsking = (boss: string, change: { skipped?: boolean; stop?: boolean }): Promise<Directives> =>
+    this.desk("POST", "/api/desk/directives/asking", { boss, ...change });
   /** Undoes one of the boss's decisions, as you: what was done. */
   undoDecision = (id: string): Promise<{ done: string }> => this.desk("POST", `/api/desk/decisions/${encodeURIComponent(id)}/undo`);
   /** Answers what the boss asked you, from its buttons: settled on the hub

@@ -79,7 +79,7 @@ export function BossPreferences({ name, group }: { name: string; group: string |
   }, [load]);
 
   if (loaded.state === "none" || loaded.state === "loading") return null;
-  const mine = loaded.state === "ok" ? loaded.list.filter((p) => p.bossScope === scope && p.state !== "retired") : [];
+  const mine = loaded.state === "ok" ? loaded.list.filter((p) => p.bossScope === scope && p.state !== "retired" && !p.directive) : [];
   const replace = (next: Preference) =>
     setLoaded((l) => (l.state === "ok" ? { state: "ok", list: l.list.map((p) => (p.id === next.id ? next : p)) } : l));
   const remove = (id: string) =>
