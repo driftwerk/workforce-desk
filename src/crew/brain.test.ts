@@ -12,6 +12,8 @@ import {
   newAgentBrain,
   brainReady,
   resolveBrain,
+  usesAnotherProvider,
+  withAnotherProvider,
   withBrain,
   withDeskSettings,
 } from "./brain";
@@ -277,5 +279,30 @@ describe("effort per model", () => {
     expect(isDefaultBrain(MIXED, { provider: "chatgpt", model: "plain", effort: "high" })).toBe(false);
     const fastDefault = { ...MIXED, models: MIXED.models.map((m) => ({ ...m, default: m.id === "fast" })) };
     expect(isDefaultBrain(fastDefault, { provider: "chatgpt", model: "fast" })).toBe(true);
+  });
+});
+
+describe("When an agent's accounts can't serve", () => {
+  it("reads whether [llm] failover names another provider", () => {
+    expect(usesAnotherProvider('[llm]\nprovider = "claude-code"\n', "claude-code")).toBe(false);
+    expect(usesAnotherProvider('[llm]\nfailover = ["chatgpt"]\n', "claude-code")).toBe(true);
+    expect(usesAnotherProvider('[llm]\nfailover = ["claude-code:standard"]\n', "claude-code")).toBe(false);
+    expect(usesAnotherProvider("", "claude-code")).toBe(false);
+  });
+
+  it("goes to the other provider, keeping the rest of the file and the agent's own entries", () => {
+    const on = withAnotherProvider('[llm]\nprovider = "claude-code"\nfailover = ["claude-code:alt"]\n\n[rich]\ntables = true\n', "claude-code", "chatgpt", true);
+    expect(llmOf(on)?.failover).toEqual(["claude-code:alt", "chatgpt"]);
+    expect(llmOf(on)?.provider).toBe("claude-code");
+    expect((parse(on) as Record<string, unknown>).rich).toEqual({ tables: true });
+    expect(withAnotherProvider(on, "claude-code", "chatgpt", true)).toBe(on);
+  });
+
+  it("waits again by dropping only entries that route elsewhere, and the key once empty", () => {
+    const mixed = '[llm]\nprovider = "claude-code"\nfailover = ["claude-code:alt", "chatgpt"]\n';
+    expect(llmOf(withAnotherProvider(mixed, "claude-code", "chatgpt", false))?.failover).toEqual(["claude-code:alt"]);
+    const only = withAnotherProvider('[llm]\nprovider = "claude-code"\nfailover = ["chatgpt"]\n', "claude-code", "chatgpt", false);
+    expect("failover" in llmOf(only)!).toBe(false);
+    expect(llmOf(withAnotherProvider("", "chatgpt", "claude-code", true))?.failover).toEqual(["claude-code"]);
   });
 });

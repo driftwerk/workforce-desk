@@ -129,6 +129,37 @@ export const withBrain = (source: string, brain: Brain): string => {
   return stringify(doc) + "\n";
 };
 
+/** The subscription providers, and the one each falls back to when the
+ *  agent's own accounts can't serve: Claude's plan and the ChatGPT plan
+ *  stand in for each other. */
+export const OTHER_PLAN: Record<string, string> = { "claude-code": "chatgpt", chatgpt: "claude-code", codex: "claude-code" };
+
+/** The provider a `[llm] failover` entry routes to ("chatgpt", or the part
+ *  of "chatgpt:model" before the colon). */
+const failoverProvider = (entry: string): string => entry.split(":")[0]!.trim();
+
+const failoverOf = (llm: Doc): string[] =>
+  (Array.isArray(llm.failover) ? llm.failover : typeof llm.failover === "string" ? [llm.failover] : []).filter((e): e is string => typeof e === "string");
+
+/** Whether a config's `[llm] failover` names a provider other than `own`:
+ *  when its accounts can't serve, the agent goes to another provider. */
+export const usesAnotherProvider = (source: string, own: string): boolean =>
+  failoverOf((parseDoc(source).llm ?? {}) as Doc).some((e) => failoverProvider(e) !== failoverProvider(own));
+
+/** A config that falls back to `other` (on), or to no other provider (off,
+ *  which keeps the entries on the agent's own provider). Anything else in
+ *  the file stays. */
+export const withAnotherProvider = (source: string, own: string, other: string, on: boolean): string => {
+  const doc = parseDoc(source);
+  const llm: Doc = { ...((doc.llm ?? {}) as Doc) };
+  const same = failoverOf(llm).filter((e) => failoverProvider(e) === failoverProvider(own));
+  const next = on ? [...same, other] : same;
+  if (next.length > 0) llm.failover = next;
+  else delete llm.failover;
+  doc.llm = llm;
+  return stringify(doc) + "\n";
+};
+
 /** A new agent's config: `brain`, and every rich block on unless the file
  *  already says otherwise. */
 export const withDeskSettings = (source: string, brain: Brain): string => {

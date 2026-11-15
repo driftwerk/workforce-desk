@@ -10,6 +10,7 @@ import { useSettings } from "../settings/store";
 import { plainError } from "../ui/plainError";
 import { useAgentBrain, useAgentConfigs } from "./agentBrain";
 import { effortShort, isDefaultEffort, isDefaultModel, modelName, modelOf } from "./brain";
+import { Failover } from "./Failover";
 import { AGENT_FILES, ago, useDrafts } from "./files";
 import { NAME_TAKEN, nameTaken, purposeOf, renameLocalAgent, setAgentBrain, setAgentPurpose, setAgentVoice } from "./local";
 import { useUi } from "../shell/ui";
@@ -308,6 +309,7 @@ function Thinking({ agent }: { agent: Agent }) {
           </b>
           {brain && isDefaultModel(provider, brain.model) ? <span className="chip chip-default">Default</span> : <span />}
         </div>
+        <Failover agent={agent} />
         {brain?.effort && (
           <div className="think-row">
             <span>Effort</span>
