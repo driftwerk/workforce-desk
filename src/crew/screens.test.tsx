@@ -379,8 +379,8 @@ describe("Background work in Settings", () => {
       return Promise.resolve();
     });
     show(fakeHub({ agentConfig: vi.fn(() => Promise.resolve(saved)), saveAgentConfig } as Partial<DeskHub>));
-    const light = (await screen.findByLabelText("Light background work")) as HTMLSelectElement;
-    const heavy = screen.getByLabelText("Heavy background work") as HTMLSelectElement;
+    const light = (await screen.findByLabelText("Light background")) as HTMLSelectElement;
+    const heavy = screen.getByLabelText("Heavy background") as HTMLSelectElement;
     expect(light.value).toBe("");
     expect(within(light).getByRole("option", { name: "Default · cheapest model" })).toBeTruthy();
     expect(within(heavy).getByRole("option", { name: "Same as chat · Big" })).toBeTruthy();
@@ -420,7 +420,7 @@ describe("Background work in Settings", () => {
     } as unknown as Partial<ReturnType<typeof useFloor.getState>>);
     const held = new HubError(409, "The settings file was changed outside the hub.");
     show(fakeHub({ agentConfig: vi.fn(() => Promise.resolve(FILE)), saveAgentConfig: vi.fn(() => Promise.reject(held)) } as Partial<DeskHub>));
-    const banner = await screen.findByRole("status", { name: "Settings changed outside Desk" });
+    const banner = await screen.findByRole("region", { name: "Settings changed outside Desk" });
     expect(within(banner).getByText("Ledger’s settings file was changed outside Desk")).toBeTruthy();
     await act(async () => fireEvent.click(within(banner).getByRole("button", { name: "Use it" })));
     expect(decide).toHaveBeenCalledWith("local", expect.objectContaining({ id: "config:ledger:abc" }), "allow");

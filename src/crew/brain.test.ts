@@ -304,5 +304,9 @@ describe("background work", () => {
     expect(backgroundOf(moved)).toEqual({ light: null, heavy: "chat" });
     const same = withBrain(set, { provider: "claude-code", model: "opus" });
     expect(backgroundOf(same)).toEqual({ light: "haiku", heavy: "chat" });
+    const named = withBackground(file, "light", "claude-code:haiku");
+    expect(backgroundOf(withBrain(named, { provider: "chatgpt", model: "gpt-6.1-sol" })).light).toBe("claude-code:haiku");
+    const alias = withBackground(file.replace('"claude-code"', '"claude_code"'), "light", "haiku");
+    expect(backgroundOf(withBrain(alias, { provider: "claude-code", model: "opus" })).light).toBe("haiku");
   });
 });

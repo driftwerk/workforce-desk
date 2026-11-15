@@ -150,8 +150,13 @@ export const withBackground = (source: string, work: Work, model: string | null)
 };
 
 /** Whether a background setting still means something on another
- *  provider: the default, `chat` or a tier, never one provider's model. */
-const portable = (v: unknown): boolean => typeof v !== "string" || v === SAME_AS_CHAT || TIERS.has(v);
+ *  provider: the default, `chat`, a tier, or a model named with its own
+ *  provider (`claude-code:haiku`); never one provider's bare model. */
+const portable = (v: unknown): boolean =>
+  typeof v !== "string" || v === SAME_AS_CHAT || TIERS.has(v) || v.includes(":");
+
+/** A provider's name as the hub reads it: `claude_code` is `claude-code`. */
+const providerKey = (v: unknown): string => (typeof v === "string" ? v.replace(/_/g, "-") : "");
 
 /** An agent's config thinking with `brain`; an effort is dropped where the
  *  brain has none, and a background model of the provider it leaves. Anything
@@ -160,7 +165,7 @@ export const withBrain = (source: string, brain: Brain): string => {
   const doc = parseDoc(source);
   const was = (doc.llm ?? {}) as Doc;
   const llm: Doc = { ...was, provider: brain.runsOn ?? brain.provider, default_model: brain.model };
-  if (was.provider !== llm.provider) {
+  if (was.provider !== undefined && providerKey(was.provider) !== providerKey(llm.provider)) {
     for (const key of Object.values(WORK_KEY)) if (!portable(llm[key])) delete llm[key];
   }
   if (brain.effort) llm.effort = brain.effort;

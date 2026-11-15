@@ -358,13 +358,13 @@ function Thinking({ agent }: { agent: Agent }) {
 /** What each kind of background work is for, as its row says it. */
 const WORK: Record<Work, { name: string; what: string; tier: string; byDefault: string }> = {
   light: {
-    name: "Light background work",
+    name: "Light background",
     what: "Session notes, gists, memory and running accounts",
     tier: "cheap",
     byDefault: "cheapest model",
   },
   heavy: {
-    name: "Heavy background work",
+    name: "Heavy background",
     what: "Check-ins, decisions on sessions, updates and compaction",
     tier: "standard",
     byDefault: "everyday model",
@@ -421,7 +421,14 @@ function BackgroundRow({
     <div className="think-row think-row-work">
       <label htmlFor={id}>{w.name}</label>
       <span className="think-work">
-        <select id={id} className="ability-select" value={value} disabled={saving} onChange={(e) => void choose(e.target.value)}>
+        <select
+          id={id}
+          className="ability-select"
+          value={value}
+          disabled={saving}
+          aria-describedby={`${id}-what`}
+          onChange={(e) => void choose(e.target.value)}
+        >
           <option value={DEFAULT}>Default · {w.byDefault}</option>
           {models.map((m) => (
             <option key={m.id} value={m.id}>
@@ -431,7 +438,7 @@ function BackgroundRow({
           <option value={SAME_AS_CHAT}>Same as chat{chat ? ` · ${chat}` : ""}</option>
           {!known && <option value={value}>{value}</option>}
         </select>
-        <span className={problem ? "small state-blocked" : "small faint"} role={problem ? "alert" : undefined}>
+        <span id={`${id}-what`} className={problem ? "small state-blocked" : "small faint"} role={problem ? "alert" : undefined}>
           {problem ?? w.what}
         </span>
       </span>
@@ -461,7 +468,7 @@ function ChangedElsewhere({ agent }: { agent: Agent }) {
       .decide(agent.hubId, need, choice)
       .then(() => desk && useAgentConfigs.getState().load(desk, agent));
   return (
-    <div className="settings-held" role="status" aria-label="Settings changed outside Desk">
+    <div className="settings-held" role="region" aria-label="Settings changed outside Desk">
       <span className="dot dot-blocked" aria-hidden="true" />
       <span className="settings-held-text">
         <b>{agent.name}’s settings file was changed outside Desk</b>
@@ -478,7 +485,7 @@ function ChangedElsewhere({ agent }: { agent: Agent }) {
         <button type="button" className="btn btn-blocked" disabled={!!deciding} onClick={decide("allow")}>
           {deciding === "allow" ? "Using it…" : "Use it"}
         </button>
-        <button type="button" className="btn" disabled={!!deciding} onClick={decide("deny")}>
+        <button type="button" className="btn settings-held-keep" disabled={!!deciding} onClick={decide("deny")}>
           {deciding === "deny" ? "Keeping saved…" : "Keep saved"}
         </button>
       </span>

@@ -860,6 +860,10 @@ button.card-icon:hover:not(:disabled) {
   gap: 8px;
   flex-wrap: wrap;
 }
+/* On the amber wash, the plain answer sits on the page's own surface. */
+.settings-held-keep {
+  background: var(--surface);
+}
 .think-row b {
   font-weight: 600;
 }
