@@ -290,6 +290,14 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
           {now && picked && !changed && now.kind !== "remote" && (now.kind === "local" || mainBoss) && (
             <BossDirectives boss={now.kind === "local" ? group : "main"} name={bossName} />
           )}
+          {linkedHere && status && !changed && (
+            <div className="oversee-part">
+              <h3>Directives</h3>
+              <span className="oversee-sub">
+                {bossName}’s directives are kept on {status.hubLabel}: tell {bossName} there what it may do on its own.
+              </span>
+            </div>
+          )}
 
           {remote && (
             <>
