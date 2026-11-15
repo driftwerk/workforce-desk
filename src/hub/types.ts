@@ -442,6 +442,9 @@ export interface EngineAccount {
   /** What its hub knows of its plan: passed to the person's other
    *  computers' hubs, which have the same account. */
   standing?: AccountStanding | null;
+  /** The provider turned the account away: why, and when the hub tries it
+   *  again. */
+  refused?: { reason: string; recheckAt: string } | null;
   createdAt: string;
 }
 
@@ -449,6 +452,10 @@ export interface AccountIdentity {
   /** Its identity's key: a hash, never its organization or email. */
   key: string;
   email: string | null;
+  /** Its organisation's name, when the provider says. */
+  orgName?: string | null;
+  /** Its plan ("max", "pro", "team"), when the provider says. */
+  plan?: string | null;
   linkedBy: "manual" | "usage";
   /** This computer's own Claude Code is signed in to it. */
   thisComputer: boolean;
@@ -484,6 +491,8 @@ export type AccountNeed =
   | { kind: "reset"; id: string; engine: Engine; account: AccountSide; from: AccountSide; sessions: string[] }
   /** An account's sign-in can't be used: nothing switches to it. */
   | { kind: "signIn"; id: string; engine: Engine; account: AccountSide; problem: SignInProblem["problem"] }
+  /** The provider turned an account's login away; `using` takes over. */
+  | { kind: "refused"; id: string; engine: Engine; account: AccountSide; who: string | null; reason: string; using: AccountSide | null }
   /** A session in a terminal of its own sits on a full plan: Desk can't
    *  move it. */
   | { kind: "inTerminal"; id: string; engine: Engine; session: string; name: string; account: AccountSide; resetsAt: string | null }

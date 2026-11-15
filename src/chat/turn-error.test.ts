@@ -97,6 +97,30 @@ describe("an error a turn ended with, in plain words", () => {
     expect(e.details).toBe(LIMIT);
   });
 
+  const ORG = "its organisation has turned off Claude Code access";
+  const SAID = "Your organization has disabled Claude subscription access for Claude Code · Use an Anthropic API key instead, or ask your admin to enable access";
+
+  it("names the Claude login a provider refused, with who it is, never 'no route'", () => {
+    const raw = `Agent error: no route could serve this turn: claude-code:standard — subscription unavailable: the Claude login of ${ID} (system_shared) (kim@example.com, Acme) was refused: ${ORG}. The provider said: ${SAID}`;
+    const e = readableError(raw, NOW);
+    expect(e.text).toBe(`Your Claude login (kim@example.com, Acme) was refused: ${ORG}. Sign in again in Settings → Engines → Claude.`);
+    expect(e.signIn).toBe("claude");
+    expect(e.details).toBe(raw);
+  });
+
+  it("leaves out the parenthesis when the hub doesn't know who", () => {
+    const raw = `Agent error: no route could serve this turn: claude-code:standard — subscription unavailable: the Claude login of ${ID} (system_shared) was refused: ${ORG}. The provider said: ${SAID}`;
+    expect(readableError(raw, NOW).text).toBe(`Your Claude login was refused: ${ORG}. Sign in again in Settings → Engines → Claude.`);
+  });
+
+  it("says a refused login even once the hub skips it, before the generic no-login text", () => {
+    const raw = `Agent error: no route could serve this turn: claude-code:standard — subscription unavailable: no Claude login for ${ID}: agent_user none stored; global_user none stored; agent_shared none stored; system_shared was refused: ${ORG}`;
+    const e = readableError(raw, NOW);
+    expect(e.text).toBe(`Your Claude login was refused: ${ORG}. Sign in again in Settings → Engines → Claude.`);
+    expect(e.signIn).toBe("claude");
+    expect(e.text).not.toContain("no route");
+  });
+
   it("says no login is signed in, and offers to sign in", () => {
     const raw = `Agent error: subscription unavailable: no Claude login for ${ID}: agent_user none stored; system_shared none stored`;
     const e = readableError(raw, NOW);

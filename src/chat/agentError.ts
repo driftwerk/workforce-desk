@@ -49,6 +49,11 @@ const planOf = (raw: string): PlanKind | null => {
   return null;
 };
 
+/** A Claude login the provider turned away: "the Claude login of <id>
+ *  (system_shared) (kim@example.com, Acme) was refused: <reason>. The provider
+ *  said: …", or, once the hub skips it, "…; system_shared was refused: <reason>". */
+const LOGIN_REFUSED = /\b(?:the Claude login of\b[^\n]*?(?:\(([^()\n]*@[^()\n]*)\)\s*)?was|[\w-]+ was) refused:\s*([^\n]*?)(?:\.\s*The provider said:|\s*$)/i;
+
 /** The earliest time the hub says a login is at its usage limit until. */
 const limitUntil = (raw: string): number | null => {
   const times = [...raw.matchAll(new RegExp(UNTIL.source, "g"))]
@@ -64,6 +69,15 @@ const limitUntil = (raw: string): number | null => {
 export const readableError = (raw: string, now = Date.now()): ReadableError => {
   const said = raw.trim();
   const failed = TURN_FAILED.test(said);
+  // A Claude login the provider turned away: which, and why.
+  if (/subscription unavailable/i.test(said)) {
+    const m = LOGIN_REFUSED.exec(said);
+    if (m && m[2]?.trim()) {
+      const who = m[1]?.trim();
+      const reason = m[2].trim().replace(/\.$/, "");
+      return { text: `Your Claude login${who ? ` (${who})` : ""} was refused: ${reason}. Sign in again in Settings → Engines → Claude.`, signIn: "claude", details: said };
+    }
+  }
   const plan = /subscription unavailable/i.test(said) ? planOf(said) : null;
   if (plan) {
     const name = PLAN_NAME[plan];

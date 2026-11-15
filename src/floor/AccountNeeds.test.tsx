@@ -3,6 +3,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { useAccounts } from "../engines/accounts";
 import type { DeskHub } from "../hub/client";
 import { useDesk } from "../hub/store";
+import { useUi } from "../shell/ui";
 import type { AccountNeed } from "../hub/types";
 import { AccountNeeds } from "./AccountNeeds";
 
@@ -128,4 +129,28 @@ it("says a session in a terminal of its own sits on a full plan, and what to do 
   expect(screen.getByText(/run \/login there to use another account, or start it in Desk/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Not now" }));
   expect(putOffNeed).toHaveBeenCalledWith("terminal:x");
+});
+
+it("says a Claude login was refused, who Desk uses meanwhile, and opens Engines; told once", () => {
+  const putOffNeed = vi.fn(async () => undefined);
+  withHub({ putOffNeed });
+  const refused: AccountNeed = { kind: "refused", id: "refused:w", engine: "claude", account: work, who: "kim@example.com, Acme", reason: "its organisation has turned off Claude Code access", using: personal };
+  useAccounts.setState({ needs: [refused] });
+  render(<AccountNeeds />);
+  expect(screen.getByText("Your Claude login (kim@example.com, Acme) was refused: its organisation has turned off Claude Code access")).toBeTruthy();
+  expect(screen.getByText("Desk is using Personal meanwhile. Sign in again in Settings → Engines → Claude.")).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Not now" }));
+  expect(putOffNeed).toHaveBeenCalledWith("refused:w");
+  const open = vi.fn();
+  useUi.setState({ openSettings: open });
+  fireEvent.click(screen.getByRole("button", { name: "Open Engines" }));
+  expect(open).toHaveBeenCalledWith("engines");
+});
+
+it("says when nothing else is signed in to take over a refused login", () => {
+  withHub({});
+  useAccounts.setState({ needs: [{ kind: "refused", id: "refused:w", engine: "claude", account: work, who: null, reason: "it was revoked", using: null }] });
+  render(<AccountNeeds />);
+  expect(screen.getByText("Your Claude login was refused: it was revoked")).toBeTruthy();
+  expect(screen.getByText("Nothing else is signed in to take over. Sign in again in Settings → Engines → Claude.")).toBeTruthy();
 });

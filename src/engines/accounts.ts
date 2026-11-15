@@ -103,6 +103,11 @@ export const needText = (n: AccountNeed, at: (iso: string) => string): { title: 
         title: "Which of your accounts is this computer signed in to?",
         detail: `Claude Code here is signed in${n.email ? ` as ${n.email}` : ""}. Desk asks rather than guess before it moves sessions.`,
       };
+    case "refused":
+      return {
+        title: `Your Claude login${n.who ? ` (${n.who})` : ""} was refused: ${n.reason}`,
+        detail: `${n.using ? `Desk is using ${n.using.name} meanwhile.` : "Nothing else is signed in to take over."} Sign in again in Settings → Engines → Claude.`,
+      };
     case "signIn":
       return {
         title: n.problem === "notRemoved" ? `${n.account.name}’s sign-in was left behind` : `${n.account.name}’s sign-in can’t be used`,
