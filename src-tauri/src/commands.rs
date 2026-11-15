@@ -46,6 +46,8 @@ pub const COMMANDS: &[&str] = &[
     "hub_socket_open",
     "board_sync_mint",
     "knows_link",
+    "key_copies_take",
+    "key_copies_kept",
     "boss_offer",
     "boss_status",
     "boss_link",

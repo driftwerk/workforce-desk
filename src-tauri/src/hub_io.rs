@@ -247,6 +247,32 @@ impl HubIo {
     /// the other here and nowhere else: what the page is told never holds
     /// it. A hub that doesn't let devices mint says so in its words, and the
     /// page asks the person to paste one made there instead.
+    /// What the person calls paired hub `id`, when it is another hub than
+    /// this computer's and a machine's: one whose keys of theirs Desk may
+    /// copy here (`crate::key_copies`).
+    pub async fn remote_label(&self, id: &str) -> Result<String, String> {
+        if crate::hubs::machine_of(id).is_some() {
+            return Err("A machine's hub holds no keys of yours to copy.".into());
+        }
+        let there = self
+            .paired
+            .reach_async(id)
+            .await
+            .map_err(|e| e.to_string())?;
+        if there.local {
+            return Err("Those keys are on this computer already.".into());
+        }
+        let paired = Arc::clone(&self.paired);
+        let id = id.to_string();
+        let label = tauri::async_runtime::spawn_blocking(move || paired.label(&id))
+            .await
+            .map_err(|e| e.to_string())?;
+        Ok(label
+            .map(|l| l.trim().to_string())
+            .filter(|l| !l.is_empty())
+            .unwrap_or_else(|| "your workspace".to_string()))
+    }
+
     pub async fn mint_for_sync(
         &self,
         remote: &str,
@@ -762,6 +788,9 @@ fn page_refused(method: &str, target: &str) -> bool {
             | (_, ["api", "desk", "crew", "relay" | "served", ..])
             // What a local boss's machine grants say (`crate::local_bosses`).
             | (_, ["api", "desk", "machine-grants", ..])
+            // The person's own keys, values and all: the native side hands
+            // them straight to this computer's hub (`crate::key_copies`).
+            | (_, ["api", "me", "desk-key-copies", "take", ..])
     )
 }
 
@@ -1588,6 +1617,33 @@ pub(crate) mod tests {
             assert!(page_refused(method, target), "{method} {target}");
         }
         assert!(!page_refused("GET", "/api/desk/machines"));
+    }
+
+    /// The person's keys, values and all, are never the page's to take,
+    /// however spelled; listing them (names and sites) is.
+    #[test]
+    fn taking_the_persons_keys_is_never_asked_of_a_workspace_for_the_page() {
+        for (method, target) in [
+            ("POST", "/api/me/desk-key-copies/take"),
+            ("post", "/api/me/desk-key-copies/take?x=1"),
+            ("GET", "/api/me/desk-key-copies/take"),
+            ("POST", "//api/Me/Desk-Key-Copies/TAKE/"),
+            ("POST", "/api/me/desk%2Dkey-copies/%74ake"),
+            ("PUT", "/api/me/desk-key-copies/take/x"),
+        ] {
+            assert!(page_refused(method, target), "{method} {target}");
+        }
+        assert!(!page_refused("GET", "/api/me/desk-key-copies"));
+        // A path the address would read otherwise is refused before it is
+        // sent, whatever page_refused says of it.
+        let base = Url::parse("https://hub.example").unwrap();
+        for dotted in [
+            "/api/me/desk-key-copies/x/../take",
+            "/api/me/desk-key-copies/x/%2e%2e/take",
+            "/api/me/desk-key-copies/./take",
+        ] {
+            assert!(desk_core::net::at(&base, dotted, None).is_err(), "{dotted}");
+        }
     }
 
     #[test]
