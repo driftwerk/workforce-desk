@@ -1595,6 +1595,14 @@ a.ref {
   font-size: 13.5px;
   font-weight: 600;
 }
+/* The hide control sits at the head's end, the next roundup just before it. */
+.upd-card-next {
+  margin-left: auto;
+}
+.upd-card-hide {
+  align-self: center;
+  margin-right: -6px;
+}
 .upd-card .seg {
   background: var(--sunken);
 }
@@ -1629,7 +1637,9 @@ a.ref {
   flex-wrap: wrap;
 }
 @container chat (max-width: 900px) {
-  .upd-card {
+  /* Too narrow for the card: so no way to show it either. */
+  .upd-card,
+  .room-head-updates {
     display: none;
   }
 }
