@@ -15,6 +15,7 @@ const WORDS: Record<SettingsSection, string> = {
   sessions: "sessions terminals worktrees",
   memory: "memory remember notes recall",
   budgets: "budget spend money cost limit",
+  plans: "plan plans usage limit weekly account accounts hidden not matched hub",
   voices: "voice voices speech tts calls talk microphone push to talk wake tuple elevenlabs fish",
   shortcuts: "keys keyboard shortcuts hotkeys",
   help: "help setup set up report logs agent",

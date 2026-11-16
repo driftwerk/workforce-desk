@@ -1,7 +1,7 @@
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { create } from "zustand";
 import { useChat } from "../chat/store";
-import { useAccounts } from "../engines/accounts";
+import { accountsOn, useAccounts } from "../engines/accounts";
 import { FEATURES, type HubAccount } from "../chat/types";
 import { HubError } from "../hub/client";
 import { deskListeners, useDesk } from "../hub/store";
@@ -18,7 +18,8 @@ import { answeredInRoom, stillNeeds, useNeedsDismissed, useNeedsSeen, yourPosts 
 import { merged, type Merged } from "./merge";
 import { countsByItem } from "./needs";
 import { nextLocalMidnight, startOfLocalDay } from "./time";
-import { plans, type PlanCard } from "./usage";
+import { board, type Board } from "./accountCards";
+import { usePlansUi } from "./planLinks";
 import { keyOf } from "../hub/machines";
 
 /** What Desk knows of one hub's floor. */
@@ -365,25 +366,38 @@ export const useNeedCounts = (): Map<string, number> => {
   return useMemo(() => countsByItem(needs), [needs]);
 };
 
-/** The plan cards, from every hub's usage: one for each of the person's
- *  accounts. */
-export const usePlans = (): PlanCard[] => {
+/** The Plans board, from every hub's usage and what the person said: one
+ *  card for each real account, and the hubs' places not matched to one. */
+export const useBoard = (): Board => {
   const hubs = useFloor((s) => s.hubs);
   const list = useChat((s) => s.hubs);
   const accounts = useAccounts((s) => s.accounts);
   const ownKey = useAccounts((s) => s.ownPlanKey);
+  const links = usePlansUi();
+  const machines = useMemo(() => [...new Set(list.flatMap((h) => h.machine ?? []))], [list]);
+  // Each machine's accounts, read once and followed.
+  const [seen, setSeen] = useState(0);
+  useEffect(() => {
+    const offs = machines.map((m) => {
+      const store = accountsOn(m);
+      if (store.getState().supported === null) void store.getState().load();
+      return store.subscribe((s, before) => s.accounts !== before.accounts && setSeen((n) => n + 1));
+    });
+    return () => offs.forEach((off) => off());
+  }, [machines]);
   return useMemo(
     () =>
-      plans(
-        list.flatMap((h) => {
+      board({
+        sources: list.flatMap((h) => {
           const f = hubs[h.id];
-          return f?.usage ? [{ hubId: h.id, label: h.label, local: h.local, usage: f.usage, offset: f.offset }] : [];
+          return f?.usage ? [{ hubId: h.id, label: h.label, local: h.local, machine: h.machine, usage: f.usage, offset: f.offset }] : [];
         }),
-        {
-          accounts: accounts.flatMap((a) => (a.planKey ? [`${a.engine === "codex" ? "chatgpt" : "claude"}:${a.planKey}`] : [])),
-          own: ownKey ? `claude:${ownKey}` : null,
-        },
-      ),
-    [hubs, list, accounts, ownKey],
+        accounts,
+        ownKey: ownKey ? `claude:${ownKey}` : null,
+        machineAccounts: (m) => accountsOn(m).getState().accounts,
+        links,
+      }),
+    // `seen`: a machine's accounts changed.
+    [hubs, list, accounts, ownKey, links, seen],
   );
 };
