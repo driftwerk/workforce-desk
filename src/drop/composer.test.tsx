@@ -13,6 +13,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: (...a: unknown[]) => invoke(...
 
 beforeEach(() => {
   setNativeDrops(true);
+  addListener.mockClear();
   invoke.mockReset();
   invoke.mockImplementation(async (cmd: string, args: { paths?: string[]; path?: string }) => {
     if (cmd === "dropped_files")
@@ -41,6 +42,22 @@ function Box({ sent }: { sent: File[][] }) {
     </div>
   );
 }
+
+// What a drop the system kept waits on: Desk asks again when it's back in
+// front, from a focus listener its effect adds once the problem is shown.
+// That effect can run a beat after the problem appears (the read lands
+// outside act), so a test waits for the listener itself before focusing:
+// a focus before it would ask no one, and the test would wait out its time.
+const addListener = vi.spyOn(window, "addEventListener");
+const recheckListening = () =>
+  waitFor(() => expect(addListener.mock.calls.some(([type]) => type === "focus")).toBe(true));
+// Asking again is all promises (no timers), so a turn of the event loop
+// after a focus sees it answered and ready for the next one.
+const focusAndSettle = () =>
+  act(async () => {
+    window.dispatchEvent(new Event("focus"));
+    await new Promise((settled) => setTimeout(settled, 0));
+  });
 
 const zoneOf = (el: HTMLElement) => el.closest(`[${ZONE_ATTR}]`)?.getAttribute(ZONE_ATTR) ?? null;
 
@@ -147,8 +164,9 @@ describe("a composer, with the system's drag and drop", () => {
     // a.png didn't wait for b.png.
     expect(sent.map((f) => f.map((x) => x.name))).toEqual([["a.png"]]);
     allowed = true;
-    await act(async () => void window.dispatchEvent(new Event("focus")));
-    await waitFor(() => expect(sent.map((f) => f.map((x) => x.name))).toEqual([["a.png"], ["b.png"]]));
+    await recheckListening();
+    await focusAndSettle();
+    expect(sent.map((f) => f.map((x) => x.name))).toEqual([["a.png"], ["b.png"]]);
     // Only b.png was asked for again.
     const asked = invoke.mock.calls.filter(([c]) => c === "dropped_files").map(([, a]) => (a as { paths: string[] }).paths);
     expect(asked.at(-1)).toEqual(["/Users/me/Desktop/b.png"]);
@@ -169,11 +187,13 @@ describe("a composer, with the system's drag and drop", () => {
     act(() => r.handle({ type: "drop", paths: ["/Users/me/Desktop/c.png"], position: { x: 1, y: 1 } }));
     expect(await screen.findByText("Allow Desk to read c.png.")).toBeTruthy();
     // Still not allowed: it stays.
-    await act(async () => void window.dispatchEvent(new Event("focus")));
+    await recheckListening();
+    await focusAndSettle();
+    expect(invoke.mock.calls.filter(([c]) => c === "dropped_files")).toHaveLength(2);
     expect(screen.getByText("Allow Desk to read c.png.")).toBeTruthy();
     expired = true;
-    await act(async () => void window.dispatchEvent(new Event("focus")));
-    expect(await screen.findByText("Desk only reads files dropped on it. Drop it again.")).toBeTruthy();
+    await focusAndSettle();
+    expect(screen.getByText("Desk only reads files dropped on it. Drop it again.")).toBeTruthy();
     expect(screen.queryByText("Allow Desk to read c.png.")).toBeNull();
   });
 });
