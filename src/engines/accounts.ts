@@ -121,7 +121,6 @@ export const needText = (n: AccountNeed, at: (iso: string) => string): { title: 
 export const accountOfCard = (accounts: readonly EngineAccount[], cardKey: string): EngineAccount | null =>
   accounts.find((a) => a.planKey && cardKey === `${a.engine === "codex" ? "chatgpt" : "claude"}:${a.planKey}`) ?? null;
 
-/** What a sign-in problem says. */
 /** When Desk tries a refused account again, as its row says it: "at
  *  14:00", "tomorrow 09:00", or with its next call once that time is past. */
 export const recheckText = (recheckAt: string, now = Date.now()): string => {
@@ -132,6 +131,7 @@ export const recheckText = (recheckAt: string, now = Date.now()): string => {
   return `Desk tries it again ${/^\d/.test(when) ? `at ${when}` : when}.`;
 };
 
+/** What a sign-in problem says. */
 export const problemText = (p: SignInProblem, store: string | null): string => {
   const where = store ?? "Desk's store";
   switch (p.problem) {
