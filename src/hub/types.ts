@@ -1776,7 +1776,11 @@ export type SyncPaused =
   | { kind: "noToken" }
   | { kind: "missing"; tools: string[] }
   | { kind: "refused"; reason: string }
-  | { kind: "leftGroup" };
+  | { kind: "leftGroup" }
+  /** The hub has no Jira site or Linear workspace of the person's by the
+   *  name the link keeps (`asked`), or the link keeps none and they have
+   *  several there (`names`): it is linked again, picking one. */
+  | { kind: "workspace"; what: string; asked?: string; names: string[] };
 
 /** A board's link: one Jira project or one Linear team, through one hub. */
 export interface BoardSync {
@@ -1789,6 +1793,9 @@ export interface BoardSync {
   /** The agent on the hub whose tools it syncs through; absent: the hub's
    *  default agent (or an older hub). */
   agent?: string;
+  /** The Jira site or Linear workspace it syncs, by name, where the person
+   *  has several there; absent: one made before, or an older hub. */
+  workspace?: string;
   person: string;
   filter: SyncFilter;
   /** Who the person is there (a Linear user id, a Jira accountId), as the
@@ -2067,6 +2074,14 @@ export interface LinkCheck {
   /** The agent there that offers the tools; null: the hub's default, or
    *  this computer. Absent from an older hub. */
   agent?: { id: string; name: string } | null;
+  /** The person's Jira sites or Linear workspaces there, by name, when they
+   *  have several: one is picked before teams or projects are listed. */
+  workspaces?: string[];
+  /** The one picked, or the one a call naming none goes to; null: none. */
+  workspace?: string | null;
+  /** Why one must be picked (none given and no default, or the one given
+   *  isn't theirs there), in plain words: no teams or projects come with it. */
+  workspaceWhy?: string;
   /** Linear: the hub's teams. */
   teams?: { id: string; key: string; name: string }[];
   /** Jira: the projects the person can reach, when the hub lists them
@@ -2102,6 +2117,8 @@ export interface LinkBoard {
   target: string;
   targetId?: string;
   via: SyncVia;
+  /** The Jira site or Linear workspace picked, where the person has several. */
+  workspace?: string;
   filter: SyncFilter;
   me?: string;
   /** The person said the hub's answer of who they are isn't them. */
