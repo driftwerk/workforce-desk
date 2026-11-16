@@ -199,7 +199,7 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
       {unlinking && <UnlinkBoard board={board} onClose={() => setUnlinking(false)} />}
       {choosing && (
         <ChooseMe
-          where={{ system: sync.system, via: sync.via, ...(sync.agent ? { agent: sync.agent } : {}) }}
+          where={{ system: sync.system, via: sync.via, ...(sync.agent ? { agent: sync.agent } : {}), ...(sync.workspace ? { workspace: sync.workspace } : {}) }}
           hub={hub}
           chosen={sync.meSource === "chosen"}
           onCancel={() => setChoosing(false)}
