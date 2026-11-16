@@ -4,7 +4,7 @@ import { useDesk, useHubOf } from "../hub/store";
 import type { Choice, Decision, Denied, Session } from "../hub/types";
 import { requestFocus } from "../shell/focus";
 import { OptionChips } from "../ui/OptionChips";
-import { terminalAsk } from "./pending";
+import { isQuestion, terminalAsk } from "./pending";
 
 /** "Bash(cargo test)" → "Bash". */
 export const toolName = (tool: string): string => tool.split("(")[0]?.trim() || tool;
@@ -130,7 +130,7 @@ export function Approval({ session, compact = false }: { session: Session; compa
       </div>
     );
   }
-  if (session.engine === "devin" && !["Question", "Plan"].includes(pending.tool)) {
+  if (session.engine === "devin" && !isQuestion(pending)) {
     // Devin's own prompt's answers, in its words and order. Its hook can only
     // allow (once) or deny: a mode is switched in its own prompt, which Desk
     // leaves up and opens.
