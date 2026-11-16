@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState, type Ref } from "react";
 import { useDesk } from "../hub/store";
 import { agentKey, type Agent } from "../chat/types";
 import { plainError } from "../ui/plainError";
@@ -104,7 +104,7 @@ function useNextRoundup(agent: Agent, cadence: Cadence | null): string | null | 
 
 /** The card beside the boss's chat: its updates in a few lines, a preset,
  *  Roundup now, and the way to the settings in full. */
-export function UpdatesCard({ agent }: { agent: Agent }) {
+export function UpdatesCard({ agent, onHide, hideRef }: { agent: Agent; onHide?: () => void; hideRef?: Ref<HTMLButtonElement> }) {
   const hub = useDesk((s) => s.hub);
   const setAgentTab = useUi((u) => u.setAgentTab);
   const { cadence, save, status, refused, ready } = useCadence(agent);
@@ -127,7 +127,14 @@ export function UpdatesCard({ agent }: { agent: Agent }) {
     <aside className="upd-card" aria-labelledby={head}>
       <div className="upd-card-head">
         <h2 id={head}>Updates</h2>
-        {next && <span className="faint small">Next roundup {clock(next)}</span>}
+        {next && <span className="faint small upd-card-next">Next roundup {clock(next)}</span>}
+        {onHide && (
+          <button ref={hideRef} type="button" className="icon-btn-sm upd-card-hide" aria-label="Hide updates" title="Hide updates" onClick={onHide}>
+            <svg width="12" height="12" viewBox="0 0 14 14" stroke="currentColor" strokeWidth="1.7" aria-hidden="true">
+              <path d="M3 3l8 8M11 3l-8 8" />
+            </svg>
+          </button>
+        )}
       </div>
       <div className="seg upd-presets" role="radiogroup" aria-label="How you hear from it">
         {PRESETS.map((p) => (

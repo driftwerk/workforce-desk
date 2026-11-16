@@ -1,4 +1,4 @@
-import { UpdatesCard } from "../crew/Updates";
+import { ShowUpdates, UpdatesBeside, type UpdatesFocus } from "../crew/updatesShown";
 import { toShow } from "../chat/conversation";
 import { SetupInDm } from "../setup/slot";
 import { formAnswer } from "../chat/forms";
@@ -186,6 +186,8 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // ⌘F: the search, the stretch of the chat shown around a match not
   // loaded, and the match to show once it's rendered.
   const [searching, setSearching] = useState(false);
+  // Which Updates control takes focus once the other is pressed.
+  const updatesFocus = useRef<UpdatesFocus>(null);
   // The threads on this DM's messages, and the one open beside it.
   const threads = useDmThreads(activeAgent ?? null);
   const openThread = useUi((u) => u.setDmThread);
@@ -473,6 +475,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
               </button>
             ))}
           </div>
+          {overseeing && tab === "chat" && !searching && <ShowUpdates agent={agentKey(agent)} focus={updatesFocus} />}
         </header>
       )}
       {tab === "settings" ? (
@@ -637,7 +640,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
           </div>
           {searching && <SearchResults s={search} name={agent.name} onPick={pick} />}
           {/* How the boss tells you things, beside its chat. */}
-          {overseeing && !searching && !inPane && <UpdatesCard agent={agent} />}
+          {overseeing && !searching && !inPane && <UpdatesBeside agent={agent} focus={updatesFocus} />}
           </div>
           {editNote && (
             <p className="composer-note small" role="status">
