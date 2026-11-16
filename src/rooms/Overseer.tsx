@@ -21,6 +21,7 @@ import type { DeliveryKind } from "../chat/types";
 import { openLink } from "../shell/links";
 import { plainError } from "../ui/plainError";
 import { Brief } from "./Brief";
+import { RoundupBody, SaidList } from "./Said";
 import { ClosedLines } from "./Closed";
 import { DirectivesCard, DirectivesOpenLine } from "../crew/Directives";
 import { useSettledBy } from "./settled";
@@ -67,7 +68,7 @@ export const overseerPost = (extras: DeskExtras | undefined, delivery: DeliveryK
 export function OverseerBody({ extras, content, message }: { extras: DeskExtras; content: string; message?: { id: string; at: string } }) {
   if (extras.away) return <CatchUp away={extras.away} update={extras.update ?? {}} />;
   if (extras.directives) return <DirectivesCard boss={extras.directives.bossScope} message={message} />;
-  if (extras.update) return <Update update={extras.update} open={extras.directivesOpen} />;
+  if (extras.update) return <Update update={extras.update} open={extras.directivesOpen} at={message?.at} />;
   if (extras.item?.forYou) return <ForYouPost item={extras.item} content={content} />;
   if (extras.item) return <NeedsYouPost item={extras.item} content={content} />;
   if (extras.decisions?.length)
@@ -457,7 +458,28 @@ function More({ n }: { n?: number }) {
   return <p className="faint small">{n === 1 ? "1 more" : `${n} more`}: ask “what else?”</p>;
 }
 
-function Update({ update, open }: { update: MentionedUpdate; open?: DirectivesOpen }) {
+function Update({ update, open, at }: { update: MentionedUpdate; open?: DirectivesOpen; at?: string }) {
+  // A roundup (shape C), or each piece of work said as a teammate says it
+  // (shape A), from a newer hub.
+  if (update.roundup)
+    return (
+      <div className="msg-text overseer is-said">
+        <RoundupBody roundup={update.roundup} headline={update.headline} at={at} />
+        <ClosedLines lines={update.closed} />
+        {update.footer && <p className="faint small">{update.footer}</p>}
+        {open && <DirectivesOpenLine open={open} />}
+      </div>
+    );
+  if (update.said?.length)
+    return (
+      <div className="msg-text overseer is-said">
+        <WaitingAll update={update} />
+        <SaidList said={update.said} />
+        <ClosedLines lines={update.closed} />
+        {update.footer && <p className="faint small">{update.footer}</p>}
+        {open && <DirectivesOpenLine open={open} />}
+      </div>
+    );
   if (update.brief?.length)
     return (
       <div className="msg-text overseer is-brief">

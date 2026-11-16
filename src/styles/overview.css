@@ -1442,3 +1442,271 @@ a.ref {
   text-transform: uppercase;
   color: var(--faint);
 }
+
+/* ── The boss's updates as a teammate writes them ─────────────────────── */
+/* Shape A: a headline sentence, one or two more, the ids in brackets, what
+   wasn't checked, the session's link and what the boss did (folded). */
+.said-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.said {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.said-head {
+  font-weight: 600;
+  line-height: 1.4;
+  color: var(--text);
+}
+.said-problem .said-head::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 8px;
+  vertical-align: 0.08em;
+  border-radius: 50%;
+  background: var(--blocked);
+}
+.said-body {
+  color: var(--muted);
+  line-height: 1.5;
+}
+.said-ids {
+  color: var(--faint);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.said-gap {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--blocked);
+  border-radius: var(--radius-sm);
+  background: var(--blocked-soft);
+}
+.said-gap-label {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--blocked);
+}
+.said-gap p {
+  color: var(--text);
+}
+.said-links {
+  font-size: 13px;
+}
+.said-open,
+.said-did {
+  font-size: 13px;
+}
+.said-did-list {
+  margin-top: 4px;
+}
+
+/* Shape C, the roundup: sections by what they mean to you. */
+.rnd {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.rnd-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.msg-text.overseer .rnd-upToYou .sec-label {
+  color: var(--blocked);
+}
+.rnd-lines {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.rnd-line {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+}
+.rnd-mark {
+  font-weight: 700;
+  color: var(--faint);
+}
+.rnd-mark.finished {
+  color: var(--done);
+}
+.rnd-mark.worthKnowing {
+  color: var(--blocked);
+}
+.rnd-mark.decided {
+  color: var(--signal);
+}
+.rnd-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.rnd-text > p:first-child {
+  color: var(--muted);
+  line-height: 1.5;
+}
+.rnd-what {
+  color: var(--text);
+  font-weight: 600;
+}
+.rnd-upToYou .rnd-line {
+  grid-template-columns: minmax(0, 1fr);
+}
+.rnd-upToYou .rnd-mark {
+  display: none;
+}
+
+/* The Updates card beside an overseer's chat, and its settings in full. */
+.upd-card {
+  flex: 0 0 300px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border-left: 1px solid var(--border);
+  background: var(--bg);
+  overflow-y: auto;
+}
+.upd-card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+.upd-card-head h2 {
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.upd-card .seg {
+  background: var(--sunken);
+}
+.upd-card .seg button,
+.upd-settings .seg button {
+  font-size: 12px;
+  padding: 4px 6px;
+  min-height: 28px;
+  white-space: nowrap;
+}
+.upd-card .seg button {
+  padding: 4px 4px;
+}
+.upd-summary {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.upd-summary b {
+  color: var(--text);
+  font-weight: 600;
+}
+.upd-card-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+@container chat (max-width: 900px) {
+  .upd-card {
+    display: none;
+  }
+}
+.upd-settings {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.upd-settings .seg {
+  max-width: 420px;
+}
+.upd-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.upd-table th,
+.upd-table td {
+  padding: 8px 6px;
+  border-bottom: 1px solid var(--border);
+  text-align: center;
+  vertical-align: middle;
+}
+.upd-table thead th {
+  font-weight: 600;
+  color: var(--muted);
+  font-size: 12px;
+}
+.upd-table th[scope="row"],
+.upd-table thead th:first-child {
+  text-align: left;
+}
+.upd-table th[scope="row"] {
+  font-weight: 400;
+}
+.upd-row-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+/* As the options below draw theirs. */
+.upd-radio {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  vertical-align: middle;
+  accent-color: var(--signal);
+  cursor: pointer;
+}
+.upd-table tr:last-child > * {
+  border-bottom: 0;
+}
+.upd-field {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin: 0;
+  padding: 14px 16px;
+  min-width: 0;
+}
+/* Its options one under another, each its own height. */
+.upd-field .oversee-check {
+  flex: none;
+}
+/* Inside the card, not on its border. */
+.upd-field legend {
+  float: left;
+  width: 100%;
+  padding: 0;
+  font-weight: 600;
+}
+.upd-field legend + * {
+  clear: both;
+}
+.upd-quiet {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--muted);
+}

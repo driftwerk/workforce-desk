@@ -17,6 +17,11 @@ vi.mock("../crew/agentBrain", () => ({
     brain: { provider: "claude-code", model: "sonnet", effort: "medium" },
     provider: { id: "claude-code", name: "Claude plan", models: [{ id: "sonnet", name: "Sonnet 5.5", description: "", default: true }], efforts: ["medium"] },
   }),
+  // The Updates card beside the chat reads the boss's config: none here.
+  useAgentConfigs: Object.assign(
+    (pick: (s: { configs: Record<string, string>; put: () => void }) => unknown) => pick({ configs: {}, put: () => {} }),
+    { getState: () => ({ configs: {}, load: async () => {}, put: () => {} }) },
+  ),
 }));
 
 Element.prototype.scrollIntoView = () => {};
