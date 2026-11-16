@@ -15,6 +15,7 @@ export const SETTINGS_SECTIONS = {
   sessions: "Sessions",
   memory: "Memory",
   budgets: "Budgets",
+  plans: "Plans",
   voices: "Voice",
   shortcuts: "Shortcuts",
   help: "Help",

@@ -326,6 +326,7 @@ it("shows whose each account is, and a refused one with why and a way to sign in
   await act(async () => {});
   expect(screen.getByText("kim@example.com · Acme · Max")).toBeTruthy();
   expect(screen.getByText("bob@example.com")).toBeTruthy();
-  expect(screen.getByText(/Refused: its organisation has turned off Claude Code access\. Desk tries it again hourly\./)).toBeTruthy();
+  // Its re-check, 12:00 on 11/15, is past: the next call is it.
+  expect(screen.getByText(/Refused: its organisation has turned off Claude Code access\. Desk tries it again with its next call\./)).toBeTruthy();
   expect(screen.getAllByRole("button", { name: "Sign in again" })).toHaveLength(1);
 });
