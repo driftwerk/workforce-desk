@@ -24,6 +24,11 @@ describe("readings that can't be one account's", () => {
     expect(disagree([r(75, 100 * H, 1 * H), r(90, 100 * H - 168 * H, 200 * H)])).toBe(false);
   });
 
+  it("are none for last week's reading beside this week's, give or take the places' clocks", () => {
+    expect(disagree([r(5, 100 * H, 1 * H), r(40, 100 * H - 168 * H + 150, 60 * H)])).toBe(false);
+    expect(disagree([r(5, 100 * H, 1 * H), r(40, 100 * H - 168 * H - 150, 60 * H)])).toBe(false);
+  });
+
   it("are a later reading below an earlier one of the same week, beyond a point or two", () => {
     expect(disagree([r(16, 100 * H, 5 * H), r(13, 100 * H, 1 * H)])).toBe(true);
     expect(disagree([r(16, 100 * H, 5 * H), r(15, 100 * H, 1 * H)])).toBe(false);

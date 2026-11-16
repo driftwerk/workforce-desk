@@ -269,6 +269,18 @@ describe("the plan cards, one per account", () => {
     expect(screen.queryByRole("region", { name: "Not matched to an account yet" })).toBeNull();
   });
 
+  it("put a hub's reading of an account only a machine has on that machine's card", () => {
+    accountsOn("devbox").setState({ accounts: [account("m-w", "Work", "dev-work")] });
+    places({
+      devbox: usage({ logins: [], readings: [reading([gmailWeek(40)], { account: "dev-work", observedAt: at(9) })] }),
+      dw: usage({ logins: [], readings: [reading([gmailWeek(41)], { account: "dev-work", where: "hub", observedAt: at(2) })] }),
+    });
+    render(<PlanCards />);
+    const work = card("Work on devbox usage");
+    expect(within(work).getAllByRole("listitem").map((li) => li.textContent?.split("·")[0]?.trim().replace(/read.*$/, ""))).toEqual(["devbox", "Driftwerk hub"]);
+    expect(screen.queryByRole("region", { name: "Not matched to an account yet" })).toBeNull();
+  });
+
   it("match a hub's place that names an account: ChatGPT's, by its account", () => {
     places({
       local: usage({ readings: [reading([gmailWeek(4)], { kind: "chatgpt", account: "gpt-1", plan: "prolite", observedAt: at(5) })] }),

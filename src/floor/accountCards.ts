@@ -127,7 +127,9 @@ export const disagree = (readings: readonly PlanReading[]): boolean => {
       if (apart <= SAME_RESET_MS) {
         const [older, later] = a.at <= b.at ? [a, b] : [b, a];
         if (later.used < older.used - DROP) return true;
-      } else if (apart < a.minutes * MINUTE) return true;
+        // Back-to-back windows reset one length apart: give or take the
+        // places' clocks, that's an older week's reading, not a clash.
+      } else if (apart < a.minutes * MINUTE - SAME_RESET_MS) return true;
     }
   return false;
 };
@@ -193,7 +195,10 @@ export const board = ({ sources, accounts, ownKey, machineAccounts, links }: Inp
     state: "reading",
     reading: null,
   });
-  for (const s of sources.filter((s) => !s.local))
+  // Machines first: a hub's reading naming an account only a machine has
+  // joins that machine's card.
+  const remotes = sources.filter((s) => !s.local).sort((a, b) => Number(!a.machine) - Number(!b.machine));
+  for (const s of remotes)
     for (const { key, reading: r } of placesOf(s)) {
       const named = r.account ? byAccount.get(`${r.kind}:${r.account}`) : undefined;
       if (s.machine) {
@@ -204,7 +209,11 @@ export const board = ({ sources, accounts, ownKey, machineAccounts, links }: Inp
         const onto = named ?? (mine && cardKeyOf(mine) && cards.has(cardKeyOf(mine)!) ? cardKeyOf(mine)! : undefined);
         if (!onto && !there && r.where === "hub") continue;
         const row: UsedOn = { key, where: "machine", label: s.label, sessions: there ? there.sessions.length : null, reading: r, picked: false };
-        put(onto ?? key, row, remote(key, r.kind, `${there?.name ?? NAME[r.kind]} on ${s.label}`, s.label));
+        // None of this computer's: a card of its own, one an account
+        // wherever it's used.
+        const own = onto ?? (r.account ? `${r.kind}:${r.account}` : key);
+        put(own, row, remote(own, r.kind, `${there?.name ?? NAME[r.kind]} on ${s.label}`, s.label));
+        if (r.account) byAccount.set(`${r.kind}:${r.account}`, own);
         continue;
       }
       const row: UsedOn = { key, where: "hub", label: s.label, sessions: null, reading: r, picked: false };

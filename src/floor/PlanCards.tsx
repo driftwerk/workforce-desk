@@ -183,6 +183,11 @@ function Place({ u, newest, read, now }: { u: UsedOn; newest: boolean; read: boo
   );
 }
 
+/** A card a hub's place can be said to be: an account's, wherever it is
+ *  used, never one standing in until this computer reads (`@none`) or
+ *  offering sign-in. */
+const pickable = (c: AccountCard): boolean => c.state !== "signed-out" && !c.key.endsWith("@none");
+
 /** A hub's places that haven't said which account they are, to say. */
 function NotMatched({ rows, cards, title, now }: { rows: Unmatched[]; cards: AccountCard[]; title: (c: AccountCard) => string; now: number }) {
   const H = useSubHeading();
@@ -219,7 +224,7 @@ function NotMatched({ rows, cards, title, now }: { rows: Unmatched[]; cards: Acc
         </thead>
         <tbody>
           {rows.map((r) => (
-            <UnmatchedRow key={r.key} row={r} cards={cards.filter((c) => c.kind === r.kind && (c.hub === null || c.key.startsWith("other:")) && c.state !== "signed-out")} title={title} now={now} />
+            <UnmatchedRow key={r.key} row={r} cards={cards.filter((c) => c.kind === r.kind && pickable(c))} title={title} now={now} />
           ))}
         </tbody>
       </table>
