@@ -9,20 +9,27 @@ const at = (iso: string | null | undefined): number => (iso ? Date.parse(iso) : 
 const newer = (a: AccountStanding, b: AccountStanding | null | undefined): boolean =>
   !b || at(a.hitAt) > at(b.hitAt) || (a.windows.length > 0 && at(a.readAt) > at(b.readAt));
 
+/** The account in `among` that is `a` on another computer: by identity
+ *  key when both know it, never one known as another identity, else by name
+ *  (as Desk copies them). Of the same engine only. */
+export const sameAccountIn = (a: EngineAccount, among: readonly EngineAccount[]): EngineAccount | null => {
+  const key = a.identity?.key ?? null;
+  const sameName = (t: EngineAccount) => t.name.trim().toLowerCase() === a.name.trim().toLowerCase();
+  return (
+    among.find((t) => t.engine === a.engine && key !== null && t.identity?.key === key) ??
+    among.find((t) => t.engine === a.engine && sameName(t) && (!key || !t.identity?.key || t.identity.key === key)) ??
+    null
+  );
+};
+
 /** What a machine's hub doesn't know yet of this computer's accounts'
- *  plans: for each Claude account both have, this computer's standing
- *  where it is newer. Matched by identity key when both know it, never
- *  onto an account the machine knows as another identity, else by name (as
- *  Desk copies them). */
+ *  plans: for each Claude account both have ([`sameAccountIn`]), this
+ *  computer's standing where it is newer. */
 export const newerFor = (from: readonly EngineAccount[], to: readonly EngineAccount[]): StandingElsewhere[] =>
   from.flatMap((a) => {
     if (a.engine !== "claude" || !a.standing) return [];
-    const key = a.identity?.key ?? null;
-    const sameName = (t: EngineAccount) => t.name.trim().toLowerCase() === a.name.trim().toLowerCase();
-    const there =
-      to.find((t) => t.engine === "claude" && key !== null && t.identity?.key === key) ??
-      to.find((t) => t.engine === "claude" && sameName(t) && (!key || !t.identity?.key || t.identity.key === key));
-    return there && newer(a.standing, there.standing) ? [{ engine: a.engine, name: a.name, identity: key, standing: a.standing }] : [];
+    const there = sameAccountIn(a, to);
+    return there && newer(a.standing, there.standing) ? [{ engine: a.engine, name: a.name, identity: a.identity?.key ?? null, standing: a.standing }] : [];
   });
 
 /** Passes what this computer knows of the person's accounts' plans to each

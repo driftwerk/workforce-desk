@@ -194,7 +194,8 @@
 .plan-window-head {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   font-size: 13px;
 }
 .plan-window-head .floor-time {
@@ -248,6 +249,161 @@
 }
 .plan-signin p {
   margin: 0;
+}
+.plan-card-sub {
+  margin-left: auto;
+}
+/* Where an account is used: this computer, a machine, a hub. */
+.plan-used-on {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.plan-used-on-label {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.plan-used-on ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.plan-place {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.plan-place b {
+  font-weight: 500;
+  color: var(--text);
+}
+.plan-place-reading {
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--faint);
+}
+.plan-place-reading .link {
+  color: var(--signal);
+  font-size: inherit;
+}
+.plan-mismatch {
+  margin: 0;
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--blocked-soft);
+  color: var(--text);
+  font-size: 13px;
+}
+.plan-mismatch b {
+  color: color-mix(in srgb, var(--blocked) 85%, var(--text));
+  white-space: nowrap;
+}
+/* The hubs' places not matched to an account yet. */
+.plan-unmatched {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.plan-unmatched-head {
+  margin: 0;
+}
+.plan-unmatched-fold {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  font-family: var(--font-display);
+  font-size: 15px;
+  font-weight: 650;
+}
+.plan-unmatched-fold span {
+  font-size: 12px;
+  color: var(--faint);
+}
+.plan-unmatched > p,
+.plan-unmatched-folded {
+  margin: 0;
+}
+.plan-unmatched-folded {
+  font-size: 13px;
+}
+.plan-unmatched-folded .link {
+  color: var(--signal);
+}
+.plan-unmatched-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--surface);
+  font-size: 13px;
+}
+.plan-unmatched-table th {
+  padding: 10px 16px;
+  text-align: left;
+  font-weight: 500;
+  color: var(--faint);
+  background: var(--sunken);
+}
+.plan-unmatched-table td {
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  color: var(--muted);
+}
+.plan-unmatched-table td b {
+  font-weight: 500;
+  color: var(--text);
+}
+.plan-unmatched-table th:last-child,
+.plan-unmatched-table td:last-child {
+  width: 240px;
+}
+.plan-pick {
+  width: 100%;
+  height: 34px;
+}
+.plan-name-other {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.plan-name-other input {
+  flex: 1;
+  min-width: 0;
+  height: 34px;
+}
+@media (max-width: 640px) {
+  .plan-unmatched-table th:last-child,
+  .plan-unmatched-table td:last-child {
+    width: auto;
+  }
+  .plan-unmatched-table th,
+  .plan-unmatched-table td {
+    padding: 8px 10px;
+  }
 }
 
 /* ── Spend ──────────────────────────────────────────────────────────────── */
