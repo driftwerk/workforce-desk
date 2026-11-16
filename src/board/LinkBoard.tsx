@@ -17,7 +17,7 @@ import { NoAgent, ThisComputerSetup } from "./syncSetup";
  *  system's tools. */
 type Probe =
   | { state: "checking" }
-  | { state: "offered"; teams: Team[]; projects: Project[]; agent: string | null }
+  | { state: "offered"; teams: Team[]; projects: Project[]; agent: string | null; workspaces: string[]; workspace: string | null; why: string | null }
   | { state: "no"; error: string; noToken: boolean; noAgent: boolean }
   | { state: "needsToken" };
 type Team = { id: string; key: string; name: string };
@@ -46,6 +46,23 @@ const FILTERS: Record<SyncSystem, { kind: FilterKind; label: string; sub: string
 
 /** The columns a remote state can be mapped from, left to right. */
 const MAPPED: TicketState[] = ["backlog", "todo", "doing", "review", "done", "dropped"];
+
+/** What a person's several instances of a system are called. */
+const WORKSPACE: Record<SyncSystem, string> = { jira: "Jira site", linear: "Linear workspace" };
+
+/** A check's answer as a probe says it. */
+const probeOf = (r: Checked): Probe =>
+  r.ok
+    ? {
+        state: "offered",
+        teams: r.check.teams ?? [],
+        projects: r.check.projects ?? [],
+        agent: r.check.agent?.name ?? null,
+        workspaces: r.check.workspaces ?? [],
+        workspace: r.check.workspace ?? null,
+        why: r.check.workspaceWhy ?? null,
+      }
+    : { state: "no", error: r.error, noToken: r.paused?.kind === "noToken", noAgent: r.paused?.kind === "missing" };
 
 /** A Linear id (a member's), as the hub takes one. */
 const linearId = (s: string): boolean => /^[0-9a-fA-F-]{1,64}$/.test(s);
@@ -136,12 +153,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
       if (!sync) return;
       const said: Probe = await sync
         .check({ system, via })
-        .then(
-          (r): Probe =>
-            r.ok
-              ? { state: "offered", teams: r.check.teams ?? [], projects: r.check.projects ?? [], agent: r.check.agent?.name ?? null }
-              : { state: "no", error: r.error, noToken: r.paused?.kind === "noToken", noAgent: r.paused?.kind === "missing" },
-        )
+        .then(probeOf)
         .catch((e: unknown): Probe => ({ state: "no", error: saidOf(e), noToken: false, noAgent: false }));
       if (probeRun.current === run) setProbes((p) => ({ ...p, [key]: said }));
     };
@@ -161,9 +173,47 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const hubOffers = choices.find((c) => probes[c.id]?.state === "offered");
   const viaName = viaKey === THIS ? "This computer" : (choice?.name ?? "");
 
+  // ── Which of the person's workspaces there ──────────────────────────────
+  // Where they have several Jira sites or Linear workspaces on the hub, one
+  // is picked (the one their calls go to when none is named, to start
+  // with), and its own teams or projects are asked for.
+  const workspaces = probe?.state === "offered" ? probe.workspaces : [];
+  const several = workspaces.length > 1;
+  const [workspaceFor, setWorkspaceFor] = useState<Record<string, string>>({});
+  const picked = viaKey ? workspaceFor[viaKey] : undefined;
+  const workspace: string | null = !several || probe?.state !== "offered" ? null : picked && workspaces.includes(picked) ? picked : probe.workspace && workspaces.includes(probe.workspace) ? probe.workspace : null;
+  const [inWorkspace, setInWorkspace] = useState<Record<string, Probe>>({});
+  const wsKey = viaKey && workspace ? `${system}:${viaKey}:${workspace}` : null;
+  const wsProbe = wsKey ? inWorkspace[wsKey] : undefined;
+  useEffect(() => {
+    if (!system || !via || !wsKey || !workspace || inWorkspace[wsKey]) return;
+    const sync = localSync();
+    if (!sync) return;
+    setInWorkspace((p) => ({ ...p, [wsKey]: { state: "checking" } }));
+    void sync
+      .check({ system, via, workspace })
+      .then(probeOf)
+      .catch((e: unknown): Probe => ({ state: "no", error: saidOf(e), noToken: false, noAgent: false }))
+      .then((said) => setInWorkspace((p) => ({ ...p, [wsKey]: said })));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wsKey]);
+  /** The probe the teams and projects come from: the workspace's own,
+   *  where there are several. */
+  const listed = several ? wsProbe : probe;
+  /** Teams or projects may be picked: the hub offers the system, and the
+   *  workspace (where there are several) is picked and answered. */
+  const ready = offered && listed?.state === "offered" && !listed.why;
+  const pickWorkspace = (w: string) => {
+    if (!viaKey) return;
+    setWorkspaceFor((m) => ({ ...m, [viaKey]: w }));
+    setTarget("");
+    setTeamId("");
+    setChecked(null);
+  };
+
   // ── The target, the filter and what they match ──────────────────────────
-  const teams = probe?.state === "offered" ? probe.teams : [];
-  const projects = probe?.state === "offered" ? probe.projects : [];
+  const teams = ready && listed?.state === "offered" ? listed.teams : [];
+  const projects = ready && listed?.state === "offered" ? listed.projects : [];
   const team = teams.find((t) => t.id === teamId) ?? null;
   const targetKey = system === "linear" ? (team?.key ?? "") : target;
   const targetGood = !!system && !!targetKey && targetOk(system, targetKey);
@@ -177,16 +227,16 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
           : null;
   // Who the person is there comes from the hub; only where it can't say is
   // a Linear member id asked for, for "assigned to me".
-  const meKey = `${system}:${viaKey}:${targetKey}`;
+  const meKey = `${system}:${viaKey}:${workspace}:${targetKey}`;
   const heard = heardMe?.key === meKey ? heardMe : null;
   const knownMe = notMe ? null : heard ? heard.me : undefined;
   const meNeeded = system === "linear" && filterKind === "assignedToMe" && knownMe === null;
   const filterReady = !!filter && (!meNeeded || linearId(me.trim()));
   const meBad = !!me.trim() && !linearId(me.trim());
-  const checkKey = JSON.stringify([system, viaKey, targetKey, team?.id, filterReady ? filter : null, meNeeded ? me.trim() : null, asked]);
+  const checkKey = JSON.stringify([system, viaKey, workspace, targetKey, team?.id, filterReady ? filter : null, meNeeded ? me.trim() : null, asked]);
   const checkRun = useRef(0);
   useEffect(() => {
-    if (!system || !via || !offered || !targetGood) return;
+    if (!system || !via || !ready || !targetGood) return;
     const run = ++checkRun.current;
     const sync = localSync();
     if (!sync) return;
@@ -195,6 +245,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
         .check({
           system,
           via,
+          ...(workspace ? { workspace } : {}),
           target: targetKey,
           ...(team ? { targetId: team.id } : {}),
           ...(filterReady && filter ? { filter } : {}),
@@ -207,7 +258,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     }, 400);
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [checkKey, offered, targetGood]);
+  }, [checkKey, ready, targetGood]);
   const now = checked?.key === checkKey ? checked.result : null;
   const found: LinkCheck | null = now?.ok ? now.check : null;
   // What the hub said of who the person is, kept for the target: an older
@@ -221,17 +272,17 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const remoteStates = found?.states ?? null;
   // The state map starts from what the hub's states mean, once per target.
   useEffect(() => {
-    const k = `${system}:${viaKey}:${targetKey}`;
+    const k = `${system}:${viaKey}:${workspace}:${targetKey}`;
     if (!found?.prefill || prefilledFor.current === k) return;
     prefilledFor.current = k;
     setStates(found.prefill);
-  }, [found, system, viaKey, targetKey]);
+  }, [found, system, viaKey, workspace, targetKey]);
 
   const hasTickets = tickets > 0;
   /** What happens to the board's own tickets: kept beside the issues, or
    *  cleared first. */
   const [own, setOwn] = useState<"keep" | "clear" | "new" | null>(null);
-  const canLink = (!hasTickets || !!own) && !!system && !!via && offered && targetGood && filterReady && !!found && found.matches !== undefined && !busy;
+  const canLink = (!hasTickets || !!own) && !!system && !!via && ready && targetGood && filterReady && !!found && found.matches !== undefined && !busy;
   /** Why Link can't be pressed yet: the first thing missing, in plain words. */
   const waitingOn: { words: string; failed: boolean } | null = (() => {
     if (busy) return null;
@@ -243,6 +294,12 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
       if (!probe || probe.state === "checking") return { words: `Waiting for ${viaName} to say whether it offers ${SYSTEM_TITLE[system]}…`, failed: false };
       if (probe.state === "needsToken") return { words: `${viaName} needs a token first.`, failed: false };
       if (probe.state === "no") return { words: probe.noToken ? `${viaName} needs a new token.` : probe.error, failed: true };
+    }
+    if (several && !workspace) return { words: (probe?.state === "offered" && probe.why) || `Pick which ${WORKSPACE[system]}.`, failed: false };
+    if (several && workspace) {
+      if (!wsProbe || wsProbe.state === "checking") return { words: `Asking ${viaName} for ${workspace}’s ${system === "jira" ? "projects" : "teams"}…`, failed: false };
+      if (wsProbe.state === "no") return { words: wsProbe.error, failed: true };
+      if (wsProbe.state === "offered" && wsProbe.why) return { words: wsProbe.why, failed: true };
     }
     if (!targetGood) return { words: system === "linear" ? "Pick a team." : (projects.length > 0 && !typedKey ? "Pick a project." : "Enter the Jira project key."), failed: false };
     if (!filterReady) return { words: meNeeded ? "Enter your Linear member id." : "Say what to import.", failed: false };
@@ -283,6 +340,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
         target: targetKey,
         ...(team ? { targetId: team.id } : {}),
         via,
+        ...(workspace ? { workspace } : {}),
         filter,
         ...(meNeeded ? { me: me.trim() } : {}),
         ...(notMe ? { notMe: true } : {}),
@@ -408,7 +466,27 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
           </fieldset>
         )}
 
-        {system && via && offered && (
+        {system && via && offered && several && (
+          <fieldset className="move-field">
+            <legend>{system === "jira" ? "Site" : "Workspace"}</legend>
+            <div className="move-opts" role="radiogroup" aria-label={WORKSPACE[system]}>
+              {workspaces.map((w) => (
+                <label key={w} className="move-opt">
+                  <input type="radio" name={`${ids}-workspace`} checked={workspace === w} disabled={busy} onChange={() => pickWorkspace(w)} />
+                  <span className="move-opt-main">
+                    <span>{w}</span>
+                    <span className="move-opt-sub">
+                      {probe?.state === "offered" && probe.workspace === w ? `Where your ${SYSTEM_TITLE[system]} calls on ${viaName} go when none is named` : `Your ${WORKSPACE[system]} ${w} on ${viaName}`}
+                    </span>
+                  </span>
+                </label>
+              ))}
+            </div>
+            <span className="move-opt-sub">The board syncs this one only, and keeps it with the link.</span>
+          </fieldset>
+        )}
+
+        {system && via && ready && (
           <fieldset className="move-field">
             <legend>{system === "jira" ? "Project" : "Team"}</legend>
             {system === "jira" && projects.length > 0 && !typedKey ? (
@@ -470,7 +548,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
           </fieldset>
         )}
 
-        {system && via && offered && targetGood && (
+        {system && via && ready && targetGood && (
           <fieldset className="move-field">
             <legend>Import</legend>
             <div className="seg handoff-seg" role="radiogroup" aria-label="Import">
@@ -579,7 +657,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
             )}
             {choosing && system && via && (
               <ChooseMe
-                where={{ system, via, ...(found?.agent?.id ? { agent: found.agent.id } : {}) }}
+                where={{ system, via, ...(found?.agent?.id ? { agent: found.agent.id } : {}), ...(workspace ? { workspace } : {}) }}
                 hub={viaName}
                 chosen={heard?.by === "chosen"}
                 onCancel={() => setChoosing(false)}
