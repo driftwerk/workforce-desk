@@ -160,6 +160,18 @@ describe("the directives card", () => {
     await waitFor(() => expect(asked.at(-1)?.body).toEqual({ boss: "g-acme", key: "production", answer: "no" }));
   });
 
+  it("keeps the newest card live while another view of it closes", async () => {
+    const card = (id: string, at: string) => <OverseerBody extras={{ directives: { bossScope: "g-acme" } }} content="" message={{ id, at }} />;
+    const old = render(card("m1", "2026-11-16T09:00:00Z"));
+    const main = render(card("m2", "2026-11-16T10:00:00Z"));
+    // The same DM in a grid pane: the newest card shows twice.
+    const pane = render(card("m2", "2026-11-16T10:00:00Z"));
+    await screen.findByText("Asked again further down.");
+    pane.unmount();
+    expect(old.container.textContent).toBe("Asked again further down.");
+    expect(within(main.container).getByText("Before I run on my own")).toBeTruthy();
+  });
+
   it("reads a boss's directives once for all that show them, and once more on focus", async () => {
     render(
       <>

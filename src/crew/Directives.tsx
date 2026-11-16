@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
 import { type DeskHub, HubError } from "../hub/client";
 import { useDesk } from "../hub/store";
 import type { DirectiveQuestion, Directives, DirectivesOpen } from "../hub/types";
@@ -34,8 +34,9 @@ class Shared {
   private reading: number | null = null;
   private users = 0;
   private writes: Promise<unknown> = Promise.resolve();
-  /** The DM's cards showing, by message id, with when each was posted. */
-  private cards = new Map<string, number>();
+  /** The DM's cards showing, by message id: when each was posted, and how
+   *  many times it shows (one DM can show in a grid pane and the main view). */
+  private cards = new Map<string, { at: number; shown: number }>();
 
   constructor(
     private hub: DeskHub,
@@ -102,17 +103,20 @@ class Shared {
   /** A card in the DM: only the newest one asks, so turning Act fully off
    *  and on leaves one live card, not several. */
   card(id: string, at: string) {
-    this.cards.set(id, Date.parse(at) || 0);
+    const was = this.cards.get(id);
+    this.cards.set(id, { at: Date.parse(at) || 0, shown: (was?.shown ?? 0) + 1 });
     this.pickNewest();
     return () => {
-      this.cards.delete(id);
+      const now = this.cards.get(id);
+      if (now && now.shown > 1) now.shown--;
+      else this.cards.delete(id);
       this.pickNewest();
     };
   }
   private pickNewest() {
     let newest: string | null = null;
     let when = -Infinity;
-    for (const [id, at] of this.cards)
+    for (const [id, { at }] of this.cards)
       if (at > when || (at === when && newest !== null && id > newest)) {
         newest = id;
         when = at;
@@ -264,9 +268,8 @@ function Row({ q, d, sheet }: { q: DirectiveQuestion; d: Use; sheet: boolean }) 
     want.current = key;
     if (!saving.current) void save();
   };
-  const note = kept
-    ? "Kept."
-    : q.inherited && chosen === null
+  const note =
+    q.inherited && chosen === null
       ? "From Desk’s main boss"
       : sheet && q.answer
         ? q.applied === 0
@@ -281,23 +284,32 @@ function Row({ q, d, sheet }: { q: DirectiveQuestion; d: Use; sheet: boolean }) 
         {q.question}
       </span>
       <Chips options={q.answers} value={value} onPick={pick} offline={!connected} aria-labelledby={`${ids}-q`} />
-      {/* Always there, so "Kept." is heard as it comes. */}
-      <span className={kept ? "dir-note state-done" : "dir-note"} role="status">
-        {note}
-        {note && sheet && q.answer && !q.inherited && !kept && (
-          <>
-            {" · "}
-            <button
-              type="button"
-              className="link"
-              disabled={d.busy !== null || !connected}
-              onClick={() => void d.answer(q.key, null)}
-              aria-label={`Clear: ${q.question}`}
-            >
-              Clear
-            </button>
-          </>
-        )}
+      {kept ? (
+        <span className="dir-note state-done">Kept.</span>
+      ) : (
+        note && (
+          <span className="dir-note">
+            {note}
+            {sheet && q.answer && !q.inherited && (
+              <>
+                {" · "}
+                <button
+                  type="button"
+                  className="link"
+                  disabled={d.busy !== null || !connected}
+                  onClick={() => void d.answer(q.key, null)}
+                  aria-label={`Clear: ${q.question}`}
+                >
+                  Clear
+                </button>
+              </>
+            )}
+          </span>
+        )
+      )}
+      {/* Always there and only ever "Kept.", so it's heard as it comes. */}
+      <span className="sr-only" role="status">
+        {kept ? "Kept." : ""}
       </span>
     </li>
   );
@@ -345,7 +357,8 @@ export function DirectivesCard({ boss, inline = false, message }: { boss: string
   const { shared: s } = d;
   const id = message?.id;
   const at = message?.at;
-  useEffect(() => (s && id && at && !inline ? s.card(id, at) : undefined), [s, id, at, inline]);
+  // Before paint, so a new card never shows a frame as the older one.
+  useLayoutEffect(() => (s && id && at && !inline ? s.card(id, at) : undefined), [s, id, at, inline]);
   if (d.loaded.state === "loading") return null;
   if (d.loaded.state === "none") return <p className="faint small">Answer in this chat.</p>;
   if (d.loaded.state === "failed")
