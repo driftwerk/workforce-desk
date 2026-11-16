@@ -1366,9 +1366,13 @@ a.ref {
 .dir-row {
   display: flex;
   flex-direction: column;
-  gap: 8px;
   padding: 12px 16px;
   min-width: 0;
+}
+/* Spaced by margins, not gap: a row's note is always there (it says
+   "Kept." as it comes) and takes no room while it says nothing. */
+.dir-row > :not(:first-child):not(:empty) {
+  margin-top: 8px;
 }
 .dir-row + .dir-row {
   border-top: 1px solid var(--border);
@@ -1416,6 +1420,7 @@ a.ref {
 }
 .dir-foot .link,
 .dir-note .link,
+.dir-show-all,
 .dir-own-row .link,
 .dir-open-answer {
   text-decoration: underline;

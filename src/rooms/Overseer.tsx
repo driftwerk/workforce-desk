@@ -61,10 +61,12 @@ export const overseerPost = (extras: DeskExtras | undefined, delivery: DeliveryK
   overseerShown(extras) || delivery === "update" || delivery === "away" || delivery === "question";
 
 /** What the boss's message shows in place of its markdown, from its
- *  extras; `content` stands in for anything they don't say. */
-export function OverseerBody({ extras, content }: { extras: DeskExtras; content: string }) {
+ *  extras; `content` stands in for anything they don't say. `message` is
+ *  the post it is, where it has one (a directives card needs to know which
+ *  is newest). */
+export function OverseerBody({ extras, content, message }: { extras: DeskExtras; content: string; message?: { id: string; at: string } }) {
   if (extras.away) return <CatchUp away={extras.away} update={extras.update ?? {}} />;
-  if (extras.directives) return <DirectivesCard boss={extras.directives.bossScope} />;
+  if (extras.directives) return <DirectivesCard boss={extras.directives.bossScope} message={message} />;
   if (extras.update) return <Update update={extras.update} open={extras.directivesOpen} />;
   if (extras.item?.forYou) return <ForYouPost item={extras.item} content={content} />;
   if (extras.item) return <NeedsYouPost item={extras.item} content={content} />;
