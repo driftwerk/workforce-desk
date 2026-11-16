@@ -111,6 +111,6 @@ describe("Settings › Updates", () => {
   it("says when the file holds what the hub won't take", () => {
     useAgentConfigs.setState({ configs: { "local/desk": '[oversight]\nenabled = true\n\n[oversight.updates]\nroundup = "5m"\n' } });
     render(<UpdatesSettings agent={BOSS} />);
-    expect(screen.getByRole("alert").textContent).toMatch(/How often the roundup comes must be .* runs as Balanced/);
+    expect(screen.getByRole("alert").textContent).toMatch(/How often the roundup comes must be .* isn’t overseeing anything/);
   });
 });

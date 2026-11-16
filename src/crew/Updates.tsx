@@ -56,16 +56,17 @@ function useCadence(agent: Agent) {
   };
   // Only an overseer has updates to tell.
   const oversees = config !== undefined && oversightOf(config).enabled;
-  // What the hub refuses in the file (it keeps Balanced then): said, not hidden.
+  // What the hub refuses in the file (then it oversees nothing): said, not hidden.
   const refused = config !== undefined ? readCadence(config).problem : null;
   return { cadence: shown, save, status, refused, ready: !!hub && shown !== null && oversees };
 }
 
-/** The hub won't use the file's cadence: why, and what runs instead. */
+/** The hub won't take the file's cadence: why, and that until it's fixed
+ *  the boss oversees nothing (the hub reads no oversight from it). */
 function Refused({ problem }: { problem: string }) {
   return (
     <p className="small state-blocked" role="alert">
-      {problem} Until that’s fixed it runs as Balanced; choosing here writes it afresh.
+      {problem} Until that’s fixed this agent isn’t overseeing anything. Choosing here writes it afresh.
     </p>
   );
 }
@@ -137,14 +138,16 @@ export function UpdatesCard({ agent }: { agent: Agent }) {
       </div>
       {preset === null && <p className="faint small">Custom</p>}
       {refused && <Refused problem={refused} />}
-      <ul className="upd-summary">
-        {summaryOf(cadence).map((l) => (
-          <li key={l.label}>
-            <b>{l.label}</b>
-            {l.text && ` ${l.text}`}
-          </li>
-        ))}
-      </ul>
+      {!refused && (
+        <ul className="upd-summary">
+          {summaryOf(cadence).map((l) => (
+            <li key={l.label}>
+              <b>{l.label}</b>
+              {l.text && ` ${l.text}`}
+            </li>
+          ))}
+        </ul>
+      )}
       <div className="upd-card-actions">
         {cadence.roundup !== "never" && (
           <button type="button" className="btn btn-sm" disabled={asked === "asking"} onClick={() => void roundupNow()}>

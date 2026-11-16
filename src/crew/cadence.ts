@@ -148,9 +148,10 @@ const ROW_NAME: Record<Row, string> = {
 };
 
 /** The cadence an agent's config says (Balanced where it says nothing), and
- *  what the hub would refuse in it, in the hub's words; then the hub keeps
- *  Balanced and Desk shows that. Read as the hub reads it: values trimmed,
- *  an hour of one digit or two. */
+ *  what the hub would refuse in it, in the hub's words. A refused file
+ *  oversees nothing at all: the cadence is then Balanced only as the base
+ *  Desk writes afresh from. Read as the hub reads it: values trimmed, an
+ *  hour of one digit or two. */
 export const readCadence = (source: string): { cadence: Cadence; problem: string | null } => {
   let doc: Doc = {};
   try {
@@ -219,12 +220,12 @@ export const readCadence = (source: string): { cadence: Cadence; problem: string
     ),
   };
   const problem = problems[0] ?? problemOf(cadence);
-  // What the hub refuses it doesn't use: it keeps Balanced.
+  // Refused: the base Desk writes afresh from.
   return problem ? { cadence: BALANCED, problem } : { cadence, problem: null };
 };
 
-/** The cadence in force: what the config says, or Balanced where the hub
- *  would refuse it. */
+/** The cadence the config says, or Balanced (the base to write from) where
+ *  the hub would refuse it. */
 export const cadenceOf = (source: string): Cadence => readCadence(source).cadence;
 
 /** What is wrong with `c` as the hub would say it; null when nothing is. */

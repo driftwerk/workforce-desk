@@ -49,7 +49,7 @@ describe("the boss's cadence in its config", () => {
     expect(out).toMatch(/also_to = \[ "desk", "slack" \]/);
   });
 
-  it("says what the hub would refuse, and that Balanced runs instead", () => {
+  it("says what the hub would refuse, with Balanced as the base to write afresh", () => {
     const bad = readCadence('[oversight.updates]\nroundup = "5m"\nfinished = "right_away"\n');
     expect(bad.problem).toMatch(/How often the roundup comes must be/);
     expect(bad.cadence).toEqual(BALANCED);
