@@ -1416,6 +1416,7 @@ a.ref {
 }
 .dir-foot .link,
 .dir-note .link,
+.dir-show-all,
 .dir-own-row .link,
 .dir-open-answer {
   text-decoration: underline;

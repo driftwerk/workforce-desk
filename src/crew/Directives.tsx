@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useId, useRef, useState } from "react";
-import { HubError } from "../hub/client";
+import { useEffect, useId, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { type DeskHub, HubError } from "../hub/client";
 import { useDesk } from "../hub/store";
 import type { DirectiveQuestion, Directives, DirectivesOpen } from "../hub/types";
 import { plainError } from "../ui/plainError";
@@ -12,43 +12,145 @@ import { plainError } from "../ui/plainError";
 
 type Loaded = { state: "loading" } | { state: "none" } | { state: "failed"; problem: string } | { state: "ok"; view: Directives };
 
+/** What every card, line and sheet of one boss reads: its directives as last
+ *  read, and which of its cards in the DM is the newest. */
+interface Snapshot {
+  loaded: Loaded;
+  newest: string | null;
+}
+
+const LOADING: Snapshot = { loaded: { state: "loading" }, newest: null };
+const NONE: Snapshot = { loaded: { state: "none" }, newest: null };
+
+/** One boss's directives on one hub, shared by all that show them: read once
+ *  when the first shows, again each time Desk comes back to the front while
+ *  any does, and replaced by the view each change sends back. Changes go to
+ *  the hub one at a time, so the last view is the last change's. */
+class Shared {
+  private snap: Snapshot = LOADING;
+  private subs = new Set<() => void>();
+  private seq = 0;
+  /** The read in flight, while it still counts. */
+  private reading: number | null = null;
+  private users = 0;
+  private writes: Promise<unknown> = Promise.resolve();
+  /** The DM's cards showing, by message id: when each was posted, and how
+   *  many times it shows (one DM can show in a grid pane and the main view). */
+  private cards = new Map<string, { at: number; shown: number }>();
+
+  constructor(
+    private hub: DeskHub,
+    private boss: string,
+  ) {}
+
+  subscribe = (fn: () => void) => {
+    this.subs.add(fn);
+    return () => void this.subs.delete(fn);
+  };
+  get = () => this.snap;
+  private set(change: Partial<Snapshot>) {
+    this.snap = { ...this.snap, ...change };
+    this.subs.forEach((fn) => fn());
+  }
+
+  load = () => {
+    // A hub client without them (a test's, an older hub's) has none.
+    if (typeof this.hub.directives !== "function") return this.set({ loaded: { state: "none" } });
+    if (this.reading === this.seq) return;
+    const n = ++this.seq;
+    this.reading = n;
+    this.hub
+      .directives(this.boss)
+      .then(
+        (view) => n === this.seq && this.set({ loaded: { state: "ok", view } }),
+        (e) => {
+          if (n !== this.seq) return;
+          if (e instanceof HubError && e.status === 404) this.set({ loaded: { state: "none" } });
+          else if (this.snap.loaded.state !== "ok") this.set({ loaded: { state: "failed", problem: plainError(e) } });
+        },
+      )
+      .finally(() => {
+        if (this.reading === n) this.reading = null;
+      });
+  };
+
+  /** Shown somewhere: read now, and again on focus (answered in the Boss
+   *  sheet, or in the chat, while it showed), until nothing shows it. */
+  use = () => {
+    if (this.users++ === 0) {
+      this.load();
+      window.addEventListener("focus", this.load);
+    }
+    return () => {
+      if (--this.users > 0) return;
+      window.removeEventListener("focus", this.load);
+      this.seq++;
+    };
+  };
+
+  /** A change, after any before it: its view takes the place of what was
+   *  read (and of any read still out). */
+  write(call: () => Promise<Directives>): Promise<Directives> {
+    const done = this.writes.then(call);
+    this.writes = done.catch(() => undefined);
+    return done.then((view) => {
+      this.seq++;
+      this.set({ loaded: { state: "ok", view } });
+      return view;
+    });
+  }
+
+  /** A card in the DM: only the newest one asks, so turning Act fully off
+   *  and on leaves one live card, not several. */
+  card(id: string, at: string) {
+    const was = this.cards.get(id);
+    this.cards.set(id, { at: Date.parse(at) || 0, shown: (was?.shown ?? 0) + 1 });
+    this.pickNewest();
+    return () => {
+      const now = this.cards.get(id);
+      if (now && now.shown > 1) now.shown--;
+      else this.cards.delete(id);
+      this.pickNewest();
+    };
+  }
+  private pickNewest() {
+    let newest: string | null = null;
+    let when = -Infinity;
+    for (const [id, { at }] of this.cards)
+      if (at > when || (at === when && newest !== null && id > newest)) {
+        newest = id;
+        when = at;
+      }
+    if (newest !== this.snap.newest) this.set({ newest });
+  }
+}
+
+const shared = new WeakMap<DeskHub, Map<string, Shared>>();
+const sharedOf = (hub: DeskHub, boss: string): Shared => {
+  let bosses = shared.get(hub);
+  if (!bosses) shared.set(hub, (bosses = new Map()));
+  let s = bosses.get(boss);
+  if (!s) bosses.set(boss, (s = new Shared(hub, boss)));
+  return s;
+};
+const nothing = () => () => undefined;
+
 /** A boss's directives, read live: `boss` is "main" or the group it bosses. */
 export function useDirectives(boss: string) {
   const hub = useDesk((s) => s.hub);
-  const [loaded, setLoaded] = useState<Loaded>({ state: "loading" });
+  const s = hub ? sharedOf(hub, boss) : null;
+  const snap = useSyncExternalStore(s ? s.subscribe : nothing, s ? s.get : () => NONE);
+  useEffect(() => s?.use(), [s]);
   const [busy, setBusy] = useState<string | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
-  const asking = useRef(0);
-  const load = useCallback(() => {
-    // A hub client without them (a test's, an older hub's) has none.
-    if (!hub || typeof hub.directives !== "function") return setLoaded({ state: "none" });
-    const n = ++asking.current;
-    hub.directives(boss).then(
-      (view) => n === asking.current && setLoaded({ state: "ok", view }),
-      (e) => {
-        if (n !== asking.current) return;
-        if (e instanceof HubError && e.status === 404) setLoaded({ state: "none" });
-        else setLoaded((was) => (was.state === "ok" ? was : { state: "failed", problem: plainError(e) }));
-      },
-    );
-  }, [hub, boss]);
-  useEffect(() => {
-    load();
-    // Answered in the Boss sheet, or in the chat, while this showed.
-    window.addEventListener("focus", load);
-    return () => {
-      window.removeEventListener("focus", load);
-      asking.current++;
-    };
-  }, [load]);
   /** Runs a change: the view the hub sends back takes the place of this one. */
-  const run = async (what: string, call: () => Promise<Directives>): Promise<boolean> => {
+  const run = async (what: string, call: (hub: DeskHub) => Promise<Directives>): Promise<boolean> => {
+    const now = useDesk.getState().hub;
+    if (!now) return false;
     setBusy(what);
     setProblem(null);
     try {
-      const view = await call();
-      asking.current++;
-      setLoaded({ state: "ok", view });
+      await sharedOf(now, boss).write(() => call(now));
       return true;
     } catch (e) {
       setProblem(plainError(e));
@@ -57,48 +159,117 @@ export function useDirectives(boss: string) {
       setBusy(null);
     }
   };
-  const h = () => useDesk.getState().hub!;
   return {
-    loaded,
+    loaded: snap.loaded,
+    newest: snap.newest,
+    shared: s,
     busy,
     problem,
-    reload: load,
-    answer: (key: string, answer: string | null) => run(key, () => h().answerDirective(boss, key, answer)),
-    add: (text: string) => run("own", () => h().addDirective(boss, text)),
-    asking: (change: { skipped?: boolean; stop?: boolean }) => run("asking", () => h().directivesAsking(boss, change)),
+    reload: () => s?.load(),
+    answer: (key: string, answer: string | null) => run(key, (h) => h.answerDirective(boss, key, answer)),
+    add: (text: string) => run("own", (h) => h.addDirective(boss, text)),
+    asking: (change: { skipped?: boolean; stop?: boolean }) => run("asking", (h) => h.directivesAsking(boss, change)),
     forget: (id: string) =>
-      run(id, async () => {
-        await h().setPreference(id, "retire");
-        return h().directives(boss);
+      run(id, async (h) => {
+        await h.setPreference(id, "retire");
+        return h.directives(boss);
       }),
   };
 }
 
 type Use = ReturnType<typeof useDirectives>;
 
-/** One question: its answers as chips, one tap each. */
+/** How long "Kept." shows on a question once its answer is kept. */
+export const KEPT_MS = 2500;
+
+/** Answers as chips, one radio group: a tap or Space or Enter chooses one;
+ *  the arrow keys (and Home and End) move to the next and choose it, as
+ *  radios do. Only the chosen one is a tab stop. The chips stay focusable
+ *  while a choice is saved, so the keyboard never loses its place. */
+function Chips({
+  options,
+  value,
+  onPick,
+  offline,
+  ...label
+}: {
+  options: readonly { key: string; label: string }[];
+  value: string | null;
+  onPick: (key: string) => void;
+  offline: boolean;
+} & ({ "aria-labelledby": string } | { "aria-label": string })) {
+  const on = options.findIndex((o) => o.key === value);
+  const keys = (e: React.KeyboardEvent<HTMLButtonElement>, at: number) => {
+    const n = options.length;
+    const to = { ArrowDown: at + 1, ArrowRight: at + 1, ArrowUp: at - 1, ArrowLeft: at - 1, Home: 0, End: n - 1 }[e.key];
+    if (to === undefined || offline) return;
+    e.preventDefault();
+    const next = (to + n) % n;
+    e.currentTarget.closest('[role="radiogroup"]')?.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus();
+    onPick(options[next]!.key);
+  };
+  return (
+    <span className="chip-row" role="radiogroup" {...label}>
+      {options.map((o, i) => (
+        <button
+          key={o.key}
+          type="button"
+          role="radio"
+          className={o.key === value ? "chip-btn on" : "chip-btn"}
+          aria-checked={o.key === value}
+          tabIndex={(on < 0 ? i === 0 : i === on) ? 0 : -1}
+          disabled={offline}
+          onClick={() => onPick(o.key)}
+          onKeyDown={(e) => keys(e, i)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </span>
+  );
+}
+
+/** One question: its answers as chips, one tap each. The chip shows chosen
+ *  at once; the latest choice is saved after any still saving, then
+ *  "Kept." shows a moment. */
 function Row({ q, d, sheet }: { q: DirectiveQuestion; d: Use; sheet: boolean }) {
   const ids = useId();
   const connected = useDesk((s) => !!s.hub);
+  const [chosen, setChosen] = useState<string | null>(null);
+  const want = useRef<string | null>(null);
+  const saving = useRef(false);
   const [kept, setKept] = useState(false);
-  const pick = async (key: string) => {
+  const keptFor = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(keptFor.current), []);
+  const value = chosen ?? q.answer;
+  const save = async () => {
+    saving.current = true;
+    let ok = true;
+    while (ok && want.current !== null) {
+      const key = want.current;
+      want.current = null;
+      ok = await d.answer(q.key, key);
+    }
+    want.current = null;
+    saving.current = false;
+    // The view says it now; or, not kept, says what is.
+    setChosen(null);
+    if (!ok) return;
+    // Set with "Kept." itself, so it goes KEPT_MS after it came.
+    setKept(true);
+    clearTimeout(keptFor.current);
+    keptFor.current = setTimeout(() => setKept(false), KEPT_MS);
+  };
+  const pick = (key: string) => {
     // Your own answer pressed again is no change; one from the main boss
     // pressed is kept for this boss.
-    if (key === q.answer && !q.inherited) return;
-    if (await d.answer(q.key, key)) setKept(true);
+    if (key === value && (chosen !== null || !q.inherited)) return;
+    setChosen(key);
+    want.current = key;
+    if (!saving.current) void save();
   };
-  const keys = (e: React.KeyboardEvent, at: number) => {
-    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[e.key];
-    if (!step) return;
-    e.preventDefault();
-    const next = (at + step + q.answers.length) % q.answers.length;
-    const row = (e.currentTarget as HTMLElement).closest('[role="radiogroup"]');
-    row?.querySelectorAll<HTMLElement>('[role="radio"]')[next]?.focus();
-  };
-  const on = q.answers.findIndex((a) => a.key === q.answer);
-  const note = kept
-    ? "Kept."
-    : q.inherited
+  const note =
+    q.inherited && chosen === null
       ? "From Desk’s main boss"
       : sheet && q.answer
         ? q.applied === 0
@@ -112,42 +283,34 @@ function Row({ q, d, sheet }: { q: DirectiveQuestion; d: Use; sheet: boolean }) 
       <span className="dir-q" id={`${ids}-q`}>
         {q.question}
       </span>
-      <div className="chip-row" role="radiogroup" aria-labelledby={`${ids}-q`}>
-        {q.answers.map((a, i) => (
-          <button
-            key={a.key}
-            type="button"
-            role="radio"
-            className={a.key === q.answer ? "chip-btn on" : "chip-btn"}
-            aria-checked={a.key === q.answer}
-            tabIndex={(on < 0 ? i === 0 : i === on) ? 0 : -1}
-            disabled={d.busy !== null || !connected}
-            onClick={() => void pick(a.key)}
-            onKeyDown={(e) => keys(e, i)}
-          >
-            {a.label}
-          </button>
-        ))}
-      </div>
-      {note && (
-        <span className={kept ? "dir-note state-done" : "dir-note"} role={kept ? "status" : undefined}>
-          {note}
-          {sheet && q.answer && !q.inherited && !kept && (
-            <>
-              {" · "}
-              <button
-                type="button"
-                className="link"
-                disabled={d.busy !== null || !connected}
-                onClick={() => void d.answer(q.key, null)}
-                aria-label={`Clear: ${q.question}`}
-              >
-                Clear
-              </button>
-            </>
-          )}
-        </span>
+      <Chips options={q.answers} value={value} onPick={pick} offline={!connected} aria-labelledby={`${ids}-q`} />
+      {kept ? (
+        <span className="dir-note state-done">Kept.</span>
+      ) : (
+        note && (
+          <span className="dir-note">
+            {note}
+            {sheet && q.answer && !q.inherited && (
+              <>
+                {" · "}
+                <button
+                  type="button"
+                  className="link"
+                  disabled={d.busy !== null || !connected}
+                  onClick={() => void d.answer(q.key, null)}
+                  aria-label={`Clear: ${q.question}`}
+                >
+                  Clear
+                </button>
+              </>
+            )}
+          </span>
+        )
       )}
+      {/* Always there and only ever "Kept.", so it's heard as it comes. */}
+      <span className="sr-only" role="status">
+        {kept ? "Kept." : ""}
+      </span>
     </li>
   );
 }
@@ -182,10 +345,20 @@ function Problem({ d }: { d: Use }) {
   );
 }
 
-/** The card the boss posts once when Act fully goes on, read live. */
-export function DirectivesCard({ boss, inline = false }: { boss: string; inline?: boolean }) {
+/** The card the boss posts once when Act fully goes on, read live. In the
+ *  DM, `message` is the post it is: only the newest card for a boss asks,
+ *  and an older one folds to a line. Unfolded `inline` under an update's
+ *  line, it shows the questions open when it was unfolded, with Show all. */
+export function DirectivesCard({ boss, inline = false, message }: { boss: string; inline?: boolean; message?: { id: string; at: string } }) {
   const d = useDirectives(boss);
   const [open, setOpen] = useState(false);
+  const [all, setAll] = useState(false);
+  const openAt = useRef<ReadonlySet<string> | null>(null);
+  const { shared: s } = d;
+  const id = message?.id;
+  const at = message?.at;
+  // Before paint, so a new card never shows a frame as the older one.
+  useLayoutEffect(() => (s && id && at && !inline ? s.card(id, at) : undefined), [s, id, at, inline]);
   if (d.loaded.state === "loading") return null;
   if (d.loaded.state === "none") return <p className="faint small">Answer in this chat.</p>;
   if (d.loaded.state === "failed")
@@ -196,6 +369,13 @@ export function DirectivesCard({ boss, inline = false }: { boss: string; inline?
           Try again
         </button>
       </p>
+    );
+  // Asked again further down (Act fully off and on again): this one folds.
+  if (id && !inline && d.newest !== null && d.newest !== id)
+    return (
+      <div className="msg-text overseer">
+        <p className="faint small">Asked again further down.</p>
+      </div>
     );
   const v = d.loaded.view;
   const left = v.questions.filter((q) => !q.answer).length;
@@ -212,6 +392,11 @@ export function DirectivesCard({ boss, inline = false }: { boss: string; inline?
         </p>
       </div>
     );
+  // Those open when it was unfolded stay, answered or not, so a row
+  // answered here keeps its place (and its focus, and its "Kept.").
+  if (inline && openAt.current === null) openAt.current = new Set(v.questions.filter((q) => !q.answer).map((q) => q.key));
+  const only = inline && !all && openAt.current && openAt.current.size > 0 && openAt.current.size < v.questions.length ? openAt.current : null;
+  const questions = only ? v.questions.filter((q) => only.has(q.key)) : v.questions;
   return (
     <section className={inline ? "dir-card is-inline" : "msg-text overseer dir-card"} aria-label="Your directives">
       {!inline && (
@@ -221,10 +406,17 @@ export function DirectivesCard({ boss, inline = false }: { boss: string; inline?
         </>
       )}
       <ul className="dir-list">
-        {v.questions.map((q) => (
+        {questions.map((q) => (
           <Row key={q.key} q={q} d={d} sheet={false} />
         ))}
       </ul>
+      {only && (
+        <p className="faint small">
+          <button type="button" className="link small dir-show-all" onClick={() => setAll(true)}>
+            Show all {v.questions.length}
+          </button>
+        </p>
+      )}
       {v.own.length > 0 && <p className="faint small">Your own: {v.own.map((o) => o.text).join(" · ")}</p>}
       <AddOwn d={d} placeholder="Add your own, e.g. Never touch the billing service" />
       <Problem d={d} />
@@ -249,15 +441,23 @@ export function DirectivesCard({ boss, inline = false }: { boss: string; inline?
 }
 
 /** The one line an update adds on the directives still open, with Answer,
- *  which unfolds the card under it. */
+ *  which unfolds the card under it. Read live: an old update says what is
+ *  open now, and nothing once all are answered. Until the directives are
+ *  read, it says what the update said. */
 export function DirectivesOpenLine({ open }: { open: DirectivesOpen }) {
   const [shown, setShown] = useState(false);
-  const topics = open.topics ?? [];
+  const d = useDirectives(open.bossScope);
+  const live = d.loaded.state === "ok" ? d.loaded.view.questions.filter((q) => !q.answer) : null;
+  const n = live ? live.length : open.open;
+  const topics = live ? live.map((q) => q.topic) : (open.topics ?? []);
+  // All answered (here, in the sheet, or in the chat): nothing to say, unless
+  // it is unfolded, where the answers just given stay in view.
+  if (n === 0 && !shown) return null;
   return (
     <div className="dir-open">
       <p className="faint small">
-        {open.open === 1 ? "1 directive still open" : `${open.open} directives still open`}
-        {topics.length ? `: ${topics.join(", ")}.` : "."}{" "}
+        {n === 0 ? "All directives answered." : n === 1 ? "1 directive still open" : `${n} directives still open`}
+        {n > 0 && (topics.length ? `: ${topics.join(", ")}.` : ".")}{" "}
         <button type="button" className="link small dir-open-answer" aria-expanded={shown} onClick={() => setShown((s) => !s)}>
           {shown ? "Hide" : "Answer"}
         </button>
@@ -267,11 +467,18 @@ export function DirectivesOpenLine({ open }: { open: DirectivesOpen }) {
   );
 }
 
+const ASKING = [
+  { key: "daily", label: "Once a day" },
+  { key: "stop", label: "Stop asking" },
+] as const;
+
 /** The Boss sheet's Directives: each with its answer to change or clear,
  *  your own to forget, one to add, and whether the boss asks again. */
 export function BossDirectives({ boss, name, shared = false }: { boss: string; name: string; shared?: boolean }) {
   const d = useDirectives(boss);
   const connected = useDesk((s) => !!s.hub);
+  const [stopWant, setStopWant] = useState<boolean | null>(null);
+  const asks = useRef(0);
   if (d.loaded.state === "none" || d.loaded.state === "loading") return null;
   return (
     <div className="oversee-part dir-section">
@@ -320,23 +527,24 @@ export function BossDirectives({ boss, name, shared = false }: { boss: string; n
             </>
           )}
           <AddOwn d={d} placeholder="Add your own…" />
-          <div className="dir-ask" role="radiogroup" aria-label="Ask me about unanswered ones">
+          <div className="dir-ask">
             <span className="oversee-sub">Ask me about unanswered ones:</span>
-            <span className="chip-row">
-              {([false, true] as const).map((stop) => (
-                <button
-                  key={String(stop)}
-                  type="button"
-                  role="radio"
-                  className={d.loaded.state === "ok" && d.loaded.view.stopAsking === stop ? "chip-btn on" : "chip-btn"}
-                  aria-checked={d.loaded.state === "ok" && d.loaded.view.stopAsking === stop}
-                  disabled={d.busy !== null || !connected}
-                  onClick={() => d.loaded.state === "ok" && d.loaded.view.stopAsking !== stop && void d.asking({ stop })}
-                >
-                  {stop ? "Stop asking" : "Once a day"}
-                </button>
-              ))}
-            </span>
+            <Chips
+              options={ASKING}
+              value={(stopWant ?? d.loaded.view.stopAsking) ? "stop" : "daily"}
+              offline={!connected}
+              aria-label="Ask me about unanswered ones"
+              onPick={(key) => {
+                if (d.loaded.state !== "ok") return;
+                const stop = key === "stop";
+                if (stop === (stopWant ?? d.loaded.view.stopAsking)) return;
+                // Chosen at once, as a radio is; the hub's view takes over
+                // once the last choice is saved.
+                setStopWant(stop);
+                const n = ++asks.current;
+                void d.asking({ stop }).finally(() => n === asks.current && setStopWant(null));
+              }}
+            />
           </div>
           <Problem d={d} />
         </>

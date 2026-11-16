@@ -210,7 +210,7 @@ export const Message = memo(function Message({
             anything else the boss said with it (its closing summary) stays. */}
         {fromExtras && message.desk ? (
           <RichHostProvider host={host}>
-            <OverseerBody extras={message.desk} content={message.content} />
+            <OverseerBody extras={message.desk} content={message.content} message={message} />
           </RichHostProvider>
         ) : question && message.content.trim() ? (
           <RichHostProvider host={host}>
