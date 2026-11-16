@@ -1,14 +1,15 @@
 import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
-import { accountOfCard, sessionsText, useAccounts } from "../engines/accounts";
+import { useAccounts } from "../engines/accounts";
 import type { PlanKind, PlanWindow } from "../hub/types";
 import { CLI_NAME, CopyInstall, PlanLoginAction, ReopenLink, usePlanLogin } from "../settings/PlanLogin";
-import { ask, usePlans } from "./store";
+import type { AccountCard, Unmatched, UsedOn } from "./accountCards";
+import { forgetPlace, hidePlace, linkPlace, linkToOther, setFolded, usePlansUi } from "./planLinks";
+import { ask, useBoard } from "./store";
 import { clock, dayClock, durationOf } from "./time";
 import { fullness, nextChange, pace, projection, windowNow, type PlanCard } from "./usage";
 import { useSubHeading } from "./FloorShell";
 
-const TITLE: Record<PlanKind, string> = { claude: "Claude plan", chatgpt: "ChatGPT plan" };
 const NAME: Record<PlanKind, string> = { claude: "Claude", chatgpt: "ChatGPT" };
 
 const MINUTE = 60_000;
@@ -50,64 +51,256 @@ const useNow = (cards: readonly PlanCard[]): number => {
   return now;
 };
 
-/** Each plan's limits, as the plans' own apps last reported them. */
+/** The window a card shows: the weekly one, else the longest. */
+export const shownWindow = (windows: readonly PlanWindow[]): PlanWindow | null =>
+  windows.find((w) => w.minutes === 10_080) ?? [...windows].sort((a, b) => b.minutes - a.minutes)[0] ?? null;
+
+/** "21:11" today, else "yesterday 05:18", "Sat 05:18". */
+const saidAt = (iso: string, now: number): string => {
+  const d = dayClock(iso, now);
+  return d === clock(iso) ? `at ${d}` : d;
+};
+
+const sessionsOn = (n: number): string => (n === 0 ? "no sessions now" : n === 1 ? "1 session" : `${n} sessions`);
+
+const hubName = (label: string): string => (/\bhub$/i.test(label) ? label : `${label} hub`);
+
+/** A card's name, as its region and the pickers say it. */
+const useTitle = (): ((c: AccountCard) => string) => {
+  // This computer's own sign-in, none of the accounts: by who Claude Code
+  // says it is.
+  const who = useAccounts((s) => (s.claudeSignIn?.state === "in" ? s.claudeSignIn.who : null));
+  const ownKey = useAccounts((s) => s.ownPlanKey);
+  return (c) =>
+    c.name ??
+    (ownKey !== null && c.key === `claude:${ownKey}`
+      ? (who ?? "This computer’s sign-in")
+      : c.state === "signed-out"
+        ? `${NAME[c.kind]} on this computer · not signed in`
+        : `${NAME[c.kind]} on this computer`);
+};
+
+/** One card per real account, each saying where it is used, and the hubs'
+ *  places not matched to one yet. */
 export function PlanCards() {
-  const cards = usePlans();
+  const { cards, unmatched } = useBoard();
   const now = useNow(cards);
-  if (cards.length === 0) return null;
+  const title = useTitle();
+  if (cards.length === 0 && unmatched.length === 0) return null;
   return (
-    <div className="plan-cards">
-      {cards.map((c) => (
-        <Card key={c.key} card={c} now={now} />
-      ))}
-    </div>
+    <>
+      {cards.length > 0 && (
+        <div className="plan-cards">
+          {cards.map((c) => (
+            <Card key={c.key} card={c} title={title(c)} now={now} />
+          ))}
+        </div>
+      )}
+      <NotMatched rows={unmatched} cards={cards} title={title} now={now} />
+    </>
   );
 }
 
-function Card({ card, now }: { card: PlanCard; now: number }) {
+function Card({ card, title, now }: { card: AccountCard; title: string; now: number }) {
   const H = useSubHeading();
-  // One of the person's accounts: its name, and the sessions on it.
-  const account = useAccounts((s) => accountOfCard(s.accounts, card.key));
-  // This computer's own sign-in, not known as one of the accounts: by who
-  // Claude Code says it is.
-  const who = useAccounts((s) => (s.claudeSignIn?.state === "in" ? s.claudeSignIn.who : null));
-  const ownKey = useAccounts((s) => s.ownPlanKey);
-  // Only the card of the sign-in's own key: never another reading's.
-  const own = !account && ownKey !== null && card.key === `claude:${ownKey}`;
-  // Whose plan it is, always: an account's, this computer's sign-in's (by
-  // who Claude Code says it is, else as this computer's), a remote hub's
-  // own, or whatever this computer's CLI is signed in to.
-  const sub = [account && sessionsText(account), card.plan && capitalised(card.plan), card.hub === null && !card.computer && card.where]
-    .filter(Boolean)
-    .join(" · ");
-  const title = account
-    ? `${TITLE[card.kind]} · ${account.name}`
-    : own
-      ? `${TITLE[card.kind]} · ${who ?? "this computer’s sign-in"}`
-      : card.hub !== null
-        ? `${card.hub} hub’s ${NAME[card.kind]} plan`
-        : card.state === "signed-out"
-          ? `${NAME[card.kind]} on this computer · not signed in`
-          : `${NAME[card.kind]} on this computer`;
+  const sub = [NAME[card.kind], card.plan && capitalised(card.plan), card.isDefault && "default"].filter(Boolean).join(" · ");
+  const w = card.reading && shownWindow(card.reading.windows);
+  const many = card.usedOn.length > 1;
+  const asOf = card.reading && `${many ? "newest reading" : "as of"} ${dayClock(card.reading.observedAt, now)}`;
   return (
     <section className="floor-card plan-card" aria-label={`${title} usage`}>
       <div className="floor-card-head">
         <H className="display floor-card-title">{title}</H>
-        <span className="muted small">{sub}</span>
-        {card.reading && <span className="floor-time">as of {clock(card.reading.observedAt)}</span>}
+        <span className="muted small plan-card-sub">{sub}</span>
       </div>
-      {card.state === "reading" && card.reading ? (
-        card.reading.windows.map((w, i) => <Window key={`${w.minutes}:${i}`} w={w} observedAt={card.reading!.observedAt} now={now} />)
-      ) : card.state === "no-reading" ? (
+      {card.state === "reading" && card.reading && w ? (
+        <Window w={w} observedAt={card.reading.observedAt} asOf={asOf} now={now} />
+      ) : card.state === "reading" ? null : card.state === "no-reading" ? (
         <p className="muted small">No reading yet. It shows after {CLI_NAME[card.kind]} next answers on this plan.</p>
       ) : (
         <SignIn kind={card.kind} />
+      )}
+      {card.usedOn.length > 0 && (
+        <div className="plan-used-on">
+          <span className="plan-used-on-label">Used on</span>
+          <ul>
+            {card.usedOn.map((u) => (
+              <Place key={u.key} u={u} newest={u.reading === card.reading} read={many} now={now} />
+            ))}
+          </ul>
+        </div>
+      )}
+      {card.conflict && (
+        <p className="plan-mismatch" role="note">
+          <b>Doesn’t add up</b>
+          <span>These readings can’t all be the same account at once. Check the links, or unlink the one that’s wrong.</span>
+        </p>
       )}
     </section>
   );
 }
 
-function Window({ w, observedAt, now }: { w: PlanWindow; observedAt: string; now: number }) {
+/** One place an account is used: what it is there, and, beside the others,
+ *  what it last read. */
+function Place({ u, newest, read, now }: { u: UsedOn; newest: boolean; read: boolean; now: number }) {
+  const what =
+    u.where === "computer"
+      ? u.sessions === null
+        ? null
+        : sessionsOn(u.sessions)
+      : u.where === "machine"
+        ? u.sessions === null
+          ? "picked when you added it"
+          : sessionsOn(u.sessions)
+        : null;
+  const w = u.reading && shownWindow(u.reading.windows);
+  const said =
+    u.reading && w
+      ? windowNow(w, u.reading.observedAt, now).reset
+        ? `read before its reset, ${dayClock(u.reading.observedAt, now)}`
+        : `${newest ? "reads" : "read"} ${Math.round(w.usedPercent)}% ${saidAt(u.reading.observedAt, now)}`
+      : null;
+  return (
+    <li className="plan-place">
+      <span>
+        <b>{u.where === "hub" ? hubName(u.label) : u.label}</b>
+        {what && ` · ${what}`}
+      </span>
+      {(read || u.picked) && (
+        <span className="plan-place-reading">
+          {read && said}
+          {u.picked && (
+            <>
+              {read && said && " · "}
+              <button type="button" className="link plan-unlink" onClick={() => forgetPlace(u.key)} aria-label={`Unlink ${hubName(u.label)}`}>
+                Unlink
+              </button>
+            </>
+          )}
+        </span>
+      )}
+    </li>
+  );
+}
+
+/** A hub's places that haven't said which account they are, to say. */
+function NotMatched({ rows, cards, title, now }: { rows: Unmatched[]; cards: AccountCard[]; title: (c: AccountCard) => string; now: number }) {
+  const H = useSubHeading();
+  const ui = usePlansUi();
+  if (rows.length === 0) return null;
+  const n = rows.length;
+  if (ui.folded)
+    return (
+      <p className="plan-unmatched-folded muted">
+        {n} {n === 1 ? "place" : "places"} not matched ·{" "}
+        <button type="button" className="link" aria-expanded={false} onClick={() => setFolded(false)}>
+          Show
+        </button>
+      </p>
+    );
+  return (
+    <section className="plan-unmatched" aria-label="Not matched to an account yet">
+      <H className="plan-unmatched-head">
+        <button type="button" className="plan-unmatched-fold" aria-expanded onClick={() => setFolded(true)}>
+          <span aria-hidden="true">▾</span>
+          Not matched to an account yet · {n}
+        </button>
+      </H>
+      <p className="muted small">
+        These hubs use a plan but haven’t said which account. Say which, and they join its card; or choose “Don’t ask” and they stay off the Floor.
+      </p>
+      <table className="plan-unmatched-table">
+        <thead>
+          <tr>
+            <th scope="col">Where</th>
+            <th scope="col">Its reading</th>
+            <th scope="col">Which account is this?</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <UnmatchedRow key={r.key} row={r} cards={cards.filter((c) => c.kind === r.kind && (c.hub === null || c.key.startsWith("other:")) && c.state !== "signed-out")} title={title} now={now} />
+          ))}
+        </tbody>
+      </table>
+    </section>
+  );
+}
+
+// Never a card key.
+const OTHER = ":other";
+const HIDE = ":hide";
+
+function UnmatchedRow({ row, cards, title, now }: { row: Unmatched; cards: AccountCard[]; title: (c: AccountCard) => string; now: number }) {
+  const [naming, setNaming] = useState(false);
+  const [name, setName] = useState("");
+  const where = `${hubName(row.label)} · ${NAME[row.kind]}${row.plan ? `, ${capitalised(row.plan)}` : ""}`;
+  const w = shownWindow(row.reading.windows);
+  const reading = w ? readingText(w, row.reading.observedAt, now) : `read ${dayClock(row.reading.observedAt, now)}`;
+  const label = `${hubName(row.label)} ${NAME[row.kind]} account`;
+  const make = () => {
+    const n = name.trim();
+    if (n) linkToOther(row.key, row.kind, n);
+  };
+  return (
+    <tr>
+      <td>
+        <b>{hubName(row.label)}</b> · {NAME[row.kind]}
+        {row.plan && `, ${capitalised(row.plan)}`}
+      </td>
+      <td>{reading}</td>
+      <td>
+        {naming ? (
+          <form
+            className="plan-name-other"
+            onSubmit={(e) => {
+              e.preventDefault();
+              make();
+            }}
+          >
+            <input aria-label={`Name the account ${where} uses`} className="ability-select" placeholder="Its name" value={name} autoFocus onChange={(e) => setName(e.target.value)} />
+            <button type="submit" className="btn btn-sm" disabled={!name.trim()}>
+              Make its card
+            </button>
+            <button type="button" className="link" onClick={() => setNaming(false)}>
+              Cancel
+            </button>
+          </form>
+        ) : (
+          <select
+            aria-label={label}
+            className="ability-select plan-pick"
+            value=""
+            onChange={(e) => {
+              const v = e.target.value;
+              if (v === OTHER) setNaming(true);
+              else if (v === HIDE) hidePlace(row.key, where);
+              else if (v) linkPlace(row.key, v);
+            }}
+          >
+            <option value="">Choose…</option>
+            {cards.map((c) => (
+              <option key={c.key} value={c.key}>
+                {title(c)}
+              </option>
+            ))}
+            <option value={OTHER}>Another account</option>
+            <option value={HIDE}>Don’t ask</option>
+          </select>
+        )}
+      </td>
+    </tr>
+  );
+}
+
+/** "13% · resets Fri 16:00", or "0% · no use since Thu 07:00". */
+const readingText = (w: PlanWindow, observedAt: string, now: number): string => {
+  const { used, resetAt, reset } = windowNow(w, observedAt, now);
+  const when = resetAt === null ? null : dayClock(resetAt, now);
+  return reset ? `0%${when ? ` · no use since ${when}` : ""}` : `${Math.round(used)}%${when ? ` · resets ${when}` : ""}`;
+};
+
+function Window({ w, observedAt, asOf, now }: { w: PlanWindow; observedAt: string; asOf: string | null; now: number }) {
   const label = windowLabel(w.minutes);
   const { used, resetAt, reset } = windowNow(w, observedAt, now);
   const tick = reset ? null : pace(w, now);
@@ -135,7 +328,7 @@ function Window({ w, observedAt, now }: { w: PlanWindow; observedAt: string; now
       <div className="plan-window-head">
         <span>{label}</span>
         <b className={`plan-${level}`}>{percent}%</b>
-        {when && <span className="floor-time">{when}</span>}
+        {(when || asOf) && <span className="floor-time">{[when, asOf].filter(Boolean).join(" · ")}</span>}
       </div>
       <div className="plan-bar" role="img" aria-label={spoken}>
         <span className={`plan-fill plan-fill-${level}`} style={{ width: `${Math.min(100, Math.max(0, used))}%` }} />
