@@ -234,12 +234,9 @@ function Row({ q, d, sheet }: { q: DirectiveQuestion; d: Use; sheet: boolean }) 
   const [chosen, setChosen] = useState<string | null>(null);
   const want = useRef<string | null>(null);
   const saving = useRef(false);
-  const [kept, setKept] = useState(0);
-  useEffect(() => {
-    if (!kept) return;
-    const t = setTimeout(() => setKept(0), KEPT_MS);
-    return () => clearTimeout(t);
-  }, [kept]);
+  const [kept, setKept] = useState(false);
+  const keptFor = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(keptFor.current), []);
   const value = chosen ?? q.answer;
   const save = async () => {
     saving.current = true;
@@ -253,7 +250,11 @@ function Row({ q, d, sheet }: { q: DirectiveQuestion; d: Use; sheet: boolean }) 
     saving.current = false;
     // The view says it now; or, not kept, says what is.
     setChosen(null);
-    if (ok) setKept((n) => n + 1);
+    if (!ok) return;
+    // Set with "Kept." itself, so it goes KEPT_MS after it came.
+    setKept(true);
+    clearTimeout(keptFor.current);
+    keptFor.current = setTimeout(() => setKept(false), KEPT_MS);
   };
   const pick = (key: string) => {
     // Your own answer pressed again is no change; one from the main boss
