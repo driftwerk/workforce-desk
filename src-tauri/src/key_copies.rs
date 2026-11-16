@@ -354,9 +354,10 @@ pub async fn take(
     for copy in copies {
         // Its own tier's pick alone: an older hub, which says no agent,
         // answers only the personal ones.
-        let Some(pick) = picks.iter().find(|p| {
-            p.connector == copy.connector && p.key == copy.key && p.agent == copy.agent
-        }) else {
+        let Some(pick) = picks
+            .iter()
+            .find(|p| p.connector == copy.connector && p.key == copy.key && p.agent == copy.agent)
+        else {
             continue;
         };
         let (path, new) = match &pick.into {
@@ -576,7 +577,11 @@ mod tests {
         assert_eq!(copies[1].agent, None);
         assert_eq!(
             missing,
-            [("jira".to_string(), "acme".to_string(), Some("allan".to_string()))]
+            [(
+                "jira".to_string(),
+                "acme".to_string(),
+                Some("allan".to_string())
+            )]
         );
     }
 
@@ -595,7 +600,10 @@ mod tests {
         upsert(&mut records, r(Some("allan"), "all~~driftwerk"));
         assert_eq!(records.len(), 2);
         upsert(&mut records, r(Some("allan"), "all~~again"));
-        assert_eq!(records, [r(None, "all~~default"), r(Some("allan"), "all~~again")]);
+        assert_eq!(
+            records,
+            [r(None, "all~~default"), r(Some("allan"), "all~~again")]
+        );
         // A record from before tiers were said is the personal one's.
         let old: Vec<Record> = serde_json::from_str(
             r#"[{"hub":"driftwerk","connector":"linear","remoteKey":"default","connection":"all~~default","updatedAt":null}]"#,
