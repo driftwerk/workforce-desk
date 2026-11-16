@@ -82,7 +82,7 @@ function Group({ group }: { group: BriefGroup }) {
   );
 }
 
-function Row({ item, quiet = false }: { item: BriefItem; quiet?: boolean }) {
+export function Row({ item, quiet = false }: { item: BriefItem; quiet?: boolean }) {
   const connected = useDesk((s) => !!s.hub);
   const [more, setMore] = useState(false);
   const panel = useId();

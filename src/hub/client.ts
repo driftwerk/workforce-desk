@@ -855,6 +855,18 @@ export class DeskHub {
       if (e instanceof HubError && e.status === 404 && e.message !== NO_BOSS) this.#unheard.add("typing");
     }
   };
+  /** When the boss `agent`'s next roundup comes (null: none comes); null
+   *  on a hub without cadences (an older one). */
+  updatesOf = async (agent: string): Promise<{ nextRoundup: string | null } | null> => {
+    try {
+      return await this.desk("GET", `/api/desk/updates/${encodeURIComponent(agent)}`);
+    } catch (e) {
+      if (e instanceof HubError && e.status === 404) return null;
+      throw e;
+    }
+  };
+  /** "Roundup now": the boss `agent` sends its roundup at its next look. */
+  roundupNow = (agent: string): Promise<void> => this.desk("POST", `/api/desk/updates/${encodeURIComponent(agent)}/roundup`);
   /** Whether Desk is in front of you, and which boss's DM is on screen:
    *  the hub tells you're away from the DM by it. Quiet on an older hub. */
   presence = async (attending: boolean, dmOnScreen: string | null): Promise<void> => {

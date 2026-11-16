@@ -247,6 +247,9 @@ const HTTP: &[Route] = &[
     // Your typing to a boss, and whether its DM is in front of you.
     route("POST", "/api/desk/dm/{}/typing"),
     route("POST", "/api/desk/presence"),
+    // A boss's next roundup, and "Roundup now".
+    route("GET", "/api/desk/updates/{}"),
+    route("POST", "/api/desk/updates/{}/roundup"),
     // Your preferences for the bosses.
     route("GET", "/api/desk/preferences"),
     route("PATCH", "/api/desk/preferences/{}"),

@@ -170,6 +170,8 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   doneItem: (h) => h.doneItem("i1"),
   dmTyping: (h) => h.dmTyping("desk"),
   presence: (h) => h.presence(true, "desk"),
+  updatesOf: (h) => h.updatesOf("desk"),
+  roundupNow: (h) => h.roundupNow("desk"),
   preferences: (h) => h.preferences(),
   changePreference: (h) => h.changePreference("p1", { thenText: "Wait for green" }),
   setPreference: (h) => Promise.all([h.setPreference("p1", "pause"), h.setPreference("p1", "resume"), h.setPreference("p1", "retire")]),

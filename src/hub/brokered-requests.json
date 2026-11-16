@@ -687,6 +687,16 @@
   {
     "kind": "http",
     "method": "GET",
+    "path": "/api/desk/updates/desk"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/updates/desk/roundup"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
     "path": "/api/desk/preferences"
   },
   {
