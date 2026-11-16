@@ -1,11 +1,5 @@
 import { useId, useState } from "react";
-import type {
-  BriefItem,
-  Roundup,
-  RoundupSection,
-  Said,
-  SessionLink,
-} from "../hub/types";
+import type { BriefItem, Roundup, RoundupSection, Said, SessionLink } from "../hub/types";
 import { openSession } from "../overview/people";
 import { Row } from "./Brief";
 import { UNDO_LABEL, useUndo } from "./undo";
@@ -30,27 +24,14 @@ const clock = (iso?: string | null): string => {
 };
 
 /** "(MAN-632, MAN-637)", after the words; nothing with no ids. */
-const idsOf = (ids?: string[]): string =>
-  ids?.length ? `(${ids.join(", ")})` : "";
+const idsOf = (ids?: string[]): string => (ids?.length ? `(${ids.join(", ")})` : "");
 
 /** "Open the session (MAN-632, closed) ›": opens it beside the chat; a
  *  closed one opens read-only, with Resume. */
-export function OpenSession({
-  link,
-  short = false,
-}: {
-  link: SessionLink;
-  short?: boolean;
-}) {
-  const label = short
-    ? link.name
-    : `Open the session (${link.name}${link.closed ? ", closed" : ""})`;
+export function OpenSession({ link, short = false }: { link: SessionLink; short?: boolean }) {
+  const label = short ? link.name : `Open the session (${link.name}${link.closed ? ", closed" : ""})`;
   return (
-    <button
-      type="button"
-      className="link said-open"
-      onClick={() => openSession(link.sessionId)}
-    >
+    <button type="button" className="link said-open" onClick={() => openSession(link.sessionId)}>
       {label} ›
     </button>
   );
@@ -63,13 +44,7 @@ function WhatIDid({ did }: { did: readonly BriefItem[] }) {
   if (!did.length) return null;
   return (
     <>
-      <button
-        type="button"
-        className="link said-did"
-        aria-expanded={open}
-        aria-controls={list}
-        onClick={() => setOpen((o) => !o)}
-      >
+      <button type="button" className="link said-did" aria-expanded={open} aria-controls={list} onClick={() => setOpen((o) => !o)}>
         What I did · {did.length} {open ? "‹" : "›"}
       </button>
       {open && (
@@ -105,9 +80,7 @@ export function SaidItem({ said }: { said: Said }) {
       {(said.session || (said.did?.length ?? 0) > 0) && (
         <div className="said-links">
           {said.session && <OpenSession link={said.session} />}
-          {said.session && (said.did?.length ?? 0) > 0 && (
-            <span className="faint"> · </span>
-          )}
+          {said.session && (said.did?.length ?? 0) > 0 && <span className="faint"> · </span>}
           <WhatIDid did={said.did ?? []} />
         </div>
       )}
@@ -139,11 +112,11 @@ function Decided({ line }: { line: Said }) {
   const connected = useDesk((s) => !!s.hub);
   const [why, setWhy] = useState(false);
   const item = line.did?.[0];
-  const { undone, isUndone, fixed, busy, problem, undo } = useUndo(
-    item?.id ?? "",
-    false,
-  );
+  const { undone, isUndone, fixed, busy, problem, undo } = useUndo(item?.id ?? "", false);
   const can = !!item?.undo && !isUndone && !fixed;
+  const ids = idsOf(line.ids);
+  // What it did, word for word ("Told the session: …"), on asking.
+  const detail = item?.detail ?? null;
   return (
     <li className="rnd-line">
       <span className="rnd-mark decided" aria-hidden>
@@ -151,11 +124,12 @@ function Decided({ line }: { line: Said }) {
       </span>
       <div className="rnd-text">
         <p>
-          <span className={isUndone ? "dec-undone" : "rnd-what"}>
-            {line.headline}
-          </span>
-          {why && line.body && <span className="brief-why"> {line.body}</span>}
+          <span className={isUndone ? "dec-undone" : "rnd-what"}>{line.headline}</span>
+          {ids && <span className="said-ids"> {ids}</span>}
+          {/* Its "because …", always: the design's one line of why. */}
+          {line.body && <span className="brief-why"> {line.body}</span>}
         </p>
+        {why && detail && <p className="faint small">{detail}</p>}
         <p className="rnd-meta faint small">
           {clock(line.at)}
           {line.session && (
@@ -164,15 +138,10 @@ function Decided({ line }: { line: Said }) {
               <OpenSession link={line.session} short />
             </>
           )}
-          {line.body && (
+          {detail && (
             <>
               {" · "}
-              <button
-                type="button"
-                className="link"
-                aria-expanded={why}
-                onClick={() => setWhy((w) => !w)}
-              >
+              <button type="button" className="link" aria-expanded={why} onClick={() => setWhy((w) => !w)}>
                 {why ? "Less" : "Why?"}
               </button>
             </>
@@ -191,12 +160,7 @@ function Decided({ line }: { line: Said }) {
               </button>
             </>
           )}
-          {isUndone && (
-            <span role="status">
-              {" "}
-              · {undone ? `Undone: ${undone}.` : "Undone."}
-            </span>
-          )}
+          {isUndone && <span role="status"> · {undone ? `Undone: ${undone}.` : "Undone."}</span>}
           {problem && (
             <span className="state-blocked" role="alert">
               {" "}
@@ -222,9 +186,7 @@ function Line({ line, mark }: { line: Said; mark: RoundupSection["key"] }) {
           {line.body && ` ${line.body}`}
           {ids && <span className="said-ids"> {ids}</span>}
         </p>
-        {line.notChecked && (
-          <p className="faint small">Not checked: {line.notChecked}</p>
-        )}
+        {line.notChecked && <p className="faint small">Not checked: {line.notChecked}</p>}
         {line.session && (
           <p className="rnd-meta small">
             <OpenSession link={line.session} short />
@@ -238,20 +200,13 @@ function Line({ line, mark }: { line: Said; mark: RoundupSection["key"] }) {
 function Section({ section }: { section: RoundupSection }) {
   const head = useId();
   return (
-    <section
-      className={`rnd-section rnd-${section.key}`}
-      aria-labelledby={head}
-    >
+    <section className={`rnd-section rnd-${section.key}`} aria-labelledby={head}>
       <span className="sec-label" id={head}>
         {section.title}
       </span>
       <ul className="rnd-lines">
         {section.lines.map((l, i) =>
-          section.key === "decided" ? (
-            <Decided key={l.did?.[0]?.id ?? i} line={l} />
-          ) : (
-            <Line key={l.session?.sessionId ?? i} line={l} mark={section.key} />
-          ),
+          section.key === "decided" ? <Decided key={l.did?.[0]?.id ?? i} line={l} /> : <Line key={l.session?.sessionId ?? i} line={l} mark={section.key} />,
         )}
       </ul>
     </section>
@@ -260,15 +215,7 @@ function Section({ section }: { section: RoundupSection }) {
 
 /** Shape C: "09:00 roundup · since 07:00", the line that matters most, then
  *  its sections. */
-export function RoundupBody({
-  roundup,
-  headline,
-  at,
-}: {
-  roundup: Roundup;
-  headline?: string | null;
-  at?: string;
-}) {
+export function RoundupBody({ roundup, headline, at }: { roundup: Roundup; headline?: string | null; at?: string }) {
   const routine = roundup.routine ?? 0;
   const decided = roundup.sections.some((s) => s.key === "decided");
   return (
@@ -277,16 +224,15 @@ export function RoundupBody({
         {at ? `${clock(at)} roundup` : "Roundup"} · since {clock(roundup.since)}
       </p>
       {headline && <p className="upd-line">{headline}</p>}
-      {roundup.sections.map((s) => (
-        <Section key={s.key} section={s} />
-      ))}
+      {roundup.sections
+        .filter((s) => s.lines.length > 0)
+        .map((s) => (
+          <Section key={s.key} section={s} />
+        ))}
       {routine > 0 && (
         <p className="faint small">
-          {decided
-            ? "Only decisions that merge, release, delete, spend, override a session or set something to happen later are listed. "
-            : ""}
-          {routine === 1 ? "1 routine one" : `${routine} routine ones`} (nudges,
-          restarts, waits): ask “what else did you decide?”
+          {decided ? "Only decisions that merge, release, delete, spend, override a session or set something to happen later are listed. " : ""}
+          {routine === 1 ? "1 routine one" : `${routine} routine ones`} (nudges, restarts, waits): ask “what else did you decide?”
         </p>
       )}
     </div>

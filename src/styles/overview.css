@@ -1522,7 +1522,7 @@ a.ref {
   flex-direction: column;
   gap: 8px;
 }
-.rnd-upToYou .sec-label {
+.msg-text.overseer .rnd-upToYou .sec-label {
   color: var(--blocked);
 }
 .rnd-lines {
@@ -1603,6 +1603,10 @@ a.ref {
   font-size: 12px;
   padding: 4px 6px;
   min-height: 28px;
+  white-space: nowrap;
+}
+.upd-card .seg button {
+  padding: 4px 4px;
 }
 .upd-summary {
   margin: 0;
@@ -1659,10 +1663,21 @@ a.ref {
   text-align: left;
 }
 .upd-table th[scope="row"] {
+  font-weight: 400;
+}
+.upd-row-name {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  font-weight: 400;
+}
+/* As the options below draw theirs. */
+.upd-radio {
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  vertical-align: middle;
+  accent-color: var(--signal);
+  cursor: pointer;
 }
 .upd-table tr:last-child > * {
   border-bottom: 0;

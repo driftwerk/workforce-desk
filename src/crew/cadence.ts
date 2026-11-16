@@ -9,8 +9,7 @@ export type Route = "right_away" | "roundup" | "ask";
 export type RoundupEvery = "30m" | "1h" | "2h" | "meals" | "never";
 export type Decided = "important" | "important_right_away" | "all" | "ask";
 export type PresetName = "as_it_happens" | "balanced" | "roundups_only";
-export type Row =
-  "needs_you" | "problems" | "finished" | "progress" | "routine";
+export type Row = "needs_you" | "problems" | "finished" | "progress" | "routine";
 
 export interface Cadence {
   needs_you: Route;
@@ -81,10 +80,7 @@ export const PRESETS: readonly { key: PresetName; title: string }[] = [
   { key: "roundups_only", title: "Roundups only" },
 ];
 
-const ROW_SETS: Record<
-  PresetName,
-  { rows: [Route, Route, Route, Route, Route]; roundup: RoundupEvery }
-> = {
+const ROW_SETS: Record<PresetName, { rows: [Route, Route, Route, Route, Route]; roundup: RoundupEvery }> = {
   as_it_happens: {
     rows: ["right_away", "right_away", "right_away", "right_away", "ask"],
     roundup: "never",
@@ -133,64 +129,108 @@ export const presetOf = (c: Cadence): PresetName | null =>
   })?.key ?? null;
 
 type Doc = Record<string, unknown>;
-const table = (v: unknown): Doc =>
-  v && typeof v === "object" && !Array.isArray(v) && !(v instanceof Date)
-    ? (v as Doc)
-    : {};
-const TIME = /^([01]\d|2[0-3]):([0-5]\d)$/;
+const table = (v: unknown): Doc => (v && typeof v === "object" && !Array.isArray(v) && !(v instanceof Date) ? (v as Doc) : {});
 
-const route = (v: unknown, d: Route, ask = true): Route =>
-  v === "right_away" || v === "roundup" || (ask && v === "ask") ? v : d;
+/** "7:00" or "07:00" as "07:00", as the hub reads a time; null if it isn't one. */
+const clockOf = (x: string): string | null => {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(x.trim());
+  if (!m) return null;
+  const [h, min] = [Number(m[1]), Number(m[2])];
+  return h <= 23 && min <= 59 ? `${String(h).padStart(2, "0")}:${m[2]}` : null;
+};
 
-/** The cadence an agent's config says, Balanced where it says nothing (or
- *  something the hub wouldn't take). */
-export const cadenceOf = (source: string): Cadence => {
+const ROW_NAME: Record<Row, string> = {
+  needs_you: "what needs you",
+  problems: "problems",
+  finished: "finished work",
+  progress: "progress",
+  routine: "routine things",
+};
+
+/** The cadence an agent's config says (Balanced where it says nothing), and
+ *  what the hub would refuse in it, in the hub's words; then the hub keeps
+ *  Balanced and Desk shows that. Read as the hub reads it: values trimmed,
+ *  an hour of one digit or two. */
+export const readCadence = (source: string): { cadence: Cadence; problem: string | null } => {
   let doc: Doc = {};
   try {
     doc = source.trim() ? (parse(source) as Doc) : {};
   } catch {
-    return BALANCED;
+    return { cadence: BALANCED, problem: "Their settings file has a mistake in it." };
   }
   const u = table(table(doc.oversight).updates);
   const d = BALANCED;
+  const text = (v: unknown): string | null => (typeof v === "string" ? v.trim() : null);
+  const problems: string[] = [];
+  const route = (row: Row, what: string): Route => {
+    if (!(row in u)) return d[row];
+    const v = text(u[row]);
+    const ask = row !== "needs_you";
+    if (v === "right_away" || v === "roundup" || (ask && v === "ask")) return v;
+    problems.push(
+      ask
+        ? `When you hear of ${what} must be right away, in the roundup, or only if you ask.`
+        : `When you hear of ${what} must be right away or in the roundup.`,
+    );
+    return d[row];
+  };
+  const one = <T extends string>(key: string, keys: readonly { key: T }[], fallback: T, wrong: string): T => {
+    if (!(key in u)) return fallback;
+    const v = text(u[key]);
+    const hit = keys.find((k) => k.key === v);
+    if (!hit) problems.push(wrong);
+    return hit?.key ?? fallback;
+  };
   const quiet = (): Cadence["quiet"] => {
     if (!("quiet_hours" in u)) return d.quiet;
-    const q = typeof u.quiet_hours === "string" ? u.quiet_hours.trim() : "";
-    const [from, until] = q.split("-").map((x) => x.trim());
-    return from &&
-      until &&
-      TIME.test(from) &&
-      TIME.test(until) &&
-      from !== until
-      ? { from, until }
-      : null;
+    const q = text(u.quiet_hours);
+    if (q === "") return null;
+    const [from, until, ...rest] = (q ?? "").split("-");
+    const f = from !== undefined ? clockOf(from) : null;
+    const t = until !== undefined ? clockOf(until) : null;
+    if (f && t && f !== t && !rest.length) return { from: f, until: t };
+    problems.push("The quiet hours must look like 22:00-07:00, or be empty for none.");
+    return d.quiet;
   };
-  return {
-    needs_you: route(u.needs_you, d.needs_you, false),
-    problems: route(u.problems, d.problems),
-    finished: route(u.finished, d.finished),
-    progress: route(u.progress, d.progress),
-    routine: route(u.routine, d.routine),
-    roundup: EVERY.some((e) => e.key === u.roundup)
-      ? (u.roundup as RoundupEvery)
-      : d.roundup,
+  const cadence: Cadence = {
+    needs_you: route("needs_you", "what needs you"),
+    problems: route("problems", "problems"),
+    finished: route("finished", "finished work"),
+    progress: route("progress", "progress"),
+    routine: route("routine", "routine things"),
+    roundup: one(
+      "roundup",
+      EVERY,
+      d.roundup,
+      "How often the roundup comes must be every 30 minutes, every hour, every 2 hours, morning, lunch and end of day, or never.",
+    ),
     quiet: quiet(),
-    quietNeedsYou:
-      typeof u.quiet_needs_you === "boolean"
-        ? u.quiet_needs_you
-        : d.quietNeedsYou,
-    decisions: DECIDED.some((x) => x.key === u.decisions)
-      ? (u.decisions as Decided)
-      : d.decisions,
+    quietNeedsYou: (() => {
+      if (!("quiet_needs_you" in u)) return d.quietNeedsYou;
+      if (typeof u.quiet_needs_you === "boolean") return u.quiet_needs_you;
+      problems.push("Whether telling you at once in the quiet hours when something needs you is on or off must be true or false.");
+      return d.quietNeedsYou;
+    })(),
+    decisions: one(
+      "decisions",
+      DECIDED,
+      d.decisions,
+      "Which of its decisions you hear of must be the important ones in the roundup, the important ones right away, every one in the roundup, or only when you ask.",
+    ),
   };
+  const problem = problems[0] ?? problemOf(cadence);
+  // What the hub refuses it doesn't use: it keeps Balanced.
+  return problem ? { cadence: BALANCED, problem } : { cadence, problem: null };
 };
+
+/** The cadence in force: what the config says, or Balanced where the hub
+ *  would refuse it. */
+export const cadenceOf = (source: string): Cadence => readCadence(source).cadence;
 
 /** What is wrong with `c` as the hub would say it; null when nothing is. */
 export const problemOf = (c: Cadence): string | null => {
   if (c.roundup !== "never") return null;
-  const waiting = ROWS.filter((r) => c[r.key] === "roundup").map((r) =>
-    r.title.toLowerCase(),
-  );
+  const waiting = ROWS.filter((r) => c[r.key] === "roundup").map((r) => ROW_NAME[r.key]);
   if (!waiting.length) return null;
   return `With no roundups, ${waiting.join(" and ")} would never be told: send ${waiting.length === 1 ? "it" : "them"} right away or only if you ask, or choose how often the roundup comes.`;
 };
@@ -219,18 +259,12 @@ export const withCadence = (source: string, c: Cadence): string => {
 
 /** Writes `change` of the agent's cadence into its config as it is now (read
  *  fresh, so nothing else is lost); answers with the config written. */
-export async function setAgentCadence(
-  hub: DeskHub,
-  id: string,
-  change: (c: Cadence) => Cadence,
-): Promise<string> {
+export async function setAgentCadence(hub: DeskHub, id: string, change: (c: Cadence) => Cadence): Promise<string> {
   const source = await hub.agentConfig(id);
   try {
     if (source.trim()) parse(source);
   } catch {
-    throw new Error(
-      "Their settings file has a mistake in it, so Desk won’t change it.",
-    );
+    throw new Error("Their settings file has a mistake in it, so Desk won’t change it.");
   }
   const next = change(cadenceOf(source));
   const problem = problemOf(next);
@@ -256,22 +290,17 @@ const ROW_SAID: Record<Row, string> = {
   routine: "routine nudges and checks",
 };
 
-const list = (xs: string[]): string =>
-  xs.length <= 1
-    ? xs.join("")
-    : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`;
+const list = (xs: string[]): string => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} and ${xs.at(-1)}`);
 
 /** The card's summary: a label and what it covers, each line. */
 export const summaryOf = (c: Cadence): { label: string; text: string }[] => {
-  const of = (r: Route) =>
-    ROWS.filter((x) => c[x.key] === r).map((x) => ROW_SAID[x.key]);
+  const of = (r: Route) => ROWS.filter((x) => c[x.key] === r).map((x) => ROW_SAID[x.key]);
   const out: { label: string; text: string }[] = [];
   const now = of("right_away");
   if (now.length) out.push({ label: "Right away:", text: list(now) });
   const later = of("roundup");
   if (c.roundup === "never") out.push({ label: "No roundups", text: "" });
-  else if (later.length)
-    out.push({ label: `${EVERY_SAID[c.roundup]}:`, text: list(later) });
+  else if (later.length) out.push({ label: `${EVERY_SAID[c.roundup]}:`, text: list(later) });
   else
     out.push({
       label: `Roundups ${EVERY_SAID[c.roundup].toLowerCase()}`,
@@ -291,9 +320,7 @@ export const summaryOf = (c: Cadence): { label: string; text: string }[] => {
   if (c.quiet)
     out.push({
       label: `Quiet ${c.quiet.from}–${c.quiet.until}:`,
-      text: c.quietNeedsYou
-        ? "held for the morning, except what needs you"
-        : "everything held for the morning",
+      text: c.quietNeedsYou ? "held for the morning, except what needs you" : "everything held for the morning",
     });
   return out;
 };
