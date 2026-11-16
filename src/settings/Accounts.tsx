@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { useClaudeSignIn } from "../engines/signIn";
-import { accountsOf, accountsOn, freeName, ownSignInWorks, problemText, sessionsText, useAccounts, type AccountsStore } from "../engines/accounts";
+import { accountsOf, accountsOn, freeName, ownSignInWorks, problemText, recheckText, sessionsText, useAccounts, type AccountsStore } from "../engines/accounts";
 import { LOCAL, type MachineId } from "../hub/machines";
 import { useDesk, useHubOf } from "../hub/store";
 import type { EngineAccount, EngineInfo } from "../hub/types";
@@ -381,7 +381,7 @@ function AccountRow({
       </span>
       {account.refused && (
         <span className="state-blocked small" role="status">
-          Refused: {account.refused.reason}. Desk tries it again hourly.
+          Refused: {account.refused.reason}. {recheckText(account.refused.recheckAt)}
         </span>
       )}
       <span className="account-actions">
