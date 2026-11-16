@@ -2,6 +2,7 @@ import { create } from "zustand";
 import { LOCAL, machineOf, type MachineId } from "../hub/machines";
 import { deskListeners, engineListeners, hubOf } from "../hub/store";
 import type { AccountNeed, AccountSignIn, Caps, DeskEvent, Engine, EngineAccount, Session, SignIn, SignInProblem } from "../hub/types";
+import { dayClock } from "../floor/time";
 import { passStanding } from "./standing";
 
 /** The choice that runs a session on the CLI's own sign-in. */
@@ -121,6 +122,16 @@ export const accountOfCard = (accounts: readonly EngineAccount[], cardKey: strin
   accounts.find((a) => a.planKey && cardKey === `${a.engine === "codex" ? "chatgpt" : "claude"}:${a.planKey}`) ?? null;
 
 /** What a sign-in problem says. */
+/** When Desk tries a refused account again, as its row says it: "at
+ *  14:00", "tomorrow 09:00", or with its next call once that time is past. */
+export const recheckText = (recheckAt: string, now = Date.now()): string => {
+  const t = new Date(recheckAt).getTime();
+  if (Number.isNaN(t)) return "Desk tries it again later.";
+  if (t <= now) return "Desk tries it again with its next call.";
+  const when = dayClock(t, now);
+  return `Desk tries it again ${/^\d/.test(when) ? `at ${when}` : when}.`;
+};
+
 export const problemText = (p: SignInProblem, store: string | null): string => {
   const where = store ?? "Desk's store";
   switch (p.problem) {
