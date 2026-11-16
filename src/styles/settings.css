@@ -832,13 +832,15 @@ legend.set-label {
   gap: 4px 10px;
 }
 /* An engine's accounts read as rows inside its card, hairlines between
-   them: no card inside the card. */
+   them: no card inside the card. The rows lay out by the list's own width
+   (a narrow Settings pane in a wide window is still narrow). */
 .account-list {
   list-style: none;
   margin: 0;
   padding: 0;
   display: flex;
   flex-direction: column;
+  container-type: inline-size;
 }
 .account-row {
   display: grid;
@@ -925,7 +927,10 @@ legend.set-label {
   flex-wrap: wrap;
   gap: 4px 12px;
 }
-@media (max-width: 520px) {
+/* Too narrow for the account and its actions side by side: the actions go
+   under what is said of the account, rather than squeezed into a column of
+   one-word lines beside it. */
+@container (max-width: 34rem) {
   .account-row {
     grid-template-columns: minmax(0, 1fr);
   }
