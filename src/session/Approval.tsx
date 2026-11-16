@@ -81,6 +81,10 @@ const CODEX_LABEL: Record<Choice, string> = {
   cancel: "Deny and stop",
 };
 
+/** The modes Devin's own prompt offers beside Allow and Deny. */
+const DEVIN_MODES = ["Accept edits mode", "Bypass mode"] as const;
+const DEVIN_MODE_TITLE = "Devin switches modes only in its own prompt: this opens it there, where you choose";
+
 export function Approval({ session, compact = false }: { session: Session; compact?: boolean }) {
   const { fail, open } = useDesk();
   const hub = useHubOf(machineOf(session));
@@ -123,6 +127,40 @@ export function Approval({ session, compact = false }: { session: Session; compa
             {CODEX_LABEL[c]}
           </button>
         ))}
+      </div>
+    );
+  }
+  if (session.engine === "devin" && !["Question", "Plan"].includes(pending.tool)) {
+    // Devin's own prompt's answers, in its words and order. Its hook can only
+    // allow (once) or deny: a mode is switched in its own prompt, which Desk
+    // leaves up and opens.
+    const inDevin = () => {
+      decide("terminal");
+      open(sessionKey(session));
+    };
+    return (
+      <div className={compact ? "approval approval-compact" : "approval"}>
+        {!compact && (
+          <span className="approval-text">
+            <b>Needs you</b>
+            <span>
+              {pending.tool}
+              {pending.detail ? ` · ${pending.detail}` : ""}
+            </span>
+          </span>
+        )}
+        <button type="button" className="btn btn-blocked" title="Just this once" onClick={() => decide("allow")}>
+          Allow
+        </button>
+        {!compact &&
+          DEVIN_MODES.map((m) => (
+            <button key={m} type="button" className="btn btn-ghost" title={DEVIN_MODE_TITLE} onClick={inDevin}>
+              {m}
+            </button>
+          ))}
+        <button type="button" className="btn btn-ghost" onClick={() => decide("deny")}>
+          Deny
+        </button>
       </div>
     );
   }
