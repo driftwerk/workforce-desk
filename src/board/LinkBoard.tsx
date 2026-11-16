@@ -180,10 +180,12 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const workspaces = probe?.state === "offered" ? probe.workspaces : [];
   const several = workspaces.length > 1;
   const [workspaceFor, setWorkspaceFor] = useState<Record<string, string>>({});
-  const picked = viaKey ? workspaceFor[viaKey] : undefined;
+  const pickKey = `${system}:${viaKey}`;
+  const picked = viaKey ? workspaceFor[pickKey] : undefined;
   const workspace: string | null = !several || probe?.state !== "offered" ? null : picked && workspaces.includes(picked) ? picked : probe.workspace && workspaces.includes(probe.workspace) ? probe.workspace : null;
   const [inWorkspace, setInWorkspace] = useState<Record<string, Probe>>({});
-  const wsKey = viaKey && workspace ? `${system}:${viaKey}:${workspace}` : null;
+  // Asked again whenever the hubs are (a new token, a turned-on system).
+  const wsKey = viaKey && workspace ? `${system}:${viaKey}:${workspace}:${keptKey}:${reprobe}` : null;
   const wsProbe = wsKey ? inWorkspace[wsKey] : undefined;
   useEffect(() => {
     if (!system || !via || !wsKey || !workspace || inWorkspace[wsKey]) return;
@@ -205,9 +207,11 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const ready = offered && listed?.state === "offered" && !listed.why;
   const pickWorkspace = (w: string) => {
     if (!viaKey) return;
-    setWorkspaceFor((m) => ({ ...m, [viaKey]: w }));
+    setWorkspaceFor((m) => ({ ...m, [pickKey]: w }));
     setTarget("");
     setTeamId("");
+    setMe("");
+    setNotMe(false);
     setChecked(null);
   };
 
@@ -301,6 +305,8 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
       if (wsProbe.state === "no") return { words: wsProbe.error, failed: true };
       if (wsProbe.state === "offered" && wsProbe.why) return { words: wsProbe.why, failed: true };
     }
+    // What the hub says stops the list, whatever it is.
+    if (listed?.state === "offered" && listed.why) return { words: listed.why, failed: true };
     if (!targetGood) return { words: system === "linear" ? "Pick a team." : (projects.length > 0 && !typedKey ? "Pick a project." : "Enter the Jira project key."), failed: false };
     if (!filterReady) return { words: meNeeded ? "Enter your Linear member id." : "Say what to import.", failed: false };
     if (!now) return { words: "Waiting for the match count…", failed: false };
