@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import type { EngineAccount } from "../hub/types";
-import { OWN_SIGN_IN, accountOfCard, accountOfChoice, accountsOf, defaultChoice, hasAccounts, problemText, sessionsText, signInStep, switchingText, withAccount, ownSignInWorks } from "./accounts";
+import { OWN_SIGN_IN, accountOfCard, accountOfChoice, accountsOf, defaultChoice, hasAccounts, problemText, recheckText, sessionsText, signInStep, switchingText, withAccount, ownSignInWorks } from "./accounts";
 
 const account = (id: string, isDefault = false, engine: EngineAccount["engine"] = "claude", sessions: string[] = []): EngineAccount => ({
   id,
@@ -57,4 +57,13 @@ it("says each sign-in problem with where the sign-ins are kept", () => {
   const p = (problem: "gone" | "unreadable" | "notRemoved") => problemText({ account: "a", name: "Work", problem }, "the keychain");
   expect(p("gone")).toBe("Work’s sign-in is no longer in the keychain: sign it in again from its row. Nothing is switched to it.");
   expect(p("notRemoved")).toContain("couldn’t delete its sign-in from the keychain");
+});
+
+it("says when a refused account is tried again, from its re-check time", () => {
+  const now = new Date(2026, 10, 16, 10, 0).getTime();
+  const at = (h: number, day = 16) => new Date(2026, 10, day, h, 0).toISOString();
+  expect(recheckText(at(11), now)).toMatch(/^Desk tries it again at \d{1,2}:\d\d(\s[AP]M)?\.$/);
+  expect(recheckText(at(9, 17), now)).toMatch(/^Desk tries it again tomorrow \d{1,2}:\d\d(\s[AP]M)?\.$/);
+  expect(recheckText(at(9), now)).toBe("Desk tries it again with its next call.");
+  expect(recheckText("not a time", now)).toBe("Desk tries it again later.");
 });

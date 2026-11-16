@@ -135,6 +135,13 @@ describe("an error a turn ended with, in plain words", () => {
     expect(e.signIn).toBe("claude");
   });
 
+  it("names the refused Claude login when a ChatGPT route refused before it", () => {
+    const raw = `Agent error: no route could serve this turn: chatgpt:fast — subscription unavailable: no ChatGPT login for ${ID}: agent_user was refused: the account is suspended; claude-code:standard — subscription unavailable: no Claude login for ${ID}: system_shared (kim@example.com, Acme) was refused: ${ORG}`;
+    const e = readableError(raw, NOW);
+    expect(e.text).toBe(`Your Claude login (kim@example.com, Acme) was refused: ${ORG}. Sign in again in Settings → Engines → Claude.`);
+    expect(e.signIn).toBe("claude");
+  });
+
   it("never reads a refused ChatGPT login as a Claude one", () => {
     const raw = `Agent error: subscription unavailable: no ChatGPT login for ${ID}: agent_user was refused: the account is suspended`;
     const e = readableError(raw, NOW);
