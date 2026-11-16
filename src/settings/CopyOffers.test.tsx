@@ -1,8 +1,24 @@
-import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { HubAccount } from "../chat/types";
 import type { Connection, Connector } from "../hub/connections";
-import { offerOf, sources, type CopyNative, type CopyRecord, type RemoteConnection } from "../hub/keyCopies";
+import {
+  offerLines,
+  offerOf,
+  placeOf,
+  serviceLine,
+  sources,
+  type CopyNative,
+  type CopyRecord,
+  type RemoteConnection,
+  type RemoteList,
+} from "../hub/keyCopies";
 import { CopyOffers } from "./CopyOffers";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
@@ -21,7 +37,10 @@ const hub = (h: Partial<HubAccount> = {}): HubAccount => ({
   ...h,
 });
 
-const remote = (r: Partial<RemoteConnection> & Pick<RemoteConnection, "connector" | "service">): RemoteConnection => ({
+const remote = (
+  r: Partial<RemoteConnection> &
+    Pick<RemoteConnection, "connector" | "service">,
+): RemoteConnection => ({
   key: "default",
   name: r.service,
   site: null,
@@ -47,7 +66,11 @@ const conn = (c: Partial<Connection> = {}): Connection => ({
   ...c,
 });
 
-const service = (id: string, name: string, connections: Connection[] = []): Connector => ({
+const service = (
+  id: string,
+  name: string,
+  connections: Connection[] = [],
+): Connector => ({
   id,
   name,
   about: "",
@@ -82,17 +105,39 @@ const METABASE = remote({
   service: "Metabase",
   site: "https://metabase.acme.example",
 });
-const LOCAL = [service("jira", "Jira"), service("github", "GitHub"), service("datadog", "Datadog"), service("metabase", "Metabase")];
+/** A hub's answer: `connections`, and the sign-ins it can't copy. */
+const listing =
+  (
+    connections: RemoteConnection[],
+    signInOnly: RemoteList["signInOnly"] = [],
+  ) =>
+  async (): Promise<RemoteList> => ({ connections, signInOnly });
+
+const LOCAL = [
+  service("jira", "Jira"),
+  service("github", "GitHub"),
+  service("datadog", "Datadog"),
+  service("metabase", "Metabase"),
+];
 
 describe("what a paired hub offers", () => {
   it("comes only from another hub, never this computer's or a machine's", () => {
-    expect(sources([hub(), hub({ id: "local", local: true }), hub({ id: "machine:devbox", machine: "devbox" })]).map((h) => h.id)).toEqual([
-      "patchwork",
-    ]);
+    expect(
+      sources([
+        hub(),
+        hub({ id: "local", local: true }),
+        hub({ id: "machine:devbox", machine: "devbox" }),
+      ]).map((h) => h.id),
+    ).toEqual(["patchwork"]);
   });
 
   it("is each connection not here yet, and none this hub doesn't connect", () => {
-    const offer = offerOf("patchwork", [JIRA, GITHUB, remote({ connector: "notion", service: "Notion" })], [], LOCAL);
+    const offer = offerOf(
+      "patchwork",
+      [JIRA, GITHUB, remote({ connector: "notion", service: "Notion" })],
+      [],
+      LOCAL,
+    );
     expect(offer.map((i) => [i.connector, i.state])).toEqual([
       ["jira", "new"],
       ["github", "new"],
@@ -102,11 +147,18 @@ describe("what a paired hub offers", () => {
   it("leaves out one the person connected here by hand, by its site or account", () => {
     const local = [
       service("jira", "Jira", [conn({ site: "https://acme.atlassian.net/" })]),
-      service("metabase", "Metabase", [conn({ site: "metabase.acme.example" })]),
+      service("metabase", "Metabase", [
+        conn({ site: "metabase.acme.example" }),
+      ]),
       service("github", "GitHub", [conn({ account: "ann" })]),
       service("datadog", "Datadog", [conn({ site: "us1" })]),
     ];
-    const offer = offerOf("patchwork", [JIRA, METABASE, GITHUB, DATADOG], [], local);
+    const offer = offerOf(
+      "patchwork",
+      [JIRA, METABASE, GITHUB, DATADOG],
+      [],
+      local,
+    );
     expect(offer.map((i) => i.connector)).toEqual(["datadog"]);
   });
 
@@ -120,23 +172,46 @@ describe("what a paired hub offers", () => {
       connectedAt: "2026-11-01T00:00:05Z",
     };
     const local = [
-      service("jira", "Jira", [conn({ id: "all~~acme", name: "Acme", site: "acme.atlassian.net", connectedAt: "2026-11-01T00:00:05Z" })]),
+      service("jira", "Jira", [
+        conn({
+          id: "all~~acme",
+          name: "Acme",
+          site: "acme.atlassian.net",
+          connectedAt: "2026-11-01T00:00:05Z",
+        }),
+      ]),
     ];
     expect(offerOf("patchwork", [JIRA], [record], local)).toEqual([]);
     const changed = { ...JIRA, updatedAt: "2026-11-10T00:00:00Z" };
-    expect(offerOf("patchwork", [changed], [record], local)).toEqual([{ ...changed, state: "newer", into: "all~~acme", localName: "Acme" }]);
+    expect(offerOf("patchwork", [changed], [record], local)).toEqual([
+      { ...changed, state: "newer", into: "all~~acme", localName: "Acme" },
+    ]);
     // Another hub's copy isn't this one's.
     expect(offerOf("driftwerk", [changed], [record], local)).toEqual([]);
     // The copy removed here: offered anew, unless one by hand stands in for it.
-    expect(offerOf("patchwork", [changed], [record], [service("jira", "Jira")]).map((i) => i.state)).toEqual(["new"]);
+    expect(
+      offerOf("patchwork", [changed], [record], [service("jira", "Jira")]).map(
+        (i) => i.state,
+      ),
+    ).toEqual(["new"]);
     // Kept again here by hand since, under the same id: no longer the copy,
     // and never written over.
-    const byHand = [service("jira", "Jira", [conn({ id: "all~~acme", site: "acme.atlassian.net", connectedAt: "2026-11-12T00:00:00Z" })])];
+    const byHand = [
+      service("jira", "Jira", [
+        conn({
+          id: "all~~acme",
+          site: "acme.atlassian.net",
+          connectedAt: "2026-11-12T00:00:00Z",
+        }),
+      ]),
+    ];
     expect(offerOf("patchwork", [changed], [record], byHand)).toEqual([]);
   });
 });
 
-const fakeNative = (over: Partial<CopyNative> = {}): CopyNative & { take: ReturnType<typeof vi.fn> } =>
+const fakeNative = (
+  over: Partial<CopyNative> = {},
+): CopyNative & { take: ReturnType<typeof vi.fn> } =>
   ({
     kept: vi.fn(async () => []),
     take: vi.fn(async () => ({ kind: "done" as const, results: [] })),
@@ -168,14 +243,26 @@ describe("Settings → Connections' offer", () => {
     });
     const reload = vi.fn(async () => {});
     await act(async () => {
-      render(<CopyOffers local={LOCAL} reload={reload} hubs={[hub()]} copier={copier} list={async () => [JIRA, GITHUB, DATADOG, METABASE]} />);
+      render(
+        <CopyOffers
+          local={LOCAL}
+          reload={reload}
+          hubs={[hub()]}
+          copier={copier}
+          list={listing([JIRA, GITHUB, DATADOG, METABASE])}
+        />,
+      );
     });
     expect(
       screen.getByRole("heading", {
         name: "Patchwork has 4 of your connections",
       }),
     ).toBeTruthy();
-    expect(screen.getByText(/Jira, GitHub, Datadog and Metabase/)).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Jira (acme.atlassian.net) · GitHub — account ‘Acme’ · Datadog (us5) · Metabase (metabase.acme.example)",
+      ),
+    ).toBeTruthy();
     fireEvent.click(screen.getByRole("checkbox", { name: /GitHub/ }));
     fireEvent.click(screen.getByRole("checkbox", { name: /Metabase/ }));
     await act(async () => {
@@ -185,8 +272,14 @@ describe("Settings → Connections' offer", () => {
       { connector: "jira", key: "default" },
       { connector: "datadog", key: "default" },
     ]);
-    expect(screen.getByText("Saved · signed in as ann@acme.example")).toBeTruthy();
-    expect(screen.getByText("Datadog said the application key is wrong. Nothing was saved.")).toBeTruthy();
+    expect(
+      screen.getByText("Saved · signed in as ann@acme.example"),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Datadog said the application key is wrong. Nothing was saved.",
+      ),
+    ).toBeTruthy();
     expect(reload).toHaveBeenCalled();
   });
 
@@ -200,32 +293,74 @@ describe("Settings → Connections' offer", () => {
       connectedAt: "2026-10-01T00:00:05Z",
     };
     const copier = fakeNative({ kept: vi.fn(async () => [record]) });
-    const local = [service("jira", "Jira", [conn({ id: "all~~acme", name: "Acme", connectedAt: "2026-10-01T00:00:05Z" })])];
+    const local = [
+      service("jira", "Jira", [
+        conn({
+          id: "all~~acme",
+          name: "Acme",
+          connectedAt: "2026-10-01T00:00:05Z",
+        }),
+      ]),
+    ];
     await act(async () => {
-      render(<CopyOffers local={local} reload={async () => {}} hubs={[hub()]} copier={copier} list={async () => [JIRA]} />);
+      render(
+        <CopyOffers
+          local={local}
+          reload={async () => {}}
+          hubs={[hub()]}
+          copier={copier}
+          list={listing([JIRA])}
+        />,
+      );
     });
     expect(screen.getByText("Patchwork has a newer Jira key")).toBeTruthy();
     expect(copier.take).not.toHaveBeenCalled();
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Use it" }));
     });
-    expect(copier.take).toHaveBeenCalledWith("patchwork", [{ connector: "jira", key: "default", into: "all~~acme" }]);
+    expect(copier.take).toHaveBeenCalledWith("patchwork", [
+      { connector: "jira", key: "default", into: "all~~acme" },
+    ]);
   });
 
   it("shows nothing when the hub offers nothing, and Not now puts an offer away", async () => {
     await act(async () => {
-      render(<CopyOffers local={LOCAL} reload={async () => {}} hubs={[hub()]} copier={fakeNative()} list={async () => null} />);
+      render(
+        <CopyOffers
+          local={LOCAL}
+          reload={async () => {}}
+          hubs={[hub()]}
+          copier={fakeNative()}
+          list={async () => null}
+        />,
+      );
     });
     expect(screen.queryByRole("region")).toBeNull();
     cleanup();
     await act(async () => {
-      render(<CopyOffers local={LOCAL} reload={async () => {}} hubs={[hub()]} copier={fakeNative()} list={async () => [JIRA]} />);
+      render(
+        <CopyOffers
+          local={LOCAL}
+          reload={async () => {}}
+          hubs={[hub()]}
+          copier={fakeNative()}
+          list={listing([JIRA])}
+        />,
+      );
     });
     fireEvent.click(screen.getByRole("button", { name: "Not now" }));
     expect(screen.queryByText(/Patchwork has/)).toBeNull();
     cleanup();
     await act(async () => {
-      render(<CopyOffers local={LOCAL} reload={async () => {}} hubs={[hub()]} copier={fakeNative()} list={async () => [JIRA]} />);
+      render(
+        <CopyOffers
+          local={LOCAL}
+          reload={async () => {}}
+          hubs={[hub()]}
+          copier={fakeNative()}
+          list={listing([JIRA])}
+        />,
+      );
     });
     expect(screen.queryByText(/Patchwork has/)).toBeNull();
   });
@@ -239,11 +374,228 @@ describe("Settings → Connections' offer", () => {
       })),
     });
     await act(async () => {
-      render(<CopyOffers local={LOCAL} reload={async () => {}} hubs={[hub()]} copier={copier} list={async () => [JIRA]} />);
+      render(
+        <CopyOffers
+          local={LOCAL}
+          reload={async () => {}}
+          hubs={[hub()]}
+          copier={copier}
+          list={listing([JIRA])}
+        />,
+      );
     });
     await act(async () => {
       fireEvent.click(screen.getByRole("button", { name: "Set it up here" }));
     });
-    expect(screen.getByRole("alert").textContent).toContain("turned off copying");
+    expect(screen.getByRole("alert").textContent).toContain(
+      "turned off copying",
+    );
+  });
+});
+
+// ── Both of the person's own tiers there ───────────────────────────────────
+
+const ALLAN = { tier: "agent_per_user", agent: "allan", agentName: "Allan" };
+const linear = (key: string, extra: Partial<RemoteConnection> = {}) =>
+  remote({
+    connector: "linear",
+    service: "Linear",
+    key,
+    name: key,
+    ...ALLAN,
+    ...extra,
+  });
+const DRIFTWERK_LOCAL = [
+  service("linear", "Linear"),
+  service("email", "Email"),
+  service("metabase", "Metabase"),
+  service("jira", "Jira"),
+];
+
+describe("a hub's keys through its agents", () => {
+  it("are said by service, labelled as workspaces and sites, and through which agent", () => {
+    expect(
+      serviceLine([
+        linear("driftwerk"),
+        linear("mantiscrm"),
+        linear("petmobile"),
+      ]),
+    ).toBe("Linear — driftwerk, mantiscrm, petmobile workspaces");
+    expect(serviceLine([linear("driftwerk")])).toBe(
+      "Linear — workspace ‘driftwerk’",
+    );
+    expect(
+      serviceLine([
+        remote({
+          connector: "jira",
+          service: "Jira",
+          site: "https://patchwork.atlassian.net/",
+        }),
+      ]),
+    ).toBe("Jira (patchwork.atlassian.net)");
+    expect(
+      serviceLine([
+        remote({
+          connector: "email",
+          service: "Email",
+          account: "ann@acme.example",
+        }),
+      ]),
+    ).toBe("Email (ann@acme.example)");
+    expect(placeOf(linear("driftwerk"))).toBe("workspace ‘driftwerk’");
+    expect(
+      offerLines("Driftwerk", [
+        linear("driftwerk"),
+        remote({
+          connector: "jira",
+          service: "Jira",
+          site: "acme.atlassian.net",
+        }),
+        linear("mantiscrm"),
+        remote({ connector: "email", service: "Email", ...ALLAN }),
+      ]),
+    ).toEqual([
+      { from: "Driftwerk", services: ["Jira (acme.atlassian.net)"] },
+      {
+        from: "Driftwerk (through Allan)",
+        services: ["Linear — driftwerk, mantiscrm workspaces", "Email"],
+      },
+    ]);
+  });
+
+  it("are each their own beside a personal one of the same service and key", () => {
+    const personal = remote({
+      connector: "linear",
+      service: "Linear",
+      key: "acme",
+      name: "acme",
+    });
+    const through = linear("acme");
+    const record: CopyRecord = {
+      hub: "driftwerk",
+      connector: "linear",
+      remoteKey: "acme",
+      connection: "all~~acme",
+      updatedAt: "2026-11-01T00:00:00Z",
+      connectedAt: "2026-11-01T00:00:05Z",
+    };
+    const local = [
+      service("linear", "Linear", [
+        conn({
+          id: "all~~acme",
+          name: "acme",
+          connectedAt: "2026-11-01T00:00:05Z",
+        }),
+      ]),
+    ];
+    const newer = { updatedAt: "2026-11-10T00:00:00Z" };
+    // The personal one's copy is no copy of Allan's: Allan's newer key isn't offered over it.
+    expect(
+      offerOf("driftwerk", [{ ...through, ...newer }], [record], local).map(
+        (i) => i.state,
+      ),
+    ).toEqual([]);
+    expect(
+      offerOf("driftwerk", [{ ...personal, ...newer }], [record], local).map(
+        (i) => i.state,
+      ),
+    ).toEqual(["newer"]);
+    expect(
+      offerOf(
+        "driftwerk",
+        [{ ...through, ...newer }],
+        [{ ...record, agent: "allan" }],
+        local,
+      ).map((i) => i.state),
+    ).toEqual(["newer"]);
+  });
+
+  it("offers each Linear workspace not here by its name, not hidden by another one here", () => {
+    const local = [
+      service("linear", "Linear", [
+        conn({ name: "driftwerk", account: "Driftwerk" }),
+      ]),
+    ];
+    expect(
+      offerOf(
+        "driftwerk",
+        [linear("driftwerk"), linear("mantiscrm")],
+        [],
+        local,
+      ).map((i) => i.key),
+    ).toEqual(["mantiscrm"]);
+  });
+
+  it("make one card per hub, a line per tier, Google said once, and are taken from their tier", async () => {
+    const copier = fakeNative();
+    const connections = [
+      linear("driftwerk"),
+      linear("mantiscrm"),
+      linear("petmobile"),
+      remote({
+        connector: "email",
+        service: "Email",
+        account: "ann@driftwerk.example",
+        ...ALLAN,
+      }),
+      remote({
+        connector: "metabase",
+        service: "Metabase",
+        site: "https://mb.driftwerk.example",
+        ...ALLAN,
+      }),
+    ];
+    await act(async () => {
+      render(
+        <CopyOffers
+          local={DRIFTWERK_LOCAL}
+          reload={async () => {}}
+          hubs={[hub({ id: "driftwerk", label: "Driftwerk" })]}
+          copier={copier}
+          list={listing(connections, [
+            { connector: "google", service: "Google" },
+          ])}
+        />,
+      );
+    });
+    expect(screen.getAllByRole("region")).toHaveLength(1);
+    expect(screen.getByText("Driftwerk (through Allan):")).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Linear — driftwerk, mantiscrm, petmobile workspaces · Email (ann@driftwerk.example) · Metabase (mb.driftwerk.example)",
+      ),
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Google: sign in from Desk; a hub’s Google sign-in can’t be copied.",
+      ),
+    ).toBeTruthy();
+    expect(screen.getAllByText("through Allan")).toHaveLength(5);
+    fireEvent.click(screen.getByRole("checkbox", { name: /petmobile/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Email/ }));
+    fireEvent.click(screen.getByRole("checkbox", { name: /Metabase/ }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Set up 2 here" }));
+    });
+    expect(copier.take).toHaveBeenCalledWith("driftwerk", [
+      { connector: "linear", key: "driftwerk", agent: "allan" },
+      { connector: "linear", key: "mantiscrm", agent: "allan" },
+    ]);
+  });
+
+  it("leaves Google unsaid when it's connected here", async () => {
+    const local = [...DRIFTWERK_LOCAL, service("google", "Google", [conn()])];
+    await act(async () => {
+      render(
+        <CopyOffers
+          local={local}
+          reload={async () => {}}
+          hubs={[hub()]}
+          copier={fakeNative()}
+          list={listing([JIRA], [{ connector: "google", service: "Google" }])}
+        />,
+      );
+    });
+    expect(screen.queryByText(/Google: sign in/)).toBeNull();
   });
 });

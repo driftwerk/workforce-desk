@@ -10,6 +10,11 @@
 //! with its service's own test call and keeps it in Desk's vault, or keeps
 //! nothing. No value reaches the page, a log, an error or a file here.
 //!
+//! A pick names the tier it is kept in there: the person's personal one
+//! (no `agent`), or theirs through an agent (`agent`), and is matched to the
+//! hub's answer by both, so two of one service and key in two tiers never
+//! cross.
+//!
 //! What was copied from where is kept in `key-copies.json` (no values), so
 //! that a key changed there later is offered as newer, never written over
 //! silently, and only over the connection it was copied into.
@@ -35,6 +40,9 @@ pub const MAX_PICKS: usize = 12;
 pub struct Pick {
     pub connector: String,
     pub key: String,
+    /// The agent it is kept through there; none: the personal tier.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub into: Option<String>,
 }
@@ -48,6 +56,7 @@ pub enum Copied {
     Saved {
         connector: String,
         key: String,
+        agent: Option<String>,
         connection: String,
         name: String,
         account: Option<String>,
@@ -57,11 +66,16 @@ pub enum Copied {
     Failed {
         connector: String,
         key: String,
+        agent: Option<String>,
         error: String,
     },
     /// The paired hub holds it no more.
     #[serde(rename_all = "camelCase")]
-    Missing { connector: String, key: String },
+    Missing {
+        connector: String,
+        key: String,
+        agent: Option<String>,
+    },
 }
 
 /// What a press did.
@@ -86,6 +100,10 @@ pub struct Record {
     pub hub: String,
     pub connector: String,
     pub remote_key: String,
+    /// The agent it was copied through there; none: the personal tier (and
+    /// every record from before tiers were said).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent: Option<String>,
     /// The connection's id on this computer's hub.
     pub connection: String,
     /// When the copied key last changed there, as it said.
@@ -116,7 +134,10 @@ fn write(paths: &Paths, records: &[Record]) -> Result<(), String> {
 /// `records` with `r` in place of the one copied from the same place.
 fn upsert(records: &mut Vec<Record>, r: Record) {
     records.retain(|x| {
-        !(x.hub == r.hub && x.connector == r.connector && x.remote_key == r.remote_key)
+        !(x.hub == r.hub
+            && x.connector == r.connector
+            && x.remote_key == r.remote_key
+            && x.agent == r.agent)
     });
     records.push(r);
 }
@@ -139,6 +160,7 @@ fn refuse_picks(picks: &[Pick]) -> Option<String> {
         .any(|p| {
             !plain_id(&p.connector)
                 || !plain_id(&p.key)
+                || p.agent.as_deref().is_some_and(|a| !plain_id(a))
                 || p.into.as_deref().is_some_and(|i| !plain_id(i))
         })
         .then(|| "That isn't a connection Desk can copy.".to_string())
@@ -156,14 +178,15 @@ fn scrub(text: &str, fields: &BTreeMap<String, Zeroizing<String>>) -> String {
 struct Copy {
     connector: String,
     key: String,
+    agent: Option<String>,
     name: String,
     service: String,
     updated_at: Option<String>,
     fields: BTreeMap<String, Zeroizing<String>>,
 }
 
-/// The connections a paired hub no longer holds: (connector, key).
-type Missing = Vec<(String, String)>;
+/// The connections a paired hub no longer holds: (connector, key, agent).
+type Missing = Vec<(String, String, Option<String>)>;
 
 /// The copies and the missing in the paired hub's answer, its values held
 /// in memory that is cleared when dropped.
@@ -178,6 +201,7 @@ fn copies_of(body: &[u8]) -> Option<(Vec<Copy>, Missing)> {
             Some(Copy {
                 connector: s(c, "connector")?,
                 key: s(c, "key")?,
+                agent: s(c, "agent"),
                 name: s(c, "name").unwrap_or_default(),
                 service: s(c, "service").unwrap_or_default(),
                 updated_at: s(c, "updatedAt"),
@@ -195,7 +219,7 @@ fn copies_of(body: &[u8]) -> Option<(Vec<Copy>, Missing)> {
         .and_then(|m| m.as_array())
         .map(|m| {
             m.iter()
-                .filter_map(|p| Some((s(p, "connector")?, s(p, "key")?)))
+                .filter_map(|p| Some((s(p, "connector")?, s(p, "key")?, s(p, "agent"))))
                 .collect()
         })
         .unwrap_or_default();
@@ -279,6 +303,7 @@ pub async fn take(
                 r.hub == remote
                     && r.connector == p.connector
                     && r.remote_key == p.key
+                    && r.agent == p.agent
                     && Some(&r.connection) == p.into.as_ref()
                     && r.connected_at.is_some()
                     && here.get(&(r.connector.clone(), r.connection.clone()))
@@ -293,7 +318,12 @@ pub async fn take(
     }
     let ask: Vec<serde_json::Value> = picks
         .iter()
-        .map(|p| serde_json::json!({ "connector": p.connector, "key": p.key }))
+        .map(|p| match &p.agent {
+            Some(agent) => {
+                serde_json::json!({ "connector": p.connector, "key": p.key, "agent": agent })
+            }
+            None => serde_json::json!({ "connector": p.connector, "key": p.key }),
+        })
         .collect();
     let ask = serde_json::to_vec(&serde_json::json!({ "connections": ask }))
         .map_err(|e| e.to_string())?;
@@ -322,9 +352,11 @@ pub async fn take(
     drop(body);
     let mut results = Vec::new();
     for copy in copies {
+        // Its own tier's pick alone: an older hub, which says no agent,
+        // answers only the personal ones.
         let Some(pick) = picks
             .iter()
-            .find(|p| p.connector == copy.connector && p.key == copy.key)
+            .find(|p| p.connector == copy.connector && p.key == copy.key && p.agent == copy.agent)
         else {
             continue;
         };
@@ -349,6 +381,7 @@ pub async fn take(
         let failed = |error: String| Copied::Failed {
             connector: copy.connector.clone(),
             key: copy.key.clone(),
+            agent: copy.agent.clone(),
             error: scrub(&error, &copy.fields),
         };
         let result = match kept {
@@ -369,6 +402,7 @@ pub async fn take(
                                 hub: remote.to_string(),
                                 connector: copy.connector.clone(),
                                 remote_key: copy.key.clone(),
+                                agent: copy.agent.clone(),
                                 connection: connection.clone(),
                                 updated_at: copy.updated_at.clone(),
                                 connected_at: s("connectedAt"),
@@ -377,6 +411,7 @@ pub async fn take(
                         Copied::Saved {
                             connector: copy.connector.clone(),
                             key: copy.key.clone(),
+                            agent: copy.agent.clone(),
                             connection,
                             name: s("name").unwrap_or_else(|| copy.name.clone()),
                             account: s("account"),
@@ -393,8 +428,12 @@ pub async fn take(
         };
         results.push(result);
     }
-    for (connector, key) in missing {
-        results.push(Copied::Missing { connector, key });
+    for (connector, key, agent) in missing {
+        results.push(Copied::Missing {
+            connector,
+            key,
+            agent,
+        });
     }
     let saved = results
         .iter()
@@ -443,6 +482,7 @@ mod tests {
         Pick {
             connector: connector.into(),
             key: key.into(),
+            agent: None,
             into: None,
         }
     }
@@ -469,7 +509,7 @@ mod tests {
         let body = br#"{"copies":[{"connector":"jira","service":"Jira","key":"default","name":"Jira","updatedAt":"2026-11-01T00:00:00Z","fields":{"api_token":"not-a-real-value","site":"acme.atlassian.net"}}],"missing":[{"connector":"github","key":"acme"}]}"#;
         let (copies, missing) = copies_of(body).unwrap();
         assert_eq!(copies.len(), 1);
-        assert_eq!(missing, [("github".to_string(), "acme".to_string())]);
+        assert_eq!(missing, [("github".to_string(), "acme".to_string(), None)]);
         let said = scrub("Jira said not-a-real-value is wrong", &copies[0].fields);
         assert_eq!(said, "Jira said [secret] is wrong");
         // A connection named only by its service is named here as by hand.
@@ -495,6 +535,7 @@ mod tests {
             hub: "patchwork".into(),
             connector: "jira".into(),
             remote_key: "default".into(),
+            agent: None,
             connection: connection.into(),
             updated_at: None,
             connected_at: Some("2026-11-01T00:00:00Z".into()),
@@ -519,5 +560,56 @@ mod tests {
         );
         assert_eq!(times[&("jira".to_string(), "all~~old".to_string())], None);
         assert!(connected_times(b"not json").is_empty());
+    }
+
+    #[test]
+    fn a_pick_through_an_agent_is_its_own_and_its_agent_a_plain_id() {
+        let mut through = pick("linear", "default");
+        through.agent = Some("allan".into());
+        assert!(refuse_picks(&[through.clone(), pick("linear", "default")]).is_none());
+        for bad in ["../x", "a/b", "", "a b"] {
+            through.agent = Some(bad.into());
+            assert!(refuse_picks(&[through.clone()]).is_some(), "{bad}");
+        }
+        let body = br#"{"copies":[{"connector":"linear","key":"default","agent":"allan","fields":{"api_key":"not-a-real-value"}},{"connector":"linear","key":"default","fields":{"api_key":"not-a-real-value-2"}}],"missing":[{"connector":"jira","key":"acme","agent":"allan"}]}"#;
+        let (copies, missing) = copies_of(body).unwrap();
+        assert_eq!(copies[0].agent.as_deref(), Some("allan"));
+        assert_eq!(copies[1].agent, None);
+        assert_eq!(
+            missing,
+            [(
+                "jira".to_string(),
+                "acme".to_string(),
+                Some("allan".to_string())
+            )]
+        );
+    }
+
+    #[test]
+    fn a_record_through_an_agent_is_kept_beside_the_personal_one() {
+        let r = |agent: Option<&str>, connection: &str| Record {
+            hub: "driftwerk".into(),
+            connector: "linear".into(),
+            remote_key: "default".into(),
+            agent: agent.map(str::to_string),
+            connection: connection.into(),
+            updated_at: None,
+            connected_at: None,
+        };
+        let mut records = vec![r(None, "all~~default")];
+        upsert(&mut records, r(Some("allan"), "all~~driftwerk"));
+        assert_eq!(records.len(), 2);
+        upsert(&mut records, r(Some("allan"), "all~~again"));
+        assert_eq!(
+            records,
+            [r(None, "all~~default"), r(Some("allan"), "all~~again")]
+        );
+        // A record from before tiers were said is the personal one's.
+        let old: Vec<Record> = serde_json::from_str(
+            r#"[{"hub":"driftwerk","connector":"linear","remoteKey":"default","connection":"all~~default","updatedAt":null}]"#,
+        )
+        .unwrap();
+        assert_eq!(old[0].agent, None);
+        assert!(!serde_json::to_string(&old[0]).unwrap().contains("agent"));
     }
 }
