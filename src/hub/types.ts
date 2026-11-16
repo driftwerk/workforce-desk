@@ -1214,6 +1214,51 @@ export interface MentionedUpdate {
   /** The finished sessions it closed, would close, or left open for work
    *  still in them (a newer hub): one line each. */
   closed?: ClosedLine[];
+  /** Each piece of work, said as a teammate says it (a newer hub): shown in
+   *  place of the sessions and the brief. */
+  said?: Said[];
+  /** A roundup (a newer hub): what happened since the last, by section. */
+  roundup?: Roundup | null;
+}
+
+/** Which of the five kinds of news an item is: where the cadence sends it. */
+export type EventKind = "needs_you" | "problem" | "finished" | "progress" | "routine";
+
+/** The session an item links to; a closed one opens read-only, with Resume. */
+export interface SessionLink {
+  sessionId: string;
+  name: string;
+  closed?: boolean;
+}
+
+/** One thing an update says: a headline sentence, one or two more, the ids
+ *  in brackets after, what wasn't checked, its session, and what the boss
+ *  did about it (folded). */
+export interface Said {
+  kind?: EventKind;
+  headline: string;
+  body?: string;
+  ids?: string[];
+  notChecked?: string | null;
+  session?: SessionLink | null;
+  did?: BriefItem[];
+  at?: string | null;
+}
+
+export type RoundupSectionKey = "upToYou" | "decided" | "finished" | "worthKnowing" | "stillGoing";
+
+export interface RoundupSection {
+  key: RoundupSectionKey;
+  title: string;
+  lines: Said[];
+}
+
+/** What happened since the last roundup, by what it means to you; how many
+ *  routine things it left out. */
+export interface Roundup {
+  since: string;
+  sections: RoundupSection[];
+  routine?: number;
 }
 
 /** One line of an update about finished sessions: "Closed 3 finished

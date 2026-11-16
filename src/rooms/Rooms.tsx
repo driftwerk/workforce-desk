@@ -1,3 +1,4 @@
+import { UpdatesCard } from "../crew/Updates";
 import { toShow } from "../chat/conversation";
 import { SetupInDm } from "../setup/slot";
 import { formAnswer } from "../chat/forms";
@@ -635,6 +636,8 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
             )}
           </div>
           {searching && <SearchResults s={search} name={agent.name} onPick={pick} />}
+          {/* How the boss tells you things, beside its chat. */}
+          {overseeing && !searching && !inPane && <UpdatesCard agent={agent} />}
           </div>
           {editNote && (
             <p className="composer-note small" role="status">
