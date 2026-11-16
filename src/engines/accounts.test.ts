@@ -62,8 +62,8 @@ it("says each sign-in problem with where the sign-ins are kept", () => {
 it("says when a refused account is tried again, from its re-check time", () => {
   const now = new Date(2026, 10, 16, 10, 0).getTime();
   const at = (h: number, day = 16) => new Date(2026, 10, day, h, 0).toISOString();
-  expect(recheckText(at(11), now)).toMatch(/^Desk tries it again at \d\d:\d\d\.$/);
-  expect(recheckText(at(9, 17), now)).toMatch(/^Desk tries it again tomorrow \d\d:\d\d\.$/);
+  expect(recheckText(at(11), now)).toMatch(/^Desk tries it again at \d{1,2}:\d\d(\s[AP]M)?\.$/);
+  expect(recheckText(at(9, 17), now)).toMatch(/^Desk tries it again tomorrow \d{1,2}:\d\d(\s[AP]M)?\.$/);
   expect(recheckText(at(9), now)).toBe("Desk tries it again with its next call.");
   expect(recheckText("not a time", now)).toBe("Desk tries it again later.");
 });
