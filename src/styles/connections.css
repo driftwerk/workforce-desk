@@ -463,6 +463,25 @@
 .copy-lead {
   color: var(--signal-soft-text);
 }
+/* Where the offer's keys are kept there, a line per tier: the hub's own
+   for the person, then each agent's. */
+.copy-froms {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.copy-from b {
+  font-weight: 650;
+}
+.copy-from-sign-in {
+  color: var(--signal-soft-text);
+  font-size: 12px;
+}
 .copy-picks {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr));
@@ -501,6 +520,10 @@
   font-size: 11.5px;
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+.copy-through {
+  font-size: 11.5px;
+  color: var(--signal-soft-text);
 }
 .copy-res {
   font-size: 12px;
