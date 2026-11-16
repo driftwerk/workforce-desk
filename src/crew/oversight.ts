@@ -87,6 +87,10 @@ export interface Work {
   engine: string;
   /** Its turns for its sessions' turn ends, in any hour. */
   maxTurnsPerHour: number;
+  /** It closes the sessions it started once their work is done (and, at
+   *  Act fully, those you handed it): never with uncommitted or unpushed
+   *  work, nor one you're in. */
+  closeFinished: boolean;
 }
 
 /** The most sessions it may run at once, as the hub allows. */
@@ -123,7 +127,7 @@ export const DEFAULT_OVERSIGHT: Oversight = {
     handOff: false,
     setMode: false,
   },
-  work: { preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", maxTurnsPerHour: 60 },
+  work: { preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", maxTurnsPerHour: 60, closeFinished: true },
   full: { anywhere: false, repos: [], workflows: [], budgetUsdPerDay: null, budgetClearedAt: null },
 };
 
@@ -212,6 +216,7 @@ export const oversightOf = (source: string): Oversight => {
       takeOn: work.take_on === "handed" || work.take_on === "all" ? work.take_on : d.work.takeOn,
       engine: typeof work.engine === "string" && ENGINE_WORD.test(work.engine.trim()) ? work.engine.trim() : d.work.engine,
       maxTurnsPerHour: within(work.max_turns_per_hour, 1, MAX_WORK_TURNS_PER_HOUR, d.work.maxTurnsPerHour),
+      closeFinished: bool(work.close_finished, d.work.closeFinished),
     },
     full: {
       anywhere: bool(full.anywhere, d.full.anywhere),
@@ -276,6 +281,7 @@ export const withOversight = (source: string, o: Oversight): string => {
       take_on: o.work.takeOn,
       engine: ENGINE_WORD.test(o.work.engine) ? o.work.engine : DEFAULT_OVERSIGHT.work.engine,
       max_turns_per_hour: Math.min(MAX_WORK_TURNS_PER_HOUR, Math.max(1, Math.round(o.work.maxTurnsPerHour))),
+      close_finished: o.work.closeFinished,
     },
   };
   // Act fully's table: written once anything of it is set, kept as it is

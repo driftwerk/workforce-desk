@@ -1211,6 +1211,31 @@ export interface MentionedUpdate {
   moreItems?: number;
   /** The day's cheap calls, near the ceiling. */
   footer?: string | null;
+  /** The finished sessions it closed, would close, or left open for work
+   *  still in them (a newer hub): one line each. */
+  closed?: ClosedLine[];
+}
+
+/** One line of an update about finished sessions: "Closed 3 finished
+ *  sessions: web, api, docs." */
+export interface ClosedLine {
+  /** Closed (each with its Undo), suggested (its suggestions come with the
+   *  update), or kept open (work not committed or pushed). */
+  kind: "closed" | "suggested" | "keptOpen";
+  text: string;
+  sessions: ClosedSession[];
+}
+
+/** A session a closed line names. */
+export interface ClosedSession {
+  sessionId: string;
+  name: string;
+  /** Why, in a few words. */
+  why?: string | null;
+  /** The decision that closed it; its Undo reopens it. */
+  decisionId?: string | null;
+  undo?: DecisionLine["undo"] | null;
+  suggestionId?: string | null;
 }
 
 /** Where a preference holds: everywhere the boss looks, one sidebar

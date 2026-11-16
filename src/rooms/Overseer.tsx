@@ -21,6 +21,7 @@ import type { DeliveryKind } from "../chat/types";
 import { openLink } from "../shell/links";
 import { plainError } from "../ui/plainError";
 import { Brief } from "./Brief";
+import { ClosedLines } from "./Closed";
 import { DirectivesCard, DirectivesOpenLine } from "../crew/Directives";
 import { useSettledBy } from "./settled";
 import { UNDO_LABEL, useUndo } from "./undo";
@@ -372,12 +373,14 @@ function CatchUp({ away, update }: { away: MentionedAway; update: MentionedUpdat
         <>
           <WaitingAll update={update} />
           <Brief groups={brief} />
+          <ClosedLines lines={update.closed} />
           <More n={update.moreItems} />
         </>
       ) : (
         <>
           <WaitingAll update={update} />
           {(update.decisions ?? []).length > 0 && <WhatIDid decisions={update.decisions!} />}
+          <ClosedLines lines={update.closed} />
         </>
       )}
       {parked.length > 0 && (
@@ -459,6 +462,7 @@ function Update({ update, open }: { update: MentionedUpdate; open?: DirectivesOp
         {update.headline && <p className="upd-line">{update.headline}</p>}
         <WaitingAll update={update} />
         <Brief groups={update.brief} />
+        <ClosedLines lines={update.closed} />
         <More n={update.moreItems} />
         {update.footer && <p className="faint small">{update.footer}</p>}
         {open && <DirectivesOpenLine open={open} />}
@@ -469,6 +473,7 @@ function Update({ update, open }: { update: MentionedUpdate; open?: DirectivesOp
       <Head update={update} />
       <WaitingAll update={update} />
       {(update.decisions ?? []).length > 0 && <WhatIDid decisions={update.decisions!} />}
+      <ClosedLines lines={update.closed} />
       {update.footer && <p className="faint small">{update.footer}</p>}
       {open && <DirectivesOpenLine open={open} />}
     </div>

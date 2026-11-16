@@ -701,3 +701,45 @@ describe("always, refused", () => {
     expect(screen.getByRole("button", { name: "Always" })).toBeTruthy();
   });
 });
+
+describe("the finished sessions an update speaks of", () => {
+  const CLOSED: DeskExtras = {
+    update: {
+      headline: "3 closed.",
+      brief: [],
+      closed: [
+        {
+          kind: "closed",
+          text: "Closed 3 finished sessions: web, api, docs.",
+          sessions: [
+            { sessionId: "s1", name: "web", why: "its PR #12 merged", decisionId: "c1", undo: "undo" },
+            { sessionId: "s2", name: "api", why: "its ticket is done", decisionId: "c2", undo: "undo" },
+            { sessionId: "s3", name: "docs", why: null, decisionId: "c3", undo: null },
+          ],
+        },
+        {
+          kind: "keptOpen",
+          text: "Left 1 finished session open: billing (2 commits not pushed).",
+          sessions: [{ sessionId: "s4", name: "billing", why: "2 commits not pushed" }],
+        },
+      ],
+    },
+  };
+
+  it("are one line of what it closed, each name with an Undo that reopens it, and one of what it left open", async () => {
+    const { container } = show(said("3 closed.", CLOSED, "update"));
+    const rows = [...container.querySelectorAll(".closed-lines .brief-row")].map((r) => r.querySelector(".brief-text")!.textContent);
+    expect(rows).toEqual(["Closed 3 finished sessions: webUndo, apiUndo, docs.", "Left 1 finished session open: billing (2 commits not pushed)."]);
+    // One with no conversation to resume has no Undo.
+    expect(screen.queryByRole("button", { name: "Undo: closed docs" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Undo: closed web" }));
+    await waitFor(() => expect(asked).toContainEqual({ method: "POST", path: "/api/desk/decisions/c1/undo", body: undefined }));
+    expect(await screen.findByText("reopened")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Undo: closed web" })).toBeNull();
+  });
+
+  it("are said by an older update's layout too, after what it did", () => {
+    const { container } = show(said("…", { update: { ...UPDATE.update, closed: CLOSED.update!.closed } }, "update"));
+    expect(container.querySelector(".closed-lines")?.textContent).toContain("Closed 3 finished sessions:");
+  });
+});

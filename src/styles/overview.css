@@ -1290,6 +1290,11 @@ a.ref {
 .brief-why {
   color: var(--faint);
 }
+.link.closed-undo {
+  margin-left: 6px;
+  font-size: 12px;
+  color: var(--faint);
+}
 .link.brief-more {
   margin-left: 8px;
   font-size: 12px;

@@ -430,6 +430,8 @@ describe("Oversees the crew", () => {
     show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "act"\n`);
     expect(screen.getByRole("heading", { name: "How Ledger works" })).toBeTruthy();
     expect((screen.getByRole("checkbox", { name: /Always work in real sessions/ }) as HTMLInputElement).checked).toBe(true);
+    // On unless you turn it off.
+    expect((screen.getByRole("checkbox", { name: /Close sessions I started when their work is done/ }) as HTMLInputElement).checked).toBe(true);
     expect(screen.getByRole("radio", { name: /Only what I hand it/ }).getAttribute("aria-checked")).toBe("true");
     const parallel = screen.getByRole("textbox", { name: "Sessions at once" }) as HTMLInputElement;
     expect(parallel.value).toBe("4");
@@ -447,12 +449,13 @@ describe("Oversees the crew", () => {
 
     await act(async () => fireEvent.click(screen.getByRole("radio", { name: /Every session it can/ })));
     await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Always work in real sessions/ })));
+    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Close sessions I started when their work is done/ })));
     await act(async () => fireEvent.change(engine, { target: { value: "codex" } }));
     const turns = screen.getByRole("textbox", { name: "Work turns an hour" });
     fireEvent.change(turns, { target: { value: "90" } });
     await act(async () => fireEvent.blur(turns));
     await waitFor(() =>
-      expect(oversight()?.work).toEqual({ prefer_sessions: false, parallel: 6, take_on: "all", engine: "codex", max_turns_per_hour: 90 }),
+      expect(oversight()?.work).toEqual({ prefer_sessions: false, parallel: 6, take_on: "all", engine: "codex", max_turns_per_hour: 90, close_finished: false }),
     );
     expect(file).toContain("[oversight.work]");
   });
