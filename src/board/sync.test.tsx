@@ -582,6 +582,55 @@ describe("the link dialog", () => {
     expect(screen.queryByLabelText("Your Linear member id")).toBeNull();
   });
 
+  it("asks which Linear workspace first where you have several there, lists its teams, and keeps it with the link", async () => {
+    const WS = ["driftwerk", "mantiscrm", "petmobile"];
+    native.route = (hub, method, path, body) => {
+      if (hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "linear") {
+        const ws = body.workspace as string | undefined;
+        if (!ws) return { status: 200, body: { offered: true, workspaces: WS, workspace: null, workspaceWhy: "Pick which Linear workspace: driftwerk, mantiscrm or petmobile" } };
+        if (!body.target) return { status: 200, body: { offered: true, workspaces: WS, workspace: ws, teams: ws === "mantiscrm" ? [{ id: "8a7b-man", key: "MAN", name: "Mantis" }] : [{ id: "8a7b-dri", key: "DRI", name: "Driftwerk" }] } };
+        return { status: 200, body: { offered: true, workspaces: WS, workspace: ws, states: ["Todo", "Done"], prefill: { todo: "Todo", done: "Done" }, me: { id: "u1", name: "Sam" }, ...(body.filter ? { matches: 4, matchesAtLeast: false } : {}) } };
+      }
+      return localRoutes(method, path, body);
+    };
+    const closed = vi.fn();
+    render(<LinkBoardDialog board={ACME} tickets={0} onClose={closed} />);
+    pickSystem("Linear");
+    await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+    const picker = within(await screen.findByRole("radiogroup", { name: "Linear workspace" }));
+    expect(picker.getAllByRole("radio").map((r) => r.closest("label")!.querySelector(".move-opt-main > span")!.textContent)).toEqual(WS);
+    // No team until one is picked, and the button says why, plainly.
+    expect(screen.queryByLabelText("Atlas’s Linear team")).toBeNull();
+    expect(document.querySelector(".dialog-foot-note")!.textContent).toBe("Pick which Linear workspace: driftwerk, mantiscrm or petmobile");
+    expect(document.body.textContent).not.toMatch(/'default'/);
+    fireEvent.click(picker.getByRole("radio", { name: /^mantiscrm/ }));
+    const team = await screen.findByLabelText("Atlas’s Linear team");
+    expect(within(team).getByRole("option", { name: "MAN · Mantis" })).toBeTruthy();
+    expect(native.asked.some((a) => a.path === "/api/desk/boards/link/check" && a.body?.workspace === "mantiscrm" && !a.body?.target)).toBe(true);
+    fireEvent.change(team, { target: { value: "8a7b-man" } });
+    await screen.findByText("4 open issues", undefined, { timeout: 2000 });
+    expect(native.asked.some((a) => a.path === "/api/desk/boards/link/check" && a.body?.workspace === "mantiscrm" && a.body?.target === "MAN")).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "Link to MAN" }));
+    await waitFor(() => expect(closed).toHaveBeenCalled());
+    const linked = native.asked.find((a) => a.method === "PUT" && a.path === `/api/desk/boards/${ACME.id}/link`)!;
+    expect(linked.body).toMatchObject({ system: "linear", target: "MAN", targetId: "8a7b-man", workspace: "mantiscrm" });
+  });
+
+  it("shows no workspace picker where you have one there", async () => {
+    native.route = (hub, method, path, body) => {
+      if (hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "linear")
+        return { status: 200, body: { offered: true, workspaces: ["driftwerk"], workspace: "driftwerk", teams: [{ id: "6f1c0a2e-1b2c", key: "ATL", name: "Atlas core" }] } };
+      return localRoutes(method, path, body);
+    };
+    render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
+    pickSystem("Linear");
+    await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+    await screen.findByLabelText("Atlas’s Linear team");
+    expect(screen.queryByRole("radiogroup", { name: "Linear workspace" })).toBeNull();
+  });
+
   it("says by the Link button what it still waits on, first thing first", async () => {
     let matching: { status: number; body: unknown } = { status: 200, body: { offered: true, states: ["Todo", "Done"], matches: 4, matchesAtLeast: false } };
     native.route = (hub, method, path, body) => {
@@ -1080,6 +1129,12 @@ describe("board sync's words and checks", () => {
     const through = { ...ACME, sync: { link: "l", system: "jira", target: "ACME", via: { kind: "hub", hub: "atlas" }, agent: "lattice", person: "p", filter: { kind: "assignedToMe" }, states: {} } } as BoardT;
     expect(linkedTo(through, "Atlas")).toBe("Jira ACME through Lattice on Atlas");
     expect(linkedTo({ ...through, sync: { ...through.sync!, agent: undefined } }, "Atlas")).toBe("Jira ACME via Atlas");
+    const mantis = { ...ACME, sync: { link: "l", system: "linear", target: "MAN", workspace: "mantiscrm", via: { kind: "hub", hub: "driftwerk" }, person: "p", filter: { kind: "all", value: { includeDone: false } }, states: {} } } as BoardT;
+    expect(linkedTo(mantis, "Driftwerk")).toBe("Linear · mantiscrm · MAN via Driftwerk");
+    expect(pausedWords({ kind: "workspace", what: "Linear workspace", names: ["driftwerk", "mantiscrm", "petmobile"] }, "Driftwerk")).toBe(
+      "Paused: you have more than one Linear workspace on Driftwerk (driftwerk, mantiscrm or petmobile), and this link doesn't say which.",
+    );
+    expect(pausedWords({ kind: "workspace", what: "Jira site", asked: "client", names: ["acme"] }, "Atlas")).toBe("Paused: Atlas has no Jira site client of yours any more; yours there are acme.");
     expect(pausedWords({ kind: "refused", reason: "policy denied" }, "Atlas")).toBe("Paused: Atlas refused: policy denied");
     expect(pausedWords({ kind: "hubUnpaired" }, "Atlas")).toMatch(/isn't linked any more/);
     expect(pausedWords({ kind: "leftGroup" }, "Atlas")).toMatch(/left the group/);

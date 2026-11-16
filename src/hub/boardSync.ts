@@ -16,7 +16,7 @@ import type { Board, BoardSync, LinkBoard, LinkCheck, SyncFilter, SyncHub, SyncM
 
 /** Where a person chooses who they are: the service, the hub it's reached
  *  through, and the board's agent there (tried first). */
-export type MeWhere = { system: SyncSystem; via: SyncVia; agent?: string };
+export type MeWhere = { system: SyncSystem; via: SyncVia; agent?: string; workspace?: string };
 
 /** What a check of a link answered with: what it found, or why the hub
  *  can't (its words, and the pause it would be), or a refusal. */
@@ -35,7 +35,7 @@ export const boardSyncOf = (hub: HubRef) => ({
   /** Whether `via` offers `system`'s tools, and what the dialog needs: the
    *  teams, the target's states, and how many issues the filter matches.
    *  The hub's reasons come back as an answer, not thrown. */
-  check: async (b: { system: SyncSystem; via: SyncVia; target?: string; targetId?: string; filter?: SyncFilter; me?: string }): Promise<Checked> => {
+  check: async (b: { system: SyncSystem; via: SyncVia; workspace?: string; target?: string; targetId?: string; filter?: SyncFilter; me?: string }): Promise<Checked> => {
     const res = await pairedHub(hub).fetch("POST", "/api/desk/boards/link/check", jsonBody(b));
     if (res.ok) return { ok: true, check: (await res.json()) as LinkCheck };
     const text = await res.text().catch(() => "");
@@ -138,8 +138,17 @@ export const pausedWords = (p: SyncPaused, hub: string): string => {
       return `Paused: ${hub} refused: ${p.reason}`;
     case "leftGroup":
       return "Paused: this board left the group it was linked in.";
+    case "workspace": {
+      const names = orList(p.names ?? []);
+      if (!names) return `Paused: ${hub} has no ${p.what} of yours set up any more.`;
+      return p.asked ? `Paused: ${hub} has no ${p.what} ${p.asked} of yours any more; yours there are ${names}.` : `Paused: you have more than one ${p.what} on ${hub} (${names}), and this link doesn't say which.`;
+    }
   }
 };
+
+/** Names as a person lists them: "a", "a or b", "a, b or c". */
+export const orList = (names: readonly string[]): string =>
+  names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} or ${names[names.length - 1]}`;
 
 /** The one button that mends a pause or problem: what it says and what it
  *  does (`token`: a new token for the hub; `connections`: Settings → Connections
@@ -167,6 +176,7 @@ export const fixOf = (s: BoardSync, hub: string): SyncFix | null => {
       case "refused":
         return { kind: "retry", label: "Try again" };
       case "leftGroup":
+      case "workspace":
         return { kind: "unlink", label: "Keep the tickets, unlink" };
     }
   }
@@ -199,7 +209,8 @@ export const agentTitle = (id: string): string =>
 export const linkedTo = (b: Board, hub: string): string | null => {
   const s = b.sync;
   if (!s) return null;
-  const head = `${SYSTEM_TITLE[s.system]} ${s.target}`;
+  // "Linear · mantiscrm · MAN": the workspace, where the person has several.
+  const head = s.workspace ? `${SYSTEM_TITLE[s.system]} · ${s.workspace} · ${s.target}` : `${SYSTEM_TITLE[s.system]} ${s.target}`;
   if (s.via.kind !== "hub") return `${head} with this computer's keys`;
   return s.agent ? `${head} through ${agentTitle(s.agent)} on ${hub}` : `${head} via ${hub}`;
 };
