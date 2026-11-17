@@ -7,6 +7,7 @@ import { useDesk } from "../hub/store";
 import type { DeskSocket, DeskTransport } from "../hub/transport";
 import type { DeskExtras } from "../hub/types";
 import { Message } from "./Message";
+import { shownOf } from "./Said";
 
 vi.mock("@workforce/rich", () => ({
   RichMarkdown: ({ text }: { text: string }) => text,
@@ -291,6 +292,76 @@ describe("a roundup (shape C)", () => {
     expect(within(still).getByText(/Nothing changed since 08:00/)).toBeTruthy();
     expect(within(still).getByText("(MAN-650)")).toBeTruthy();
     expect(within(still).queryByRole("button", { name: "Show all ›" })).toBeNull();
+  });
+
+  // The 17:00 hour, its names changed: one entry a session, its decisions
+  // under it, the notable ones always shown.
+  const message = (n: number, notable = false) => ({
+    id: `b${n}`,
+    kind: "done" as const,
+    action: notable ? "Started it again in manual mode" : "Sent it a message",
+    why: `step ${n} of the merge plan`,
+    detail: null,
+    undo: "undo" as const,
+    at: `2026-11-17T17:${String(56 - n).padStart(2, "0")}:00Z`,
+    ...(notable ? { notable: true } : {}),
+  });
+  const billing = {
+    kind: "routine" as const,
+    headline: "Billing Migration · 14 decisions, 17:05–17:56",
+    session: { sessionId: "s3", name: "Billing Migration" },
+    // The notable one ninth, behind the four newest messages.
+    did: Array.from({ length: 14 }, (_, n) => message(n, n === 8)),
+    at: "2026-11-17T17:56:00Z",
+    decisions: 14,
+  };
+  const lockdown = {
+    kind: "routine" as const,
+    headline: "Access Lockdown · 1 decision at 17:33",
+    session: { sessionId: "s5", name: "Access Lockdown" },
+    did: [{ id: "l1", kind: "done" as const, action: "Stopped it", why: "you asked", detail: null, undo: "undo" as const, notable: true }],
+    decisions: 1,
+  };
+  const grouped: DeskExtras = {
+    update: {
+      headline: "15 decided without you.",
+      roundup: { since: "2026-11-17T17:00:00Z", sections: [{ key: "decided", title: "Decided without you", lines: [billing, lockdown] }] },
+    },
+  };
+
+  it("says what it decided as one entry a session, the notable ones always shown", () => {
+    show(post(grouped));
+    const decided = screen.getByRole("region", { name: "Decided without you" });
+    expect(within(decided).getByText(billing.headline)).toBeTruthy();
+    expect(within(decided).getByText(lockdown.headline)).toBeTruthy();
+    // Three newest messages and the notable one; ten more behind Show.
+    expect(within(decided).getAllByText("Sent it a message")).toHaveLength(3);
+    expect(within(decided).getByText("Started it again in manual mode")).toBeTruthy();
+    expect(within(decided).getAllByRole("button", { name: /^Undo: / })).toHaveLength(5);
+    fireEvent.click(within(decided).getByRole("button", { name: "10 more · Show ›" }));
+    expect(within(decided).getAllByText("Sent it a message")).toHaveLength(13);
+    expect(within(decided).getAllByRole("button", { name: /^Undo: / })).toHaveLength(15);
+    fireEvent.click(within(decided).getByRole("button", { name: "Billing Migration ›" }));
+    expect(opened).toHaveBeenCalledWith("s3");
+  });
+
+  it("shows the newest four and every notable one", () => {
+    const of = (notable: number[], n: number) => Array.from({ length: n }, (_, k) => message(k, notable.includes(k)));
+    expect(shownOf([])).toEqual({ shown: [], more: 0 });
+    expect(shownOf(of([], 3)).more).toBe(0);
+    expect(shownOf(of([], 6)).shown.map((i) => i.id)).toEqual(["b0", "b1", "b2", "b3"]);
+    expect(shownOf(of([5], 6)).shown.map((i) => i.id)).toEqual(["b0", "b1", "b2", "b5"]);
+    const many = shownOf(of([1, 2, 3, 4, 5], 7));
+    expect([many.shown.map((i) => i.id), many.more]).toEqual([["b1", "b2", "b3", "b4", "b5"], 2]);
+  });
+
+  it("keeps the notable ones of what the boss did shown in a message right away", () => {
+    const work = { kind: "progress" as const, headline: "The migration is waiting on CI.", session: billing.session, did: billing.did };
+    show(post({ update: { said: [work] } }));
+    fireEvent.click(screen.getByRole("button", { name: /What I did · 14/ }));
+    expect(screen.getAllByText("Sent it a message")).toHaveLength(3);
+    expect(screen.getByText("Started it again in manual mode")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "10 more · Show ›" })).toBeTruthy();
   });
 
   it("lists a run as one line when you asked for every decision", () => {
