@@ -42,10 +42,12 @@ function WhatIDid({ did }: { did: readonly BriefItem[] }) {
   const [open, setOpen] = useState(false);
   const list = useId();
   if (!did.length) return null;
+  // A folded run's line counts every decision it stands for.
+  const count = did.reduce((n, i) => n + (i.folded ?? 1), 0);
   return (
     <>
       <button type="button" className="link said-did" aria-expanded={open} aria-controls={list} onClick={() => setOpen((o) => !o)}>
-        What I did · {did.length} {open ? "‹" : "›"}
+        What I did · {count} {open ? "‹" : "›"}
       </button>
       {open && (
         <ul className="brief-items said-did-list" id={list}>
