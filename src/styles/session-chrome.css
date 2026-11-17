@@ -463,7 +463,8 @@ span.sc-driver {
   position: relative;
 }
 .sc-driven-boss[data-band="tiny"] .mark::after,
-.sc-driven-you[data-band="tiny"] .mark::after {
+.sc-driven-you[data-band="tiny"] .mark::after,
+.sc-driven-mine[data-band="tiny"] .mark::after {
   content: "";
   position: absolute;
   right: -3px;
@@ -477,6 +478,10 @@ span.sc-driver {
 .sc-driven-you[data-band="tiny"] .mark::after {
   background: var(--surface);
   box-shadow: inset 0 0 0 1.5px var(--signal);
+}
+/* Taken back: yours, in the text's colour, not the boss's signal. */
+.sc-driven-mine[data-band="tiny"] .mark::after {
+  background: var(--text);
 }
 /* In one row the name gives way before the buttons do. */
 .sc[data-band="tiny"] .sc-name {
