@@ -114,7 +114,7 @@ class FakeHub implements DeskTransport {
     this.requests.push(route);
     const said = body ? (JSON.parse(String(body.data)) as Record<string, unknown>) : {};
     this.said.push({ route, said });
-    if (route === "GET /api/desk/charges") return json(this.charge ? [this.charge] : []);
+    if (route === "GET /api/desk/charges?released=true") return json(this.charge ? [this.charge] : []);
     if (route === "GET /api/desk/sessions") return json([this.session]);
     if (route === "GET /api/desk/manager") return json({ agentId: "sarah", level: "act" });
     if (route === "GET /api/desk/sessions/s1/line") return json(this.lineNow());
@@ -131,10 +131,10 @@ class FakeHub implements DeskTransport {
       return json(this.charge);
     }
     if (route === "DELETE /api/desk/sessions/s1/charge") {
-      if (!this.charge) return json({ error: "No boss runs that session." }, 409);
+      if (!this.live) return json({ error: "No boss runs that session." }, 409);
       this.move("queued", "withdrawn");
-      const gone = { ...this.charge, releasedAt: "2026-11-03T10:30:00Z" };
-      this.charge = null;
+      const gone = { ...this.live, releasedAt: "2026-11-03T10:30:00Z", releasedBy: "person" as const };
+      this.charge = gone;
       this.events?.say({ type: "charge", charge: gone });
       this.note("I'm no longer running this session: the person runs it on their own now.");
       return json(gone);
@@ -150,15 +150,20 @@ class FakeHub implements DeskTransport {
     return new Socket((data) => {
       if (!ArrayBuffer.isView(data)) return;
       this.typed += new TextDecoder().decode(data);
-      if (this.charge?.wheel === "boss") this.put({ ...this.charge, wheel: "person", wheelSince: "2026-11-03T10:20:00Z" });
+      if (this.live?.wheel === "boss") this.put({ ...this.live, wheel: "person", wheelSince: "2026-11-03T10:20:00Z" });
     });
   };
 
   /** The thread as the hub reads it: why a queued message waits now. */
   lineNow = (): LineMessage[] =>
     this.thread.map((m) =>
-      m.delivery === "queued" && m.from.kind === "manager" ? { ...m, waiting: this.charge && this.charge.wheel !== "boss" ? "person_driving" : "working" } : m,
+      m.delivery === "queued" && m.from.kind === "manager" ? { ...m, waiting: this.live && this.live.wheel !== "boss" ? "person_driving" : "working" } : m,
     );
+
+  /** The charge while Sarah runs it; none once it was let go. */
+  get live(): ChargeView | null {
+    return this.charge && !this.charge.releasedAt ? this.charge : null;
+  }
 
   put(c: ChargeView) {
     this.charge = c;
@@ -343,6 +348,22 @@ describe("a session Sarah runs", () => {
     await waitFor(() => expect(within(pane).getByText("Sarah has it")).toBeTruthy());
     expect(chip()!.getAttribute("aria-label")).toBe("Who runs it: Sarah has it");
     expect(within(pane).queryByText("You’re running this")).toBeNull();
+  });
+
+  it("is still yours to run once Desk reads its charges again, as the hub keeps who took it back", async () => {
+    hub.charge = { ...charged(), releasedAt: "2026-11-03T10:30:00Z", releasedBy: "person" };
+    await connect();
+    render(<SessionCard session={useDesk.getState().sessions.s1!} />);
+    const chip = await screen.findByRole("button", { name: "Who runs it: You’re running this" });
+    expect(chip.getAttribute("title")).toBe("You took this back from Sarah. Sarah watches but won’t act on it until you hand it back.");
+  });
+
+  it("shows no one running it once its boss let it go", async () => {
+    hub.charge = { ...charged(), releasedAt: "2026-11-03T10:30:00Z", releasedBy: "boss" };
+    await connect();
+    render(<SessionCard session={useDesk.getState().sessions.s1!} />);
+    expect(screen.queryByRole("button", { name: /^Who runs it: / })).toBeNull();
+    expect(screen.queryByText("You’re running this")).toBeNull();
   });
 
   it("is handed back to Sarah from the chip you run it by", async () => {

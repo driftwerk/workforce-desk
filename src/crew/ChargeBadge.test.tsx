@@ -43,7 +43,7 @@ describe("ChargeBadge", () => {
 
   it("says you run a session you took back, and what that means, until it ends", () => {
     useDesk.setState({ sessions: { s1: asking() } });
-    useCharges.setState({ released: { s1: { ...charge, releasedAt: "2026-11-03T11:00:00Z" } } });
+    useCharges.setState({ released: { s1: { ...charge, releasedAt: "2026-11-03T11:00:00Z", releasedBy: "person" } } });
     const { rerender } = render(<ChargeBadge charge={undefined} session="s1" />);
     const badge = screen.getByText("You’re running this");
     expect(badge.className).toContain("charge-mine");

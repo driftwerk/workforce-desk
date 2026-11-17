@@ -457,7 +457,7 @@
   {
     "kind": "http",
     "method": "GET",
-    "path": "/api/desk/charges"
+    "path": "/api/desk/charges?released=true"
   },
   {
     "kind": "http",

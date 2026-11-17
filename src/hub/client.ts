@@ -706,11 +706,12 @@ export class DeskHub {
   /** Puts `text` in a session's prompt without sending it, for you to add
    *  to and send yourself. */
   draftLine = (sessionId: string, text: string): Promise<Session> => this.call("POST", `/api/desk/sessions/${encodeURIComponent(sessionId)}/draft`, { text });
-  /** Every session a boss runs now, with who drives each; null from a hub
-   *  without charges (an older one). */
+  /** Every session a boss runs now, with who drives each, and every one let
+   *  go that Desk still has (who let it go); null from a hub without
+   *  charges (an older one). */
   charges = async (): Promise<ChargeView[] | null> => {
     try {
-      return await this.call<ChargeView[]>("GET", "/api/desk/charges");
+      return await this.call<ChargeView[]>("GET", "/api/desk/charges?released=true");
     } catch (e) {
       if (e instanceof HubError && (e.status === 404 || e.status === 405)) return null;
       throw e;

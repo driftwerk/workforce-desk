@@ -31,9 +31,12 @@ describe("a session a boss runs", () => {
 
   it("is yours to run once you took it back, whoever had the wheel, and says so in a sentence", () => {
     for (const wheel of ["boss", "person", "person_pinned"] as const) {
-      expect(badgeOf(charge({ wheel, releasedAt: "2026-11-03T11:00:00Z" }), false, "Sarah left this to you.")).toEqual({ text: "You’re running this", look: "mine" });
-      expect(badgeOf(charge({ wheel, releasedAt: "2026-11-03T11:00:00Z" }), true)).toEqual({ text: "You run it", look: "mine" });
+      expect(badgeOf(charge({ wheel, releasedAt: "2026-11-03T11:00:00Z", releasedBy: "person" }), false, "Sarah left this to you.")).toEqual({ text: "You’re running this", look: "mine" });
+      expect(badgeOf(charge({ wheel, releasedAt: "2026-11-03T11:00:00Z", releasedBy: "person" }), true)).toEqual({ text: "You run it", look: "mine" });
     }
+    // Let go by its boss, or by an older hub that doesn't say who: no badge.
+    expect(badgeOf(charge({ releasedAt: "2026-11-03T11:00:00Z", releasedBy: "boss" }))).toBeNull();
+    expect(badgeOf(charge({ releasedAt: "2026-11-03T11:00:00Z" }))).toBeNull();
     expect(releasedText(charge())).toBe("You took this back from Sarah. Sarah watches but won’t act on it until you hand it back.");
     expect(releasedText(charge({ bossName: "" }))).toBe("You took this back from your overseer. Your overseer watches but won’t act on it until you hand it back.");
     expect(chargeChoices(lined(), charge({ releasedAt: "2026-11-03T11:00:00Z" }), SARAH)).toEqual([{ verb: "hand", label: "Hand to Sarah" }]);

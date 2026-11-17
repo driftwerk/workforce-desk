@@ -7,15 +7,15 @@ import { withWheel } from "../line/rows";
 import { useLine } from "../line/store";
 import { useOverview } from "../overview/store";
 import { useLocalAgent } from "../overview/people";
-import type { Boss, ChargeVerb } from "./charge";
+import { takenBack, type Boss, type ChargeVerb } from "./charge";
 import { isServed, useGrantBossOf } from "./grantBoss";
 
 interface ChargeState {
   /** The sessions a boss runs now, by session key (see `keyOf`): each
    *  engine's boss runs that engine's sessions. */
   bySession: Record<string, ChargeView>;
-  /** The sessions the person took back from their boss here (Release), by
-   *  session key, as the release answered: theirs until handed back. */
+  /** The sessions the person took back from their boss, by session key, as
+   *  the hub keeps them: theirs until handed to a boss again. */
   released: Record<string, ChargeView>;
   /** This computer's hub keeps charges: false once it said it doesn't (an
    *  older one). */
@@ -30,15 +30,23 @@ interface ChargeState {
   act: (key: string, verb: ChargeVerb, boss?: Boss | null) => Promise<void>;
 }
 
+/** `all` but those whose key is in `keys`. */
+const without = (all: Record<string, ChargeView>, keys: Iterable<string>): Record<string, ChargeView> => {
+  const gone = new Set(keys);
+  return [...gone].some((k) => k in all) ? Object.fromEntries(Object.entries(all).filter(([k]) => !gone.has(k))) : all;
+};
+
 /** `all` with `c` (on `machine`) as it now stands: a released one gone. */
 export const withCharge = (all: Record<string, ChargeView>, c: ChargeView, machine: MachineId = LOCAL): Record<string, ChargeView> => {
   const key = keyOf(machine, c.session);
-  if (c.releasedAt) {
-    if (!(key in all)) return all;
-    const { [key]: _, ...rest } = all;
-    return rest;
-  }
-  return { ...all, [key]: c };
+  return c.releasedAt ? without(all, [key]) : { ...all, [key]: c };
+};
+
+/** `taken` with `c` (on `machine`) as it now stands: there while the
+ *  person took it back, gone once a boss runs it or let it go. */
+const withTakenBack = (taken: Record<string, ChargeView>, c: ChargeView, machine: MachineId = LOCAL): Record<string, ChargeView> => {
+  const key = keyOf(machine, c.session);
+  return takenBack(c) ? { ...taken, [key]: c } : without(taken, [key]);
 };
 
 /** Charges heard from each engine, by machine: a read of an engine's that
@@ -50,10 +58,6 @@ const heardOf = (machine: MachineId): number => heardCount.get(machine) ?? 0;
 /** Every charge but `machine`'s. */
 const others = (all: Record<string, ChargeView>, machine: MachineId): Record<string, ChargeView> =>
   Object.fromEntries(Object.entries(all).filter(([k]) => splitKey(k).machine !== machine));
-
-/** `all` but those whose key is in `live`: a boss runs them again. */
-const without = (all: Record<string, ChargeView>, live: Record<string, unknown>): Record<string, ChargeView> =>
-  Object.fromEntries(Object.entries(all).filter(([k]) => !(k in live)));
 
 export const useCharges = create<ChargeState>((set, get) => ({
   bySession: {},
@@ -67,8 +71,11 @@ export const useCharges = create<ChargeState>((set, get) => ({
       const list = await hub.charges();
       // Another hub by now, or a charge heard since: what was read is older.
       if (hubOf(machine) !== hub || heardOf(machine) !== was) return;
-      const mine = Object.fromEntries((list ?? []).map((c) => [keyOf(machine, c.session), named(c, machine)]));
-      set((s) => ({ bySession: { ...others(s.bySession, machine), ...mine }, released: without(s.released, mine), ...(machine === LOCAL ? { supported: list !== null } : {}) }));
+      const read = (list ?? []).map((c) => named(c, machine));
+      const keyed = (cs: ChargeView[]) => Object.fromEntries(cs.map((c) => [keyOf(machine, c.session), c]));
+      const mine = keyed(read.filter((c) => !c.releasedAt));
+      const back = keyed(read.filter(takenBack));
+      set((s) => ({ bySession: { ...others(s.bySession, machine), ...mine }, released: { ...others(s.released, machine), ...back }, ...(machine === LOCAL ? { supported: list !== null } : {}) }));
     } catch {
       // Kept as last read; the next snapshot reads them again.
     }
@@ -78,7 +85,7 @@ export const useCharges = create<ChargeState>((set, get) => ({
     const c = named(heard, machine);
     const key = keyOf(machine, c.session);
     const was = get().bySession[key];
-    set((s) => ({ bySession: withCharge(s.bySession, c, machine), released: c.releasedAt ? s.released : without(s.released, { [key]: c }), ...(machine === LOCAL ? { supported: true } : {}) }));
+    set((s) => ({ bySession: withCharge(s.bySession, c, machine), released: withTakenBack(s.released, c, machine), ...(machine === LOCAL ? { supported: true } : {}) }));
     // Why the boss's messages wait changes with the wheel: at once as far
     // as Desk can tell, then as the hub says on reading the thread again.
     if (!was || was.wheel !== c.wheel || !!c.releasedAt) rewait(key, c.session, !c.releasedAt && c.wheel !== "boss");
@@ -94,9 +101,6 @@ export const useCharges = create<ChargeState>((set, get) => ({
           ? await hub.releaseCharge(id)
           : await hub.setWheel(id, verb === "drive" ? "person_pinned" : "boss");
     get().heard(c, machine);
-    // Who let it go isn't in what the hub tells everyone: Desk knows the
-    // person did when they asked.
-    if (verb === "release" && c.releasedAt) set((s) => ({ released: { ...s.released, [key]: named(c, machine) } }));
   },
 }));
 
@@ -168,8 +172,7 @@ const onEvent = (e: EngineEvent) => {
   // updated meanwhile).
   else if (e.type === "snapshot") void s.load(machine);
   else if (key && (key in s.bySession || key in s.released)) {
-    const gone = { [key]: true };
-    useCharges.setState({ bySession: without(s.bySession, gone), released: without(s.released, gone) });
+    useCharges.setState({ bySession: without(s.bySession, [key]), released: without(s.released, [key]) });
   }
 };
 engineListeners.add(onEvent);
