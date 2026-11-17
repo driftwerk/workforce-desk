@@ -7,6 +7,7 @@ import { useDesk } from "../hub/store";
 import type { DeskSocket, DeskTransport } from "../hub/transport";
 import type { DeskExtras } from "../hub/types";
 import { Message } from "./Message";
+import { shownOf } from "./Said";
 
 vi.mock("@workforce/rich", () => ({
   RichMarkdown: ({ text }: { text: string }) => text,
@@ -342,6 +343,16 @@ describe("a roundup (shape C)", () => {
     expect(within(decided).getAllByRole("button", { name: /^Undo: / })).toHaveLength(15);
     fireEvent.click(within(decided).getByRole("button", { name: "Billing Migration ›" }));
     expect(opened).toHaveBeenCalledWith("s3");
+  });
+
+  it("shows the newest four and every notable one", () => {
+    const of = (notable: number[], n: number) => Array.from({ length: n }, (_, k) => message(k, notable.includes(k)));
+    expect(shownOf([])).toEqual({ shown: [], more: 0 });
+    expect(shownOf(of([], 3)).more).toBe(0);
+    expect(shownOf(of([], 6)).shown.map((i) => i.id)).toEqual(["b0", "b1", "b2", "b3"]);
+    expect(shownOf(of([5], 6)).shown.map((i) => i.id)).toEqual(["b0", "b1", "b2", "b5"]);
+    const many = shownOf(of([1, 2, 3, 4, 5], 7));
+    expect([many.shown.map((i) => i.id), many.more]).toEqual([["b1", "b2", "b3", "b4", "b5"], 2]);
   });
 
   it("keeps the notable ones of what the boss did shown in a message right away", () => {

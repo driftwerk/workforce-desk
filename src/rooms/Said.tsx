@@ -60,17 +60,20 @@ export function shownOf(did: readonly BriefItem[]): { shown: BriefItem[]; more: 
  *  ones, the rest behind "N more · Show". */
 function Decisions({ did, id }: { did: readonly BriefItem[]; id?: string }) {
   const [all, setAll] = useState(false);
+  const own = useId();
+  const list = id ?? own;
   const { shown, more } = shownOf(did);
+  if (!did.length) return null;
   return (
     <>
-      <ul className="brief-items said-did-list" id={id}>
+      <ul className="brief-items said-did-list" id={list}>
         {(all ? did : shown).map((i) => (
           <Row key={i.id} item={i} />
         ))}
       </ul>
       {more > 0 && (
         <p className="rnd-meta faint small">
-          <button type="button" className="link" aria-expanded={all} onClick={() => setAll((a) => !a)}>
+          <button type="button" className="link" aria-expanded={all} aria-controls={list} onClick={() => setAll((a) => !a)}>
             {all ? "Fewer ‹" : `${more} more · Show ›`}
           </button>
         </p>
@@ -338,7 +341,7 @@ function Section({ section }: { section: RoundupSection }) {
       <ul className="rnd-lines">
         {section.lines.map((l, i) =>
           section.key === "decided" && l.decisions != null ? (
-            <SessionDecided key={l.session?.sessionId ?? `d${i}`} line={l} />
+            <SessionDecided key={`${l.session?.sessionId ?? "crew"}:${i}`} line={l} />
           ) : section.key === "decided" && l.kind === "routine" ? (
             <Run key={l.did?.[0]?.id ?? i} line={l} decided />
           ) : section.key === "decided" ? (
