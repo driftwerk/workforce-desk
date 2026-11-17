@@ -8,7 +8,7 @@ import { useId, useLayoutEffect, useRef, useState, type HTMLAttributes, type Key
 import { SessionTicketChip } from "../board/TicketChip";
 import { DriverChip } from "../crew/ChargeBadge";
 import { CostChip } from "../spend/SpendStrip";
-import { useCharge } from "../crew/chargeStore";
+import { useCharge, useTakenBack } from "../crew/chargeStore";
 import { useSessionSpend } from "../spend/store";
 import { usdText } from "../spend/spend";
 import { switchingText, withAccount } from "../engines/accounts";
@@ -135,6 +135,7 @@ export function SessionChrome({
   const head = useRef<HTMLElement>(null);
   const band = useBand(head);
   const charge = useCharge(sessionKey(session));
+  const takenBack = useTakenBack(sessionKey(session));
   const today = useSessionSpend(sessionKey(session), "day");
   const week = useSessionSpend(sessionKey(session), "week");
   // What a narrow chrome no longer shows is in its menu: the tabs, once
@@ -180,7 +181,7 @@ export function SessionChrome({
     <header
       {...headProps}
       ref={head}
-      className={`sc sc-${size} ${charge ? `sc-driven-${charge.wheel === "boss" ? "boss" : "you"}` : ""} ${headProps?.className ?? ""}`}
+      className={`sc sc-${size} ${charge ? `sc-driven-${charge.wheel === "boss" ? "boss" : "you"}` : takenBack ? "sc-driven-mine" : ""} ${headProps?.className ?? ""}`}
       data-band={band}
       aria-describedby={`${said}-where`}
       onKeyDown={onKeyDown}

@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { useDesk } from "../hub/store";
 import type { ChargeView, Session } from "../hub/types";
 import { ChargeBadge } from "./ChargeBadge";
+import { useCharges } from "./chargeStore";
 
 const charge: ChargeView = {
   session: "s1",
@@ -21,6 +22,7 @@ const asking = (waitsOnYou?: string) => ({ id: "s1", waitsOnYou }) as unknown as
 afterEach(() => {
   cleanup();
   useDesk.setState({ sessions: {} });
+  useCharges.setState({ released: {} });
 });
 
 describe("ChargeBadge", () => {
@@ -37,5 +39,19 @@ describe("ChargeBadge", () => {
     useDesk.setState({ sessions: { s1: asking() } });
     render(<ChargeBadge charge={charge} session="s1" />);
     expect(screen.getByText("Sarah has it")).toBeTruthy();
+  });
+
+  it("says you run a session you took back, and what that means, until it ends", () => {
+    useDesk.setState({ sessions: { s1: asking() } });
+    useCharges.setState({ released: { s1: { ...charge, releasedAt: "2026-11-03T11:00:00Z", releasedBy: "person" } } });
+    const { rerender } = render(<ChargeBadge charge={undefined} session="s1" />);
+    const badge = screen.getByText("You’re running this");
+    expect(badge.className).toContain("charge-mine");
+    expect(badge.getAttribute("title")).toBe("You took this back from Sarah. Sarah watches but won’t act on it until you hand it back.");
+    rerender(<ChargeBadge charge={undefined} session="s1" short />);
+    expect(screen.getByText("You run it")).toBeTruthy();
+    useDesk.setState({ sessions: { s1: { ...asking(), state: "closed" } as Session } });
+    rerender(<ChargeBadge charge={undefined} session="s1" short />);
+    expect(screen.queryByText("You run it")).toBeNull();
   });
 });

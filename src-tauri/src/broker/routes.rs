@@ -72,7 +72,7 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/line/{}/dismiss"),
     route("POST", "/api/desk/sessions/{}/draft"),
     // Charges: which boss runs which session; Hand to, Release, the wheel.
-    route("GET", "/api/desk/charges"),
+    with_query("GET", "/api/desk/charges", &["released"]),
     route("POST", "/api/desk/sessions/{}/charge"),
     route("DELETE", "/api/desk/sessions/{}/charge"),
     route("PATCH", "/api/desk/sessions/{}/charge"),

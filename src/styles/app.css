@@ -868,7 +868,8 @@ body.side-resizing * {
   color: var(--working);
 }
 /* A session a boss runs: "Sarah has it" in the signal's soft colour; while
-   you have the wheel, a dashed "You're driving". */
+   you have the wheel, a dashed "You're driving"; once you took it back, a
+   solid "You're running this". */
 .charge-badge {
   flex: none;
   display: inline-block;
@@ -889,6 +890,11 @@ body.side-resizing * {
   background: transparent;
   border-color: var(--border);
   border-style: dashed;
+  color: var(--text);
+}
+.charge-mine {
+  background: transparent;
+  border-color: var(--border);
   color: var(--text);
 }
 /* In a sidebar row: the name gives way first. */

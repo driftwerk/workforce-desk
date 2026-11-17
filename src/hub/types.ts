@@ -1435,6 +1435,9 @@ export interface ChargeView {
   since: string;
   /** Set once it was let go: it no longer runs it. */
   releasedAt: string | null;
+  /** Who let it go, once it was: the person took it back, or its boss let
+   *  it go; none while it runs, and from an older hub. */
+  releasedBy?: "person" | "boss" | null;
   /** How long, in minutes, the person's last input keeps the wheel theirs
    *  (unpinned); an older hub doesn't say. */
   holdMinutes?: number;

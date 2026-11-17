@@ -114,7 +114,7 @@ class FakeHub implements DeskTransport {
     this.requests.push(route);
     const said = body ? (JSON.parse(String(body.data)) as Record<string, unknown>) : {};
     this.said.push({ route, said });
-    if (route === "GET /api/desk/charges") return json(this.charge ? [this.charge] : []);
+    if (route === "GET /api/desk/charges?released=true") return json(this.charge ? [this.charge] : []);
     if (route === "GET /api/desk/sessions") return json([this.session]);
     if (route === "GET /api/desk/manager") return json({ agentId: "sarah", level: "act" });
     if (route === "GET /api/desk/sessions/s1/line") return json(this.lineNow());
@@ -131,10 +131,10 @@ class FakeHub implements DeskTransport {
       return json(this.charge);
     }
     if (route === "DELETE /api/desk/sessions/s1/charge") {
-      if (!this.charge) return json({ error: "No boss runs that session." }, 409);
+      if (!this.live) return json({ error: "No boss runs that session." }, 409);
       this.move("queued", "withdrawn");
-      const gone = { ...this.charge, releasedAt: "2026-11-03T10:30:00Z" };
-      this.charge = null;
+      const gone = { ...this.live, releasedAt: "2026-11-03T10:30:00Z", releasedBy: "person" as const };
+      this.charge = gone;
       this.events?.say({ type: "charge", charge: gone });
       this.note("I'm no longer running this session: the person runs it on their own now.");
       return json(gone);
@@ -150,15 +150,20 @@ class FakeHub implements DeskTransport {
     return new Socket((data) => {
       if (!ArrayBuffer.isView(data)) return;
       this.typed += new TextDecoder().decode(data);
-      if (this.charge?.wheel === "boss") this.put({ ...this.charge, wheel: "person", wheelSince: "2026-11-03T10:20:00Z" });
+      if (this.live?.wheel === "boss") this.put({ ...this.live, wheel: "person", wheelSince: "2026-11-03T10:20:00Z" });
     });
   };
 
   /** The thread as the hub reads it: why a queued message waits now. */
   lineNow = (): LineMessage[] =>
     this.thread.map((m) =>
-      m.delivery === "queued" && m.from.kind === "manager" ? { ...m, waiting: this.charge && this.charge.wheel !== "boss" ? "person_driving" : "working" } : m,
+      m.delivery === "queued" && m.from.kind === "manager" ? { ...m, waiting: this.live && this.live.wheel !== "boss" ? "person_driving" : "working" } : m,
     );
+
+  /** The charge while Sarah runs it; none once it was let go. */
+  get live(): ChargeView | null {
+    return this.charge && !this.charge.releasedAt ? this.charge : null;
+  }
 
   put(c: ChargeView) {
     this.charge = c;
@@ -224,7 +229,7 @@ beforeEach(() => {
   useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
   startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
   useTerminals.setState({ byId: {}, known: true, programs: {}, problems: {} });
-  useCharges.setState({ bySession: {}, supported: null });
+  useCharges.setState({ bySession: {}, released: {}, supported: null });
   useGrantBosses.setState({ byGroup: {}, bossed: {}, readAt: {} });
   useHubLayout.setState({ layout: null, kept: false });
   useLine.setState({ threads: {}, problems: {} });
@@ -320,9 +325,16 @@ describe("a session Sarah runs", () => {
     expect(within(who).getByText(/Sarah runs this session/)).toBeTruthy();
     await act(async () => fireEvent.click(within(who).getByRole("button", { name: "Release" })));
     expect(hub.requests).toContain("DELETE /api/desk/sessions/s1/charge");
-    await waitFor(() => expect(chip()).toBeNull());
+    // It's yours to run now, and says so where Sarah's badge was.
+    await waitFor(() => expect(chip()!.getAttribute("aria-label")).toBe("Who runs it: You’re running this"));
     const pane = screen.getByRole("region", { name: "acme-web" });
     expect(within(pane).queryByText("Sarah has it")).toBeNull();
+    expect(within(pane).getAllByText("You’re running this").length).toBeGreaterThan(0);
+    await act(async () => fireEvent.click(chip()!));
+    const mine = screen.getByRole("dialog", { name: "Who runs acme-web" });
+    expect(within(mine).getByText(/^You took this back from Sarah\. Sarah watches/)).toBeTruthy();
+    expect(within(mine).getByRole("button", { name: "Hand to Sarah" })).toBeTruthy();
+    fireEvent.keyDown(mine, { key: "Escape" });
     expect(await within(card).findByText(/Not delivered: Sarah no longer runs it/)).toBeTruthy();
     expect(within(card).getByText(/I'm no longer running this session/)).toBeTruthy();
     expect(within(card).getAllByText(/A note here only: not typed in/).length).toBeGreaterThan(0);
@@ -334,7 +346,40 @@ describe("a session Sarah runs", () => {
     await act(async () => fireEvent.click(screen.getByRole("menuitem", { name: "Hand to Sarah" })));
     expect(hub.requests.filter((r) => r === "POST /api/desk/sessions/s1/charge")).toHaveLength(1);
     await waitFor(() => expect(within(pane).getByText("Sarah has it")).toBeTruthy());
-    expect(chip()).toBeTruthy();
+    expect(chip()!.getAttribute("aria-label")).toBe("Who runs it: Sarah has it");
+    expect(within(pane).queryByText("You’re running this")).toBeNull();
+  });
+
+  it("is still yours to run once Desk reads its charges again, as the hub keeps who took it back", async () => {
+    hub.charge = { ...charged(), releasedAt: "2026-11-03T10:30:00Z", releasedBy: "person" };
+    await connect();
+    render(<SessionCard session={useDesk.getState().sessions.s1!} />);
+    const chip = await screen.findByRole("button", { name: "Who runs it: You’re running this" });
+    expect(chip.getAttribute("title")).toBe("You took this back from Sarah. Sarah watches but won’t act on it until you hand it back.");
+  });
+
+  it("shows no one running it once its boss let it go", async () => {
+    hub.charge = { ...charged(), releasedAt: "2026-11-03T10:30:00Z", releasedBy: "boss" };
+    await connect();
+    render(<SessionCard session={useDesk.getState().sessions.s1!} />);
+    expect(screen.queryByRole("button", { name: /^Who runs it: / })).toBeNull();
+    expect(screen.queryByText("You’re running this")).toBeNull();
+  });
+
+  it("is handed back to Sarah from the chip you run it by", async () => {
+    hub.charge = charged();
+    await connect();
+    render(<SessionCard session={useDesk.getState().sessions.s1!} />);
+    const card = screen.getByRole("complementary", { name: "Session acme-web" });
+    const chip = () => within(card).getByRole("button", { name: /^Who runs it: / });
+    await act(async () => fireEvent.click(chip()));
+    await act(async () => fireEvent.click(within(screen.getByRole("dialog", { name: "Who runs acme-web" })).getByRole("button", { name: "Release" })));
+    await waitFor(() => expect(chip().getAttribute("aria-label")).toBe("Who runs it: You’re running this"));
+    await act(async () => fireEvent.click(chip()));
+    await act(async () => fireEvent.click(within(screen.getByRole("dialog", { name: "Who runs acme-web" })).getByRole("button", { name: "Hand to Sarah" })));
+    expect(hub.requests.filter((r) => r === "POST /api/desk/sessions/s1/charge")).toHaveLength(1);
+    await waitFor(() => expect(chip().getAttribute("aria-label")).toBe("Who runs it: Sarah has it"));
+    expect(useCharges.getState().released).toEqual({});
   });
 
   it("is handed to the boss its group's grant names on another hub, by name and party id", async () => {

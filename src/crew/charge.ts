@@ -29,6 +29,10 @@ export const quietFor = (c: ChargeView): string => {
  *  "Your overseer" starting a sentence and "your overseer" within one. */
 export const called = (name: string, start = false): string => name || (start ? "Your overseer" : "your overseer");
 
+/** Whether the person took it back from its boss (not its boss letting it
+ *  go): theirs until they hand it to one again. */
+export const takenBack = (c: ChargeView): boolean => !!c.releasedAt && c.releasedBy === "person";
+
 /** Whether the person has the wheel. */
 export const driving = (c: ChargeView): boolean => c.wheel !== "boss";
 
@@ -36,15 +40,21 @@ export const driving = (c: ChargeView): boolean => c.wheel !== "boss";
  *  driving" while the person has the wheel, or "Waiting on you" while what
  *  it waits on is the person's though the boss has the wheel (`waitsOnYou`,
  *  the hub's reason: the boss only suggests, left it to them, or only its
- *  terminal can answer); `short` where space is tight (the sidebar):
- *  "Sarah's", "Yours" or "Asks you". It never says the boss has it while nobody but
- *  the person will answer. */
-export const badgeOf = (c: ChargeView | null | undefined, short = false, waitsOnYou?: string | null): { text: string; look: "boss" | "you" } | null => {
-  if (!c || c.releasedAt) return null;
+ *  terminal can answer); "You're running this" once the person took it back
+ *  (`takenBack`), nothing once its boss let it go; `short` where space is tight (the sidebar): "Sarah's",
+ *  "Yours", "Asks you" or "You run it". It never says the boss has it while
+ *  nobody but the person will answer. */
+export const badgeOf = (c: ChargeView | null | undefined, short = false, waitsOnYou?: string | null): { text: string; look: "boss" | "you" | "mine" } | null => {
+  if (!c) return null;
+  if (c.releasedAt) return takenBack(c) ? { text: short ? "You run it" : "You’re running this", look: "mine" } : null;
   if (driving(c)) return { text: short ? "Yours" : "You’re driving", look: "you" };
   if (waitsOnYou) return { text: short ? "Asks you" : "Waiting on you", look: "you" };
   return { text: short ? `${called(c.bossName, true)}’s` : `${called(c.bossName, true)} has it`, look: "boss" };
 };
+
+/** What taking it back means, in a sentence: the boss leaves it be. */
+export const releasedText = (c: ChargeView): string =>
+  `You took this back from ${called(c.bossName)}. ${called(c.bossName, true)} watches but won’t act on it until you hand it back.`;
 
 /** Who has the wheel, and what that means, in a sentence. */
 export const wheelText = (c: ChargeView): string => {

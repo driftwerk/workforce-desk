@@ -36,7 +36,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   useDesk.setState({ hub: null });
-  useCharges.setState({ bySession: {}, supported: null });
+  useCharges.setState({ bySession: {}, released: {}, supported: null });
 });
 
 describe("the charges Desk keeps", () => {
@@ -87,7 +87,32 @@ describe("the charges Desk keeps", () => {
     expect(badgeOf(charge(), false, "Sarah left this to you.")).toEqual({ text: "Waiting on you", look: "you" });
     expect(badgeOf(charge(), true, "Sarah only suggests: you decide.")).toEqual({ text: "Asks you", look: "you" });
     expect(badgeOf(charge({ wheel: "person" }), false, "You're driving it.")?.text).toBe("You’re driving");
-    expect(badgeOf(charge({ releasedAt: "2026-11-03T11:00:00Z" }), false, "x")).toBeNull();
+    expect(badgeOf(charge({ releasedAt: "2026-11-03T11:00:00Z", releasedBy: "person" }), false, "x")).toEqual({ text: "You’re running this", look: "mine" });
+  });
+
+  it("keeps the sessions the person took back, as the hub says, until a boss runs them again", async () => {
+    const back = charge({ releasedAt: "2026-11-03T11:00:00Z", releasedBy: "person" });
+    const let_go = charge({ session: "s2", releasedAt: "2026-11-03T11:00:00Z", releasedBy: "boss" });
+    // Read after a restart: the one taken back is the person's, the one its
+    // boss let go no one's, and neither is run by a boss.
+    useDesk.setState({ hub: { charges: () => Promise.resolve([back, let_go, charge({ session: "s3" })]) } as never });
+    await useCharges.getState().load();
+    expect(Object.keys(useCharges.getState().bySession)).toEqual(["s3"]);
+    expect(useCharges.getState().released).toEqual({ s1: back });
+    // Handed to the boss again, then taken back, then let go by its boss.
+    useCharges.getState().heard(charge());
+    expect(useCharges.getState()).toMatchObject({ bySession: { s1: charge() }, released: {} });
+    useCharges.getState().heard(back);
+    expect(useCharges.getState().released).toEqual({ s1: back });
+    useCharges.getState().heard({ ...back, releasedBy: "boss" });
+    expect(useCharges.getState().released).toEqual({});
+    // An older hub never says who: no one's taking it back.
+    useCharges.getState().heard(charge({ releasedAt: "2026-11-03T11:00:00Z" }));
+    expect(useCharges.getState().released).toEqual({});
+    // A session removed takes it with it.
+    useCharges.getState().heard(back);
+    say({ type: "removed", id: "s1" });
+    expect(useCharges.getState().released).toEqual({});
   });
 
   it("names a boss the hub only knows by id as your overseer, and by its name once the roster has it", () => {
