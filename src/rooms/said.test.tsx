@@ -293,6 +293,66 @@ describe("a roundup (shape C)", () => {
     expect(within(still).queryByRole("button", { name: "Show all ›" })).toBeNull();
   });
 
+  // The 17:00 hour, its names changed: one entry a session, its decisions
+  // under it, the notable ones always shown.
+  const message = (n: number, notable = false) => ({
+    id: `b${n}`,
+    kind: "done" as const,
+    action: notable ? "Started it again in manual mode" : "Sent it a message",
+    why: `step ${n} of the merge plan`,
+    detail: null,
+    undo: "undo" as const,
+    at: `2026-11-17T17:${String(56 - n).padStart(2, "0")}:00Z`,
+    ...(notable ? { notable: true } : {}),
+  });
+  const billing = {
+    kind: "routine" as const,
+    headline: "Billing Migration · 14 decisions, 17:05–17:56",
+    session: { sessionId: "s3", name: "Billing Migration" },
+    // The notable one ninth, behind the four newest messages.
+    did: Array.from({ length: 14 }, (_, n) => message(n, n === 8)),
+    at: "2026-11-17T17:56:00Z",
+    decisions: 14,
+  };
+  const lockdown = {
+    kind: "routine" as const,
+    headline: "Access Lockdown · 1 decision at 17:33",
+    session: { sessionId: "s5", name: "Access Lockdown" },
+    did: [{ id: "l1", kind: "done" as const, action: "Stopped it", why: "you asked", detail: null, undo: "undo" as const, notable: true }],
+    decisions: 1,
+  };
+  const grouped: DeskExtras = {
+    update: {
+      headline: "15 decided without you.",
+      roundup: { since: "2026-11-17T17:00:00Z", sections: [{ key: "decided", title: "Decided without you", lines: [billing, lockdown] }] },
+    },
+  };
+
+  it("says what it decided as one entry a session, the notable ones always shown", () => {
+    show(post(grouped));
+    const decided = screen.getByRole("region", { name: "Decided without you" });
+    expect(within(decided).getByText(billing.headline)).toBeTruthy();
+    expect(within(decided).getByText(lockdown.headline)).toBeTruthy();
+    // Three newest messages and the notable one; ten more behind Show.
+    expect(within(decided).getAllByText("Sent it a message")).toHaveLength(3);
+    expect(within(decided).getByText("Started it again in manual mode")).toBeTruthy();
+    expect(within(decided).getAllByRole("button", { name: /^Undo: / })).toHaveLength(5);
+    fireEvent.click(within(decided).getByRole("button", { name: "10 more · Show ›" }));
+    expect(within(decided).getAllByText("Sent it a message")).toHaveLength(13);
+    expect(within(decided).getAllByRole("button", { name: /^Undo: / })).toHaveLength(15);
+    fireEvent.click(within(decided).getByRole("button", { name: "Billing Migration ›" }));
+    expect(opened).toHaveBeenCalledWith("s3");
+  });
+
+  it("keeps the notable ones of what the boss did shown in a message right away", () => {
+    const work = { kind: "progress" as const, headline: "The migration is waiting on CI.", session: billing.session, did: billing.did };
+    show(post({ update: { said: [work] } }));
+    fireEvent.click(screen.getByRole("button", { name: /What I did · 14/ }));
+    expect(screen.getAllByText("Sent it a message")).toHaveLength(3);
+    expect(screen.getByText("Started it again in manual mode")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "10 more · Show ›" })).toBeTruthy();
+  });
+
   it("lists a run as one line when you asked for every decision", () => {
     const every: DeskExtras = {
       update: { roundup: { since: "2026-11-17T09:00:00Z", sections: [{ key: "decided", title: "Decided without you", lines: [run] }] } },

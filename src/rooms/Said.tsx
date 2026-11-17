@@ -37,6 +37,48 @@ export function OpenSession({ link, short = false }: { link: SessionLink; short?
   );
 }
 
+/** How many of a session's decisions are shown before "N more" (the
+ *  notable ones are shown however many), as the hub's text says them. */
+export const SHOWN = 4;
+
+/** The decisions of `did` (the newest first) shown before "N more": every
+ *  notable one, and the newest of the rest up to {@link SHOWN}, in order. */
+export function shownOf(did: readonly BriefItem[]): { shown: BriefItem[]; more: number } {
+  let room = Math.max(0, SHOWN - did.filter((i) => i.notable).length);
+  const shown: BriefItem[] = [];
+  for (const i of did) {
+    if (i.notable) shown.push(i);
+    else if (room > 0) {
+      room -= 1;
+      shown.push(i);
+    }
+  }
+  return { shown, more: did.length - shown.length };
+}
+
+/** A session's decisions, each with its Undo: the first few and the notable
+ *  ones, the rest behind "N more · Show". */
+function Decisions({ did, id }: { did: readonly BriefItem[]; id?: string }) {
+  const [all, setAll] = useState(false);
+  const { shown, more } = shownOf(did);
+  return (
+    <>
+      <ul className="brief-items said-did-list" id={id}>
+        {(all ? did : shown).map((i) => (
+          <Row key={i.id} item={i} />
+        ))}
+      </ul>
+      {more > 0 && (
+        <p className="rnd-meta faint small">
+          <button type="button" className="link" aria-expanded={all} onClick={() => setAll((a) => !a)}>
+            {all ? "Fewer ‹" : `${more} more · Show ›`}
+          </button>
+        </p>
+      )}
+    </>
+  );
+}
+
 /** "What I did · 3 ›": the boss's own steps on it, each with its Undo. */
 function WhatIDid({ did }: { did: readonly BriefItem[] }) {
   const [open, setOpen] = useState(false);
@@ -49,13 +91,7 @@ function WhatIDid({ did }: { did: readonly BriefItem[] }) {
       <button type="button" className="link said-did" aria-expanded={open} aria-controls={list} onClick={() => setOpen((o) => !o)}>
         What I did · {count} {open ? "‹" : "›"}
       </button>
-      {open && (
-        <ul className="brief-items said-did-list" id={list}>
-          {did.map((i) => (
-            <Row key={i.id} item={i} />
-          ))}
-        </ul>
-      )}
+      {open && <Decisions did={did} id={list} />}
     </>
   );
 }
@@ -175,6 +211,32 @@ function Decided({ line }: { line: Said }) {
   );
 }
 
+/** One session's decisions without you, one entry ("Billing Migration ·
+ *  14 decisions, 17:05–17:56"): its session, and under it each decision
+ *  with its Undo, the first few and the notable ones, the rest behind "N
+ *  more · Show". */
+function SessionDecided({ line }: { line: Said }) {
+  return (
+    <li className="rnd-line">
+      <span className="rnd-mark decided" aria-hidden>
+        {MARK.decided}
+      </span>
+      <div className="rnd-text">
+        <p>
+          <span className="rnd-what">{line.headline}</span>
+          {line.body && <span className="brief-why"> {line.body}</span>}
+        </p>
+        {line.session && (
+          <p className="rnd-meta faint small">
+            <OpenSession link={line.session} short />
+          </p>
+        )}
+        <Decisions did={line.did ?? []} />
+      </div>
+    </li>
+  );
+}
+
 /** A run of routine decisions, one line ("Allowed web 16 times, 09:05–09:15:
  *  test and fixture edits, and local test runs."), each of them on "Show
  *  all". */
@@ -275,7 +337,9 @@ function Section({ section }: { section: RoundupSection }) {
       </span>
       <ul className="rnd-lines">
         {section.lines.map((l, i) =>
-          section.key === "decided" && l.kind === "routine" ? (
+          section.key === "decided" && l.decisions != null ? (
+            <SessionDecided key={l.session?.sessionId ?? `d${i}`} line={l} />
+          ) : section.key === "decided" && l.kind === "routine" ? (
             <Run key={l.did?.[0]?.id ?? i} line={l} decided />
           ) : section.key === "decided" ? (
             <Decided key={l.did?.[0]?.id ?? i} line={l} />

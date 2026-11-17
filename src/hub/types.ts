@@ -1165,6 +1165,10 @@ export interface BriefItem {
   at?: string | null;
   /** How many decisions a folded run's line stands for; absent on a line of its own. */
   folded?: number | null;
+  /** It did something itself (merged, released, deleted, spent, overrode a
+   *  session), never a message about it: always shown, however many lines
+   *  its group keeps behind "N more" (a newer hub). */
+  notable?: boolean;
 }
 
 /** What needs you, laid out by the hub: the same items as `waiting`. */
@@ -1245,6 +1249,9 @@ export interface Said {
   session?: SessionLink | null;
   did?: BriefItem[];
   at?: string | null;
+  /** A line of "Decided without you" that stands for one session's
+   *  decisions (a newer hub): how many, each of them in `did`. */
+  decisions?: number | null;
 }
 
 export type RoundupSectionKey = "upToYou" | "decided" | "finished" | "worthKnowing" | "stillGoing";
