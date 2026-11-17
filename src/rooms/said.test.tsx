@@ -246,7 +246,7 @@ describe("a roundup (shape C)", () => {
     show(post(hour));
     expect(screen.queryByText(/routine ones/)).toBeNull();
     expect(screen.queryByText(run.headline)).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+    fireEvent.click(screen.getByRole("button", { name: "Show ›" }));
     expect(screen.getByText(/16 routine things/)).toBeTruthy();
     expect(screen.getByText(run.headline)).toBeTruthy();
     expect(screen.queryByText(/test edit 3 in its worktree/)).toBeNull();
@@ -255,6 +255,28 @@ describe("a roundup (shape C)", () => {
     expect(screen.getByText(/test edit 3 in its worktree/)).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "Billing Migration ›" }));
     expect(opened).toHaveBeenCalledWith("s3");
+  });
+
+  it("keeps a routine piece of work in Still going as a line of its own", () => {
+    const going: DeskExtras = {
+      update: {
+        roundup: {
+          since: "2026-11-17T09:00:00Z",
+          sections: [
+            {
+              key: "stillGoing",
+              title: "Still going",
+              lines: [{ kind: "routine", headline: "The nightly check ran again.", body: "Nothing changed since 08:00.", ids: ["MAN-650"], session: { sessionId: "s4", name: "Nightly" } }],
+            },
+          ],
+        },
+      },
+    };
+    show(post(going));
+    const still = screen.getByRole("region", { name: "Still going" });
+    expect(within(still).getByText(/Nothing changed since 08:00/)).toBeTruthy();
+    expect(within(still).getByText("(MAN-650)")).toBeTruthy();
+    expect(within(still).queryByRole("button", { name: "Show all ›" })).toBeNull();
   });
 
   it("lists a run as one line when you asked for every decision", () => {

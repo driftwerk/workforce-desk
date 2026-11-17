@@ -226,7 +226,7 @@ function Routine({ count, runs, decided }: { count: number; runs: readonly Said[
       <p className="faint small">
         {things} ·{" "}
         <button type="button" className="link" aria-expanded={open} aria-controls={list} onClick={() => setOpen((o) => !o)}>
-          {open ? "Hide" : "Show"}
+          {open ? "Hide ‹" : "Show ›"}
         </button>
       </p>
       {open && (
@@ -273,7 +273,7 @@ function Section({ section }: { section: RoundupSection }) {
       </span>
       <ul className="rnd-lines">
         {section.lines.map((l, i) =>
-          l.kind === "routine" ? (
+          section.key === "decided" && l.kind === "routine" ? (
             <Run key={l.did?.[0]?.id ?? i} line={l} />
           ) : section.key === "decided" ? (
             <Decided key={l.did?.[0]?.id ?? i} line={l} />
