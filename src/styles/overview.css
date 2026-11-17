@@ -1566,6 +1566,11 @@ a.ref {
   color: var(--text);
   font-weight: 600;
 }
+.rnd-routine {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .rnd-upToYou .rnd-line {
   grid-template-columns: minmax(0, 1fr);
 }
