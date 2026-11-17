@@ -65,7 +65,9 @@ jobs:
   macos:
     needs: version
     runs-on: macos-latest
-    timeout-minutes: 240
+    # Two hub sidecar builds (one per arch, ~85 min each) and the app
+    # build run one after another; 240 ran out on v0.2.10 as the bundle finished.
+    timeout-minutes: 360
     steps:
       - name: Check out Desk
         uses: actions/checkout@v7
