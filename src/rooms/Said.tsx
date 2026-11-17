@@ -173,6 +173,73 @@ function Decided({ line }: { line: Said }) {
   );
 }
 
+/** A run of routine decisions, one line ("Allowed web 16 times, 09:05–09:15:
+ *  test and fixture edits, and local test runs."), each of them on "Show
+ *  all". */
+function Run({ line }: { line: Said }) {
+  const [open, setOpen] = useState(false);
+  const list = useId();
+  const did = line.did ?? [];
+  return (
+    <li className="rnd-line">
+      <span className="rnd-mark" aria-hidden>
+        ·
+      </span>
+      <div className="rnd-text">
+        <p>{line.headline}</p>
+        <p className="rnd-meta faint small">
+          {line.session && <OpenSession link={line.session} short />}
+          {line.session && did.length > 0 && " · "}
+          {did.length > 0 && (
+            <button type="button" className="link" aria-expanded={open} aria-controls={list} onClick={() => setOpen((o) => !o)}>
+              {open ? "Hide ‹" : "Show all ›"}
+            </button>
+          )}
+        </p>
+        {open && (
+          <ul className="brief-items said-did-list" id={list}>
+            {did.map((i) => (
+              <Row key={i.id} item={i} />
+            ))}
+          </ul>
+        )}
+      </div>
+    </li>
+  );
+}
+
+/** "16 routine things · Show": what it left out, as runs, on asking; an
+ *  older hub's count says to ask. */
+function Routine({ count, runs, decided }: { count: number; runs: readonly Said[]; decided: boolean }) {
+  const [open, setOpen] = useState(false);
+  const list = useId();
+  const things = count === 1 ? "1 routine thing" : `${count} routine things`;
+  if (!runs.length)
+    return (
+      <p className="faint small">
+        {decided ? "Only decisions that merge, release, delete, spend, override a session or set something to happen later are listed. " : ""}
+        {count === 1 ? "1 routine one" : `${count} routine ones`} (nudges, restarts, waits): ask “what else did you decide?”
+      </p>
+    );
+  return (
+    <div className="rnd-routine">
+      <p className="faint small">
+        {things} ·{" "}
+        <button type="button" className="link" aria-expanded={open} aria-controls={list} onClick={() => setOpen((o) => !o)}>
+          {open ? "Hide" : "Show"}
+        </button>
+      </p>
+      {open && (
+        <ul className="rnd-lines" id={list}>
+          {runs.map((r, i) => (
+            <Run key={r.did?.[0]?.id ?? i} line={r} />
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 function Line({ line, mark }: { line: Said; mark: RoundupSection["key"] }) {
   const ids = idsOf(line.ids);
   return (
@@ -206,7 +273,13 @@ function Section({ section }: { section: RoundupSection }) {
       </span>
       <ul className="rnd-lines">
         {section.lines.map((l, i) =>
-          section.key === "decided" ? <Decided key={l.did?.[0]?.id ?? i} line={l} /> : <Line key={l.session?.sessionId ?? i} line={l} mark={section.key} />,
+          l.kind === "routine" ? (
+            <Run key={l.did?.[0]?.id ?? i} line={l} />
+          ) : section.key === "decided" ? (
+            <Decided key={l.did?.[0]?.id ?? i} line={l} />
+          ) : (
+            <Line key={l.session?.sessionId ?? i} line={l} mark={section.key} />
+          ),
         )}
       </ul>
     </section>
@@ -229,12 +302,7 @@ export function RoundupBody({ roundup, headline, at }: { roundup: Roundup; headl
         .map((s) => (
           <Section key={s.key} section={s} />
         ))}
-      {routine > 0 && (
-        <p className="faint small">
-          {decided ? "Only decisions that merge, release, delete, spend, override a session or set something to happen later are listed. " : ""}
-          {routine === 1 ? "1 routine one" : `${routine} routine ones`} (nudges, restarts, waits): ask “what else did you decide?”
-        </p>
-      )}
+      {routine > 0 && <Routine count={routine} runs={roundup.runs ?? []} decided={decided} />}
     </div>
   );
 }

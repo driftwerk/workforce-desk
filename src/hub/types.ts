@@ -1254,11 +1254,13 @@ export interface RoundupSection {
 }
 
 /** What happened since the last roundup, by what it means to you; how many
- *  routine things it left out. */
+ *  routine things it left out, and those as runs (a newer hub): one line a
+ *  session and kind of decision, each of them in `did`. */
 export interface Roundup {
   since: string;
   sections: RoundupSection[];
   routine?: number;
+  runs?: Said[];
 }
 
 /** One line of an update about finished sessions: "Closed 3 finished

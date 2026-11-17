@@ -216,4 +216,55 @@ describe("a roundup (shape C)", () => {
     show(post(empty));
     expect(screen.queryByRole("region", { name: "Still going" })).toBeNull();
   });
+
+  // An hour of ordinary approvals in one session: one line behind "16
+  // routine things · Show", each of them behind its "Show all".
+  const allowed = (n: number) => ({
+    id: `r${n}`,
+    kind: "done" as const,
+    action: "Allowed Billing Migration",
+    why: `test edit ${n} in its worktree`,
+    detail: null,
+    undo: null,
+    at: `2026-11-17T09:${String(5 + (n % 10)).padStart(2, "0")}:00Z`,
+  });
+  const run = {
+    kind: "routine" as const,
+    headline: "Allowed Billing Migration 16 times, 09:05–09:15: test and fixture edits, and local test runs, all in its worktree.",
+    session: { sessionId: "s3", name: "Billing Migration" },
+    did: Array.from({ length: 16 }, (_, n) => allowed(n)),
+    at: "2026-11-17T09:05:00Z",
+  };
+  const hour: DeskExtras = {
+    update: {
+      headline: "One fix merged; sixteen ordinary steps allowed.",
+      roundup: { ...C.update!.roundup!, routine: 16, runs: [run] },
+    },
+  };
+
+  it("folds the routine into one line a run, behind Show", () => {
+    show(post(hour));
+    expect(screen.queryByText(/routine ones/)).toBeNull();
+    expect(screen.queryByText(run.headline)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show" }));
+    expect(screen.getByText(/16 routine things/)).toBeTruthy();
+    expect(screen.getByText(run.headline)).toBeTruthy();
+    expect(screen.queryByText(/test edit 3 in its worktree/)).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Show all ›" }));
+    expect(screen.getAllByText("Allowed Billing Migration")).toHaveLength(16);
+    expect(screen.getByText(/test edit 3 in its worktree/)).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Billing Migration ›" }));
+    expect(opened).toHaveBeenCalledWith("s3");
+  });
+
+  it("lists a run as one line when you asked for every decision", () => {
+    const every: DeskExtras = {
+      update: { roundup: { since: "2026-11-17T09:00:00Z", sections: [{ key: "decided", title: "Decided without you", lines: [run] }] } },
+    };
+    show(post(every));
+    const decided = screen.getByRole("region", { name: "Decided without you" });
+    expect(within(decided).getByText(run.headline)).toBeTruthy();
+    expect(within(decided).queryByRole("button", { name: "Why?" })).toBeNull();
+    expect(within(decided).getByRole("button", { name: "Show all ›" })).toBeTruthy();
+  });
 });
