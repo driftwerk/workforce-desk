@@ -176,14 +176,14 @@ function Decided({ line }: { line: Said }) {
 /** A run of routine decisions, one line ("Allowed web 16 times, 09:05–09:15:
  *  test and fixture edits, and local test runs."), each of them on "Show
  *  all". */
-function Run({ line }: { line: Said }) {
+function Run({ line, decided = false }: { line: Said; decided?: boolean }) {
   const [open, setOpen] = useState(false);
   const list = useId();
   const did = line.did ?? [];
   return (
     <li className="rnd-line">
-      <span className="rnd-mark" aria-hidden>
-        ·
+      <span className={`rnd-mark${decided ? " decided" : ""}`} aria-hidden>
+        {decided ? MARK.decided : "·"}
       </span>
       <div className="rnd-text">
         <p>{line.headline}</p>
@@ -274,7 +274,7 @@ function Section({ section }: { section: RoundupSection }) {
       <ul className="rnd-lines">
         {section.lines.map((l, i) =>
           section.key === "decided" && l.kind === "routine" ? (
-            <Run key={l.did?.[0]?.id ?? i} line={l} />
+            <Run key={l.did?.[0]?.id ?? i} line={l} decided />
           ) : section.key === "decided" ? (
             <Decided key={l.did?.[0]?.id ?? i} line={l} />
           ) : (
