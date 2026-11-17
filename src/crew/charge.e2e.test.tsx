@@ -224,7 +224,7 @@ beforeEach(() => {
   useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
   startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
   useTerminals.setState({ byId: {}, known: true, programs: {}, problems: {} });
-  useCharges.setState({ bySession: {}, supported: null });
+  useCharges.setState({ bySession: {}, released: {}, supported: null });
   useGrantBosses.setState({ byGroup: {}, bossed: {}, readAt: {} });
   useHubLayout.setState({ layout: null, kept: false });
   useLine.setState({ threads: {}, problems: {} });
@@ -320,9 +320,16 @@ describe("a session Sarah runs", () => {
     expect(within(who).getByText(/Sarah runs this session/)).toBeTruthy();
     await act(async () => fireEvent.click(within(who).getByRole("button", { name: "Release" })));
     expect(hub.requests).toContain("DELETE /api/desk/sessions/s1/charge");
-    await waitFor(() => expect(chip()).toBeNull());
+    // It's yours to run now, and says so where Sarah's badge was.
+    await waitFor(() => expect(chip()!.getAttribute("aria-label")).toBe("Who runs it: You’re running this"));
     const pane = screen.getByRole("region", { name: "acme-web" });
     expect(within(pane).queryByText("Sarah has it")).toBeNull();
+    expect(within(pane).getAllByText("You’re running this").length).toBeGreaterThan(0);
+    await act(async () => fireEvent.click(chip()!));
+    const mine = screen.getByRole("dialog", { name: "Who runs acme-web" });
+    expect(within(mine).getByText(/^You took this back from Sarah\. Sarah watches/)).toBeTruthy();
+    expect(within(mine).getByRole("button", { name: "Hand to Sarah" })).toBeTruthy();
+    fireEvent.keyDown(mine, { key: "Escape" });
     expect(await within(card).findByText(/Not delivered: Sarah no longer runs it/)).toBeTruthy();
     expect(within(card).getByText(/I'm no longer running this session/)).toBeTruthy();
     expect(within(card).getAllByText(/A note here only: not typed in/).length).toBeGreaterThan(0);
@@ -334,7 +341,24 @@ describe("a session Sarah runs", () => {
     await act(async () => fireEvent.click(screen.getByRole("menuitem", { name: "Hand to Sarah" })));
     expect(hub.requests.filter((r) => r === "POST /api/desk/sessions/s1/charge")).toHaveLength(1);
     await waitFor(() => expect(within(pane).getByText("Sarah has it")).toBeTruthy());
-    expect(chip()).toBeTruthy();
+    expect(chip()!.getAttribute("aria-label")).toBe("Who runs it: Sarah has it");
+    expect(within(pane).queryByText("You’re running this")).toBeNull();
+  });
+
+  it("is handed back to Sarah from the chip you run it by", async () => {
+    hub.charge = charged();
+    await connect();
+    render(<SessionCard session={useDesk.getState().sessions.s1!} />);
+    const card = screen.getByRole("complementary", { name: "Session acme-web" });
+    const chip = () => within(card).getByRole("button", { name: /^Who runs it: / });
+    await act(async () => fireEvent.click(chip()));
+    await act(async () => fireEvent.click(within(screen.getByRole("dialog", { name: "Who runs acme-web" })).getByRole("button", { name: "Release" })));
+    await waitFor(() => expect(chip().getAttribute("aria-label")).toBe("Who runs it: You’re running this"));
+    await act(async () => fireEvent.click(chip()));
+    await act(async () => fireEvent.click(within(screen.getByRole("dialog", { name: "Who runs acme-web" })).getByRole("button", { name: "Hand to Sarah" })));
+    expect(hub.requests.filter((r) => r === "POST /api/desk/sessions/s1/charge")).toHaveLength(1);
+    await waitFor(() => expect(chip().getAttribute("aria-label")).toBe("Who runs it: Sarah has it"));
+    expect(useCharges.getState().released).toEqual({});
   });
 
   it("is handed to the boss its group's grant names on another hub, by name and party id", async () => {

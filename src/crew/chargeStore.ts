@@ -14,6 +14,9 @@ interface ChargeState {
   /** The sessions a boss runs now, by session key (see `keyOf`): each
    *  engine's boss runs that engine's sessions. */
   bySession: Record<string, ChargeView>;
+  /** The sessions the person took back from their boss here (Release), by
+   *  session key, as the release answered: theirs until handed back. */
+  released: Record<string, ChargeView>;
   /** This computer's hub keeps charges: false once it said it doesn't (an
    *  older one). */
   supported: boolean | null;
@@ -48,8 +51,13 @@ const heardOf = (machine: MachineId): number => heardCount.get(machine) ?? 0;
 const others = (all: Record<string, ChargeView>, machine: MachineId): Record<string, ChargeView> =>
   Object.fromEntries(Object.entries(all).filter(([k]) => splitKey(k).machine !== machine));
 
+/** `all` but those whose key is in `live`: a boss runs them again. */
+const without = (all: Record<string, ChargeView>, live: Record<string, unknown>): Record<string, ChargeView> =>
+  Object.fromEntries(Object.entries(all).filter(([k]) => !(k in live)));
+
 export const useCharges = create<ChargeState>((set, get) => ({
   bySession: {},
+  released: {},
   supported: null,
   load: async (machine = LOCAL) => {
     const hub = hubOf(machine);
@@ -60,7 +68,7 @@ export const useCharges = create<ChargeState>((set, get) => ({
       // Another hub by now, or a charge heard since: what was read is older.
       if (hubOf(machine) !== hub || heardOf(machine) !== was) return;
       const mine = Object.fromEntries((list ?? []).map((c) => [keyOf(machine, c.session), named(c, machine)]));
-      set((s) => ({ bySession: { ...others(s.bySession, machine), ...mine }, ...(machine === LOCAL ? { supported: list !== null } : {}) }));
+      set((s) => ({ bySession: { ...others(s.bySession, machine), ...mine }, released: without(s.released, mine), ...(machine === LOCAL ? { supported: list !== null } : {}) }));
     } catch {
       // Kept as last read; the next snapshot reads them again.
     }
@@ -70,7 +78,7 @@ export const useCharges = create<ChargeState>((set, get) => ({
     const c = named(heard, machine);
     const key = keyOf(machine, c.session);
     const was = get().bySession[key];
-    set((s) => ({ bySession: withCharge(s.bySession, c, machine), ...(machine === LOCAL ? { supported: true } : {}) }));
+    set((s) => ({ bySession: withCharge(s.bySession, c, machine), released: c.releasedAt ? s.released : without(s.released, { [key]: c }), ...(machine === LOCAL ? { supported: true } : {}) }));
     // Why the boss's messages wait changes with the wheel: at once as far
     // as Desk can tell, then as the hub says on reading the thread again.
     if (!was || was.wheel !== c.wheel || !!c.releasedAt) rewait(key, c.session, !c.releasedAt && c.wheel !== "boss");
@@ -86,6 +94,9 @@ export const useCharges = create<ChargeState>((set, get) => ({
           ? await hub.releaseCharge(id)
           : await hub.setWheel(id, verb === "drive" ? "person_pinned" : "boss");
     get().heard(c, machine);
+    // Who let it go isn't in what the hub tells everyone: Desk knows the
+    // person did when they asked.
+    if (verb === "release" && c.releasedAt) set((s) => ({ released: { ...s.released, [key]: named(c, machine) } }));
   },
 }));
 
@@ -118,6 +129,14 @@ const rewait = (key: string, id: string, driving: boolean) => {
 export const useCharge = (sessionId: string | null | undefined): ChargeView | undefined =>
   useCharges((s) => (sessionId ? s.bySession[sessionId] : undefined));
 
+/** The released charge on `sessionId` while it is the person's: they took
+ *  it back, and it hasn't ended. */
+export const useTakenBack = (sessionId: string | null | undefined): ChargeView | undefined => {
+  const c = useCharges((s) => (sessionId ? s.released[sessionId] : undefined));
+  const ended = useDesk((s) => (sessionId ? s.sessions[sessionId]?.state === "closed" : false));
+  return ended ? undefined : c;
+};
+
 /** The boss session `s` can be handed to: the one its group's grant names
  *  on another hub, wherever the session runs (machines' sessions too); else
  *  this computer's, for its own sessions. A machine has no boss of its own
@@ -148,9 +167,9 @@ const onEvent = (e: EngineEvent) => {
   // Read again on every snapshot (a hub that had none may have been
   // updated meanwhile).
   else if (e.type === "snapshot") void s.load(machine);
-  else if (key && key in s.bySession) {
-    const { [key]: _, ...rest } = s.bySession;
-    useCharges.setState({ bySession: rest });
+  else if (key && (key in s.bySession || key in s.released)) {
+    const gone = { [key]: true };
+    useCharges.setState({ bySession: without(s.bySession, gone), released: without(s.released, gone) });
   }
 };
 engineListeners.add(onEvent);
@@ -158,23 +177,25 @@ engineListeners.add(onEvent);
 // Another hub (or none): what the last one said is no longer so; a machine
 // let go takes its charges with it.
 useDesk.subscribe((now, before) => {
-  if (now.hub !== before.hub) useCharges.setState((s) => ({ bySession: others(s.bySession, LOCAL), supported: null }));
+  if (now.hub !== before.hub) useCharges.setState((s) => ({ bySession: others(s.bySession, LOCAL), released: others(s.released, LOCAL), supported: null }));
   if (now.engines === before.engines) return;
   const gone = Object.keys(before.engines).filter((m) => m !== LOCAL && !now.engines[m]);
-  for (const m of gone) useCharges.setState((s) => ({ bySession: others(s.bySession, m) }));
+  for (const m of gone) useCharges.setState((s) => ({ bySession: others(s.bySession, m), released: others(s.released, m) }));
 });
 
 // Names the roster brings after the charges came.
 useChat.subscribe((now, before) => {
   if (now.roster === before.roster && now.hubs === before.hubs) return;
-  const { bySession } = useCharges.getState();
+  const { bySession, released } = useCharges.getState();
   let changed = false;
-  const next = Object.fromEntries(
-    Object.entries(bySession).map(([key, c]) => {
-      const n = named(c, splitKey(key).machine);
-      if (n !== c) changed = true;
-      return [key, n];
-    }),
-  );
-  if (changed) useCharges.setState({ bySession: next });
+  const renamed = (all: Record<string, ChargeView>) =>
+    Object.fromEntries(
+      Object.entries(all).map(([key, c]) => {
+        const n = named(c, splitKey(key).machine);
+        if (n !== c) changed = true;
+        return [key, n];
+      }),
+    );
+  const next = { bySession: renamed(bySession), released: renamed(released) };
+  if (changed) useCharges.setState(next);
 });

@@ -9,7 +9,7 @@ import { create } from "zustand";
 import { useChat } from "../chat/store";
 import { SessionTicketChip } from "../board/TicketChip";
 import { ChargeBadge } from "../crew/ChargeBadge";
-import { useCharge } from "../crew/chargeStore";
+import { useCharge, useTakenBack } from "../crew/chargeStore";
 import { ENGINE_TITLE } from "../engines/engines";
 import { GroupDot } from "../groups/GroupChip";
 import { useLayout } from "../groups/store";
@@ -201,12 +201,14 @@ export function PlanProgressCard({ plan }: { plan: PlanProgress }) {
   );
 }
 
-/** Whose a working session is: its boss's ("Sarah's"), or yours. */
+/** Whose a working session is: its boss's ("Sarah's"), yours to run once
+ *  you took it back, or yours. */
 function Whose({ work }: { work: FloorWork }) {
   const key = sessionKeyOfItem(work);
   const charge = useCharge(key);
+  const back = useTakenBack(key);
   if (work.who.kind !== "session") return null;
-  if (charge && !charge.releasedAt) return <ChargeBadge charge={charge} session={key} short />;
+  if (charge || back) return <ChargeBadge charge={charge} session={key} short />;
   return <span className="charge-badge charge-you">yours</span>;
 }
 
@@ -307,6 +309,7 @@ export function DeskTile({ item, chip }: { item: DeskItem; chip: { id: string; n
   const name = item.who.kind === "session" ? named : item.name;
   const localId = useChat((s) => s.hubs.find((h) => h.local)?.id ?? null);
   const charge = useCharge(item.who.kind === "session" ? item.who.id : null);
+  const back = useTakenBack(item.who.kind === "session" ? item.who.id : null);
   const state = DESK_STATE[item.look];
   const target: Target | null =
     item.who.kind === "session" ? { kind: "session", sessionId: item.who.id } : localId ? { kind: "agent", key: `${localId}/${item.who.id}` } : null;
@@ -344,7 +347,7 @@ export function DeskTile({ item, chip }: { item: DeskItem; chip: { id: string; n
           </span>
         )}
         {item.who.kind === "session" &&
-          (charge && !charge.releasedAt ? <ChargeBadge charge={charge} session={item.who.id} short /> : <span className="charge-badge charge-you">yours</span>)}
+          (charge || back ? <ChargeBadge charge={charge} session={item.who.id} short /> : <span className="charge-badge charge-you">yours</span>)}
       </div>
     </article>
   );

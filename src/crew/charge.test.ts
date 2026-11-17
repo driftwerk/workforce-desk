@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ChargeView } from "../hub/types";
 import { lined } from "../line/testing";
-import { badgeOf, chargeChoices, chargeable, howText, wheelText, type Boss } from "./charge";
+import { badgeOf, chargeChoices, chargeable, howText, releasedText, wheelText, type Boss } from "./charge";
 
 const charge = (more: Partial<ChargeView> = {}): ChargeView => ({
   session: "s1",
@@ -26,8 +26,17 @@ describe("a session a boss runs", () => {
       expect(badgeOf(charge({ wheel }))).toEqual({ text: "You’re driving", look: "you" });
       expect(badgeOf(charge({ wheel }), true)).toEqual({ text: "Yours", look: "you" });
     }
-    expect(badgeOf(charge({ releasedAt: "2026-11-03T11:00:00Z" }))).toBeNull();
     expect(badgeOf(undefined)).toBeNull();
+  });
+
+  it("is yours to run once you took it back, whoever had the wheel, and says so in a sentence", () => {
+    for (const wheel of ["boss", "person", "person_pinned"] as const) {
+      expect(badgeOf(charge({ wheel, releasedAt: "2026-11-03T11:00:00Z" }), false, "Sarah left this to you.")).toEqual({ text: "You’re running this", look: "mine" });
+      expect(badgeOf(charge({ wheel, releasedAt: "2026-11-03T11:00:00Z" }), true)).toEqual({ text: "You run it", look: "mine" });
+    }
+    expect(releasedText(charge())).toBe("You took this back from Sarah. Sarah watches but won’t act on it until you hand it back.");
+    expect(releasedText(charge({ bossName: "" }))).toBe("You took this back from your overseer. Your overseer watches but won’t act on it until you hand it back.");
+    expect(chargeChoices(lined(), charge({ releasedAt: "2026-11-03T11:00:00Z" }), SARAH)).toEqual([{ verb: "hand", label: "Hand to Sarah" }]);
   });
 
   it("says who has the wheel, and when it comes back, in a sentence", () => {

@@ -3,8 +3,8 @@ import { useDesk } from "../hub/store";
 import type { ChargeView, Session } from "../hub/types";
 import { useOverview } from "../overview/store";
 import { plainError } from "../ui/plainError";
-import { badgeOf, called, chargeChoices, driving, howText, wheelText, type ChargeChoice } from "./charge";
-import { useBossOf, useCharge, useCharges } from "./chargeStore";
+import { badgeOf, called, chargeChoices, driving, howText, releasedText, wheelText, type ChargeChoice } from "./charge";
+import { useBossOf, useCharge, useCharges, useTakenBack } from "./chargeStore";
 import { Popover } from "../ui/Popover";
 import { sessionKey } from "../hub/machines";
 
@@ -16,20 +16,25 @@ const useWaitsOnYou = (key: string | null | undefined): string | undefined => us
 /** `why` as a sentence of its own, ending in a full stop. */
 const sentence = (why: string): string => `${why.trim().replace(/[.!?]+$/, "")}.`;
 
-/** What the badge's title says: why it waits on you, when it does, then
- *  how the boss came to run it and who has the wheel. */
-const titleOf = (charge: ChargeView, waits: string | undefined): string => `${waits && !driving(charge) ? `Waiting on you: ${sentence(waits)} ` : ""}${howText(charge)}. ${wheelText(charge)}`;
+/** What the badge's title says: that you took it back, once you did; else
+ *  why it waits on you, when it does, then how the boss came to run it and
+ *  who has the wheel. */
+const titleOf = (charge: ChargeView, waits: string | undefined): string =>
+  charge.releasedAt ? releasedText(charge) : `${waits && !driving(charge) ? `Waiting on you: ${sentence(waits)} ` : ""}${howText(charge)}. ${wheelText(charge)}`;
 
 /** The badge on a session a boss runs: "Sarah has it" (or "Sarah's",
  *  `short`), dashed "You're driving" while the person has the wheel, and
- *  "Waiting on you" while what it waits on is the person's to answer.
- *  `session` is the session's key, as its charge was looked up by. */
+ *  "Waiting on you" while what it waits on is the person's to answer; on
+ *  one the person took back, "You're running this". `session` is the
+ *  session's key, as its charge was looked up by. */
 export function ChargeBadge({ charge, session, short = false, className = "" }: { charge: ChargeView | undefined; session: string | null | undefined; short?: boolean; className?: string }) {
   const waits = useWaitsOnYou(session);
-  const badge = badgeOf(charge, short, waits);
-  if (!charge || !badge) return null;
+  const back = useTakenBack(session);
+  const shown = charge ?? back;
+  const badge = badgeOf(shown, short, waits);
+  if (!shown || !badge) return null;
   return (
-    <span className={`charge-badge charge-${badge.look} ${className}`} title={titleOf(charge, waits)}>
+    <span className={`charge-badge charge-${badge.look} ${className}`} title={titleOf(shown, waits)}>
       {badge.text}
     </span>
   );
@@ -66,12 +71,16 @@ export const useChargeActions = (session: Session | null | undefined): (ChargeCh
 /** Who runs `session`, in its chrome: the badge as a button ("Desk has it
  *  ▾", dashed "You're driving ▾"), with a count of what the boss suggests
  *  while you drive. It opens what that means and the choices: I'll drive,
- *  Hand back, Release. Nothing while no boss runs it (Hand to … is in the
- *  session's menu). */
+ *  Hand back, Release. Once the person took it back, "You're running this
+ *  ▾" opens Hand to … (a plain badge where there's no one to hand it to).
+ *  Nothing while no boss runs it otherwise (Hand to … is in the session's
+ *  menu). */
 export function DriverChip({ session }: { session: Session }) {
-  const charge = useCharge(sessionKey(session));
+  const live = useCharge(sessionKey(session));
+  const back = useTakenBack(sessionKey(session));
+  const charge = live ?? back;
   const boss = useBossOf(session);
-  const suggested = useSuggested(charge && charge.wheel !== "boss" ? session.id : null).length;
+  const suggested = useSuggested(live && live.wheel !== "boss" ? session.id : null).length;
   const [from, setFrom] = useState<HTMLElement | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const going = useRef(false);
@@ -81,6 +90,18 @@ export function DriverChip({ session }: { session: Session }) {
   const short = badgeOf(charge, true, waits);
   if (!charge || !badge || !short) return null;
   const choices = chargeChoices(session, charge, boss);
+  const words = (
+    <>
+      <span className="sc-long">{badge.text}</span>
+      <span className="sc-short">{short.text}</span>
+    </>
+  );
+  if (!choices.length)
+    return (
+      <span className={`charge-badge charge-${badge.look} sc-driver`} title={titleOf(charge, waits)}>
+        {words}
+      </span>
+    );
   const run = (c: ChargeChoice) => {
     // Asked once, however quickly it's clicked again.
     if (going.current) return;
@@ -109,8 +130,7 @@ export function DriverChip({ session }: { session: Session }) {
         title={titleOf(charge, waits)}
         onClick={(e) => setFrom(from ? null : e.currentTarget)}
       >
-        <span className="sc-long">{badge.text}</span>
-        <span className="sc-short">{short.text}</span>
+        {words}
         {suggested > 0 && <span className="sc-count">{suggested}</span>}
         <Caret />
       </button>
@@ -118,10 +138,10 @@ export function DriverChip({ session }: { session: Session }) {
         <Popover label={`Who runs ${name}`} from={from} onClose={() => setFrom(null)} className="driver-pop">
           <span className="driver-pop-head">
             <ChargeBadge charge={charge} session={sessionKey(session)} />
-            <span className="small faint">{howText(charge)}</span>
+            {!charge.releasedAt && <span className="small faint">{howText(charge)}</span>}
           </span>
-          {waits && !driving(charge) && <p className="driver-pop-text">Waiting on you: {sentence(waits)}</p>}
-          <p className="driver-pop-text">{wheelText(charge)}</p>
+          {waits && !charge.releasedAt && !driving(charge) && <p className="driver-pop-text">Waiting on you: {sentence(waits)}</p>}
+          <p className="driver-pop-text">{charge.releasedAt ? releasedText(charge) : wheelText(charge)}</p>
           {problem && (
             <p className="small state-blocked" role="alert">
               {problem}

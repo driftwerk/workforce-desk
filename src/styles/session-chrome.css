@@ -262,6 +262,10 @@
 .sc-driver.charge-you {
   border-style: dashed;
 }
+/* Nothing to choose: a badge, not a button. */
+span.sc-driver {
+  cursor: default;
+}
 .sc-count {
   display: inline-grid;
   place-items: center;
