@@ -127,6 +127,20 @@ describe("an update written like a teammate's (shape A)", () => {
     expect(screen.getByText("Marked MAN-632 Done")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Undo: Closed the session" })).toBeTruthy();
   });
+
+  it("counts every decision in a folded run of what the boss did", () => {
+    const work = A.update!.said![0]!;
+    const run = {
+      id: "d3",
+      kind: "done" as const,
+      action: "Allowed 16 edits and test runs",
+      why: "the billing migration",
+      detail: Array.from({ length: 16 }, (_, n) => `10:${String(n).padStart(2, "0")} Allowed an edit`).join("\n"),
+      folded: 16,
+    };
+    show(post({ update: { ...A.update!, said: [{ ...work, did: [...work.did!, run] }] } }));
+    expect(screen.getByRole("button", { name: /What I did · 18/ })).toBeTruthy();
+  });
 });
 
 describe("a roundup (shape C)", () => {

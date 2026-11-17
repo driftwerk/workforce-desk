@@ -1163,6 +1163,8 @@ export interface BriefItem {
   /** Settled since, in the session or by you: folded into one line. */
   settledBy?: "session" | "you" | null;
   at?: string | null;
+  /** How many decisions a folded run's line stands for; absent on a line of its own. */
+  folded?: number | null;
 }
 
 /** What needs you, laid out by the hub: the same items as `waiting`. */
