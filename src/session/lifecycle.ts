@@ -33,11 +33,27 @@ export const dropPanesOf = (key: string): void => {
   }
 };
 
+/** The most closed sessions an engine lists (the hub's `CLOSED_LISTED`): a
+ *  list that long may not be all of them. */
+export const CLOSED_LISTED = 200;
+
+/** Each machine's restore offers, by session key, as its last snapshot
+ *  said them (this computer's are `useDesk`'s `restore`). */
+const offeredOn = new Map<MachineId, Set<string>>();
+
+/** By machine, the sessions its engine said were closed since its last
+ *  snapshot: their panes stay, without asking again. */
+const closedOn = new Map<MachineId, Set<string>>();
+
+/** Each machine's sweep under way, so triggers together ask once. */
+const sweeping = new Map<MachineId, Promise<void>>();
+
 /** The sessions of `machine` that panes this window writes still show
- *  while its engine doesn't list them: removed, or closed. */
+ *  while its engine doesn't list them, nor offers to restore them: removed,
+ *  or closed. */
 const unlisted = (machine: MachineId): string[] => {
   const { sessions, restore } = useDesk.getState();
-  const restoring = new Set(machine === LOCAL ? restore.map((r) => keyOf(LOCAL, r.id)) : []);
+  const restoring = machine === LOCAL ? new Set(restore.map((r) => keyOf(LOCAL, r.id))) : (offeredOn.get(machine) ?? new Set<string>());
   const { order, grids } = useGrids.getState();
   const keys = new Set<string>();
   for (const gridId of order) {
@@ -53,19 +69,32 @@ const unlisted = (machine: MachineId): string[] => {
 /** Panes left showing a session that was removed while this window wasn't
  *  listening (Desk closed, a grid's window opening, its engine restarting)
  *  close too. A closed one keeps its pane, to resume: only those its engine
- *  doesn't list as closed either go. */
-export async function sweepRemoved(machine: MachineId): Promise<void> {
-  if (!useGrids.getState().ready || !useDesk.getState().engines[machine]?.loaded) return;
+ *  lists neither as running, to restore nor as closed go. Asked while
+ *  another sweep of `machine` waits on its engine, it is that one. */
+export function sweepRemoved(machine: MachineId): Promise<void> {
+  const under = sweeping.get(machine);
+  if (under) return under;
+  if (!useGrids.getState().ready || !useDesk.getState().engines[machine]?.loaded) return Promise.resolve();
   const hub = engineOf(machine);
-  if (!hub || unlisted(machine).length === 0) return;
-  let closed: Set<string>;
-  try {
-    closed = new Set((await hub.closedSessions()).map((s) => keyOf(machine, s.id)));
-  } catch {
-    return; // Not said: nothing is taken for gone.
-  }
-  // As things are now: one listed again meanwhile stays.
-  for (const key of unlisted(machine)) if (!closed.has(key)) dropPanesOf(key);
+  const known = closedOn.get(machine);
+  if (!hub || unlisted(machine).every((k) => known?.has(k))) return Promise.resolve();
+  const run = hub
+    .closedSessions()
+    .then(
+      (list) => {
+        // A full list may leave older closed sessions out: none is taken
+        // for removed on its word.
+        if (list.length >= CLOSED_LISTED) return;
+        const closed = new Set(list.map((s) => keyOf(machine, s.id)));
+        closedOn.set(machine, closed);
+        // As things are now: one listed again meanwhile stays.
+        for (const key of unlisted(machine)) if (!closed.has(key)) dropPanesOf(key);
+      },
+      () => undefined, // Not said: nothing is taken for gone.
+    )
+    .finally(() => sweeping.delete(machine));
+  sweeping.set(machine, run);
+  return run;
 }
 
 const sweepAll = (): void => {
@@ -77,8 +106,16 @@ const sweepAll = (): void => {
 // engine has said what it has, panes left from a removal this window
 // didn't hear of go too.
 engineListeners.add((e) => {
-  if (e.type === "removed") dropPanesOf(keyOf(machineOf(e), e.id));
-  if (e.type === "snapshot") void sweepRemoved(machineOf(e));
+  const machine = machineOf(e);
+  if (e.type === "removed") {
+    closedOn.get(machine)?.delete(keyOf(machine, e.id));
+    dropPanesOf(keyOf(machine, e.id));
+  }
+  if (e.type === "snapshot") {
+    if (machine !== LOCAL) offeredOn.set(machine, new Set(e.restore.map((r) => keyOf(machine, r.id))));
+    closedOn.delete(machine);
+    void sweepRemoved(machine);
+  }
 });
 
 // And once this window has its grids, or takes over writing one (a grid's

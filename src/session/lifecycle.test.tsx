@@ -9,7 +9,7 @@ import { createGrid, deliver, layOut, setOpen, setPlacement, startGrids, useGrid
 import { Sessions } from "../settings/Sessions";
 import { endSession, lifecycleActions, runs, sessionActions } from "./actions";
 import { LifecycleDialogs } from "./LifecycleDialogs";
-import { askLifecycle, closeLifecycle, sweepRemoved, useLifecycle } from "./lifecycle";
+import { askLifecycle, CLOSED_LISTED, closeLifecycle, sweepRemoved, useLifecycle } from "./lifecycle";
 import { useHubLayout } from "../groups/hubLayout";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
@@ -58,6 +58,7 @@ const shown = (s: Session) => {
 
 beforeEach(() => {
   Object.values(hub).forEach((f) => f.mockClear());
+  hub.closedSessions.mockImplementation(() => Promise.resolve([]));
   closeLifecycle();
   useDesk.setState({ sessions: {}, hub: hub as never });
 });
@@ -256,7 +257,6 @@ describe("a session removed while this window wasn't listening", () => {
     await sweepRemoved("local");
     expect(anywhereIn(MAIN_GRID)).toEqual(["s2", "s3"]);
     expect(laidOutIn(MAIN_GRID)).not.toContain(null);
-    hub.closedSessions.mockImplementation(() => Promise.resolve([]));
   });
 
   it("asks nothing and takes nothing before its engine has said, or when every pane's session is listed", async () => {
@@ -277,7 +277,34 @@ describe("a session removed while this window wasn't listening", () => {
     useDesk.setState({ sessions: {}, restore: [], engines: loaded() });
     await sweepRemoved("local");
     expect(anywhereIn(MAIN_GRID)).toEqual(["s1"]);
-    hub.closedSessions.mockImplementation(() => Promise.resolve([]));
+  });
+
+  it("keeps a machine's session its engine offers to restore after a restart", async () => {
+    freshGrids();
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s1", machine: "devbox" });
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s2", machine: "devbox" });
+    useDesk.setState({ sessions: {}, restore: [], engines: loaded("devbox") });
+    announce({ type: "snapshot", machine: "devbox", sessions: [], restore: [session({ id: "s1" })], rooms: [] } as never);
+    await waitFor(() => expect(anywhereIn(MAIN_GRID)).toEqual(["devbox/s1"]));
+  });
+
+  it("takes nothing on a full closed list, which may leave older closed sessions out", async () => {
+    freshGrids();
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+    const full = Array.from({ length: CLOSED_LISTED }, (_, i) => session({ id: `c${i}`, state: "closed" }));
+    hub.closedSessions.mockImplementation(() => Promise.resolve(full));
+    useDesk.setState({ sessions: {}, restore: [], engines: loaded() });
+    await sweepRemoved("local");
+    expect(anywhereIn(MAIN_GRID)).toEqual(["s1"]);
+  });
+
+  it("asks once for triggers together", async () => {
+    freshGrids();
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+    useDesk.setState({ sessions: {}, restore: [], engines: loaded() });
+    await Promise.all([sweepRemoved("local"), sweepRemoved("local")]);
+    expect(hub.closedSessions).toHaveBeenCalledTimes(1);
   });
 
   it("is swept when its engine's snapshot comes", async () => {
@@ -324,9 +351,7 @@ describe("Settings → Sessions", () => {
     act(() => announce({ type: "removed", id: "x1" }));
     expect(screen.queryByText("vellev-07")).toBeNull();
     expect(screen.getByText("acme-web")).toBeTruthy();
-    hub.closedSessions.mockImplementation(() => Promise.resolve([]));
   });
-
 
   it("resumes a closed session from another terminal in Desk, and tracks a removed one again", async () => {
     hub.closedSessions.mockImplementation(() => Promise.resolve([session({ id: "x1", name: "vellev-07", origin: "external", state: "closed" })]));
