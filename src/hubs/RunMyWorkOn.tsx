@@ -165,7 +165,7 @@ function RouteModelsRows({
       <div className="think-rows">
         {WORK.map(({ work, name, what }) => {
           const set = chosenModel(route, work);
-          const known = !set || set === "chat" || models.includes(set) || TIERS.some(([t]) => t === set);
+          const known = !set || set === "chat" || models.includes(set) || tiers.some(([t]) => t === set);
           const id = `${ids}-${work}`;
           return (
             <div key={work} className="think-row think-row-work">
