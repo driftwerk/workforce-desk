@@ -6,28 +6,56 @@
 //!
 //! Some Macs refuse to start voice processing (AVFAudio error -10875). The
 //! microphone is then opened plainly and goes quiet while Desk speaks, and
-//! for a moment after, so Desk never hears itself.
+//! for a moment after, so Desk never hears itself ([`super::live`]).
+//!
+//! A device other than the system's is set on the engine's I/O unit before
+//! the engine starts (`kAudioOutputUnitProperty_CurrentDevice`). With voice
+//! processing on, both nodes are one voice-processing unit, and the device
+//! goes on its input element (1) and the speaker on its output element (0),
+//! as Chromium's voice-processing capture does. Voice processing makes an
+//! aggregate device of its own, so it isn't tried on an aggregate.
+//!
+//! macOS stops an engine whenever the audio device's configuration changes
+//! (another app, a device switch, a voice-processing unit winding down);
+//! this engine says it's no longer healthy, and a new one is built on the
+//! devices there are then, its tap and voice processing made afresh.
 
+use std::ffi::c_void;
 use std::ptr::NonNull;
-use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use block2::RcBlock;
 use eyre::{Result, eyre};
 use objc2::AllocAnyThread;
 use objc2::rc::Retained;
+use objc2_audio_toolbox::{
+    AudioUnit, AudioUnitGetProperty, AudioUnitSetProperty, kAudioOutputUnitProperty_CurrentDevice,
+    kAudioUnitScope_Global,
+};
 use objc2_avf_audio::{
     AVAudioEngine, AVAudioFormat, AVAudioPCMBuffer, AVAudioPlayerNode,
     AVAudioPlayerNodeCompletionCallbackType, AVAudioTime,
 };
 
 use super::SharedIn;
-use super::gate::Speaking;
+use super::devices::{Device, Devices};
+use super::live::{Attempt, Backend, Done};
 use crate::resample::Resampler;
-use crate::{AudioIn, AudioOut, SharedAudioOut};
 
 const TAP_FRAMES: u32 = 4096;
 const PLAYBACK_RATE: u32 = 48_000;
+
+/// Apple's voice processing removes Desk's voice from the microphone.
+pub(crate) const HAS_ECHO_CANCELLER: bool = true;
+/// How long a voice-processing unit takes to wind down once its engine is
+/// gone: the next engine's microphone won't start before.
+pub(crate) const SETTLE: Duration = Duration::from_millis(300);
+/// Tries at the plain microphone after voice processing failed, `SETTLE`
+/// apart.
+pub(crate) const RETRIES_AFTER_VP: usize = 5;
+/// How often the devices are listed, to follow them.
+pub(crate) const POLL: Duration = Duration::from_millis(500);
 
 struct Engine {
     engine: Retained<AVAudioEngine>,
@@ -42,43 +70,17 @@ unsafe impl Send for Engine {}
 type Tap = RcBlock<dyn Fn(NonNull<AVAudioPCMBuffer>, NonNull<AVAudioTime>)>;
 
 pub struct MacAudio {
-    engine: Arc<Mutex<Engine>>,
-    alive: Arc<std::sync::atomic::AtomicBool>,
+    engine: Mutex<Engine>,
     format: Retained<AVAudioFormat>,
     resampler: Mutex<Option<Resampler>>,
-    speaking: Arc<Speaking>,
+    /// The buffers scheduled and not yet answered.
+    waiting: Mutex<Vec<Waiting>>,
     tap: Option<Tap>,
 }
 
 // SAFETY: the engine is behind a `Mutex`; the format is an immutable object.
 unsafe impl Send for MacAudio {}
 unsafe impl Sync for MacAudio {}
-
-/// Starts the engine: the microphone (voice-processed) goes to `input` as
-/// mono samples at the hardware rate; the returned output plays speech.
-pub fn open(input: AudioIn) -> Result<SharedAudioOut> {
-    let input: SharedIn = Arc::from(input);
-    // In a pool of its own, so a failed attempt's objects are gone before the retry.
-    match objc2::rc::autoreleasepool(|_| build(Some((input.clone(), true)))) {
-        Ok(audio) => Ok(Arc::new(audio)),
-        Err(e) => {
-            tracing::warn!(
-                "voice processing won't start ({e:#}); listening without it, quiet while speaking"
-            );
-            // The failed voice-processing unit winds down in the background;
-            // the plain microphone starts once it has.
-            let mut last = None;
-            for _ in 0..5 {
-                std::thread::sleep(std::time::Duration::from_millis(300));
-                match objc2::rc::autoreleasepool(|_| build(Some((input.clone(), false)))) {
-                    Ok(audio) => return Ok(Arc::new(audio)),
-                    Err(e) => last = Some(e),
-                }
-            }
-            Err(last.unwrap_or_else(|| eyre!("the microphone won't start")))
-        }
-    }
-}
 
 /// Whether Desk may use the microphone: AVAudioApplication's record
 /// permission (macOS 14 and later; before, the system doesn't say).
@@ -96,15 +98,23 @@ pub fn mic_access() -> super::MicAccess {
     }
 }
 
-/// Just the speaker side: for playing a sample while voice is off.
-pub fn output() -> Result<SharedAudioOut> {
-    Ok(Arc::new(build(None)?))
+/// Opens the engine as `attempt` says: the microphone (voice-processed, or
+/// plain) to `to` as mono samples at the hardware rate, and the speaker.
+pub(crate) fn build(attempt: &Attempt, to: Option<SharedIn>) -> Result<Box<dyn Backend>> {
+    Ok(Box::new(build_engine(attempt, to)?))
 }
 
-/// The engine, with the microphone when `input` is given: voice-processed
-/// (echo cancelled), or plain and quiet while Desk speaks.
-fn build(input: Option<(SharedIn, bool)>) -> Result<MacAudio> {
-    let speaking = Arc::new(Speaking::default());
+/// Voice processing makes an aggregate device of its own, and can't of one
+/// that already is.
+pub(crate) fn can_cancel_echo(input: Option<&Device>) -> bool {
+    input.is_none_or(|d| !hal::is_aggregate(&d.id))
+}
+
+pub(crate) fn devices() -> Devices {
+    hal::devices()
+}
+
+fn build_engine(attempt: &Attempt, to: Option<SharedIn>) -> Result<MacAudio> {
     unsafe {
         let engine = AVAudioEngine::new();
         let format = AVAudioFormat::initStandardFormatWithSampleRate_channels(
@@ -113,13 +123,16 @@ fn build(input: Option<(SharedIn, bool)>) -> Result<MacAudio> {
             1,
         )
         .ok_or_else(|| eyre!("no mono playback format"))?;
-        let cancels_echo = input.as_ref().is_some_and(|(_, cancel)| *cancel);
-        let tap = input
-            .map(|(input, cancel_echo)| {
-                let gate = (!cancel_echo).then(|| speaking.clone());
-                listen(&engine, input, cancel_echo, gate)
-            })
-            .transpose()?;
+        let tap = match to.filter(|_| attempt.listen) {
+            Some(to) => Some(listen(&engine, to, attempt)?),
+            None => None,
+        };
+        if tap.is_none()
+            && let Some(uid) = &attempt.output
+        {
+            // Without the microphone, the output node is a unit of its own.
+            set_device(engine.outputNode().audioUnit(), 0, uid)?;
+        }
 
         let player = AVAudioPlayerNode::new();
         engine.attachNode(&player);
@@ -143,35 +156,65 @@ fn build(input: Option<(SharedIn, bool)>) -> Result<MacAudio> {
                 e.code()
             ));
         }
-        let engine = Arc::new(Mutex::new(Engine { engine, player }));
-        let alive = Arc::new(std::sync::atomic::AtomicBool::new(true));
-        keep_running(
-            engine.clone(),
-            alive.clone(),
-            cancels_echo,
-            speaking.clone(),
-        );
         Ok(MacAudio {
-            engine,
-            alive,
+            engine: Mutex::new(Engine { engine, player }),
             format,
             resampler: Mutex::new(None),
-            speaking,
+            waiting: Mutex::new(Vec::new()),
             tap,
         })
     }
 }
 
-/// A tap on the microphone: voice-processed when `cancel_echo`; otherwise
-/// silence goes to `input` while `gate` says Desk is speaking.
-unsafe fn listen(
-    engine: &AVAudioEngine,
-    input: SharedIn,
-    cancel_echo: bool,
-    gate: Option<Arc<Speaking>>,
-) -> Result<Tap> {
+/// Puts the device with Core Audio UID `uid` on `unit`'s `element`.
+unsafe fn set_device(unit: AudioUnit, element: u32, uid: &str) -> Result<()> {
+    if unit.is_null() {
+        return Err(eyre!("the engine has no audio unit to put {uid} on"));
+    }
+    let device = hal::device_id(uid).ok_or_else(|| eyre!("no device {uid}"))?;
+    let status = unsafe {
+        AudioUnitSetProperty(
+            unit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            element,
+            (&raw const device).cast::<c_void>(),
+            size_of_val(&device) as u32,
+        )
+    };
+    if status != 0 {
+        return Err(eyre!("couldn’t use device {uid} (OSStatus {status})"));
+    }
+    Ok(())
+}
+
+/// The device on `unit`'s `element`, as the unit says.
+unsafe fn current_device(unit: AudioUnit, element: u32) -> Option<u32> {
+    if unit.is_null() {
+        return None;
+    }
+    let mut device = 0u32;
+    let mut size = size_of_val(&device) as u32;
+    let status = unsafe {
+        AudioUnitGetProperty(
+            unit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            element,
+            NonNull::from(&mut device).cast::<c_void>(),
+            NonNull::from(&mut size),
+        )
+    };
+    (status == 0).then_some(device)
+}
+
+/// A tap on the microphone, voice-processed when `attempt` says, on its
+/// device; the speaker's device too, which voice processing shares the
+/// microphone's unit with.
+unsafe fn listen(engine: &AVAudioEngine, to: SharedIn, attempt: &Attempt) -> Result<Tap> {
     unsafe {
         let mic = engine.inputNode();
+        let cancel_echo = attempt.cancel_echo;
         mic.setVoiceProcessingEnabled_error(cancel_echo)
             .map_err(|e| {
                 eyre!(
@@ -181,6 +224,30 @@ unsafe fn listen(
                     e.code()
                 )
             })?;
+        // The devices go on before the formats are read: the microphone's is
+        // the device's own.
+        let (input_element, output_element) = if cancel_echo { (1, 0) } else { (0, 0) };
+        if let Some(uid) = &attempt.input {
+            set_device(mic.audioUnit(), input_element, uid)?;
+        }
+        if let Some(uid) = &attempt.output {
+            set_device(engine.outputNode().audioUnit(), output_element, uid)?;
+            // Where the microphone and speaker share one unit, the speaker's
+            // device can take the microphone's place: then this pair can't
+            // be had, and the chosen microphone is tried on its own. Only
+            // the plain unit says so truly: voice processing reports the
+            // aggregate it builds of the two, and is trusted to use both
+            // elements' devices as Chromium's capture does.
+            let mic_should_be = match &attempt.input {
+                Some(mic_uid) => hal::device_id(mic_uid),
+                None => hal::default_input(),
+            };
+            if !cancel_echo && current_device(mic.audioUnit(), input_element) != mic_should_be {
+                return Err(eyre!(
+                    "the microphone and speaker can’t be different devices here"
+                ));
+            }
+        }
         let format = mic.outputFormatForBus(0);
         if format.sampleRate() == 0.0 || format.channelCount() == 0 {
             return Err(eyre!("no microphone input"));
@@ -202,10 +269,7 @@ unsafe fn listen(
                 // processed voice (the 3-mic array and the speaker reference
                 // come out as one signal), so the first is the voice.
                 let voice = std::slice::from_raw_parts((*data).as_ptr(), frames);
-                match &gate {
-                    Some(gate) => input(gate.gated(voice, &mut Vec::new()), rate),
-                    None => input(voice, rate),
-                }
+                to(voice, rate);
             },
         );
         mic.installTapOnBus_bufferSize_format_block(0, TAP_FRAMES, None, RcBlock::as_ptr(&tap));
@@ -228,22 +292,25 @@ impl MacAudio {
     }
 }
 
-impl AudioOut for MacAudio {
-    fn play(&self, samples: &[f32], rate: u32, done: Box<dyn FnOnce() + Send>) {
+impl Backend for MacAudio {
+    fn play(&self, samples: &[f32], rate: u32, done: Done) {
         let Some(buffer) = pcm(&self.format, &self.at_playback_rate(samples, rate)) else {
             done();
             return;
         };
-        let done = Mutex::new(Some(done));
-        let speaking = self.speaking.clone();
-        speaking.started();
+        let done: Waiting = Arc::new(Mutex::new(Some(done)));
+        let answer = done.clone();
         let finished = RcBlock::new(move |_: AVAudioPlayerNodeCompletionCallbackType| {
-            speaking.finished();
-            if let Some(done) = done.lock().ok().and_then(|mut d| d.take()) {
+            if let Some(done) = answer.lock().ok().and_then(|mut d| d.take()) {
                 done();
             }
         });
+        if let Ok(mut waiting) = self.waiting.lock() {
+            waiting.retain(|w| w.lock().is_ok_and(|d| d.is_some()));
+            waiting.push(done.clone());
+        }
         let Ok(engine) = self.engine.lock() else {
+            answer_all(&[done]);
             return;
         };
         // Called once the buffer has been heard, the output device's latency
@@ -267,12 +334,12 @@ impl AudioOut for MacAudio {
 
     /// What's played reaches the tap after the microphone's own latency, and
     /// up to a tap's buffer later still. The output's latency is in `done`.
-    fn lag(&self) -> std::time::Duration {
+    fn lag(&self) -> Duration {
         if self.tap.is_none() {
-            return std::time::Duration::ZERO;
+            return Duration::ZERO;
         }
         let Ok(engine) = self.engine.lock() else {
-            return std::time::Duration::ZERO;
+            return Duration::ZERO;
         };
         let (latency, rate) = unsafe {
             let mic = engine.engine.inputNode();
@@ -286,23 +353,47 @@ impl AudioOut for MacAudio {
         } else {
             0.0
         };
-        std::time::Duration::from_secs_f64((latency.max(0.0) + buffered).min(1.0))
+        Duration::from_secs_f64((latency.max(0.0) + buffered).min(1.0))
     }
 
+    /// Stops the player, which answers what it had; whatever it didn't (an
+    /// engine the system already stopped) is answered here, so nothing is
+    /// left waiting on speech that will never play.
     fn stop(&self) {
         if let Ok(engine) = self.engine.lock() {
             unsafe { engine.player.stop() };
         }
-        self.speaking.stopped();
+        let waiting = self
+            .waiting
+            .lock()
+            .map(|mut w| std::mem::take(&mut *w))
+            .unwrap_or_default();
+        answer_all(&waiting);
         if let Ok(mut r) = self.resampler.lock() {
             *r = None;
         }
     }
+
+    /// The system stops the engine on a configuration change and leaves it
+    /// stopped: then it's built again, on the devices there are now.
+    fn healthy(&self) -> bool {
+        self.engine
+            .lock()
+            .is_ok_and(|e| unsafe { e.engine.isRunning() })
+    }
 }
 
-/// macOS stops an engine whenever the audio device's configuration changes
-/// (another app, a device switch, a voice-processing unit winding down) and
-/// leaves restarting it to the app: this does, until the engine is dropped.
+/// A buffer's `done`, until it's called.
+type Waiting = Arc<Mutex<Option<Done>>>;
+
+fn answer_all(waiting: &[Waiting]) {
+    for w in waiting {
+        if let Some(done) = w.lock().ok().and_then(|mut d| d.take()) {
+            done();
+        }
+    }
+}
+
 /// The echo canceller won't start unless both its sides run at one rate. The
 /// output side is the main mixer's link to the speaker, which AVAudioEngine
 /// creates lazily — once voice processing is on it reads the speaker as 0 Hz
@@ -323,62 +414,8 @@ unsafe fn match_output_to_microphone(engine: &AVAudioEngine) -> Result<()> {
     }
 }
 
-fn keep_running(
-    engine: Arc<Mutex<Engine>>,
-    alive: Arc<std::sync::atomic::AtomicBool>,
-    cancel_echo: bool,
-    speaking: Arc<Speaking>,
-) {
-    std::thread::spawn(move || {
-        let mut failures = 0u32;
-        while alive.load(Ordering::SeqCst) {
-            std::thread::sleep(std::time::Duration::from_millis(250));
-            let Ok(e) = engine.lock() else { break };
-            if !alive.load(Ordering::SeqCst) || unsafe { e.engine.isRunning() } {
-                failures = 0;
-                continue;
-            }
-            match unsafe {
-                if cancel_echo {
-                    // A device change can leave the output at another rate.
-                    let _ = match_output_to_microphone(&e.engine);
-                }
-                e.engine.prepare();
-                e.engine.startAndReturnError()
-            } {
-                Ok(()) => {
-                    tracing::info!("voice: the audio device changed; audio restarted");
-                    let lost = speaking.pending();
-                    if lost > 0 {
-                        // The player went down with the engine. Stopping it
-                        // answers the buffers it had, so whoever waits on
-                        // them hears they're over and isn't left "speaking".
-                        tracing::warn!(
-                            lost,
-                            "voice: speech stopped: the audio device changed mid-reply"
-                        );
-                        unsafe { e.player.stop() };
-                        speaking.stopped();
-                    }
-                    failures = 0;
-                }
-                Err(err) => {
-                    failures += 1;
-                    if failures == 1 || failures.is_multiple_of(40) {
-                        tracing::warn!(
-                            "voice: audio stopped and won't restart yet: {}",
-                            err.localizedDescription()
-                        );
-                    }
-                }
-            }
-        }
-    });
-}
-
 impl Drop for MacAudio {
     fn drop(&mut self) {
-        self.alive.store(false, Ordering::SeqCst);
         if let Ok(engine) = self.engine.lock() {
             unsafe {
                 engine.player.stop();
@@ -409,12 +446,216 @@ fn pcm(format: &AVAudioFormat, samples: &[f32]) -> Option<Retained<AVAudioPCMBuf
     }
 }
 
+/// Core Audio's devices: listed with their UIDs (stable across restarts),
+/// names and whether they're the system's default.
+mod hal {
+    use std::ffi::c_void;
+    use std::ptr::NonNull;
+
+    use objc2_core_audio::{
+        AudioObjectGetPropertyData, AudioObjectGetPropertyDataSize, AudioObjectID,
+        AudioObjectPropertyAddress, kAudioDevicePropertyDeviceUID, kAudioDevicePropertyStreams,
+        kAudioDevicePropertyTransportType, kAudioDeviceTransportTypeAggregate,
+        kAudioHardwarePropertyDefaultInputDevice, kAudioHardwarePropertyDefaultOutputDevice,
+        kAudioHardwarePropertyDevices, kAudioObjectPropertyElementMain, kAudioObjectPropertyName,
+        kAudioObjectPropertyScopeGlobal, kAudioObjectPropertyScopeInput,
+        kAudioObjectPropertyScopeOutput, kAudioObjectSystemObject,
+    };
+    use objc2_core_foundation::{CFRetained, CFString};
+
+    use super::{Device, Devices};
+
+    const SYSTEM: AudioObjectID = kAudioObjectSystemObject as AudioObjectID;
+
+    fn address(selector: u32, scope: u32) -> AudioObjectPropertyAddress {
+        AudioObjectPropertyAddress {
+            mSelector: selector,
+            mScope: scope,
+            mElement: kAudioObjectPropertyElementMain,
+        }
+    }
+
+    /// The property's size in bytes, if the object has it.
+    fn size(object: AudioObjectID, selector: u32, scope: u32) -> Option<u32> {
+        let address = address(selector, scope);
+        let mut size = 0u32;
+        // SAFETY: the address and size are ours; no qualifier.
+        let status = unsafe {
+            AudioObjectGetPropertyDataSize(
+                object,
+                NonNull::from(&address),
+                0,
+                std::ptr::null(),
+                NonNull::from(&mut size),
+            )
+        };
+        (status == 0).then_some(size)
+    }
+
+    /// A plain-data property: a `u32` or an array of them.
+    fn get<T: Copy + Default>(object: AudioObjectID, selector: u32, scope: u32) -> Option<T> {
+        let address = address(selector, scope);
+        let mut value = T::default();
+        let mut size = size_of::<T>() as u32;
+        // SAFETY: `value` is `size` bytes of plain data.
+        let status = unsafe {
+            AudioObjectGetPropertyData(
+                object,
+                NonNull::from(&address),
+                0,
+                std::ptr::null(),
+                NonNull::from(&mut size),
+                NonNull::from(&mut value).cast::<c_void>(),
+            )
+        };
+        (status == 0 && size as usize == size_of::<T>()).then_some(value)
+    }
+
+    /// A CFString property (the caller owns what Core Audio returns).
+    fn string(object: AudioObjectID, selector: u32) -> Option<String> {
+        let address = address(selector, kAudioObjectPropertyScopeGlobal);
+        let mut value: *const CFString = std::ptr::null();
+        let mut size = size_of::<*const CFString>() as u32;
+        // SAFETY: room for one CFStringRef, which the HAL retains for us.
+        let status = unsafe {
+            AudioObjectGetPropertyData(
+                object,
+                NonNull::from(&address),
+                0,
+                std::ptr::null(),
+                NonNull::from(&mut size),
+                NonNull::from(&mut value).cast::<c_void>(),
+            )
+        };
+        if status != 0 {
+            return None;
+        }
+        let value = NonNull::new(value.cast_mut())?;
+        // SAFETY: a +1 CFString from the HAL, released when dropped.
+        let value = unsafe { CFRetained::from_raw(value) };
+        Some(value.to_string())
+    }
+
+    fn all() -> Vec<AudioObjectID> {
+        let Some(bytes) = size(
+            SYSTEM,
+            kAudioHardwarePropertyDevices,
+            kAudioObjectPropertyScopeGlobal,
+        ) else {
+            return Vec::new();
+        };
+        let mut ids = vec![0 as AudioObjectID; bytes as usize / size_of::<AudioObjectID>()];
+        if ids.is_empty() {
+            return ids;
+        }
+        let address = address(
+            kAudioHardwarePropertyDevices,
+            kAudioObjectPropertyScopeGlobal,
+        );
+        let mut size = bytes;
+        // SAFETY: `ids` holds `bytes` bytes.
+        let status = unsafe {
+            AudioObjectGetPropertyData(
+                SYSTEM,
+                NonNull::from(&address),
+                0,
+                std::ptr::null(),
+                NonNull::from(&mut size),
+                NonNull::new(ids.as_mut_ptr().cast::<c_void>()).expect("a vector's pointer"),
+            )
+        };
+        if status != 0 {
+            return Vec::new();
+        }
+        ids.truncate(size as usize / size_of::<AudioObjectID>());
+        ids
+    }
+
+    /// Whether the device has streams on `scope`'s side.
+    fn has_streams(device: AudioObjectID, scope: u32) -> bool {
+        size(device, kAudioDevicePropertyStreams, scope).is_some_and(|n| n > 0)
+    }
+
+    /// The aggregates voice processing makes for itself, which aren't the
+    /// person's to choose.
+    fn private(uid: &str) -> bool {
+        uid.contains("CADefaultDeviceAggregate") || uid.contains("VPAUAggregateAudioDevice")
+    }
+
+    /// The system's microphone now.
+    pub(super) fn default_input() -> Option<AudioObjectID> {
+        get::<AudioObjectID>(
+            SYSTEM,
+            kAudioHardwarePropertyDefaultInputDevice,
+            kAudioObjectPropertyScopeGlobal,
+        )
+    }
+
+    pub(super) fn devices() -> Devices {
+        let default_in = default_input();
+        let default_out = get::<AudioObjectID>(
+            SYSTEM,
+            kAudioHardwarePropertyDefaultOutputDevice,
+            kAudioObjectPropertyScopeGlobal,
+        );
+        let mut d = Devices::default();
+        for id in all() {
+            let Some(uid) = string(id, kAudioDevicePropertyDeviceUID).filter(|u| !private(u))
+            else {
+                continue;
+            };
+            let name = string(id, kAudioObjectPropertyName).unwrap_or_else(|| uid.clone());
+            if has_streams(id, kAudioObjectPropertyScopeInput) {
+                d.inputs.push(Device {
+                    id: uid.clone(),
+                    name: name.clone(),
+                    is_default: default_in == Some(id),
+                });
+            }
+            if has_streams(id, kAudioObjectPropertyScopeOutput) {
+                d.outputs.push(Device {
+                    id: uid,
+                    name,
+                    is_default: default_out == Some(id),
+                });
+            }
+        }
+        d
+    }
+
+    /// The device with UID `uid` now.
+    pub(super) fn device_id(uid: &str) -> Option<AudioObjectID> {
+        all()
+            .into_iter()
+            .find(|id| string(*id, kAudioDevicePropertyDeviceUID).as_deref() == Some(uid))
+    }
+
+    pub(super) fn is_aggregate(uid: &str) -> bool {
+        device_id(uid).is_some_and(|id| {
+            get::<u32>(
+                id,
+                kAudioDevicePropertyTransportType,
+                kAudioObjectPropertyScopeGlobal,
+            ) == Some(kAudioDeviceTransportTypeAggregate)
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::AtomicUsize;
+    use crate::AudioIn;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::mpsc::channel;
-    use std::time::Duration;
+
+    fn attempt(listen: bool, cancel_echo: bool) -> Attempt {
+        Attempt {
+            input: None,
+            output: None,
+            listen,
+            cancel_echo,
+        }
+    }
 
     /// Whether this Mac starts Apple's echo canceller right now (prints the
     /// error when it won't).
@@ -422,10 +663,35 @@ mod tests {
     #[ignore = "uses the microphone"]
     fn voice_processing_starts() {
         let input: SharedIn = Arc::new(|_: &[f32], _: u32| {});
-        match build(Some((input, true))) {
+        match build_engine(&attempt(true, true), Some(input)) {
             Ok(_) => eprintln!("voice processing: started"),
             Err(e) => panic!("voice processing: {e:#}"),
         }
+    }
+
+    /// Voice processing on each microphone there is, by name: whether it
+    /// starts on one that isn't the system's.
+    #[test]
+    #[ignore = "uses every microphone"]
+    fn voice_processing_on_each_microphone() {
+        for mic in devices().inputs {
+            let input: SharedIn = Arc::new(|_: &[f32], _: u32| {});
+            let a = Attempt {
+                input: Some(mic.id.clone()),
+                ..attempt(true, true)
+            };
+            let r = objc2::rc::autoreleasepool(|_| build_engine(&a, Some(input)).map(drop));
+            eprintln!("{}: {r:?}", mic.name);
+            std::thread::sleep(SETTLE);
+        }
+    }
+
+    #[test]
+    #[ignore = "reads this Mac's devices"]
+    fn lists_this_macs_devices() {
+        let d = devices();
+        eprintln!("{d:#?}");
+        assert!(d.inputs.iter().filter(|m| m.is_default).count() <= 1);
     }
 
     /// The microphone keeps delivering, second after second, once open.
@@ -437,7 +703,7 @@ mod tests {
         let input: AudioIn = Box::new(move |samples: &[f32], _rate: u32| {
             c.fetch_add(samples.len(), Ordering::SeqCst);
         });
-        let _audio = open(input).unwrap();
+        let _audio = super::super::open(input).unwrap();
         let mut per_second = Vec::new();
         let mut last = 0;
         for _ in 0..8 {
@@ -463,7 +729,7 @@ mod tests {
         let input: AudioIn = Box::new(move |samples: &[f32], rate: u32| {
             let _ = tx.lock().unwrap().send((samples.len(), rate));
         });
-        let _audio = open(input).unwrap();
+        let _audio = super::super::open(input).unwrap();
         let (n, rate) = rx
             .recv_timeout(Duration::from_secs(5))
             .expect("a buffer from the microphone");
@@ -475,7 +741,7 @@ mod tests {
     #[test]
     #[ignore = "plays a little silence on the default output device"]
     fn plays_mono_speech_at_each_engines_rate() {
-        let audio = build(None).unwrap();
+        let audio = build_engine(&attempt(false, false), None).unwrap();
         let (tx, rx) = channel();
         for rate in [16_000, 24_000, 48_000] {
             let tx = tx.clone();
