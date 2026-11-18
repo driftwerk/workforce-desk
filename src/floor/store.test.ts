@@ -234,13 +234,13 @@ describe("the floor's store", () => {
     expect(hubs.local!.days).toHaveLength(reads + 1);
   });
 
-  it("reads this computer's hub when something new needs the person, even while its link is up", async () => {
+  it("reads this computer's hub when something needs the person or stops needing them, even while its link is up", async () => {
     useChat.setState({ hubs: [hub("local")] });
     await settle();
     floorHeard("local", new Set(["desk.floor"]));
     await settle();
     const reads = hubs.local!.days.length;
-    const event = (kind: "needs_you" | "finished") => ({
+    const event = (kind: "needs_you" | "resumed" | "finished") => ({
       id: `e-${kind}`,
       at: "2026-10-29T12:00:00Z",
       kind,
@@ -254,6 +254,9 @@ describe("the floor's store", () => {
     deskListeners.forEach((f) => f({ type: "activity", event: event("needs_you") }));
     await settle();
     expect(hubs.local!.days).toHaveLength(reads + 1);
+    deskListeners.forEach((f) => f({ type: "activity", event: event("resumed") }));
+    await settle();
+    expect(hubs.local!.days).toHaveLength(reads + 2);
   });
 
   it("reads again for the new day at midnight", async () => {

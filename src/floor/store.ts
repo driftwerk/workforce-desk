@@ -244,9 +244,10 @@ export const watchFloor = (): (() => void) => {
     const lineQuestion = e.type === "line" && e.message.kind === "ask";
     // A boss's plan proposed, changed or approved: its need comes or goes.
     const plan = e.type === "plan";
-    // Something new waits on the person (a session the line's loop guard
-    // stopped): the floor signal doesn't cover it either.
-    const needsYou = e.type === "activity" && e.event.kind === "needs_you";
+    // Something waits on the person, or stopped waiting (a session the
+    // line's loop guard stopped, and let carry on): the floor signal
+    // doesn't cover it either.
+    const needsYou = e.type === "activity" && (e.event.kind === "needs_you" || e.event.kind === "resumed");
     if (lineQuestion || plan || needsYou || (MOVES.has(e.type) && !useFloor.getState().heard[local])) ask([local]);
   };
   deskListeners.add(heard);
