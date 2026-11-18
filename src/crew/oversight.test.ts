@@ -124,7 +124,7 @@ act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_o
         handOff: false,
         setMode: false,
       },
-      work: { preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", maxTurnsPerHour: 60, closeFinished: true },
+      work: { preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", model: null, maxTurnsPerHour: 60, closeFinished: true },
       full: { anywhere: false, repos: [], workflows: [], budgetUsdPerDay: null, budgetClearedAt: null },
     });
   });
@@ -210,9 +210,9 @@ wake = { waiting_minutes = 2.5 }
   });
 
   it("reads how it runs sessions, inline or as its own table, and writes it under [oversight.work] as the hub reads it", () => {
-    expect(DEFAULT_OVERSIGHT.work).toEqual({ preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", maxTurnsPerHour: 60, closeFinished: true });
+    expect(DEFAULT_OVERSIGHT.work).toEqual({ preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", model: null, maxTurnsPerHour: 60, closeFinished: true });
     const inline = oversightOf(`[oversight]
-work = { prefer_sessions = false, parallel = 12, take_on = "all", engine = "codex", max_turns_per_hour = 1, close_finished = false }
+work = { prefer_sessions = false, parallel = 12, take_on = "all", engine = "codex", model = "gpt-6.1-sol", max_turns_per_hour = 1, close_finished = false }
 `);
     const own = oversightOf(`[oversight]
 [oversight.work]
@@ -220,19 +220,21 @@ prefer_sessions = false
 parallel = 12
 take_on = "all"
 engine = "codex"
+model = "gpt-6.1-sol"
 max_turns_per_hour = 1
 close_finished = false
 `);
-    expect(inline.work).toEqual({ preferSessions: false, parallel: 12, takeOn: "all", engine: "codex", maxTurnsPerHour: 1, closeFinished: false });
+    expect(inline.work).toEqual({ preferSessions: false, parallel: 12, takeOn: "all", engine: "codex", model: "gpt-6.1-sol", maxTurnsPerHour: 1, closeFinished: false });
     expect(own).toEqual(inline);
     const toml = withOversight(`${CONFIG}\n[oversight]\nenabled = true\n[oversight.work]\nfuture = 1\n`, {
       ...DEFAULT_OVERSIGHT,
       enabled: true,
-      work: { preferSessions: false, parallel: 6, takeOn: "all", engine: "codex", maxTurnsPerHour: 90, closeFinished: false },
+      work: { preferSessions: false, parallel: 6, takeOn: "all", engine: "codex", model: "gpt-6.1-sol", maxTurnsPerHour: 90, closeFinished: false },
     });
     expect(toml).toContain("[oversight.work]");
     expect((parse(toml) as { oversight: { work: unknown } }).oversight.work).toEqual({
       future: 1,
+      model: "gpt-6.1-sol",
       prefer_sessions: false,
       parallel: 6,
       take_on: "all",
@@ -240,11 +242,14 @@ close_finished = false
       max_turns_per_hour: 90,
       close_finished: false,
     });
+    // Back to the engine's own default: the key goes.
+    const back = withOversight(toml, { ...DEFAULT_OVERSIGHT, enabled: true, work: { ...DEFAULT_OVERSIGHT.work, engine: "codex", model: null } });
+    expect((parse(back) as { oversight: { work: Record<string, unknown> } }).oversight.work.model).toBeUndefined();
   });
 
   it("reads what the hub would refuse in [oversight.work] as the defaults, and never writes it", () => {
     const o = oversightOf(`[oversight]
-work = { prefer_sessions = "yes", parallel = 13, take_on = "some", engine = "Claude Code", max_turns_per_hour = 601, close_finished = "no" }
+work = { prefer_sessions = "yes", parallel = 13, take_on = "some", engine = "Claude Code", model = "-rf", max_turns_per_hour = 601, close_finished = "no" }
 `);
     expect(o.work).toEqual(DEFAULT_OVERSIGHT.work);
     expect(oversightOf(`[oversight]\nwork = { parallel = 0, max_turns_per_hour = 0, engine = 3 }\n`).work).toEqual(DEFAULT_OVERSIGHT.work);

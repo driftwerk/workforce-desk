@@ -460,6 +460,31 @@ describe("Oversees the crew", () => {
     expect(file).toContain("[oversight.work]");
   });
 
+  it("runs the sessions it starts on the model you pick for its engine, said beside the engine, and a new engine starts on its default", async () => {
+    useOverview.setState({ manager: { agentId: "ledger", level: "act" } });
+    const hub = { ...fakeHub(), features: vi.fn(() => Promise.resolve(["boss-session-model"])) } as unknown as DeskHub;
+    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "act"\n[oversight.work]\nengine = "claude"\nmodel = "opus"\n`);
+    expect(screen.getByText(/Every session Ledger starts, unless you ask for another engine or model for that work/)).toBeTruthy();
+    const model = (await screen.findByRole("combobox", { name: "Their model" })) as HTMLSelectElement;
+    expect(model.value).toBe("opus");
+    await act(async () => fireEvent.change(model, { target: { value: "sonnet" } }));
+    await waitFor(() => expect(oversight()).toMatchObject({ work: { engine: "claude", model: "sonnet" } }));
+    // Another engine: its own default, not Claude Code's model.
+    const engine = screen.getByRole("combobox", { name: "New sessions run" }) as HTMLSelectElement;
+    await waitFor(() => expect([...engine.options].map((o) => o.value)).toContain("codex"));
+    await act(async () => fireEvent.change(engine, { target: { value: "codex" } }));
+    await waitFor(() => expect(oversight()?.work).toMatchObject({ engine: "codex" }));
+    expect((oversight()?.work as Record<string, unknown>).model).toBeUndefined();
+  });
+
+  it("offers no model where the hub's boss wouldn't start its sessions on one", async () => {
+    useOverview.setState({ manager: { agentId: "ledger", level: "act" } });
+    const hub = { ...fakeHub(), features: vi.fn(() => Promise.resolve([])) } as unknown as DeskHub;
+    show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "act"\n`);
+    await waitFor(() => expect(hub.features).toHaveBeenCalled());
+    expect(screen.queryByRole("combobox", { name: "Their model" })).toBeNull();
+  });
+
   it("says a watching overseer runs no sessions", () => {
     show(fakeHub(), `${START}\n[oversight]\nenabled = true\n`);
     expect(screen.getByText("At Watch, Ledger runs no sessions. Set it to Suggest or Act to hand it work.")).toBeTruthy();

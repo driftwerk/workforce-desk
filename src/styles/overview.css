@@ -857,6 +857,17 @@ button.fsec-tile-head {
 .oversee-row + .oversee-row {
   border-top: 1px solid var(--border);
 }
+/* The engine new sessions run, and their model beside it. */
+.oversee-engine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  min-width: 0;
+}
+.oversee-engine input.pc-model-other {
+  width: min(16em, 100%);
+}
 .oversee-check {
   flex: 1 1 260px;
   min-width: 0;
