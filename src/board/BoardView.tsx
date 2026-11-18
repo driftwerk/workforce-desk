@@ -1,8 +1,13 @@
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/react";
-import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
+import { createContext, useCallback, useContext, useEffect, useId, useMemo, useRef, useState, type ComponentType, type KeyboardEvent, type MouseEvent } from "react";
 import { useChat } from "../chat/store";
+import { agentKey } from "../chat/types";
 import { useBoss } from "../crew/chargeStore";
 import { plansOn, usePlans } from "../crew/planStore";
+import { useLocalAgent } from "../overview/people";
+import { useOverview } from "../overview/store";
+import { requestFocus } from "../shell/focus";
+import { useHost } from "../shell/host";
 import { waitsOnYou } from "../floor/background";
 import { useNeedCounts } from "../floor/store";
 import { agentItem, sessionItem } from "../groups/model";
@@ -46,6 +51,7 @@ import { FACETS, facetChoices, pointsOf, type FacetId, type Facets } from "./fac
 import { OrderChip, sortedSaid } from "./OrderChip";
 import { setBoardView, useBoardView } from "./views";
 import type { TicketMove } from "../hub/types";
+import { PLAN_MAX, adoptable, bossOfBoard, handover, pickedSaid, planAsk, whyNotAdoptable } from "./planFrom";
 
 /** Whether a ticket's session or agent waits on the person, by the Floor's
  *  own rule (its needs, else the session's state). */
@@ -121,6 +127,20 @@ const States = createContext<ReadonlyMap<string, TicketState>>(new Map());
  *  with `show`, a card's plan chip shows that plan's card. */
 const Plans = createContext<{ of: ReadonlyMap<string, { id: string; goal: string }>; show: ((plan: string) => void) | null }>({ of: new Map(), show: null });
 
+/** Picking tickets for a plan, on the board in Desk's main area (never a
+ *  grid's pane): which are picked, which can be, and picking or unpicking
+ *  one; null where nothing is picked. */
+interface Picks {
+  /** The checkboxes are shown: the person is picking. */
+  shown: boolean;
+  picked: ReadonlySet<string>;
+  can: (t: Ticket) => boolean;
+  toggle: (t: Ticket) => void;
+  /** Whether a click picks rather than opens (⌘ on macOS, Ctrl elsewhere). */
+  picks: (e: MouseEvent) => boolean;
+}
+const PickContext = createContext<Picks | null>(null);
+
 const KEYS: Record<string, "up" | "down" | "left" | "right"> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
 
 /** What the Board view's header offers beyond the board itself: the
@@ -155,8 +175,14 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   const boards = useBoard((s) => s.boards);
   const all = useBoard((s) => s.tickets);
   const fail = useDesk((s) => s.fail);
-  const boss = useBoss();
+  const mainBoss = useBoss();
+  const manager = useOverview((s) => s.manager);
+  // Who plans its tickets: its group's own boss, else the main boss.
+  const boss = bossOfBoard(board, manager, mainBoss);
+  const bossAgent = useLocalAgent(boss?.id);
+  const bossName = bossAgent?.name || boss?.name || "";
   const waiting = useWaiting();
+  const platform = useHost((s) => s.platform);
   const now = useMinute();
   // The board's order, quick filter and (synced) own filters, kept for
   // each board across switching and restarts. A grid's pane has its own
@@ -179,6 +205,14 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   const [newToken, setNewToken] = useState(false);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [said, setSaid] = useState("");
+  // Tickets picked for a plan, and whether the board is picking; both go
+  // with another board.
+  const [picking, setPicking] = useState(false);
+  const [picked, setPicked] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => {
+    setPicking(false);
+    setPicked(new Set());
+  }, [board?.id]);
   const menuButton = useRef<HTMLButtonElement>(null);
   const cards = useRef(new Map<string, HTMLElement>());
 
@@ -202,10 +236,21 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   // The boss's plans on this board, each read in full for its tickets.
   const plansAll = usePlans((s) => s.plans);
   const details = usePlans((s) => s.details);
-  const plans = useMemo(() => (board ? plansOn(plansAll, board.id) : []), [plansAll, board]);
+  // A plan shows on its own board, and on any board whose tickets it took
+  // on: every plan still going is read in full, to know which those are.
+  const plans = useMemo(() => (board ? plansOn(plansAll, board.id, details) : []), [plansAll, board, details]);
   useEffect(() => {
     for (const p of plans) if (!usePlans.getState().details[p.id]) void usePlans.getState().fetch(p.id);
   }, [plans]);
+  useEffect(() => {
+    for (const p of Object.values(plansAll)) if (p.state !== "done" && p.state !== "dropped" && !usePlans.getState().details[p.id]) void usePlans.getState().fetch(p.id);
+  }, [plansAll]);
+  // The tickets in any plan, wherever the plan shows: none of them can be
+  // taken on by another.
+  const inAnyPlan = useMemo(
+    () => planOfTickets(Object.values(details).filter((d) => plansAll[d.id]?.state !== "dropped" && d.state !== "dropped")),
+    [details, plansAll],
+  );
   // The plan shown, kept by the store so a plan's card in the boss's DM
   // (Open on board) can show it here. A grid's pane has no header to show
   // it in, so it shows every plan's tickets.
@@ -252,6 +297,54 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
 
   const states = useMemo(() => statesOf(all), [all]);
   const hand = byHand(order);
+
+  // Picking tickets for a plan: only those not started yet and in no plan.
+  const canPick = useCallback((t: Ticket) => adoptable(t, inAnyPlan), [inAnyPlan]);
+  const togglePick = useCallback(
+    (t: Ticket) => {
+      if (!picked.has(t.id) && !canPick(t)) return setSaid(`${whyNotAdoptable(t, inAnyPlan) ?? "It can't be planned"}: a plan takes on only tickets not started yet`);
+      const next = new Set(picked);
+      if (!next.delete(t.id)) next.add(t.id);
+      setPicked(next);
+      setPicking(true);
+      setSaid(`${t.key ?? "The ticket"} ${next.has(t.id) ? "picked" : "unpicked"}: ${next.size} picked for a plan`);
+    },
+    [picked, canPick, inAnyPlan],
+  );
+  const picks = useMemo<Picks | null>(
+    () =>
+      pane
+        ? null
+        : {
+            shown: picking || picked.size > 0,
+            picked,
+            can: canPick,
+            toggle: togglePick,
+            picks: (e) => (platform === "macos" ? e.metaKey : e.ctrlKey) && !e.altKey && !e.shiftKey,
+          },
+    [pane, picking, picked, canPick, togglePick, platform],
+  );
+  // What the board shows now (its filter, facets, plan and search), on
+  // every page of its columns, that a plan could take on.
+  const shownCanPick = useMemo(() => cols.flatMap((c) => c.cards).filter(canPick), [cols, canPick]);
+  // What's picked, in the board's order.
+  const pickedTickets = useMemo(() => counts.flatMap((c) => [...c.cards, ...c.shelf]).filter((t) => picked.has(t.id)), [counts, picked]);
+  const handed = useMemo(() => handover(pickedTickets, inAnyPlan), [pickedTickets, inAnyPlan]);
+  const bossKey = bossAgent ? agentKey(bossAgent) : null;
+  const planWhy = !boss ? "This board’s group has no boss to plan it" : !bossKey ? `Desk hasn’t read ${bossName || "its boss"} yet: try again in a moment` : null;
+  const stopPicking = () => {
+    setPicking(false);
+    setPicked(new Set());
+  };
+  /** Hands what's picked to the boss: its DM opens with the ask in its
+   *  composer, for the person to read over and send. Nothing is sent. */
+  const makePlan = () => {
+    if (!board || !bossKey || handed.tickets.length === 0) return;
+    requestFocus(`agent:${bossKey}`, planAsk(board, handed));
+    useChat.getState().openDm(bossKey);
+    useDesk.getState().setView("rooms");
+    stopPicking();
+  };
   /** What a drag up or down says in a sorted order: the card keeps its
    *  sorted place. */
   const sorted = () => setSaid(sortedSaid(order, board?.sync?.system ?? null));
@@ -273,6 +366,11 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   };
 
   const onCardKey = (t: Ticket, e: KeyboardEvent<HTMLElement>) => {
+    // X picks it for a plan, or unpicks it.
+    if (picks && e.key.toLowerCase() === "x" && !e.altKey && !e.metaKey && !e.ctrlKey && !e.shiftKey) {
+      e.preventDefault();
+      return picks.toggle(t);
+    }
     const dir = e.altKey && !e.metaKey && !e.ctrlKey ? KEYS[e.key] : undefined;
     if (!dir) return;
     e.preventDefault();
@@ -345,29 +443,35 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
     { kind: "separator" },
     { kind: "item", label: "New board…", onSelect: () => setNaming(true) },
     ...(chrome?.entries(board, setActing) ?? []),
+    { kind: "separator" },
+    planWhy
+      ? { kind: "item", label: "Make a plan…", hint: planWhy, disabled: true, onSelect: () => {} }
+      : { kind: "item", label: "Make a plan…", hint: `pick tickets for ${bossName}`, onSelect: () => setPicking(true) },
   ];
 
   const columnsShown = (
     <States.Provider value={states}>
       <Plans.Provider value={planChips}>
-        <TicketOpener.Provider value={pane?.openTicket ?? ((id) => useBoard.getState().openTicket(id))}>
-          <Columns
-            cols={cols}
-            counts={counts}
-            all={all}
-            waiting={waiting}
-            shelfOpen={shelfOpen}
-            onShelf={() => setShelfOpen((o) => !o)}
-            onMove={move}
-            byHand={hand}
-            onSorted={sorted}
-            onCardKey={onCardKey}
-            register={(id, el) => (el ? cards.current.set(id, el) : cards.current.delete(id))}
-            ids={uid}
-            tabs={!!pane && narrow}
-            system={board.sync?.system ?? null}
-          />
-        </TicketOpener.Provider>
+        <PickContext.Provider value={picks}>
+          <TicketOpener.Provider value={pane?.openTicket ?? ((id) => useBoard.getState().openTicket(id))}>
+            <Columns
+              cols={cols}
+              counts={counts}
+              all={all}
+              waiting={waiting}
+              shelfOpen={shelfOpen}
+              onShelf={() => setShelfOpen((o) => !o)}
+              onMove={move}
+              byHand={hand}
+              onSorted={sorted}
+              onCardKey={onCardKey}
+              register={(id, el) => (el ? cards.current.set(id, el) : cards.current.delete(id))}
+              ids={uid}
+              tabs={!!pane && narrow}
+              system={board.sync?.system ?? null}
+            />
+          </TicketOpener.Provider>
+        </PickContext.Provider>
       </Plans.Provider>
     </States.Provider>
   );
@@ -394,14 +498,14 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
     <main className="board" aria-label="Board">
       <header className="board-head">
         <h1 className="display">{/board$/i.test(board.name) ? board.name : `${board.name} board`}</h1>
-        <span className="floor-time">{[board.prefix ?? board.sync?.target, boss?.name ? `run by ${boss.name}` : null].filter(Boolean).join(" · ")}</span>
+        <span className="floor-time">{[board.prefix ?? board.sync?.target, bossName ? `run by ${bossName}` : null].filter(Boolean).join(" · ")}</span>
         <button
           ref={menuButton}
           type="button"
           className="icon-btn-sm"
           aria-label="Boards"
           aria-haspopup="menu"
-          title="Other boards, rename, delete, link to Jira, Linear or GitHub"
+          title="Other boards, rename, delete, link to Jira, Linear or GitHub, make a plan"
           onClick={(e) => setMenu(below(e.currentTarget))}
         >
           <MoreIcon />
@@ -453,6 +557,24 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
       {board.sync && <SyncBar key={`sync:${board.id}`} board={board} now={now} onToken={tokenFor && chrome ? () => setNewToken(true) : undefined} />}
       <LeftFilterShelf key={`left:${board.id}`} board={board} tickets={left} />
       {!pane && <BoardPlans plans={plans} shown={plan} />}
+      {picks?.shown && (
+        <PickBar
+          picked={picked.size}
+          handed={handed}
+          shown={shownCanPick.length}
+          more={shownCanPick.filter((t) => !picked.has(t.id)).length}
+          boss={bossName}
+          why={planWhy}
+          mac={platform === "macos"}
+          onAll={() => {
+            setPicked(new Set([...picked, ...shownCanPick.map((t) => t.id)]));
+            setSaid(`${new Set([...picked, ...shownCanPick.map((t) => t.id)]).size} picked for a plan`);
+          }}
+          onClear={() => setPicked(new Set())}
+          onCancel={stopPicking}
+          onPlan={makePlan}
+        />
+      )}
       {columnsShown}
       {live}
       {menu && (
@@ -633,6 +755,89 @@ function ColumnTab({ col, count, on, over, panel, onPick }: { col: Column; count
   );
 }
 
+/** Picking tickets for a plan, in a band under the board's header as its
+ *  sync is: how many are picked, what is handed over (only tickets not
+ *  started yet, at most PLAN_MAX), and Make a plan…, which hands them to
+ *  the boss in its DM. */
+function PickBar({
+  picked,
+  handed,
+  shown,
+  more,
+  boss,
+  why,
+  mac,
+  onAll,
+  onClear,
+  onCancel,
+  onPlan,
+}: {
+  picked: number;
+  handed: ReturnType<typeof handover>;
+  /** How many of what the board shows now can be picked, and how many of
+   *  those aren't yet. */
+  shown: number;
+  more: number;
+  boss: string;
+  /** Why no plan can be made here; none when one can. */
+  why: string | null;
+  mac: boolean;
+  onAll: () => void;
+  onClear: () => void;
+  onCancel: () => void;
+  onPlan: () => void;
+}) {
+  const n = handed.tickets.length;
+  const notes = pickedSaid(handed);
+  return (
+    <div className="board-sync board-pick" role="group" aria-label="Pick tickets for a plan">
+      <span className={picked ? "chip board-sync-chip board-pick-chip" : "chip board-sync-chip"}>{picked ? `${picked} picked` : "Picking"}</span>
+      <span className="board-sync-words" role="status">
+        {why ? (
+          <span className="state-blocked">{why}.</span>
+        ) : picked ? (
+          <>
+            {n > 0 ? `${n === 1 ? "One ticket goes" : `${n} tickets go`} to ${boss || "the boss"} to plan, each taken on as it is.` : "None of what’s picked can be planned now."}
+            {notes.map((line) => (
+              <span key={line} className={line.startsWith("A plan") ? "board-pick-over" : undefined}>
+                {" "}
+                {line}
+              </span>
+            ))}
+          </>
+        ) : (
+          `Tick tickets, or ${mac ? "⌘" : "Ctrl"}-click them, for ${boss || "the boss"} to plan.`
+        )}
+        <span className="faint"> Only tickets not started yet can be: in Backlog or To do, no one on them, in no plan. Up to {PLAN_MAX} in a plan.</span>
+      </span>
+      <span className="board-sync-actions">
+        {more > 0 && (
+          <button type="button" className="btn btn-sm" onClick={onAll} title="Pick everything the board shows now, as filtered and searched, that isn’t started yet">
+            Pick all shown · {shown}
+          </button>
+        )}
+        {picked > 0 && (
+          <button type="button" className="btn btn-sm" onClick={onClear}>
+            Clear
+          </button>
+        )}
+        <button type="button" className="btn btn-sm" onClick={onCancel}>
+          Cancel
+        </button>
+        <button
+          type="button"
+          className="btn btn-sm btn-signal"
+          disabled={!!why || n === 0}
+          title={why ?? (n === 0 ? "Pick a ticket not started yet first" : `Open ${boss}’s DM with the plan asked for, to read over and send`)}
+          onClick={onPlan}
+        >
+          Make a plan…
+        </button>
+      </span>
+    </div>
+  );
+}
+
 /** A board in a short pane: how many tickets each column has, and how
  *  many wait on you. */
 function BoardShort({ counts, waiting }: { counts: Column[]; waiting: number }) {
@@ -780,6 +985,8 @@ function DraggableCard({
   const plan = plans.of.get(ticket.id);
   const showPlan = plans.show;
   const openTicket = useContext(TicketOpener);
+  const picks = useContext(PickContext);
+  const pick = picks && !settled && (picks.picked.has(ticket.id) || picks.can(ticket)) ? { picked: picks.picked.has(ticket.id), shown: picks.shown, toggle: () => picks.toggle(ticket) } : undefined;
   // A dropped ticket comes back by Bring it back, never by landing in a column.
   const drag = useDraggable({ id: ticket.id, type: "ticket", element: el, disabled: ticket.state === "dropped" });
   useDroppable({ id: ticket.id, type: "ticket", accept: "ticket", element: el, collisionPriority: 1 });
@@ -799,8 +1006,14 @@ function DraggableCard({
             el.current = b;
             register(ticket.id, b);
           }}
-          onOpen={() => {
+          pick={pick}
+          onOpen={(e) => {
             if (dragged.current) return;
+            // ⌘-click (Ctrl-click elsewhere) picks it for a plan.
+            if (picks && e && picks.picks(e)) {
+              e.preventDefault();
+              return picks.toggle(ticket);
+            }
             openTicket(ticket.id);
           }}
           onKeyDown={(e) => onKey(ticket, e)}

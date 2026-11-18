@@ -206,7 +206,13 @@ useDesk.subscribe((now, before) => {
 });
 
 /** The plans on board `board` that aren't dropped, newest first. */
-export const plansOn = (plans: Readonly<Record<string, BossPlan>>, board: string): BossPlan[] =>
+export const plansOn = (
+  plans: Readonly<Record<string, BossPlan>>,
+  board: string,
+  /** The plans read in full: one that took on a ticket of `board`'s shows
+   *  there too. */
+  details?: Readonly<Record<string, Pick<BossPlanDetail, "tickets">>>,
+): BossPlan[] =>
   Object.values(plans)
-    .filter((p) => p.board === board && p.state !== "dropped")
+    .filter((p) => p.state !== "dropped" && (p.board === board || !!details?.[p.id]?.tickets.some((t) => t.board === board)))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));

@@ -13,6 +13,8 @@ import { usePlans } from "./planStore";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
+const opened = vi.hoisted(() => ({ urls: [] as string[] }));
+vi.mock("../platform", async (real) => ({ ...(await real<typeof import("../platform")>()), openUrl: (u: string) => void opened.urls.push(u) }));
 
 let plans: PlanHub;
 let viewport: FakeViewport;
@@ -533,5 +535,49 @@ describe("a draft plan's review: where each ticket runs, and with what", () => {
     fireEvent.change(within(form).getByRole("textbox", { name: "Folder of ticket 2" }), { target: { value: "code/acme-admin" } });
     expect(within(form).getByText("On devbox, say the folder's whole path, from /.")).toBeTruthy();
     expect((within(form).getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe("tickets a plan took on from a board", () => {
+  const adopt = () => {
+    // ACM-20 was on Acme's board already; ACM-21 is a Linear issue on a
+    // synced board. The rest the plan made.
+    plans.plan.tickets[0] = { ...plans.plan.tickets[0]!, adopted: true };
+    plans.plan.tickets[1] = {
+      ...plans.plan.tickets[1]!,
+      board: "board-linear",
+      key: "MAN-465",
+      adopted: true,
+      external: { system: "linear", key: "MAN-465", url: "https://linear.app/acme/issue/MAN-465", remoteUpdatedAt: AT_, synced: true, link: "l1" },
+    };
+  };
+  const AT_ = "2026-11-08T10:03:00.000Z";
+
+  it("shows each by its key, linked, and says it came from the board", async () => {
+    adopt();
+    opened.urls = [];
+    await show();
+    const c = card();
+    const synced = within(c).getByRole("button", { name: "Open MAN-465 in Linear: Refund button in admin" });
+    expect(synced.textContent).toBe("MAN-465");
+    fireEvent.click(synced);
+    expect(opened.urls).toEqual(["https://linear.app/acme/issue/MAN-465"]);
+    expect(within(c).getByText("from Linear")).toBeTruthy();
+    // One of Desk's own boards: the ticket opens on it.
+    const own = within(c).getByRole("button", { name: "Open ACM-20 on its board: Refunds endpoint over Stripe refunds" });
+    expect(within(c).getByText("from the Acme board")).toBeTruthy();
+    fireEvent.click(own);
+    expect(useBoard.getState().open).toBe("t20");
+    expect(useBoard.getState().shown).toBe("board-acme");
+    expect(useDesk.getState().view).toBe("board");
+  });
+
+  it("leaves the plan's own tickets as they were", async () => {
+    adopt();
+    await show();
+    const c = card();
+    // ACM-22 and ACM-23 the plan made: their keys are plain, and say nothing of a board.
+    expect([...c.querySelectorAll("span.pc-key")].map((k) => k.textContent)).toEqual(["ACM-22", "ACM-23"]);
+    expect(c.querySelectorAll(".pc-adopted")).toHaveLength(2);
   });
 });
