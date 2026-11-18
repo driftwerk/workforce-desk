@@ -25,6 +25,7 @@ import { UpdatesSettings } from "./Updates";
 import { OverseesTheCrew } from "./OverseesTheCrew";
 import { WhatTheySee } from "./WhatTheySee";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
+import { AgentRoute } from "../hubs/RunMyWorkOn";
 
 /** Parts of an agent's settings only Desk's main window has, handed down
  *  by its shell (see crew/mainWindow.ts), as the Board's chrome is: a
@@ -545,6 +546,7 @@ function ThinkingElsewhere({ agent, hub }: { agent: Agent; hub: HubAccount | und
         </div>
       </div>
       <p className="small faint">Set by {hub?.label ?? "their workspace"}, where {agent.name} lives.</p>
+      {hub && !hub.machine && <AgentRoute hub={hub} workspace={hub.label} agentId={agent.id} />}
     </section>
   );
 }
