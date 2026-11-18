@@ -715,6 +715,35 @@ describe("the link dialog", () => {
       expect(linked.body).toMatchObject({ system: "github", target: "acme/projects/7", targetId: "PVT_kwDOroad", repo: "acme/web" });
     });
 
+    it("links a typed project with the id the hub resolved, and keeps the workspace when the owner changes", async () => {
+      native.route = (hub, method, path, body) => {
+        if (hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "github") {
+          if (!body.workspace && !body.target) return { status: 200, body: { offered: true, workspaces: ["acme-ws", "other-ws"], workspace: "acme-ws" } };
+          if (body.target === "acme/projects/8") {
+            const r = ghRoutes(hub, method, path, body) as { body: Record<string, unknown> };
+            return { status: 200, body: { ...r.body, targetId: "PVT_resolved" } };
+          }
+        }
+        return ghRoutes(hub, method, path, body);
+      };
+      await open();
+      fireEvent.change(await screen.findByLabelText("Owner"), { target: { value: "acme" } });
+      await waitFor(() => expect(native.asked.some((a) => a.path === "/api/desk/boards/link/check" && a.body?.owner === "acme" && a.body?.workspace === "acme-ws")).toBe(true));
+      fireEvent.click(await screen.findByRole("button", { name: "Not listed? Type it" }));
+      fireEvent.change(await screen.findByLabelText("The project’s address"), { target: { value: "acme/projects/8" } });
+      await screen.findByRole("radiogroup", { name: "Import" });
+      await screen.findByText("9 open issues", undefined, { timeout: 2000 });
+      fireEvent.click(within(screen.getByRole("radiogroup", { name: "Import" })).getByRole("radio", { name: "A label" }));
+      fireEvent.change(screen.getByPlaceholderText("desk"), { target: { value: "bug" } });
+      await waitFor(() => expect(native.asked.some((a) => a.body?.filter && (a.body.filter as { kind: string }).kind === "label" && a.body.target === "acme/projects/8")).toBe(true));
+      // The re-check with the filter carries the resolved id too.
+      expect(native.asked.filter((a) => a.body?.target === "acme/projects/8" && a.body?.filter && (a.body.filter as { kind: string }).kind === "label").at(-1)!.body).toMatchObject({ targetId: "PVT_resolved" });
+      await screen.findByText("9 issues", undefined, { timeout: 2000 });
+      fireEvent.click(screen.getByRole("button", { name: "Link to acme · project 8" }));
+      await waitFor(() => expect(native.asked.some((a) => a.method === "PUT")).toBe(true));
+      expect(native.asked.find((a) => a.method === "PUT")!.body).toMatchObject({ system: "github", target: "acme/projects/8", targetId: "PVT_resolved", workspace: "acme-ws" });
+    });
+
     it("takes a typed repository where the hub lists none, and says what it waits on", async () => {
       native.route = (hub, method, path, body) =>
         hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "github" && !body.target

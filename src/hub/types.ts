@@ -2120,6 +2120,9 @@ export interface LinkCheck {
   projectsWhy?: string;
   /** GitHub: the owner's repositories, `owner/repo`. */
   repos?: { key: string; name: string }[];
+  /** GitHub, for a typed project target sent without its id: the id the hub
+   *  resolved, to send with the link. */
+  targetId?: string;
   /** GitHub, for a repository target: its milestones' titles. */
   milestones?: string[];
   /** The states an issue in the target can be in. */

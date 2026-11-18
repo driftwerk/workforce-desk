@@ -53,7 +53,7 @@ export function Assignee({ who, waiting, mark }: { who: ActivityParty; waiting: 
   );
 }
 
-/** Who has a synced ticket's issue on Jira or Linear: their initials and
+/** Who has a synced ticket's issue on Jira, Linear or GitHub: their initials and
  *  name ("You" when it's the person), or Unassigned. */
 export function Upstream({ who, me, system }: { who: SyncAssignee | null; me: string | null | undefined; system: SyncSystem }) {
   const title = SYSTEM_TITLE[system];
@@ -155,7 +155,7 @@ export function TicketCard({
   const board = useBoard((s) => s.boards[t.board]);
   const system = board?.sync?.system ?? null;
   const ext = t.external ?? null;
-  // A synced ticket's maker is its board's Jira or Linear: every card would
+  // A synced ticket's maker is its board's Jira, Linear or GitHub: every card would
   // say so, so none does.
   const written = t.createdBy.kind !== "you" && !ext;
   const theirs = written && t.state === "backlog" && !t.assignee;

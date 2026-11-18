@@ -921,7 +921,7 @@ function NeedRow({ ticket: o, there, onRemove }: { ticket: Ticket; there?: strin
   );
 }
 
-/** Where a synced ticket's words come from: its Jira or Linear issue, and
+/** Where a synced ticket's words come from: its Jira, Linear or GitHub issue, and
  *  whether it still syncs. Its title and description are that issue's,
  *  shown as plain text. */
 function IssueLine({ ticket: t }: { ticket: Ticket }) {

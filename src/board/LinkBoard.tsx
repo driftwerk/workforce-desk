@@ -231,7 +231,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const baseListed = several ? wsProbe : probe;
   // GitHub: another owner's projects and repos, asked for once typed.
   const ownerAsk = ownerTyped !== null && ownerOk(ownerTyped.trim()) ? ownerTyped.trim() : null;
-  const ownerKey = viaKey && ownerAsk ? `${viaKey}:${ownerAsk.toLowerCase()}:${keptKey}:${reprobe}` : null;
+  const ownerKey = viaKey && ownerAsk ? `${viaKey}:${workspace ?? ""}:${ownerAsk.toLowerCase()}:${keptKey}:${reprobe}` : null;
   const [ofOwner, setOfOwner] = useState<Record<string, Probe>>({});
   const ownerProbe = ownerKey ? ofOwner[ownerKey] : undefined;
   useEffect(() => {
@@ -242,7 +242,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     const t = setTimeout(() => {
       setOfOwner((p) => (p[run] ? p : { ...p, [run]: { state: "checking" } }));
       void sync
-        .check({ system, via, owner: ownerAsk })
+        .check({ system, via, ...(workspace ? { workspace } : {}), owner: ownerAsk })
         .then(probeOf)
         .catch((e: unknown): Probe => ({ state: "no", error: saidOf(e), noToken: false, noAgent: false }))
         .then((said) => setOfOwner((p) => ({ ...p, [run]: said })));
@@ -250,7 +250,9 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ownerKey, offered]);
-  const listed = system === "github" && ownerAsk ? ownerProbe : baseListed;
+  /** GitHub: a half-typed owner lists nothing, not the last owner's. */
+  const ownerInvalid = system === "github" && ownerTyped !== null && !ownerAsk;
+  const listed = ownerInvalid ? undefined : system === "github" && ownerAsk ? ownerProbe : baseListed;
   /** Teams or projects may be picked: the hub offers the system, and the
    *  workspace (where there are several) is picked and answered. */
   const ready = offered && listed?.state === "offered" && !listed.why;
@@ -308,6 +310,9 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const meNeeded = (system === "linear" || system === "github") && filterKind === "assignedToMe" && knownMe === null;
   const filterReady = !!filter && (!meNeeded || idOk(me.trim()));
   const meBad = !!me.trim() && !idOk(me.trim());
+  // A typed project has no id until the hub resolves it: kept from its answer.
+  const [resolved, setResolved] = useState<{ target: string; id: string } | null>(null);
+  const targetIdOf: string | undefined = project?.id ?? (asProject && resolved?.target === targetKey ? resolved.id : undefined);
   const checkKey = JSON.stringify([system, viaKey, workspace, ownerTyped, targetKey, team?.id, project?.id, filterReady ? filter : null, meNeeded ? me.trim() : null, asked]);
   const checkRun = useRef(0);
   useEffect(() => {
@@ -324,7 +329,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
           ...(system === "github" && ownerAsk ? { owner: ownerAsk } : {}),
           target: targetKey,
           ...(team ? { targetId: team.id } : {}),
-          ...(project?.id ? { targetId: project.id } : {}),
+          ...(targetIdOf ? { targetId: targetIdOf } : {}),
           ...(filterReady && filter ? { filter } : {}),
           ...(meNeeded && filterReady ? { me: me.trim() } : {}),
         })
@@ -346,6 +351,10 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     else if (!now.ok && now.status === 400 && (system === "linear" || system === "github") && filterKind === "assignedToMe" && /member|login/i.test(now.error)) setHeardMe({ key: meKey, me: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [now]);
+  useEffect(() => {
+    if (found?.targetId && targetKey) setResolved({ target: targetKey, id: found.targetId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [found]);
   const remoteStates = found?.states ?? null;
   // The state map starts from what the hub's states mean, once per target.
   useEffect(() => {
@@ -374,14 +383,15 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     }
     if (several && !workspace) return { words: (probe?.state === "offered" && probe.why) || `Pick which ${WORKSPACE[system]}.`, failed: false };
     if (several && workspace) {
-      if (!wsProbe || wsProbe.state === "checking") return { words: `Asking ${viaName} for ${workspace}’s ${system === "jira" ? "projects" : "teams"}…`, failed: false };
+      if (!wsProbe || wsProbe.state === "checking") return { words: `Asking ${viaName} for ${workspace}’s ${system === "jira" ? "projects" : system === "github" ? "projects and repositories" : "teams"}…`, failed: false };
       if (wsProbe.state === "no") return { words: wsProbe.error, failed: true };
       if (wsProbe.state === "offered" && wsProbe.why) return { words: wsProbe.why, failed: true };
     }
     // What the hub says stops the list, whatever it is.
     if (listed?.state === "offered" && listed.why) return { words: listed.why, failed: true };
     if (system === "github" && ownerAsk && (!ownerProbe || ownerProbe.state === "checking")) return { words: `Asking ${viaName} for ${ownerAsk}’s projects and repositories…`, failed: false };
-    if (system === "github" && ownerProbe?.state === "no") return { words: ownerProbe.error, failed: true };
+    if (system === "github" && ownerProbe?.state === "no") return { words: "Pick another owner.", failed: true };
+    if (ownerInvalid) return { words: "Enter a GitHub login for the owner.", failed: true };
     if (!targetGood)
       return {
         words:
@@ -437,7 +447,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
         system,
         target: targetKey,
         ...(team ? { targetId: team.id } : {}),
-        ...(project?.id ? { targetId: project.id } : {}),
+        ...(targetIdOf ? { targetId: targetIdOf } : {}),
         ...(asProject && newRepo ? { repo: newRepo } : {}),
         via,
         ...(workspace ? { workspace } : {}),
@@ -576,7 +586,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
 
         {system && via && offered && several && (
           <fieldset className="move-field">
-            <legend>{system === "jira" ? "Site" : "Workspace"}</legend>
+            <legend>{system === "jira" ? "Site" : system === "github" ? "Account" : "Workspace"}</legend>
             <div className="move-opts" role="radiogroup" aria-label={WORKSPACE[system]}>
               {workspaces.map((w) => (
                 <label key={w} className="move-opt">
@@ -1053,7 +1063,7 @@ function HubRow({ name, choice, system, probe, picked, disabled, onPick }: { nam
   );
 }
 
-/** This computer's own Jira or Linear keys: only when no hub offers them. */
+/** This computer's own Jira, Linear or GitHub keys: only when no hub offers them. */
 function ThisComputer({ name, system, probe, hubOffers, picked, disabled, onPick }: { name: string; system: SyncSystem; probe: Probe | undefined; hubOffers: string | null; picked: boolean; disabled: boolean; onPick: () => void }) {
   const title = SYSTEM_TITLE[system];
   const usable = probe?.state === "offered" && !hubOffers;
