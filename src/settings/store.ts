@@ -19,6 +19,7 @@ interface SettingsStore extends Settings {
   imageSites: string[];
   setup: SetupProgress;
   writtenReplies: string[];
+  threadReplies: string[];
   /** Each shortcut's keys: the chosen ones, else the default. */
   keys: Record<ShortcutId, string>;
   loaded: boolean;
@@ -56,6 +57,7 @@ const readSettings = async (set: (patch: Partial<SettingsStore>) => void): Promi
     imageSites: s.imageSites ?? [],
     setup: s.setup ?? NO_SETUP,
     writtenReplies: s.writtenReplies ?? [],
+    threadReplies: s.threadReplies ?? [],
     loaded: true,
   });
 };
@@ -73,6 +75,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   customVoices: {},
   voice: false,
   writtenReplies: [],
+  threadReplies: [],
   voiceEngine: "cascade",
   shortcuts: {},
   groups: EMPTY_LAYOUT.groups,
@@ -105,6 +108,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       customVoices: s.customVoices,
       voice: s.voice,
       writtenReplies: s.writtenReplies,
+      threadReplies: s.threadReplies,
       voiceEngine: s.voiceEngine,
       shortcuts: s.shortcuts,
       groups: s.groups,

@@ -36,13 +36,16 @@ import { relayedOf } from "../chat/relayed";
 import { memoriesFrom, type SavedMemory } from "../chat/remove";
 import { termsOf } from "../chat/search";
 import { SearchBar, SearchResults, useDmSearch, useSearchMarks } from "./DmSearch";
-import { ThreadChip, threadsWorking, useDmThreads } from "./DmThread";
+import { openDmThread, StartedChip, ThreadChip, threadsWorking, useDmThreads } from "./DmThread";
+import { canStartThreads, isCommand, setRepliesInThreads, useRepliesInThreads } from "../chat/threadReplies";
+import { threadChannel } from "../chat/thread";
 import { useOverview } from "../overview/store";
 import { useUi, type AgentTab } from "../shell/ui";
 import { draftKey, useDraft } from "../restore/drafts";
 import { useStayPut } from "../restore/scroll";
 import { useReads } from "../unread/reads";
 import type { Agent, ChatMessage, HubAccount } from "../chat/types";
+import type { MenuEntry } from "../ui/Menu";
 import type { Step } from "../hub/types";
 import { GroupChip } from "../groups/GroupChip";
 import { agentItem } from "../groups/model";
@@ -191,6 +194,11 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // The threads on this DM's messages, and the one open beside it.
   const threads = useDmThreads(activeAgent ?? null);
   const openThread = useUi((u) => u.setDmThread);
+  // Always replying in a thread: each new message starts one, and the chat
+  // reads as the list of them. Only where a thread can show beside it.
+  const always = useRepliesInThreads(activeAgent);
+  const detached = useDesk((s) => s.detached);
+  const starting = useChat((s) => (activeAgent ? s.starting[activeAgent] : undefined));
   const search = useDmSearch(hub, agent?.id ?? "");
   const around = useChat((s) => (activeAgent ? s.around[activeAgent] : undefined));
   const showAround = useChat((s) => s.showAround);
@@ -329,8 +337,20 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
     : convo.features?.has(FEATURES.clientIds)
     ? shownWith(history?.messages ?? [], liveShown)
     : onceEach(withHistory(history?.messages ?? [], liveShown, history?.loadedAt ?? null));
+  // A new message starting its thread shows at once, until the hub's copy
+  // of the chat has it.
+  const keptAs = new Set(all.flatMap((m) => (m.clientId ? [m.id, m.clientId] : [m.id])));
+  const historyIds = new Set((history?.messages ?? []).map((m) => m.id));
+  const pendingStarts = !around && starting?.length ? starting.filter((m) => !keptAs.has(m.id)) : [];
+  // Each where it was sent among the live messages after the hub's copy.
+  const withStarting = pendingStarts.length
+    ? pendingStarts.reduce((list, top) => {
+        const at = list.findIndex((m) => !historyIds.has(m.id) && ms(m.at) > ms(top.at));
+        return at < 0 ? [...list, top] : [...list.slice(0, at), top, ...list.slice(at)];
+      }, all)
+    : all;
   const asideSet = new Set(aside ?? []);
-  const shown = aside?.length ? all.filter((m) => !asideSet.has(m.id) && !(m.clientId && asideSet.has(m.clientId))) : all;
+  const shown = aside?.length ? withStarting.filter((m) => !asideSet.has(m.id) && !(m.clientId && asideSet.has(m.clientId))) : withStarting;
   // Your latest message, what ↑ and Edit replace: one you typed, not one
   // the overseer sent on, a command, or one that never got there.
   const mineAt = shown.findLastIndex((m) => m.role === "user" && !m.undelivered && !m.command && !relayedOf(m, sentOn));
@@ -341,7 +361,9 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const editable = !around && !!convo.features?.has(FEATURES.edit) && !!convo.features?.has(FEATURES.clientIds);
   const whyNot = !mine
     ? null
-    : busy
+    : mine.startsThread
+      ? "A message that started a thread can’t be edited. Reply in its thread instead."
+      : busy
       ? `You can edit your last message once ${agent.name} has finished replying.`
       : queuedCount > 0
         ? "You can edit your last message once your queued messages have gone."
@@ -352,6 +374,10 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
             : null;
   const deletable = !around && !!convo.features?.has(FEATURES.delete);
   const threadable = !around && !!convo.features?.has(FEATURES.dmThreads);
+  const canThread = canStartThreads(convo.features);
+  // Beside the DM in Rooms; from a pane or the side panel a thread opens
+  // there. A grid in a window of its own has no Rooms to open it in.
+  const threading = always && canThread && !around && !detached;
   const threadsOf = new Map(threads.map((t) => [t.parent, t]));
   const yours = (m: ChatMessage) =>
     m.role === "user" && (!m.author || m.author.kind === "you") && !m.undelivered && !m.command && !relayedOf(m, sentOn);
@@ -553,7 +579,21 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                         <span>New</span>
                       </div>
                     )}
-                    <div className={`room-msg${editing && editing.id !== m.id && editing.aside.includes(m.id) ? " msg-dim" : ""}${openedThread === m.id ? " thread-open" : ""}`}>
+                    <div
+                      className={`room-msg${editing && editing.id !== m.id && editing.aside.includes(m.id) ? " msg-dim" : ""}${openedThread === m.id ? " thread-open" : ""}${m.startsThread ? " thread-start" : ""}`}
+                      // A conversation of its own: opened by a click anywhere on it
+                      // (not a link, a button or a selection).
+                      onClick={
+                        m.startsThread
+                          ? (e) => {
+                              const t = e.target;
+                              if (t instanceof Element && t.closest("a, button, input, textarea, select, summary, [role='button'], .msg-confirm")) return;
+                              if (window.getSelection()?.toString()) return;
+                              openDmThread(activeAgent, m.id, !!inPane);
+                            }
+                          : undefined
+                      }
+                    >
                       <DmMessage
                         message={m}
                         author={agent.name}
@@ -568,17 +608,20 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
                         orphan={!!m.answeredDeleted || orphanSet.has(m.id)}
                         {...turnOf(shown, m, i)}
                       />
-                      {!editing && deleting !== m.id && threadsOf.has(m.id) && (
-                        <ThreadChip agent={activeAgent} hub={agent.hubId} name={agent.name} thread={threadsOf.get(m.id)!} />
+                      {!editing && deleting !== m.id && m.startsThread && (
+                        <StartedChip agent={activeAgent} hub={agent.hubId} name={agent.name} parent={m.id} thread={threadsOf.get(m.id)} inPane={!!inPane} />
                       )}
-                      {!editing && deleting !== m.id && ((editable && m === mine) || (deletable && yours(m)) || (threadable && keptIds.has(m.id) && !m.command)) && (
+                      {!editing && deleting !== m.id && !m.startsThread && threadsOf.has(m.id) && (
+                        <ThreadChip agent={activeAgent} hub={agent.hubId} name={agent.name} thread={threadsOf.get(m.id)!} inPane={!!inPane} />
+                      )}
+                      {!editing && deleting !== m.id && ((editable && m === mine && !m.startsThread) || (deletable && yours(m)) || (threadable && keptIds.has(m.id) && !m.command && !m.startsThread)) && (
                         <span className="msg-actions" role="toolbar" aria-label="Message actions">
-                          {threadable && keptIds.has(m.id) && !m.command && (
-                            <button type="button" className="msg-action" title="Reply in thread" onClick={() => openThread(activeAgent, m.id)}>
+                          {threadable && keptIds.has(m.id) && !m.command && !m.startsThread && (
+                            <button type="button" className="msg-action" title="Reply in thread" onClick={() => openDmThread(activeAgent, m.id, !!inPane)}>
                               Reply in thread
                             </button>
                           )}
-                          {editable && m === mine && (
+                          {editable && m === mine && !m.startsThread && (
                             <button type="button" className="msg-action" title={whyNot ?? "Edit (↑)"} onClick={startEdit}>
                               Edit
                             </button>
@@ -684,6 +727,14 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
             sending={sending}
             onSent={latest}
             away={stay.away}
+            threading={threading}
+            canThread={canThread && !detached}
+            onThreadStarted={(id) => {
+              latest();
+              // Beside the DM in Rooms; a pane or the side panel stays as it
+              // is, its chip saying the reply is coming.
+              if (!inPane) openThread(activeAgent, id);
+            }}
           />
           )}
           {drop.dragging && <DropOverlay to={agent.name} />}
@@ -752,6 +803,8 @@ export const DmMessage = memo(function DmMessage({
 /** The answers to your message `m` in `shown`: those its turn said, by its
  *  client id, else what follows it until your next message. */
 const repliesTo = (shown: readonly ChatMessage[], m: ChatMessage): string[] => {
+  // A message that started a thread was answered there, and the thread goes with it.
+  if (m.startsThread) return [];
   const said = m.clientId ? shown.filter((x) => x.role === "assistant" && x.replyTo === m.clientId) : [];
   if (said.length) return said.map((x) => x.id);
   // Not said: what the agent said after it, until your next message, that
@@ -980,6 +1033,9 @@ function DmComposer({
   away,
   onEditLast,
   onEditBack,
+  threading,
+  canThread,
+  onThreadStarted,
 }: {
   /** The agent's key. */
   to: string;
@@ -1005,14 +1061,24 @@ function DmComposer({
   /** An edit the hub didn't take: why, and whether its words went back
    *  into the box. */
   onEditBack: (why: string, restored: boolean) => void;
+  /** Always replying in a thread: each new message starts one on itself,
+   *  sent at once whatever the DM is doing, and opened beside it. */
+  threading: boolean;
+  /** "Always reply in a thread" can be turned on here: the hub starts them. */
+  canThread: boolean;
+  /** A message started thread `id`. */
+  onThreadStarted: (id: string) => void;
 }) {
   const send = useChat((s) => s.send);
   const enqueue = useChat((s) => s.enqueue);
   // A queue that's waiting to go keeps what you send behind it, and Stop
   // beside it, whatever the agent is doing.
   const waiting = useChat((s) => !!s.queues[to]?.items.length && !s.queues[to]!.paused);
+  // A new thread runs beside whatever the DM is doing: it never waits for it.
   const holding = busy || waiting;
+  const queues = holding && !threading;
   const cancel = useChat((s) => s.cancel);
+  const startThread = useChat((s) => s.startThread);
   // What's typed to each agent, kept until it's sent (and through a crash).
   const [draft, setDraft] = useDraft(draftKey.dm(to));
   // An edit the hub didn't take: its words come back here, if the box is
@@ -1042,20 +1108,67 @@ function DmComposer({
     value: draft,
     setValue: setDraft,
   });
+  const hubCommands = useHubCommands(hub);
   const commands = useCommandMenu({
     field: composer,
     value: draft,
     setValue: setDraft,
-    commands: useHubCommands(hub),
+    commands: hubCommands,
   });
   const listing = commands.open ? commands : emoji.open ? emoji : null;
   const voiceEntries = useDmVoiceEntries(to, agent.name);
+  const always = useRepliesInThreads(to);
+  const threadEntries: MenuEntry[] = canThread
+    ? [
+        {
+          kind: "item",
+          label: "Always reply in a thread",
+          detail: `Each new message starts its own thread, where ${agent.name} answers`,
+          checked: always,
+          onSelect: () => setRepliesInThreads(to, !always),
+        },
+      ]
+    : [];
+
+  /** Sends `text` as the start of a thread on itself, with the files
+   *  picked (uploaded to that thread first); what was typed comes back if
+   *  it couldn't go. */
+  const startOne = (text: string, picked: File[]) => {
+    const id = crypto.randomUUID();
+    const failed = (why: string) => {
+      files.setProblem(why);
+      // What was typed comes back, before anything typed since.
+      const now = typedNow();
+      setDraft(now ? `${text}\n${now}` : text);
+    };
+    const unreachable = `Couldn’t reach ${agent.name}. Try again in a moment.`;
+    setDraft("");
+    if (!picked.length) {
+      void startThread(to, text, { message: id }).then((ok) => (ok ? onThreadStarted(ok) : failed(unreachable)));
+      return;
+    }
+    if (!hub) return failed(unreachable);
+    setSending(true);
+    uploadAll(hub, agent.id, threadChannel(id), picked)
+      .then(async (attachments) => {
+        const ok = await startThread(to, text, { message: id, attachments });
+        if (!ok) throw new Error(unreachable);
+        files.sent(picked);
+        onThreadStarted(ok);
+      })
+      .catch((err: unknown) => failed(err instanceof Error ? err.message : String(err)))
+      .finally(() => setSending(false));
+  };
+  const typedNow = () => composer.current?.value.trim() ?? "";
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     const picked = files.files;
     if (sending || (!draft.trim() && !picked.length)) return;
     const text = emoji.settle(draft);
+    // Always in a thread: a new message starts its own. A command acts on
+    // the chat it's typed in, so stays in the DM.
+    if (threading && !isCommand(text, hubCommands)) return startOne(text, picked);
     // While the agent works, what you send waits for its next turn: Stop
     // (or Esc) stops it, and a queued message can be sent at once.
     if (!picked.length) {
@@ -1096,7 +1209,13 @@ function DmComposer({
           ref={composer}
           rows={1}
           value={draft}
-          placeholder={overseeing && !inPane ? `Ask ${agent.name}, or tell it what to do — “restart anything stuck”` : `Message ${agent.name}`}
+          placeholder={
+            threading
+              ? `Start a thread with ${agent.name}`
+              : overseeing && !inPane
+                ? `Ask ${agent.name}, or tell it what to do — “restart anything stuck”`
+                : `Message ${agent.name}`
+          }
           {...(listing
             ? { role: "combobox", "aria-autocomplete": "list", "aria-expanded": true, "aria-controls": listing.listId, "aria-activedescendant": listing.activeId }
             : {})}
@@ -1133,7 +1252,7 @@ function DmComposer({
         />
         <EmojiButton onPick={emoji.insert} disabled={sending} />
         <DmVoiceControls agent={to} name={agent.name} />
-        <ComposerMore label={`More for ${agent.name}`} onEmoji={emoji.insert} more={voiceEntries} disabled={sending} />
+        <ComposerMore label={`More for ${agent.name}`} onEmoji={emoji.insert} more={voiceEntries} kept={threadEntries} disabled={sending} />
         {away && !draft && (
           <span className="composer-hint" aria-hidden="true">
             <kbd>End</kbd> jumps to latest
@@ -1147,10 +1266,10 @@ function DmComposer({
         <button
           type="submit"
           className="btn btn-signal"
-          title={holding ? `Sends when ${agent.name}’s done` : undefined}
-          disabled={sending || (!draft.trim() && !files.pending.length) || (!holding && !connected)}
+          title={queues ? `Sends when ${agent.name}’s done` : undefined}
+          disabled={sending || (!draft.trim() && !files.pending.length) || (!queues && !connected)}
         >
-          {sending ? "Sending…" : holding ? "Queue" : "Send"}
+          {sending ? "Sending…" : queues ? "Queue" : "Send"}
         </button>
         <QueuedMessages to={to} name={agent.name} busy={busy} />
       </form>

@@ -16,7 +16,7 @@ import { useDesk, localSessions } from "../hub/store";
 import type { Board as BoardT, SyncSystem, Ticket, TicketState } from "../hub/types";
 import { useMinute } from "../floor/RightNow";
 import { Menu, type MenuEntry } from "../ui/Menu";
-import { leftFilterOf, syncStatus } from "../hub/boardSync";
+import { leftFilterOf, syncStatus, targetWords } from "../hub/boardSync";
 import { BoardDialog } from "./BoardDialogs";
 import { BoardPlans } from "./BoardPlans";
 import { LeftFilterShelf, SyncBar } from "./SyncBar";
@@ -31,9 +31,11 @@ import {
   statesOf,
   columns,
   keyOf,
+  keyTest,
   landing,
   lineAt,
   nudge,
+  hasUpstreamOrder,
   orderOn,
   shelfLabel,
   sortedLanding,
@@ -224,7 +226,8 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   // A synced board is synced at once when it's shown, and its hub's name
   // read for what its sync bar says.
   const synced = !!board?.sync;
-  const order = orderOn(view.order, synced);
+  const upstream = hasUpstreamOrder(board?.sync);
+  const order = orderOn(view.order, synced, upstream);
   useEffect(() => {
     if (!board || !synced) return;
     void useSyncHubs.getState().load();
@@ -348,7 +351,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   };
   /** What a drag up or down says in a sorted order: the card keeps its
    *  sorted place. */
-  const sorted = () => setSaid(sortedSaid(order, board?.sync?.system ?? null));
+  const sorted = () => setSaid(sortedSaid(order, board?.sync?.system ?? null, upstream));
   const move = (id: string, shown: TicketMove) => {
     const t = all[id];
     // Placed in the whole column, whatever the filter hides: among its
@@ -384,13 +387,13 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
 
   // Enter on a typed key opens that ticket, whichever board it is on.
   const openTyped = () => {
-    const key = keyOf(q);
-    if (!key) return;
-    const found = Object.values(all).find((t) => t.key?.toUpperCase() === key);
+    const isKey = keyTest(q);
+    if (!isKey) return;
+    const found = Object.values(all).find((t) => isKey(t.key));
     if (found) {
       useBoard.getState().show(found.board);
       useBoard.getState().openTicket(found.id);
-    } else setSaid(`There's no ${key}`);
+    } else setSaid(`There's no ${keyOf(q) ?? q.trim()}`);
   };
 
   if (pane && !board) return <BoardPaneNote supported={supported} />;
@@ -499,7 +502,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
     <main className="board" aria-label="Board">
       <header className="board-head">
         <h1 className="display">{/board$/i.test(board.name) ? board.name : `${board.name} board`}</h1>
-        <span className="floor-time">{[board.prefix ?? board.sync?.target, bossName ? `run by ${bossName}` : null].filter(Boolean).join(" · ")}</span>
+        <span className="floor-time">{[board.prefix ?? (board.sync ? targetWords(board.sync.system, board.sync.target) : null), bossName ? `run by ${bossName}` : null].filter(Boolean).join(" · ")}</span>
         <button
           ref={menuButton}
           type="button"
@@ -531,7 +534,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
             ))}
           </select>
         )}
-        <OrderChip order={order} system={board.sync?.system ?? null} onChange={(o) => setBoardView(board.id, { order: o })} />
+        <OrderChip order={order} system={board.sync?.system ?? null} upstream={upstream} onChange={(o) => setBoardView(board.id, { order: o })} />
         <label className="sr-only" htmlFor={searchId}>
           Search tickets
         </label>
@@ -539,7 +542,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
           id={searchId}
           className="board-search"
           value={q}
-          placeholder={`Search or ${board.prefix ?? board.sync?.target ?? "ACM"}-12`}
+          placeholder={board.sync?.system === "github" ? "Search or web#12" : `Search or ${board.prefix ?? board.sync?.target ?? "ACM"}-12`}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") openTyped();

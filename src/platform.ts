@@ -85,6 +85,9 @@ export interface Settings {
   /** Agents, by agent key, who answer in writing when talked to in their
    *  DM; the rest answer aloud. Older files have none. */
   writtenReplies?: string[];
+  /** Agents, by agent key, whose DM starts a thread on each new message you
+   *  send there, the agent answering in it; older files have none. */
+  threadReplies?: string[];
   /** "cascade" (on-device), "gpt-live" or "gemini-live". */
   voiceEngine: string;
   /** The keyboard shortcuts chosen in place of their defaults, by id
