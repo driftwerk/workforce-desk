@@ -100,7 +100,7 @@ interface ChatStore {
   discard: (key: string, id: string) => void;
   /** Says `content` to an agent without opening their DM (connecting first
    *  if need be); false if it couldn't be sent. */
-  sendTo: (key: string, content: string) => Promise<boolean>;
+  sendTo: (key: string, content: string, opts?: SendOptions) => Promise<boolean>;
   /** Answers a permission prompt in a DM. */
   answerPrompt: (key: string, requestId: string, choice: PermissionChoice) => boolean;
   /** Stops the agent's turn; what's queued for it then waits, paused. */
@@ -791,13 +791,13 @@ export const useChat = create<ChatStore>((set, get) => ({
   },
   discard: (key, id) => live.get(key)?.remove(id),
   answerPrompt: (key, requestId, choice) => live.get(key)?.answer(requestId, choice) ?? false,
-  sendTo: (key, content) =>
+  sendTo: (key, content, opts) =>
     new Promise((resolve) => {
       if (!ensure(key)) return resolve(false);
       // The connection opens asynchronously; send once it is up.
       let tries = 0;
       const attempt = () => {
-        if (get().send(key, content)) resolve(true);
+        if (get().send(key, content, opts)) resolve(true);
         else if (++tries < 40) setTimeout(attempt, 150);
         else resolve(false);
       };

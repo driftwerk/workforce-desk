@@ -1,3 +1,4 @@
+import { proposalsMade } from "../settings/ThemeProposals";
 import { ShowUpdates, UpdatesBeside, type UpdatesFocus } from "../crew/updatesShown";
 import { toShow } from "../chat/conversation";
 import { SetupInDm } from "../setup/slot";
@@ -761,8 +762,11 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   );
 }
 
+/** Whether `m` started setups or made theme proposals: the cards a turn's
+ *  tools leave, shown on the message that made them. */
 const startsSetups = (m: ChatMessage): boolean =>
-  m.role === "assistant" && (setupsStarted(m.steps) > 0 || setupsStarted(m.tools) > 0);
+  m.role === "assistant" &&
+  (setupsStarted(m.steps) > 0 || setupsStarted(m.tools) > 0 || proposalsMade(m.steps) > 0 || proposalsMade(m.tools) > 0);
 
 /** Where a message's setups lie among `shown`, for one that set
  *  connections up: from your message it answers (else your last before it:

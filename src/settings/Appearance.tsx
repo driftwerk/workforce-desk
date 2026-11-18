@@ -1,13 +1,15 @@
-import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDesk } from "../hub/store";
 import { revealThemes, writeTheme } from "../platform";
 import { DAY, NIGHT } from "../theme/builtin";
 import { importTheme } from "../theme/import";
 import { allThemes, resolveTheme, useThemeStore } from "../theme/store";
 import { serializeTheme } from "../theme/toml";
-import { contrastChecks, cssVariables, derive, isHex, takesAlpha, tokenVar, type ContrastCheck, type Corners, type Density, type ThemeSpec, type Token } from "../theme/tokens";
+import { ThemePreview } from "../theme/ThemePreview";
+import { contrastChecks, derive, isHex, takesAlpha, type ContrastCheck, type Corners, type Density, type ThemeSpec, type Token } from "../theme/tokens";
 import { applyEdit, BACKGROUNDS, copyOf, DERIVED, derivedGroups, isBuiltin, signalsFor, upsert, withOverride, type Swatch } from "./editing";
 import { exportThemeFile, pickThemeFile } from "./files";
+import { ThemeProposals } from "./ThemeProposals";
 import { TypeSettings } from "./TypeSettings";
 
 const SAVE_DELAY = 300;
@@ -116,7 +118,6 @@ export function Appearance() {
   };
 
   const cards = cardsFor(custom, systemDark);
-  const preview = cssVariables(theme) as CSSProperties;
 
   return (
     <main className="settings-main">
@@ -152,6 +153,8 @@ export function Appearance() {
           + New theme
         </button>
       </section>
+
+      <ThemeProposals />
 
       <div className="appearance-grid">
         <section className="appearance-editor" aria-label="Editor">
@@ -248,43 +251,7 @@ export function Appearance() {
 
         <section className="appearance-side" aria-label="Preview and file">
           <span className="set-label">Preview</span>
-          <div className="preview" style={preview} data-testid="preview">
-            <div className="pv-side">
-              <span className="pv-word">
-                <b>desk</b>
-                <span className="pv-dot" />
-              </span>
-              <span className="pv-ask">Ask anyone</span>
-              <span className="small faint">Crew</span>
-              <span className="pv-crew">
-                <span className="pv-mark pv-mark-working" style={{ background: tokenVar("mark1") }} />
-                atlas
-              </span>
-              <span className="pv-crew">
-                <span className="pv-mark" style={{ background: tokenVar("mark2") }} />
-                allan
-              </span>
-            </div>
-            <div className="pv-main">
-              <span className="pv-title">release</span>
-              <span className="small">
-                <b>allan</b> <span className="muted">Three items are open.</span>
-              </span>
-              <span className="pv-card">
-                <span style={{ width: "80%", background: "var(--signal)" }} />
-                <span style={{ width: "34%", background: "var(--signal-soft)" }} />
-                <span style={{ width: "20%", background: "var(--signal-soft)" }} />
-              </span>
-              <span className="pv-term">
-                <span style={{ color: "var(--ansi-cyan)" }}>●</span> Edit gateway.rs{" "}
-                <span style={{ color: "var(--ansi-green)" }}>+14</span> <span style={{ color: "var(--ansi-red)" }}>-6</span>
-              </span>
-              <span className="pv-blocked">
-                <b>Needs you</b>
-                <span className="pv-allow">Allow</span>
-              </span>
-            </div>
-          </div>
+          <ThemePreview theme={theme} />
 
           <div className="set-group">
             <span className="set-label">
