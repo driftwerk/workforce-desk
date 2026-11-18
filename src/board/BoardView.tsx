@@ -26,6 +26,7 @@ import {
   statesOf,
   columns,
   keyOf,
+  keyTest,
   landing,
   lineAt,
   nudge,
@@ -287,13 +288,13 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
 
   // Enter on a typed key opens that ticket, whichever board it is on.
   const openTyped = () => {
-    const key = keyOf(q);
-    if (!key) return;
-    const found = Object.values(all).find((t) => t.key?.toUpperCase() === key);
+    const isKey = keyTest(q);
+    if (!isKey) return;
+    const found = Object.values(all).find((t) => isKey(t.key));
     if (found) {
       useBoard.getState().show(found.board);
       useBoard.getState().openTicket(found.id);
-    } else setSaid(`There's no ${key}`);
+    } else setSaid(`There's no ${keyOf(q) ?? q.trim()}`);
   };
 
   if (pane && !board) return <BoardPaneNote supported={supported} />;

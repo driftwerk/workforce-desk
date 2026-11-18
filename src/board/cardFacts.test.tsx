@@ -101,6 +101,9 @@ describe("a synced board's facets", () => {
     ]);
     const gh = ticket(9, { external: { system: "github", key: "acme/web#9", url: "https://github.invalid/x", remoteUpdatedAt: "2026-11-05T09:00:00Z", synced: true, link: "l", details: { kind: "Bug", labels: ["bug"], sprint: { name: "v2.0" } } } });
     expect(facetOf(gh, "sprint")).toEqual(["v2.0"]);
+    expect(sprintName({ number: 4 }, "github")).toBe("Milestone 4");
+    expect(sprintName({ number: 4 }, "linear")).toBe("Cycle 4");
+    expect(sprintName({ number: 4 })).toBe("Cycle 4");
     expect(facetOf(gh, "type")).toEqual(["Bug"]);
     expect(facetOf(gh, "label")).toEqual(["bug"]);
     expect(sprintName({})).toBe("");

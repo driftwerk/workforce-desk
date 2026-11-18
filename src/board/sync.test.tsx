@@ -60,7 +60,7 @@ vi.mock("@workforce/rich", () => ({
 }));
 
 import { useChat } from "../chat/store";
-import { boardSyncOf, fixOf, isGithubProject, issueUrl, linkedTo, looksLikeToken, pausedWords, syncHubId, syncStatus, targetOk, targetWords } from "../hub/boardSync";
+import { boardSyncOf, fixOf, isGithubProject, shortKey, issueUrl, linkedTo, looksLikeToken, pausedWords, syncHubId, syncStatus, targetOk, targetWords } from "../hub/boardSync";
 import { useDesk } from "../hub/store";
 import type { ActivityParty, Board as BoardT, SyncHub, Ticket } from "../hub/types";
 import { Board } from "./BoardView";
@@ -1112,6 +1112,11 @@ describe("the board, synced", () => {
     fireEvent.click(screen.getByRole("button", { name: "Order: as on GitHub" }));
     expect(within(screen.getByRole("menu", { name: "Order" })).getAllByRole("menuitemradio").map((i) => i.firstChild!.firstChild!.textContent)).toEqual(["As on GitHub", "Newest first", "Oldest first", "Recently changed"]);
     expect(screen.getByText("The project's own order, as GitHub has it")).toBeTruthy();
+    // Enter on repo#12 opens that issue, owner left out.
+    const search = screen.getByLabelText("Search tickets");
+    fireEvent.change(search, { target: { value: "web#13" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(useBoard.getState().open).toBe(b.id);
     // A repository's board has no order of its own: it offers none, and a saved one falls back.
     unmount();
     useBoardViews.setState({ views: { [ACME.id]: { order: "source" } } as never });
@@ -1309,6 +1314,16 @@ describe("the board, synced", () => {
     expect(screen.queryByRole("button", { name: /alert/ })).toBeNull();
   });
 
+  it("shows a GitHub issue's type and its full key in its ticket, with the milestone as such", () => {
+    const t = ticket(9, { key: "acme/web#9", title: "Postcode", external: ext("acme/web#9", { system: "github" as const, details: { kind: "Bug", sprint: { number: 4 } } }) });
+    useDesk.setState({ hub: { ticketHistory: async () => ({ events: [], next: null }), ledger: async () => ({ rows: [], next: null }) } as never });
+    useBoard.setState({ boards: { [ACME.id]: synced({ system: "github", target: "acme/projects/7" }) }, tickets: { [t.id]: t }, open: t.id });
+    render(<OpenTicket />);
+    expect(document.querySelector(".ticket-crumb-self .ticket-crumb-key")?.textContent).toBe("acme/web#9");
+    expect(document.querySelector(".ticket-key")?.textContent).toBe("acme/web#9");
+    expect(screen.getByText("Milestone 4")).toBeTruthy();
+  });
+
   it("says beside Desk's state what its issue calls it, faint, and stacks the view under 760px", async () => {
     const t = ticket(8, { key: "ACME-8", state: "doing", external: ext("ACME-8", { details: { remoteState: "In Progress", kind: "Story" } }) });
     useDesk.setState({ hub: { ticketHistory: async () => ({ events: [], next: null }), ledger: async () => ({ rows: [], next: null }) } as never });
@@ -1392,6 +1407,8 @@ describe("board sync's words and checks", () => {
     expect(targetOk("github", "acme/..")).toBe(false);
     expect(isGithubProject("acme/projects/7")).toBe(true);
     expect(isGithubProject("acme/projects")).toBe(false);
+    expect(shortKey("acme/web#12")).toBe("web#12");
+    expect(shortKey("web#12")).toBe("web#12");
     expect(targetWords("github", "acme/projects/7")).toBe("acme · project 7");
     expect(targetWords("github", "acme/web")).toBe("acme/web");
     expect(targetWords("jira", "ACME")).toBe("ACME");

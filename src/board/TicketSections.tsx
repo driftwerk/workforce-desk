@@ -121,7 +121,7 @@ export function Crumbs({ ticket: t, board, layout }: { ticket: Ticket; board: Bo
           </button>
         </>
       )}
-      {e.system === "jira" && layout !== "compact" && d?.kind && (
+      {(e.system === "jira" || e.system === "github") && layout !== "compact" && d?.kind && (
         <>
           <Sep />
           <span className="ticket-crumb ticket-crumb-self">

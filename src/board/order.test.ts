@@ -113,6 +113,8 @@ describe("a board's order", () => {
     expect(orderOn("source", true, true)).toBe("source");
     expect(orderChipSays("source", "github")).toBe("Order: as on GitHub");
     expect(orderSays("source", "github")).toBe("The project's own order, as GitHub has it");
+    expect(sortedSaid("newest", "jira")).toBe("Sorted newest first: choose As on Jira to move cards by hand.");
+    expect(sortedSaid("newest", null)).toBe("Sorted newest first: choose As arranged to move cards by hand.");
     expect(sortedSaid("newest", "github", true)).toBe("Sorted newest first: choose As on GitHub to move cards by hand.");
     expect(sortedSaid("newest", "github", false)).toMatch(/keeps no order for a repository’s issues, so cards only change column/);
   });

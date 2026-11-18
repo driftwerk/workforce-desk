@@ -10,6 +10,7 @@ import { useDesk } from "../hub/store";
 import type { ActivityParty, SyncAssignee, SyncSystem, Ticket } from "../hub/types";
 import { useLocalAgent } from "../overview/people";
 import { shortKey, SYSTEM_TITLE, takeable } from "../hub/boardSync";
+import { sprintName } from "./facets";
 import { Mark } from "../ui/Mark";
 import { blockers, createdOf, needsLine } from "./board";
 import {
@@ -240,7 +241,7 @@ export function TicketCard({
   const blocks = (facts?.links ?? []).filter((l) => l.rel === "blocks");
   const files = t.files?.length ?? 0;
   const comments = facts?.comments ?? 0;
-  const cycle = (system === "linear" || system === "github") && facts?.sprint ? (facts.sprint.name ?? (facts.sprint.number !== undefined ? `Cycle ${facts.sprint.number}` : null)) : null;
+  const cycle = (system === "linear" || system === "github") && facts?.sprint ? (sprintName(facts.sprint, system) || null) : null;
   const more =
     ext && !settled && (blocks.length > 0 || files > 0 || comments > 0 || cycle) ? (
       <span className="board-counts">

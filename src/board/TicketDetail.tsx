@@ -716,7 +716,7 @@ function Facts({ ticket: t, layout, onState }: { ticket: Ticket; layout: Layout;
   else if (d?.points !== undefined)
     facts.points = system === "linear" ? { label: "Estimate", value: <><span className="mono">{d.points}</span> pts</> } : { label: "Points", value: <span className="mono">{d.points}</span> };
   if (d?.sprint) {
-    const name = sprintName(d.sprint);
+    const name = sprintName(d.sprint, system);
     const when = d.sprint.starts && d.sprint.ends && system === "linear" ? spanText(d.sprint.starts, d.sprint.ends) : d.sprint.ends ? `ends ${dayText(d.sprint.ends)}` : null;
     facts.sprint = { label: system === "linear" ? "Cycle" : system === "github" ? "Milestone" : "Sprint", value: <><CycleIcon size={12} />{name}{when && !compact && <span className="ticket-there">{when}</span>}</> };
   }

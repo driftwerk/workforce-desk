@@ -111,13 +111,31 @@ export const keyOf = (q: string): string | null => {
   return m && Number(m[2]) > 0 ? `${m[1]!.toUpperCase()}-${Number(m[2])}` : null;
 };
 
+/** A GitHub issue as typed: `web#12`, or `acme/web#12`. */
+const GH_REF = /^(?:([A-Za-z0-9][A-Za-z0-9-]*)\/)?([A-Za-z0-9._-]+)#(\d+)$/;
+
+/** What a typed key asks for, as a test on a ticket's key: `ACM-12` exactly
+ *  (any case), or a GitHub issue by `repo#12` (the key's end, owner left
+ *  out) or `owner/repo#12`; null when `q` isn't a key. */
+export const keyTest = (q: string): ((key: string | null | undefined) => boolean) | null => {
+  const k = keyOf(q);
+  if (k) return (key) => key?.toUpperCase() === k;
+  const m = GH_REF.exec(q.trim());
+  if (!m || Number(m[3]) <= 0) return null;
+  const want = `${m[1] ? `${m[1]}/` : ""}${m[2]}#${Number(m[3])}`.toLowerCase();
+  return (key) => {
+    const have = key?.toLowerCase();
+    return !!have && (m[1] ? have === want : have === want || have.endsWith(`/${want}`));
+  };
+};
+
 /** Whether `t` is what `q` asks for: its key when `q` is one (exactly), else
  *  every word somewhere in its key, title or description. */
 export const matches = (t: Pick<Ticket, "key" | "title" | "body">, q: string): boolean => {
   const query = q.trim();
   if (!query) return true;
-  const key = keyOf(query);
-  if (key) return t.key?.toUpperCase() === key;
+  const isKey = keyTest(query);
+  if (isKey) return isKey(t.key);
   const hay = `${t.key ?? ""} ${t.title} ${t.body}`.toLowerCase();
   return query
     .toLowerCase()
