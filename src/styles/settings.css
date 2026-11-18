@@ -1825,3 +1825,60 @@ legend.set-label {
 .engine-list > li:not(.engine-row) {
   padding: 12px 14px;
 }
+
+/* Settings › Voice: the microphone and speaker. */
+.audio-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 260px;
+  flex: none;
+}
+.audio-picker-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.audio-meter {
+  display: block;
+  height: 6px;
+  max-width: 260px;
+  margin-top: 6px;
+  border-radius: 999px;
+  background: var(--sunken);
+  border: 1px solid var(--border);
+  overflow: hidden;
+}
+.audio-meter-fill {
+  display: block;
+  height: 100%;
+  background: var(--signal);
+  transition: width 90ms linear;
+}
+.audio-sense {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.audio-sense label {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.audio-sense-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+}
+.audio-sense-row input[type="range"] {
+  min-width: 0;
+}
+@media (max-width: 520px) {
+  .audio-settings .setting-card {
+    flex-wrap: wrap;
+  }
+  .audio-sense-row {
+    grid-template-columns: 1fr;
+  }
+}

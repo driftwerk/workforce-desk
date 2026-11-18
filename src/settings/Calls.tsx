@@ -3,6 +3,7 @@ import { onTupleStatus, subscribe, tupleAvailable, type TupleStatus } from "../p
 import { shortcutLabel } from "../shortcuts/keys";
 import { VOICE_ENGINES, voiceEngine } from "../voice/engines";
 import { SwitchRow } from "../ui/SwitchRow";
+import { AudioSettings } from "./Audio";
 import { useSettings } from "./store";
 
 export function Calls() {
@@ -39,6 +40,7 @@ export function Calls() {
           </div>
         </section>
       )}
+      <AudioSettings />
       {hasTuple && (
         <SwitchRow
           label="Ask agents from Tuple calls"
