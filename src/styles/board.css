@@ -806,6 +806,11 @@ button.ticket-chip:hover {
   border-color: var(--done);
   color: var(--done);
 }
+.board-sync-first {
+  border-color: var(--signal);
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+}
 .board-sync-paused {
   border-style: dashed;
 }

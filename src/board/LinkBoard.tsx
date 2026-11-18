@@ -98,11 +98,12 @@ const plainLinkError = (said: string): string => (/ORDER BY/i.test(said) && /JQL
 /** A board made for a link that failed: taken away again, here and on the
  *  hub, and the original shown. If the failure was a lost answer and the
  *  link did apply, the board is kept (`linked`) instead. `stuck`: the hub
- *  wouldn't delete it. */
-const undoMade = async (made: string, original: string): Promise<"removed" | "linked" | "stuck"> => {
+ *  wouldn't delete it. `always`: the person walked away, so it goes even
+ *  if the link applied. */
+const undoMade = async (made: string, original: string | null, always = false): Promise<"removed" | "linked" | "stuck"> => {
   const hub = useDesk.getState().hub;
   if (!hub) return "stuck";
-  const now = await hub.boards().catch(() => null);
+  const now = always ? null : await hub.boards().catch(() => null);
   const there = now?.find((b) => b.id === made);
   if (there?.sync) {
     useBoard.setState((st) => ({ boards: { ...st.boards, [made]: there }, shown: made }));
@@ -126,8 +127,12 @@ const undoMade = async (made: string, original: string): Promise<"removed" | "li
  *  the board's sync gets one made there by Desk where the hub allows it;
  *  otherwise the person pastes one made on that hub, once. Laid out as the
  *  Move and Continue-in dialogs are (.move-*). */
-export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tickets: number; onClose: () => void }) {
+export function LinkBoardDialog({ board, tickets = 0, onClose, onMade }: { board?: Board; tickets?: number; onClose: () => void; /** Without a board: the new board was made and linked. */ onMade?: (b: Board) => void }) {
   const ids = useId();
+  /** No board to link: one is made, named after the target, as it links. */
+  const fresh = !board;
+  /** The dialog was closed while the board was being made and linked. */
+  const walkedAway = useRef(false);
   const paired = useChat((s) => s.hubs);
   const kept = useSyncHubs((s) => s.hubs);
   const choices = useMemo(() => syncChoices(paired, kept), [paired, kept]);
@@ -313,6 +318,17 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   // A typed project has no id until the hub resolves it: kept from its answer.
   const [resolved, setResolved] = useState<{ target: string; id: string } | null>(null);
   const targetIdOf: string | undefined = project?.id ?? (asProject && resolved?.target === targetKey ? resolved.id : undefined);
+  /** A board made from the link goes by its target: a Linear team's name, a
+   *  Jira project's key, a GitHub project's or repository's name. */
+  const newName = !system
+    ? ""
+    : system === "linear"
+      ? (team?.name ?? targetKey)
+      : system === "github"
+        ? asProject
+          ? (project?.name ?? targetWords(system, targetKey))
+          : (targetKey.split("/").pop() ?? targetKey)
+        : targetKey;
   const checkKey = JSON.stringify([system, viaKey, workspace, ownerTyped, targetKey, team?.id, project?.id, filterReady ? filter : null, meNeeded ? me.trim() : null, asked]);
   const checkRun = useRef(0);
   useEffect(() => {
@@ -364,7 +380,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     setStates(found.prefill);
   }, [found, system, viaKey, workspace, targetKey]);
 
-  const hasTickets = tickets > 0;
+  const hasTickets = !fresh && tickets > 0;
   /** What happens to the board's own tickets: kept beside the issues, or
    *  cleared first. */
   const [own, setOwn] = useState<"keep" | "clear" | "new" | null>(null);
@@ -372,7 +388,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   /** Why Link can't be pressed yet: the first thing missing, in plain words. */
   const waitingOn: { words: string; failed: boolean } | null = (() => {
     if (busy) return null;
-    if (hasTickets && !own) return { words: `Say what happens to ${board.name}’s ${tickets === 1 ? "ticket" : `${tickets} tickets`}.`, failed: false };
+    if (hasTickets && !own) return { words: `Say what happens to ${board!.name}’s ${tickets === 1 ? "ticket" : `${tickets} tickets`}.`, failed: false };
     if (!system) return { words: "Pick Jira, Linear or GitHub.", failed: false };
     if (!localSync()) return { words: "Desk isn’t ready yet, so nothing can be checked or linked. Try again in a moment.", failed: true };
     if (!via) return { words: `Pick where ${SYSTEM_TITLE[system]} is reached through.`, failed: false };
@@ -423,27 +439,34 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     setBusy(true);
     setProblem(null);
     let made: Board | null = null;
+    const original = useBoard.getState().shown;
+    walkedAway.current = false;
     try {
       // Cleared first: they're Desk's own, and nothing there changes.
       if (hasTickets && own === "clear") {
-        const mine = Object.values(useBoard.getState().tickets).filter((t) => t.board === board.id);
+        const mine = Object.values(useBoard.getState().tickets).filter((t) => t.board === board!.id);
         for (const t of mine) await useBoard.getState().remove(t.id);
       }
       const mapped = Object.fromEntries(Object.entries(states).filter(([, v]) => !!v));
       // A new board takes the link and this one stays as it is.
       let into = board;
-      if (hasTickets && own === "new") {
-        made = await useBoard.getState().createBoard(`${board.name} · ${SYSTEM_TITLE[system]}`);
+      if (fresh) {
+        // No board yet: one is made, named after what it links to.
+        made = await useBoard.getState().createBoard(newName);
         into = made;
-        if (board.group) {
+        if (walkedAway.current) throw new Error("Cancelled.");
+      } else if (hasTickets && own === "new") {
+        made = await useBoard.getState().createBoard(`${board!.name} · ${SYSTEM_TITLE[system]}`);
+        into = made;
+        if (board!.group) {
           const hub = useDesk.getState().hub;
           if (hub) {
-            made = await hub.updateBoard(made.id, { group: board.group }).catch(() => made as Board);
+            made = await hub.updateBoard(made.id, { group: board!.group }).catch(() => made as Board);
             useBoard.setState((s) => ({ boards: { ...s.boards, [made!.id]: made! } }));
           }
         }
       }
-      const b = await sync.link(into.id, {
+      const b = await sync.link(into!.id, {
         system,
         target: targetKey,
         ...(team ? { targetId: team.id } : {}),
@@ -457,20 +480,27 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
         ...(hasTickets && own === "keep" ? { keepTickets: true } : {}),
         states: mapped,
       });
-      useBoard.setState((s) => ({ boards: { ...s.boards, [b.id]: b } }));
+      if (walkedAway.current) throw new Error("Cancelled.");
+      useBoard.setState((s) => ({ boards: { ...s.boards, [b.id]: b }, ...(fresh ? { shown: b.id } : {}) }));
+      // The board opens on its first sync: its bar shows it as it runs.
       void sync.syncNow(b.id).catch(() => {});
+      if (fresh) onMade?.(b);
       onClose();
     } catch (e) {
       let words = saidOf(e);
+      const cancelled = walkedAway.current;
       if (made) {
-        const outcome = await undoMade(made.id, board.id);
+        const outcome = await undoMade(made.id, fresh ? original : board!.id, cancelled);
         if (outcome === "linked") {
           void sync.syncNow(made.id).catch(() => {});
+          if (fresh) onMade?.(useBoard.getState().boards[made.id] ?? made);
           onClose();
           return;
         }
         if (outcome === "stuck") words = `${words} The new board “${made.name}” couldn’t be removed either: delete it from its menu.`;
+        else if (fresh) words = `${words} No board was made: “${made.name}” was removed again.`;
       }
+      if (cancelled) return;
       setProblem(words);
       setBusy(false);
     }
@@ -485,18 +515,28 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     setChecked(null);
   };
 
+  /** Closing while the board is being made: it is taken away again. */
+  const close = () => {
+    if (fresh && busy) walkedAway.current = true;
+    onClose();
+  };
+
   return (
     <Dialog
-      onClose={onClose}
+      onClose={close}
       title={(id) => (
         <header className="dialog-head">
           <span className="dialog-title">
             <h1 id={id} className="display-lg">
-              Link “{board.name}” to Jira, Linear or GitHub
+              {fresh ? "New board from Linear, Jira or GitHub" : `Link “${board.name}” to Jira, Linear or GitHub`}
             </h1>
-            <p className="small">Its tickets become the project’s issues: what you move here goes out, what changes there comes in.</p>
+            <p className="small">
+              {fresh
+                ? "Desk makes a board named after what you pick, and links it: what you move here goes out, what changes there comes in."
+                : "Its tickets become the project’s issues: what you move here goes out, what changes there comes in."}
+            </p>
           </span>
-          <CloseButton onClose={onClose} />
+          <CloseButton onClose={close} />
         </header>
       )}
     >
@@ -983,11 +1023,11 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
         <span className={`dialog-foot-note${footNote?.failed ? " state-blocked" : ""}`} role={problem ? "alert" : "status"}>
           {footNote?.words}
         </span>
-        <button type="button" className="btn btn-ghost" data-autofocus onClick={onClose}>
+        <button type="button" className="btn btn-ghost" data-autofocus onClick={close}>
           Cancel
         </button>
         <button type="button" className="btn btn-signal" disabled={!canLink} onClick={() => void link()}>
-          {busy ? "Linking…" : system && targetGood ? `Link to ${targetWords(system, targetKey)}` : "Link board"}
+          {busy ? (fresh ? "Making the board…" : "Linking…") : system && targetGood ? (fresh ? `Make “${newName}”` : `Link to ${targetWords(system, targetKey)}`) : fresh ? "Make board" : "Link board"}
         </button>
       </footer>
     </Dialog>

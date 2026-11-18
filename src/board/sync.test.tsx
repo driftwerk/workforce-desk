@@ -67,6 +67,8 @@ import { Board } from "./BoardView";
 import { BOARD_CHROME } from "./chrome";
 import { OpenTicket } from "./TicketDetail";
 import { LinkBoardDialog } from "./LinkBoard";
+import { BoardActionDialog } from "./boardActions";
+import { SyncBar } from "./SyncBar";
 import { useBoard } from "./store";
 import { useSyncHubs } from "./syncStore";
 import { useBoardViews } from "./views";
@@ -113,7 +115,7 @@ const localRoutes = (method: string, path: string, body: Record<string, unknown>
     return { status: 200, body: out };
   }
   const link = /^\/api\/desk\/boards\/([^/]+)\/link$/.exec(path);
-  if (method === "PUT" && link) return { status: 200, body: { ...ACME, prefix: null, sync: { link: "l1", ...body, person: "p1" } } };
+  if (method === "PUT" && link) return { status: 200, body: { ...ACME, id: link[1], prefix: null, sync: { link: "l1", ...body, person: "p1" } } };
   if (method === "POST" && /\/sync$/.test(path)) return { status: 202 };
   return { status: 404 };
 };
@@ -1439,5 +1441,113 @@ describe("board sync's words and checks", () => {
     await expect(api.syncNow("b1")).resolves.toBeUndefined();
     await expect(api.syncNow("b2")).rejects.toThrow("That board isn't synced.");
     await act(async () => {});
+  });
+});
+
+describe("a new board from Linear, Jira or GitHub", () => {
+  const NEW = { ...ACME, id: "b-new", name: "PLT", prefix: null } as BoardT;
+  let createBoard: ReturnType<typeof vi.fn>;
+  let deleteBoard: ReturnType<typeof vi.fn>;
+  const pickAtlasJira = async (key: string) => {
+    pickSystem("Jira");
+    await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+    fireEvent.change(await screen.findByLabelText("Atlas’s Jira project key"), { target: { value: key } });
+  };
+  const ready = (name: string) => waitFor(() => expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(false), { timeout: 2000 });
+  beforeEach(() => {
+    createBoard = vi.fn(async (b: { name: string }) => ({ ...NEW, name: b.name }));
+    deleteBoard = vi.fn(async (_id: string) => {});
+    useDesk.setState({ hub: { createBoard, deleteBoard, boards: async () => [ACME, NEW] } as never });
+  });
+  afterEach(() => useDesk.setState({ hub: null }));
+
+  it("asks for no board, makes one named after the project, links it and shows it", async () => {
+    const closed = vi.fn();
+    const made = vi.fn();
+    render(<LinkBoardDialog onMade={made} onClose={closed} />);
+    expect(screen.getByRole("heading", { name: "New board from Linear, Jira or GitHub" })).toBeTruthy();
+    expect(screen.queryByRole("radiogroup", { name: /tickets/ })).toBeNull();
+    expect(document.querySelector(".move-foot .dialog-foot-note")!.textContent).toBe("Pick Jira, Linear or GitHub.");
+    await pickAtlasJira("PLT");
+    await ready("Make “PLT”");
+    fireEvent.click(screen.getByRole("button", { name: "Make “PLT”" }));
+    await waitFor(() => expect(closed).toHaveBeenCalled());
+    expect(createBoard).toHaveBeenCalledWith({ name: "PLT" });
+    expect(native.asked.find((a) => a.method === "PUT" && a.path === "/api/desk/boards/b-new/link")!.body).toMatchObject({ system: "jira", target: "PLT" });
+    await waitFor(() => expect(native.asked.some((a) => a.method === "POST" && a.path === "/api/desk/boards/b-new/sync")).toBe(true));
+    expect(made).toHaveBeenCalledTimes(1);
+    expect(useBoard.getState().shown).toBe("b-new");
+    expect(deleteBoard).not.toHaveBeenCalled();
+  });
+
+  it("names a Linear board after its team", async () => {
+    native.route = (hub, method, path, body) =>
+      hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "linear" && !body.target
+        ? { status: 200, body: { offered: true, teams: [{ id: "8a7b-man", key: "MAN", name: "Mantis" }] } }
+        : hub === "local"
+          ? localRoutes(method, path, body)
+          : { status: 404 };
+    render(<LinkBoardDialog onClose={() => {}} />);
+    pickSystem("Linear");
+    await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+    fireEvent.change(await screen.findByLabelText("Atlas’s Linear team"), { target: { value: "8a7b-man" } });
+    await ready("Make “Mantis”");
+    fireEvent.click(screen.getByRole("button", { name: "Make “Mantis”" }));
+    await waitFor(() => expect(createBoard).toHaveBeenCalledWith({ name: "Mantis" }));
+  });
+
+  it("removes the new board and says so when the link is refused", async () => {
+    useBoard.setState({ shown: ACME.id });
+    const closed = vi.fn();
+    const was = native.route;
+    native.route = (hub, method, path, body) =>
+      method === "PUT" && /\/boards\/b-new\/link$/.test(path) ? { status: 422, body: { error: "Atlas couldn’t read that project." } } : was(hub, method, path, body);
+    render(<LinkBoardDialog onClose={closed} />);
+    await pickAtlasJira("PLT");
+    await ready("Make “PLT”");
+    fireEvent.click(screen.getByRole("button", { name: "Make “PLT”" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Atlas couldn’t read that project. No board was made: “PLT” was removed again.");
+    expect(deleteBoard).toHaveBeenCalledWith("b-new");
+    expect(useBoard.getState().boards["b-new"]).toBeUndefined();
+    expect(useBoard.getState().shown).toBe(ACME.id);
+    expect(closed).not.toHaveBeenCalled();
+  });
+
+  it("removes the new board when the dialog is closed while it is being made", async () => {
+    let finish: (b: BoardT) => void = () => {};
+    createBoard.mockImplementation(() => new Promise<BoardT>((r) => (finish = r)));
+    const closed = vi.fn();
+    const made = vi.fn();
+    render(<LinkBoardDialog onMade={made} onClose={closed} />);
+    await pickAtlasJira("PLT");
+    await ready("Make “PLT”");
+    fireEvent.click(screen.getByRole("button", { name: "Make “PLT”" }));
+    await screen.findByRole("button", { name: "Making the board…" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(closed).toHaveBeenCalledTimes(1);
+    await act(async () => finish(NEW));
+    await waitFor(() => expect(deleteBoard).toHaveBeenCalledWith("b-new"));
+    expect(native.asked.some((a) => a.method === "PUT" && a.path === "/api/desk/boards/b-new/link")).toBe(false);
+    expect(made).not.toHaveBeenCalled();
+    expect(useBoard.getState().boards["b-new"]).toBeUndefined();
+  });
+
+  it("shows a board that has pulled nothing yet as on its first sync, and as synced once it has", () => {
+    const linked = { ...ACME, updatedAt: new Date().toISOString(), sync: { link: "l", system: "jira", target: "PLT", via: { kind: "hub", hub: "atlas-acme-example" }, person: "p", filter: { kind: "all", value: { includeDone: false } }, states: {} } } as BoardT;
+    const { rerender } = render(<SyncBar board={linked} now={Date.now()} />);
+    expect(screen.getByText("Syncing")).toBeTruthy();
+    expect(screen.getByText(/bringing in its issues for the first time/)).toBeTruthy();
+    rerender(<SyncBar board={{ ...linked, sync: { ...linked.sync!, pulledAt: new Date().toISOString() } }} now={Date.now()} />);
+    expect(screen.getByText("Synced")).toBeTruthy();
+    expect(screen.queryByText(/for the first time/)).toBeNull();
+  });
+
+  it("is in the board's header menu, opening the same dialog", async () => {
+    expect(BOARD_CHROME.entries(ACME, () => []).find((e) => e.kind === "item" && e.label === "New board from Linear, Jira or GitHub…")).toBeTruthy();
+    render(<BoardActionDialog board={ACME} action="fromSystem" onClose={() => {}} />);
+    expect(screen.getByRole("heading", { name: "New board from Linear, Jira or GitHub" })).toBeTruthy();
   });
 });

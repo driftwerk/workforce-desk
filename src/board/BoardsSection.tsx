@@ -10,8 +10,9 @@ import { badgeOfGroup, NO_BADGE, type Badge } from "../unread/badges";
 import { Marks } from "../unread/Marks";
 import { Menu } from "../ui/Menu";
 import { snoozed, waitingOnYou } from "./board";
-import { BoardActionDialog, boardEntries, type BoardAction } from "./boardActions";
+import { BoardActionDialog, boardEntries, NEW_FROM_SYSTEM, type BoardAction } from "./boardActions";
 import { BoardDialog } from "./BoardDialogs";
+import { LinkBoardDialog } from "./LinkBoard";
 import { useWaiting } from "./BoardView";
 import { arrangedBoards, moveBoard, nudgeBoard, useBoardOrder } from "./order";
 import { shownBoard, useBoard } from "./store";
@@ -54,6 +55,7 @@ export function BoardsSection() {
   const inGrids = useDesk((s) => s.view === "grids");
   const waiting = useWaitingByBoard();
   const [making, setMaking] = useState(false);
+  const [makingLinked, setMakingLinked] = useState(false);
   const [menu, setMenu] = useState<{ id: string; at: { x: number; y: number }; from: HTMLElement | null } | null>(null);
   const [acting, setActing] = useState<{ id: string; action: BoardAction } | null>(null);
   const [said, setSaid] = useState("");
@@ -90,7 +92,7 @@ export function BoardsSection() {
   const actingBoard = acting ? boards[acting.id] : undefined;
   return (
     <>
-      <SideSection id="boards" label="Boards" title={`Boards (${shortcutLabel(keys.board)})`} newLabel="New board" onNew={() => setMaking(true)} badge={badgeOfGroup(list.map((b) => badgeOf(waiting.get(b.id))))}>
+      <SideSection id="boards" label="Boards" title={`Boards (${shortcutLabel(keys.board)})`} newLabel="New board" onNew={() => setMaking(true)} newMenu={[{ kind: "item", label: "New board…", onSelect: () => setMaking(true) }, { kind: "item", label: NEW_FROM_SYSTEM, onSelect: () => setMakingLinked(true) }]} badge={badgeOfGroup(list.map((b) => badgeOf(waiting.get(b.id))))}>
         <span id={hint} className="sr-only">
           Alt+Up and Alt+Down move it. Shift+F10 opens its menu.
         </span>
@@ -157,6 +159,7 @@ export function BoardsSection() {
         )}
       </SideSection>
       {acting && actingBoard && <BoardActionDialog board={actingBoard} action={acting.action} onClose={() => setActing(null)} />}
+      {makingLinked && <LinkBoardDialog onMade={() => useDesk.getState().setView("board")} onClose={() => setMakingLinked(false)} />}
       {making && <BoardDialog onMade={() => useDesk.getState().setView("board")} onClose={() => setMaking(false)} />}
     </>
   );
