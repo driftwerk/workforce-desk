@@ -666,8 +666,12 @@ pub fn meter(on: bool) -> Result<()> {
 /// than the test. Opens the microphone and speaker for it when nothing has.
 pub fn test(seconds: f32) -> Result<()> {
     static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
-    let Ok(_one) = ONE_AT_A_TIME.try_lock() else {
-        return Err(eyre!("a test is already running"));
+    let _one = match ONE_AT_A_TIME.try_lock() {
+        Ok(guard) => guard,
+        Err(std::sync::TryLockError::Poisoned(e)) => e.into_inner(),
+        Err(std::sync::TryLockError::WouldBlock) => {
+            return Err(eyre!("a test is already running"));
+        }
     };
     if super::mic_access() == super::MicAccess::Denied {
         return Err(eyre!(super::MIC_NOT_ALLOWED));

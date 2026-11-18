@@ -235,9 +235,11 @@ unsafe fn listen(engine: &AVAudioEngine, to: SharedIn, attempt: &Attempt) -> Res
             // Where the microphone and speaker share one unit, the speaker's
             // device can take the microphone's place: then this pair can't
             // be had, and the chosen microphone is tried on its own.
-            if let Some(mic_uid) = &attempt.input
-                && current_device(mic.audioUnit(), input_element) != hal::device_id(mic_uid)
-            {
+            let mic_should_be = match &attempt.input {
+                Some(mic_uid) => hal::device_id(mic_uid),
+                None => hal::default_input(),
+            };
+            if current_device(mic.audioUnit(), input_element) != mic_should_be {
                 return Err(eyre!(
                     "the microphone and speaker can’t be different devices here"
                 ));
@@ -577,12 +579,17 @@ mod hal {
         uid.contains("CADefaultDeviceAggregate") || uid.contains("VPAUAggregateAudioDevice")
     }
 
-    pub(super) fn devices() -> Devices {
-        let default_in = get::<AudioObjectID>(
+    /// The system's microphone now.
+    pub(super) fn default_input() -> Option<AudioObjectID> {
+        get::<AudioObjectID>(
             SYSTEM,
             kAudioHardwarePropertyDefaultInputDevice,
             kAudioObjectPropertyScopeGlobal,
-        );
+        )
+    }
+
+    pub(super) fn devices() -> Devices {
+        let default_in = default_input();
         let default_out = get::<AudioObjectID>(
             SYSTEM,
             kAudioHardwarePropertyDefaultOutputDevice,
