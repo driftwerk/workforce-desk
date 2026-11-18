@@ -13,6 +13,9 @@ import type { BoardAction } from "./board";
 
 export type { BoardAction };
 
+/** Making a board that syncs with Jira, Linear or GitHub in one step. */
+export const NEW_FROM_SYSTEM = "New board from Linear, Jira or GitHub…";
+
 export const boardEntries = (board: Board, act: (a: BoardAction) => void): MenuEntry[] => [
   { kind: "item", label: "Rename board…", onSelect: () => act("rename") },
   { kind: "item", label: "Delete board…", onSelect: () => act("delete") },
@@ -32,6 +35,8 @@ export function BoardActionDialog({ board, action, onClose }: { board: Board; ac
       return <DeleteBoard board={board} count={count} onClose={onClose} />;
     case "link":
       return <LinkBoardDialog board={board} tickets={count} onClose={onClose} />;
+    case "fromSystem":
+      return <LinkBoardDialog onClose={onClose} />;
     case "unlink":
       return <UnlinkBoard board={board} onClose={onClose} />;
   }
