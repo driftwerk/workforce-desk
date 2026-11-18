@@ -1545,6 +1545,52 @@ describe("a new board from Linear, Jira or GitHub", () => {
     expect(screen.queryByText(/for the first time/)).toBeNull();
   });
 
+  it("says outside the dialog when a board made for a closed dialog couldn’t be removed", async () => {
+    let finish: (b: BoardT) => void = () => {};
+    createBoard.mockImplementation(() => new Promise<BoardT>((r) => (finish = r)));
+    deleteBoard.mockRejectedValue(new Error("no"));
+    const platform = await import("../platform");
+    const said = vi.fn();
+    platform.setOpenReporter(said);
+    render(<LinkBoardDialog onClose={() => {}} />);
+    await pickAtlasJira("PLT");
+    await ready("Make “PLT”");
+    fireEvent.click(screen.getByRole("button", { name: "Make “PLT”" }));
+    await screen.findByRole("button", { name: "Making the board…" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await act(async () => finish(NEW));
+    await waitFor(() => expect(said).toHaveBeenCalled());
+    expect((said.mock.calls[0]![0] as Error).message).toMatch(/“PLT” couldn’t be removed: delete it from its menu/);
+    platform.setOpenReporter(null);
+  });
+
+  it("removes the new board, though its link applied, when the dialog was closed while linking, and leaves the view where the person went", async () => {
+    const platform = await import("../platform");
+    const said = vi.fn();
+    platform.setOpenReporter(said);
+    const was = native.route;
+    native.route = (hub, method, path, body) => {
+      if (method === "PUT" && /\/boards\/b-new\/link$/.test(path)) {
+        // Closed while the link is out; the person has gone to another board.
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        useBoard.setState({ shown: "b-other" });
+        return { status: 200, body: { ...NEW, sync: { link: "l1", ...body, person: "p" } } };
+      }
+      return was(hub, method, path, body);
+    };
+    const made = vi.fn();
+    render(<LinkBoardDialog onMade={made} onClose={() => {}} />);
+    await pickAtlasJira("PLT");
+    await ready("Make “PLT”");
+    fireEvent.click(screen.getByRole("button", { name: "Make “PLT”" }));
+    await waitFor(() => expect(deleteBoard).toHaveBeenCalledWith("b-new"));
+    await waitFor(() => expect(said).toHaveBeenCalled());
+    expect((said.mock.calls[0]![0] as Error).message).toMatch(/“PLT” was removed again; no board was made/);
+    expect(made).not.toHaveBeenCalled();
+    expect(useBoard.getState().shown).toBe("b-other");
+    platform.setOpenReporter(null);
+  });
+
   it("is in the board's header menu, opening the same dialog", async () => {
     expect(BOARD_CHROME.entries(ACME, () => []).find((e) => e.kind === "item" && e.label === "New board from Linear, Jira or GitHub…")).toBeTruthy();
     render(<BoardActionDialog board={ACME} action="fromSystem" onClose={() => {}} />);

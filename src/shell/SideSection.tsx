@@ -103,6 +103,7 @@ export function SideSection({
           aria-label={newLabel}
           title={newLabel}
           aria-haspopup={newMenu ? "menu" : undefined}
+          aria-expanded={newMenu ? !!menuAt : undefined}
           onClick={() => {
             // What's made shows in it.
             setSectionOpen(id, true);

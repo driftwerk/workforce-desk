@@ -5,7 +5,7 @@ import { HubError } from "../hub/client";
 import { useDesk } from "../hub/store";
 import { isGithubProject, looksLikeToken, mintSyncToken, ownerOk, SYSTEM_TITLE, targetOk, targetWords, type Checked } from "../hub/boardSync";
 import type { Board, LinkCheck, SyncAssignee, SyncFilter, SyncSystem, SyncVia, TicketState } from "../hub/types";
-import { openUrl } from "../platform";
+import { openUrl, reportOpenFailure } from "../platform";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { STATE_TITLE } from "./board";
 import { ChooseMe } from "./ChooseMe";
@@ -116,7 +116,7 @@ const undoMade = async (made: string, original: string | null, always = false): 
   }
   useBoard.setState((st) => {
     const { [made]: _, ...boards } = st.boards;
-    return { boards, tickets: Object.fromEntries(Object.entries(st.tickets).filter(([, t]) => t.board !== made)), shown: original };
+    return { boards, tickets: Object.fromEntries(Object.entries(st.tickets).filter(([, t]) => t.board !== made)), shown: st.shown === made ? original : st.shown };
   });
   return "removed";
 };
@@ -489,6 +489,7 @@ export function LinkBoardDialog({ board, tickets = 0, onClose, onMade }: { board
     } catch (e) {
       let words = saidOf(e);
       const cancelled = walkedAway.current;
+      let outcomeWords = "";
       if (made) {
         const outcome = await undoMade(made.id, fresh ? original : board!.id, cancelled);
         if (outcome === "linked") {
@@ -499,8 +500,16 @@ export function LinkBoardDialog({ board, tickets = 0, onClose, onMade }: { board
         }
         if (outcome === "stuck") words = `${words} The new board “${made.name}” couldn’t be removed either: delete it from its menu.`;
         else if (fresh) words = `${words} No board was made: “${made.name}” was removed again.`;
+        outcomeWords =
+          outcome === "stuck"
+            ? `You closed the new board dialog, but “${made.name}” couldn’t be removed: delete it from its menu.`
+            : `You closed the new board dialog, so “${made.name}” was removed again; no board was made.`;
       }
-      if (cancelled) return;
+      if (cancelled) {
+        // The dialog is gone: the outcome is said where Desk says such things.
+        if (made) reportOpenFailure(new Error(outcomeWords));
+        return;
+      }
       setProblem(words);
       setBusy(false);
     }
