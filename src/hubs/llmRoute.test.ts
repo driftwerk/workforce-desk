@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { optionsOf, whereDataGoes } from "./llmRoute";
+import { agentView, answer, optionsOf, whereDataGoes } from "./llmRoute";
 
 describe("optionsOf", () => {
   it("keeps the workspace's own reasons", () => {
@@ -29,5 +29,19 @@ describe("whereDataGoes", () => {
   it("names who sees the conversations", () => {
     expect(whereDataGoes("claude-code", "Driftwerk")).toContain("Anthropic");
     expect(whereDataGoes(null, "Driftwerk")).toContain("Driftwerk’s own models");
+  });
+});
+
+describe("a workspace from before routes", () => {
+  it("reads as missing, not as a failure", async () => {
+    expect((await answer(new Response("", { status: 404 }))).missing).toBe(true);
+    await expect(answer(new Response(JSON.stringify({ error: "no" }), { status: 500 }))).rejects.toThrow("no");
+  });
+
+  it("works out what an agent runs on when it doesn't say", () => {
+    const claude = { kind: "claude-code", fallback: "wait" } as const;
+    expect(agentView({ available: true, route: null, every_agent: claude }).effective).toEqual(claude);
+    expect(agentView({ available: true, route: "hub", every_agent: claude }).effective).toBeNull();
+    expect(agentView({ available: true, route: null, every_agent: claude, effective: null }).effective).toBeNull();
   });
 });

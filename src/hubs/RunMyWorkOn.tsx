@@ -107,6 +107,9 @@ function useRoute<V>(load: () => Promise<V>, deps: unknown[]) {
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let live = true;
+    // Another agent's or workspace's choice never shows, nor takes a click.
+    setView(null);
+    setProblem(null);
     load().then(
       (v) => live && setView(v),
       (e) => live && setProblem(plainError(e)),
@@ -139,6 +142,7 @@ const unavailable = (options: RouteOption[]) =>
 export function WorkspaceRoute({ hub, workspace }: { hub: HubRef; workspace: string }) {
   const { view, problem, busy, save } = useRoute<RouteView>(() => myRoute(hub), [hub.id, hub.url]);
   if (!view) return problem ? <p className="small faint">Couldn’t read what your work runs on: {problem}</p> : null;
+  if (view.missing) return null;
   if (!view.available) return <p className="small faint">{unavailable(view.options)}</p>;
   const value: Choice = view.route?.kind ?? "hub";
   return (
@@ -160,6 +164,7 @@ export function WorkspaceRoute({ hub, workspace }: { hub: HubRef; workspace: str
 export function AgentRoute({ hub, workspace, agentId }: { hub: HubRef; workspace: string; agentId: string }) {
   const { view, problem, busy, save } = useRoute<AgentRouteView>(() => myAgentRoute(hub, agentId), [hub.id, hub.url, agentId]);
   if (!view) return problem ? <p className="small faint">Couldn’t read what your work runs on: {problem}</p> : null;
+  if (view.missing) return null;
   if (!view.available) return <p className="small faint">{unavailable(view.options)}</p>;
   const route = view.route;
   const value: Choice = route === null ? "settings" : route === "hub" ? "hub" : route.kind;

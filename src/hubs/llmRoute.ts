@@ -24,12 +24,15 @@ export interface RouteOption {
 
 export interface RouteView {
   available: boolean;
+  /** The workspace is from before people could pick their route. */
+  missing?: boolean;
   route: PersonalRoute | null;
   options: RouteOption[];
 }
 
 export interface AgentRouteView {
   available: boolean;
+  missing?: boolean;
   route: AgentRoute | null;
   everyAgent: PersonalRoute | null;
   effective: PersonalRoute | null;
@@ -75,7 +78,11 @@ export const optionsOf = (raw: Raw): RouteOption[] =>
     ? raw.options.map((o) => ({ kind: o.kind, refused: o.refused ?? null }))
     : KINDS.map((kind) => ({ kind, refused: raw.allow?.includes(kind) ? null : NOT_YET }));
 
-const answer = async (res: Response): Promise<Raw> => {
+/** What a workspace from before `/api/me/llm-route` answers. */
+const MISSING: Raw & { missing: true } = { missing: true };
+
+export const answer = async (res: Response): Promise<Raw & { missing?: true }> => {
+  if (res.status === 404 || res.status === 405) return MISSING;
   const text = await res.text();
   const body = text ? (JSON.parse(text) as Raw & { error?: string }) : {};
   if (!res.ok) throw new Error(body.error ?? `The workspace answered ${res.status}.`);
@@ -84,17 +91,26 @@ const answer = async (res: Response): Promise<Raw> => {
 
 const agentPath = (agentId: string) => `/api/me/agents/${encodeURIComponent(agentId)}/llm-route`;
 
-const view = (raw: Raw): RouteView => ({
+const view = (raw: Raw & { missing?: true }): RouteView => ({
   available: !!raw.available,
+  missing: raw.missing,
   route: (raw.route as PersonalRoute | null) ?? null,
   options: optionsOf(raw),
 });
 
-const agentView = (raw: Raw): AgentRouteView => ({
+export const agentView = (raw: Raw & { missing?: true }): AgentRouteView => ({
   available: !!raw.available,
+  missing: raw.missing,
   route: (raw.route as AgentRoute | null) ?? null,
   everyAgent: raw.every_agent ?? null,
-  effective: raw.effective ?? null,
+  // A workspace that doesn't say: the agent's own setting, else the
+  // every-agent one, as the narrower wins.
+  effective:
+    raw.effective !== undefined
+      ? raw.effective
+      : raw.route === "hub"
+        ? null
+        : ((raw.route as PersonalRoute | null) ?? raw.every_agent ?? null),
   options: optionsOf(raw),
 });
 
