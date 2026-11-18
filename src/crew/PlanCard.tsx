@@ -6,7 +6,8 @@ import { LOCAL, useMachines } from "../machines/engines";
 import { homeWithin, onMachine } from "../machines/folders";
 import { RunOn } from "../machines/RunOn";
 import { nameOfMachine } from "../machines/words";
-import { machineHome } from "../platform";
+import { machineHome, openUrl } from "../platform";
+import { SYSTEM_TITLE } from "../hub/boardSync";
 import { useHost } from "../shell/host";
 import { useDesk } from "../hub/store";
 import type { PlanBudget, BossPlan, BossPlanDetail, BossPlanTicket, DraftTicket, Engine, EngineInfo, OnPlanDrop } from "../hub/types";
@@ -816,7 +817,7 @@ function TicketRow({
   const who = t.key ?? t.title;
   return (
     <div className="pc-tk">
-      <span className="pc-key">{t.key ?? "·"}</span>
+      {t.adopted ? <AdoptedKey t={t} /> : <span className="pc-key">{t.key ?? "·"}</span>}
       <span className="pc-t">{t.title}</span>
       <span className="pc-tk-run">
         {t.machine && (
@@ -839,6 +840,7 @@ function TicketRow({
         )}
       </span>
       <span className="pc-sub">
+        {t.adopted && <TakenOn t={t} />}
         {t.folder && <span className="mono">{homeShort(t.folder)}</span>}
         {needs.length > 0 && <span>· needs {needs.join(", ")}</span>}
         {own && <span>· own worktree</span>}
@@ -853,6 +855,54 @@ function TicketRow({
         </details>
       )}
     </div>
+  );
+}
+
+/** Where a ticket the plan took on is: its issue on Jira, Linear or GitHub
+ *  when it's synced, else the ticket on its board. */
+const adoptedLink = (t: Pick<BossPlanTicket, "external">): string | null => {
+  const url = t.external?.url;
+  return url && /^https:\/\//i.test(url) ? url : null;
+};
+
+/** The key of a ticket the plan took on from a board, as a link to it. */
+function AdoptedKey({ t }: { t: BossPlanTicket }) {
+  const url = adoptedLink(t);
+  const key = t.key ?? t.external?.key ?? "·";
+  const there = url && t.external ? `in ${SYSTEM_TITLE[t.external.system]}` : "on its board";
+  return (
+    <button
+      type="button"
+      className="link pc-key pc-key-link"
+      title={`Open ${key} ${there}`}
+      aria-label={`Open ${key} ${there}: ${t.title}`}
+      onClick={() => {
+        if (url) return void openUrl(url);
+        const board = useBoard.getState();
+        board.show(t.board);
+        board.openTicket(t.id);
+        useDesk.getState().setView("board");
+      }}
+    >
+      {key}
+    </button>
+  );
+}
+
+/** That a ticket was taken on from a board as it was, not made by the plan. */
+function TakenOn({ t }: { t: BossPlanTicket }) {
+  const board = useBoard((s) => s.boards[t.board]?.name);
+  const from = board
+    ? /board$/i.test(board)
+      ? `the ${board}`
+      : `the ${board} board`
+    : t.external
+      ? SYSTEM_TITLE[t.external.system]
+      : "the board";
+  return (
+    <span className="pc-adopted" title={`The plan took ${t.key ?? "it"} on from ${from} as it was`}>
+      from {from}
+    </span>
   );
 }
 

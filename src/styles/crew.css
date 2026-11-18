@@ -2099,3 +2099,20 @@ button.card-icon:hover:not(:disabled) {
 .plan-rows > .plan-row + .plan-row {
   border-top: 1px solid var(--border);
 }
+
+/* A ticket the plan took on from a board: its key links to it (its issue,
+   or the ticket on its board), and its line says where it came from. */
+.pc-key-link {
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  text-decoration: underline;
+  text-decoration-color: var(--faint);
+  text-underline-offset: 3px;
+}
+.pc-key-link:hover {
+  text-decoration-color: currentColor;
+}
+.pc-adopted {
+  color: var(--faint);
+}

@@ -2666,3 +2666,38 @@ button.ticket-row:not(:disabled):hover {
   color: var(--faint);
   white-space: nowrap;
 }
+
+/* Picking tickets for a plan: a tick at each card's top right that can be
+   picked (room kept for it in the card's head while the board picks), the
+   picked ones edged in the signal, and the band saying what goes. */
+.board-card-picking .board-card-head {
+  padding-right: 22px;
+}
+.board-card-picked,
+.board-card-picked:hover {
+  border-color: var(--signal);
+  box-shadow:
+    0 0 0 2px var(--signal-soft),
+    0 1px 2px var(--lift);
+}
+.board-pick-tick {
+  position: absolute;
+  top: 9px;
+  right: 10px;
+  display: flex;
+  cursor: pointer;
+}
+.board-pick-tick input {
+  margin: 0;
+  width: 15px;
+  height: 15px;
+  cursor: pointer;
+}
+.board-pick-chip {
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+  border-color: transparent;
+}
+.board-pick-over {
+  color: var(--blocked);
+}

@@ -1094,7 +1094,13 @@ function DmComposer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editBack]);
   const composer = useRef<HTMLTextAreaElement>(null);
-  useFocusRequest(`agent:${to}`, composer);
+  // What's handed to this DM to say (a plan asked for from the board): put
+  // after anything typed already, for the person to read over and send.
+  useFocusRequest(`agent:${to}`, composer, (text) => {
+    const next = draft.trim() ? `${draft.trimEnd()}\n\n${text}` : text;
+    setDraft(next);
+    requestAnimationFrame(() => composer.current?.setSelectionRange(next.length, next.length));
+  });
   // Typing to a boss on this computer: its posts wait for your pause.
   const pingBoss = useMemo(() => typingPinger((id) => void useDesk.getState().hub?.dmTyping?.(id), DM_TYPING_EVERY_MS), []);
   const emoji = useEmojiInput({

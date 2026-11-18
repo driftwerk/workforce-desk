@@ -1,4 +1,4 @@
-import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useId, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { ChargeBadge } from "../crew/ChargeBadge";
 import { useCharge } from "../crew/chargeStore";
 import { lookOf } from "../floor/background";
@@ -137,7 +137,11 @@ export function TicketCard({
   buttonRef,
   onOpen,
   onKeyDown,
+  pick,
 }: {
+  /** Picking it for a plan, where it can be: whether it's picked, whether
+   *  its tick is shown (the board is picking), and picking or unpicking it. */
+  pick?: { picked: boolean; shown: boolean; toggle: () => void };
   /** The goal of the boss's plan it is in, if it is in one. */
   plan?: string;
   /** Shows that plan's card, from its chip (by pointer; the board's Plan
@@ -150,7 +154,7 @@ export function TicketCard({
   waiting: boolean;
   settled?: boolean;
   buttonRef?: (el: HTMLButtonElement | null) => void;
-  onOpen: () => void;
+  onOpen: (e?: MouseEvent) => void;
   onKeyDown?: (e: KeyboardEvent<HTMLButtonElement>) => void;
 }) {
   const board = useBoard((s) => s.boards[t.board]);
@@ -184,15 +188,19 @@ export function TicketCard({
     const session = who?.kind === "session" && t.state === "doing" ? s.sessions[who.id] : undefined;
     return session ? lookOf(session) === "working" : false;
   });
-  const look = settled
-    ? "board-card-settled"
-    : waiting
-      ? "board-card-waiting"
-      : theirs
-        ? "board-card-theirs"
-        : working
-          ? "board-card-working"
-          : "";
+  // Picked for a plan: only a card not started yet is, so it is never
+  // waiting or being worked on.
+  const look = pick?.picked
+    ? "board-card-picked"
+    : settled
+      ? "board-card-settled"
+      : waiting
+        ? "board-card-waiting"
+        : theirs
+          ? "board-card-theirs"
+          : working
+            ? "board-card-working"
+            : "";
   // Its right-click menu: moving it to another group's board.
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const movable = useHubLayout((s) => s.layout !== null);
@@ -313,19 +321,19 @@ export function TicketCard({
       ref={buttonRef}
       type="button"
       data-ticket-card={t.id}
-      className={`floor-item board-card ${look}`}
+      className={`floor-item board-card ${look}${pick?.shown ? " board-card-picking" : ""}`}
       onContextMenu={
-        movable || canTake
+        movable || canTake || pick
           ? (e) => {
               e.preventDefault();
               setMenu({ x: e.clientX, y: e.clientY });
             }
           : undefined
       }
-      aria-label={`${t.key ?? "Ticket"}: ${t.title}`}
+      aria-label={`${t.key ?? "Ticket"}: ${t.title}${pick?.picked ? ", picked for a plan" : ""}`}
       aria-roledescription="ticket"
       aria-describedby={said ? descId : undefined}
-      aria-keyshortcuts="Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight"
+      aria-keyshortcuts={`Alt+ArrowUp Alt+ArrowDown Alt+ArrowLeft Alt+ArrowRight${pick ? " X" : ""}`}
       title={t.state === "dropped" ? "Dropped" : undefined}
       onClick={onOpen}
       onKeyDown={onKeyDown}
@@ -390,6 +398,11 @@ export function TicketCard({
         </span>
       )}
     </button>
+      {pick?.shown && (
+        <label className="board-pick-tick" title={pick.picked ? "Unpick it" : "Pick it for a plan"} onPointerDown={(e) => e.stopPropagation()}>
+          <input type="checkbox" tabIndex={-1} checked={pick.picked} onChange={pick.toggle} aria-label={`Pick ${t.key ?? t.title} for a plan`} />
+        </label>
+      )}
       {canTake && (
         <span className="board-take-end">
           <TakeIt ticket={t} className="btn btn-sm board-take" />
@@ -406,6 +419,7 @@ export function TicketCard({
           label={`${t.key ?? "Ticket"} options`}
           at={menu}
           entries={[
+            ...(pick ? [{ kind: "item" as const, label: pick.picked ? "Unpick" : "Pick for a plan", onSelect: pick.toggle }] : []),
             ...(canTake ? [{ kind: "item" as const, label: "Take it", onSelect: () => void useBoard.getState().take(t.id).catch(useDesk.getState().fail) }] : []),
             ...(movable ? [{ kind: "item" as const, label: "Move to group…", onSelect: () => askMove(ticketSubject(t)) }] : []),
           ]}
