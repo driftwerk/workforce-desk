@@ -234,12 +234,15 @@ unsafe fn listen(engine: &AVAudioEngine, to: SharedIn, attempt: &Attempt) -> Res
             set_device(engine.outputNode().audioUnit(), output_element, uid)?;
             // Where the microphone and speaker share one unit, the speaker's
             // device can take the microphone's place: then this pair can't
-            // be had, and the chosen microphone is tried on its own.
+            // be had, and the chosen microphone is tried on its own. Only
+            // the plain unit says so truly: voice processing reports the
+            // aggregate it builds of the two, and is trusted to use both
+            // elements' devices as Chromium's capture does.
             let mic_should_be = match &attempt.input {
                 Some(mic_uid) => hal::device_id(mic_uid),
                 None => hal::default_input(),
             };
-            if current_device(mic.audioUnit(), input_element) != mic_should_be {
+            if !cancel_echo && current_device(mic.audioUnit(), input_element) != mic_should_be {
                 return Err(eyre!(
                     "the microphone and speaker can’t be different devices here"
                 ));
