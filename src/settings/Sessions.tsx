@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { ENGINE_SHORT } from "../engines/engines";
-import { useDesk } from "../hub/store";
-import type { HiddenSession, Session } from "../hub/types";
+import { deskListeners, useDesk } from "../hub/store";
+import type { DeskEvent, HiddenSession, Session } from "../hub/types";
 import { resumable } from "../session/actions";
 import { RemoveSession } from "../session/LifecycleDialogs";
 import { askLifecycle, useLifecycle } from "../session/lifecycle";
@@ -38,6 +38,15 @@ export function Sessions() {
   useEffect(() => {
     if (!asking && !removing) void load();
   }, [load, asking, removing]);
+  // Removed meanwhile (by its boss, or in another window): off the list at
+  // once, without asking again before the hub has written it.
+  useEffect(() => {
+    const heard = (e: DeskEvent) => {
+      if (e.type === "removed") setClosed((c) => (c?.some((s) => s.id === e.id) ? c.filter((s) => s.id !== e.id) : c));
+    };
+    deskListeners.add(heard);
+    return () => void deskListeners.delete(heard);
+  }, []);
 
   const resume = async (s: Session) => {
     try {

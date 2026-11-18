@@ -2,13 +2,14 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { announce, useDesk } from "../hub/store";
 import type { HiddenSession, Session } from "../hub/types";
+import { laidOut } from "../grids/engine";
 import { MAIN_GRID } from "../grids/model";
 import type { GridStorage } from "../grids/storage";
-import { deliver, layOut, startGrids, useGrids } from "../grids/store";
+import { createGrid, deliver, layOut, setOpen, setPlacement, startGrids, useGrids } from "../grids/store";
 import { Sessions } from "../settings/Sessions";
 import { endSession, lifecycleActions, runs, sessionActions } from "./actions";
 import { LifecycleDialogs } from "./LifecycleDialogs";
-import { askLifecycle, closeLifecycle, useLifecycle } from "./lifecycle";
+import { askLifecycle, closeLifecycle, sweepRemoved, useLifecycle } from "./lifecycle";
 import { useHubLayout } from "../groups/hubLayout";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
@@ -157,33 +158,134 @@ describe("removing a session", () => {
     expect(within(dialog).getByRole("button", { name: "Stop tracking" })).toBeTruthy();
   });
 
-  it("empties the panes that showed it", async () => {
-    useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
-    startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
-    layOut(MAIN_GRID, "halves");
-    deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
-    const dialog = ask(session());
-    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
-    await waitFor(() => expect(hub.remove).toHaveBeenCalled());
-    await waitFor(() => expect(useGrids.getState().grids[MAIN_GRID]!.panes.some((p) => p.content?.kind === "session")).toBe(false));
-  });
-});
-
-describe("a session gone from the hub", () => {
-  it("leaves the panes here however it went: cleared, or removed in another window", () => {
-    useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
-    startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
+  it("closes the panes that showed it, leaving no empty pane where it was", async () => {
+    freshGrids();
     layOut(MAIN_GRID, "halves");
     deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
     deliver(MAIN_GRID, { kind: "session", sessionId: "s2" });
-    const showing = () =>
-      useGrids
-        .getState()
-        .grids[MAIN_GRID]!.panes.flatMap((p) => (p.content?.kind === "session" ? [p.content.sessionId] : []))
-        .sort();
-    expect(showing()).toEqual(["s1", "s2"]);
+    const dialog = ask(session());
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove" }));
+    await waitFor(() => expect(hub.remove).toHaveBeenCalled());
+    await waitFor(() => expect(laidOutIn(MAIN_GRID)).toEqual(["s2"]));
+  });
+});
+
+const freshGrids = (role: { kind: "main" } | { kind: "grid"; gridId: string } = { kind: "main" }, store = memory()) => {
+  useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null, filled: {} });
+  startGrids(store, { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
+  if (role.kind === "grid") useGrids.setState({ role });
+};
+
+/** What each laid-out pane of grid `id` shows: a session's key, or null
+ *  for an empty pane. */
+const laidOutIn = (id: string) =>
+  laidOut(useGrids.getState().grids[id]!.panes).map((p) =>
+    p.content?.kind === "session" ? (p.content.machine ? `${p.content.machine}/${p.content.sessionId}` : p.content.sessionId) : (p.content?.kind ?? null),
+  );
+
+/** Every session any pane of grid `id` shows, parked ones too. */
+const anywhereIn = (id: string) =>
+  useGrids
+    .getState()
+    .grids[id]!.panes.flatMap((p) => (p.content?.kind === "session" ? [p.content.machine ? `${p.content.machine}/${p.content.sessionId}` : p.content.sessionId] : []))
+    .sort();
+
+describe("a session gone from the hub", () => {
+  it("leaves the panes here however it went: cleared, or removed in another window or by its boss", () => {
+    freshGrids();
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s2" });
+    expect(anywhereIn(MAIN_GRID)).toEqual(["s1", "s2"]);
     announce({ type: "removed", id: "s1" });
-    expect(showing()).toEqual(["s2"]);
+    expect(anywhereIn(MAIN_GRID)).toEqual(["s2"]);
+    // Its neighbour takes its room: no empty pane is left behind.
+    expect(laidOutIn(MAIN_GRID)).toEqual(["s2"]);
+  });
+
+  it("leaves a parked pane too, and every grid this window writes, a detached one whose window is closed included", () => {
+    freshGrids();
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s2" });
+    layOut(MAIN_GRID, "one");
+    const away = createGrid();
+    deliver(away, { kind: "session", sessionId: "s1" });
+    setPlacement(away, { kind: "window", mode: "fill", monitor: null });
+    expect(anywhereIn(MAIN_GRID)).toEqual(["s1", "s2"]);
+    announce({ type: "removed", id: "s1" });
+    expect(anywhereIn(MAIN_GRID)).toEqual(["s2"]);
+    // No parked pane is kept for it either.
+    expect(useGrids.getState().grids[MAIN_GRID]!.panes.filter((p) => !p.rect)).toEqual([]);
+    expect(anywhereIn(away)).toEqual([]);
+  });
+
+  it("leaves a grid whose own window is open to that window, which takes it out there", () => {
+    freshGrids();
+    const away = createGrid();
+    deliver(away, { kind: "session", sessionId: "s1" });
+    setPlacement(away, { kind: "window", mode: "fill", monitor: null });
+    setOpen(away, true);
+    announce({ type: "removed", id: "s1" });
+    expect(anywhereIn(away)).toEqual(["s1"]);
+    // In the grid's own window, the same event takes it out.
+    useGrids.setState({ role: { kind: "grid", gridId: away } });
+    announce({ type: "removed", id: "s1" });
+    expect(anywhereIn(away)).toEqual([]);
+  });
+
+  it("takes out a machine's session by its machine's word, never this computer's with the same id", () => {
+    freshGrids();
+    layOut(MAIN_GRID, "halves");
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s1", machine: "devbox" });
+    announce({ type: "removed", id: "s1", machine: "devbox" });
+    expect(anywhereIn(MAIN_GRID)).toEqual(["s1"]);
+  });
+});
+
+describe("a session removed while this window wasn't listening", () => {
+  const loaded = (machine = "local") => ({ [machine]: { hub: hub as never, connected: true, loaded: true, error: null } });
+
+  it("leaves the panes once its engine has said what it has: a closed one keeps its pane, to resume", async () => {
+    freshGrids();
+    layOut(MAIN_GRID, "thirds");
+    for (const id of ["s1", "s2", "s3"]) deliver(MAIN_GRID, { kind: "session", sessionId: id });
+    hub.closedSessions.mockImplementation(() => Promise.resolve([session({ id: "s3", state: "closed" })]));
+    useDesk.setState({ sessions: { s2: session({ id: "s2" }) }, restore: [], engines: loaded() });
+    await sweepRemoved("local");
+    expect(anywhereIn(MAIN_GRID)).toEqual(["s2", "s3"]);
+    expect(laidOutIn(MAIN_GRID)).not.toContain(null);
+    hub.closedSessions.mockImplementation(() => Promise.resolve([]));
+  });
+
+  it("asks nothing and takes nothing before its engine has said, or when every pane's session is listed", async () => {
+    freshGrids();
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+    useDesk.setState({ sessions: {}, restore: [], engines: {} });
+    await sweepRemoved("local");
+    useDesk.setState({ sessions: { s1: session() }, engines: loaded() });
+    await sweepRemoved("local");
+    expect(hub.closedSessions).not.toHaveBeenCalled();
+    expect(anywhereIn(MAIN_GRID)).toEqual(["s1"]);
+  });
+
+  it("takes nothing when its engine can't say what's closed", async () => {
+    freshGrids();
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+    hub.closedSessions.mockImplementation(() => Promise.reject(new Error("offline")));
+    useDesk.setState({ sessions: {}, restore: [], engines: loaded() });
+    await sweepRemoved("local");
+    expect(anywhereIn(MAIN_GRID)).toEqual(["s1"]);
+    hub.closedSessions.mockImplementation(() => Promise.resolve([]));
+  });
+
+  it("is swept when its engine's snapshot comes", async () => {
+    freshGrids();
+    deliver(MAIN_GRID, { kind: "session", sessionId: "s1" });
+    useDesk.setState({ sessions: {}, restore: [], engines: loaded() });
+    announce({ type: "snapshot", sessions: [], restore: [], rooms: [] } as never);
+    await waitFor(() => expect(anywhereIn(MAIN_GRID)).toEqual([]));
   });
 });
 
@@ -214,6 +316,18 @@ describe("clearing finished sessions", () => {
 });
 
 describe("Settings → Sessions", () => {
+  it("drops a closed session from its list as soon as it's removed elsewhere, by its boss too", async () => {
+    hub.closedSessions.mockImplementation(() => Promise.resolve([session({ id: "x1", name: "vellev-07", state: "closed" }), session({ id: "x2", name: "acme-web", state: "closed" })]));
+    useDesk.setState({ hub: hub as never });
+    render(<Sessions />);
+    await screen.findByText("vellev-07");
+    act(() => announce({ type: "removed", id: "x1" }));
+    expect(screen.queryByText("vellev-07")).toBeNull();
+    expect(screen.getByText("acme-web")).toBeTruthy();
+    hub.closedSessions.mockImplementation(() => Promise.resolve([]));
+  });
+
+
   it("resumes a closed session from another terminal in Desk, and tracks a removed one again", async () => {
     hub.closedSessions.mockImplementation(() => Promise.resolve([session({ id: "x1", name: "vellev-07", origin: "external", state: "closed" })]));
     const removed: HiddenSession = { engine: "claude", cliSessionId: "c9", name: "monorepo-ae", cwd: "/tmp/m", hiddenAt: "2026-10-31T10:00:00Z" };
