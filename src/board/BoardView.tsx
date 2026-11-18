@@ -22,6 +22,7 @@ import {
   STATE_TITLE,
   anchored,
   byHand,
+  sourceSortOf,
   planOfTickets,
   statesOf,
   columns,
@@ -191,6 +192,10 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   // read for what its sync bar says.
   const synced = !!board?.sync;
   const order = orderOn(view.order, synced);
+  // How the board there orders its issues: what "As on" sorts by.
+  const ordering = board?.sync?.ordering ?? null;
+  const priorities = board?.sync?.fields?.priorities;
+  const source = useMemo(() => sourceSortOf(ordering ? { ordering, fields: { priorities } } : null), [ordering, priorities]);
   useEffect(() => {
     if (!board || !synced) return;
     void useSyncHubs.getState().load();
@@ -236,8 +241,8 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
     setBoardView(board.id, { facets: v ? { ...rest, [id]: v } : rest });
   };
   const cols = useMemo(
-    () => columns(onBoard, { filter, q, now, waiting, plan: planTickets, me, facets, order }),
-    [onBoard, filter, q, now, waiting, planTickets, me, facets, order],
+    () => columns(onBoard, { filter, q, now, waiting, plan: planTickets, me, facets, order, source }),
+    [onBoard, filter, q, now, waiting, planTickets, me, facets, order, source],
   );
   const counts = useMemo(() => columns(onBoard, { filter: "all", q: "", now, waiting }), [onBoard, now, waiting]);
   // Each chip counts the cards it would show, as the search and plan
@@ -251,10 +256,10 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   }, [onBoard, q, now, waiting, planTickets, me, facets]);
 
   const states = useMemo(() => statesOf(all), [all]);
-  const hand = byHand(order);
+  const hand = byHand(order, source);
   /** What a drag up or down says in a sorted order: the card keeps its
    *  sorted place. */
-  const sorted = () => setSaid(sortedSaid(order, board?.sync?.system ?? null));
+  const sorted = () => setSaid(sortedSaid(order, board?.sync?.system ?? null, ordering));
   const move = (id: string, shown: TicketMove) => {
     const t = all[id];
     // Placed in the whole column, whatever the filter hides: among its
@@ -426,7 +431,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
             ))}
           </select>
         )}
-        <OrderChip order={order} system={board.sync?.system ?? null} onChange={(o) => setBoardView(board.id, { order: o })} />
+        <OrderChip order={order} system={board.sync?.system ?? null} ordering={ordering} onChange={(o) => setBoardView(board.id, { order: o })} />
         <label className="sr-only" htmlFor={searchId}>
           Search tickets
         </label>
@@ -450,7 +455,15 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
       </header>
       {/* Keyed apart: siblings sharing a key leave the old board's bar behind
           on every switch, stacking another board's sync above this one. */}
-      {board.sync && <SyncBar key={`sync:${board.id}`} board={board} now={now} onToken={tokenFor && chrome ? () => setNewToken(true) : undefined} />}
+      {board.sync && (
+        <SyncBar
+          key={`sync:${board.id}`}
+          board={board}
+          now={now}
+          onToken={tokenFor && chrome ? () => setNewToken(true) : undefined}
+          orderWhy={order === "source" && !hand ? sortedSaid(order, board.sync.system, ordering) : null}
+        />
+      )}
       <LeftFilterShelf key={`left:${board.id}`} board={board} tickets={left} />
       {!pane && <BoardPlans plans={plans} shown={plan} />}
       {columnsShown}

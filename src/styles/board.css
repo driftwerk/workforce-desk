@@ -820,6 +820,12 @@ button.ticket-chip:hover {
   color: var(--muted);
   overflow-wrap: anywhere;
 }
+/* Why a drag up or down doesn't reorder: the board there sets its order. */
+.board-sync-order {
+  flex: 1 1 100%;
+  color: var(--muted);
+  font-size: 12px;
+}
 .board-sync-failed {
   flex: 1 1 100%;
   color: var(--blocked);
