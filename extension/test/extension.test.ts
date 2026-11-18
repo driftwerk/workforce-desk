@@ -5,8 +5,27 @@ import { Fail, perform, workable, type Exec } from "../src/commands";
 import { DeskTabs, type ChromeTabs, type Kept } from "../src/desk";
 import { labelOf } from "../src/identity";
 import { Link, type Port } from "../src/link";
-import { asksPassword, clickOn, fillField, onKeyPage, pressKey, readKey, readPage, selectOption, setFiles, shownOf, typeText } from "../src/page";
-import { PROOF_PREFIX, PROTOCOL, REVISION, fromHub, type Command, type ToHub } from "../src/protocol";
+import {
+  asksPassword,
+  clickOn,
+  fillField,
+  onKeyPage,
+  pressKey,
+  readKey,
+  readPage,
+  selectOption,
+  setFiles,
+  shownOf,
+  typeText,
+} from "../src/page";
+import {
+  PROOF_PREFIX,
+  PROTOCOL,
+  REVISION,
+  fromHub,
+  type Command,
+  type ToHub,
+} from "../src/protocol";
 import { upToDate, type Reloader } from "../src/update";
 
 afterEach(() => {
@@ -16,7 +35,10 @@ afterEach(() => {
 /** Chrome's tabs, stood in for: windows hold tabs; nothing else exists. */
 class FakeChrome implements ChromeTabs {
   next = 100;
-  windows = new Map<number, { state: "normal" | "minimized"; tabs: number[] }>();
+  windows = new Map<
+    number,
+    { state: "normal" | "minimized"; tabs: number[] }
+  >();
   groups: Record<number, number[]> = {};
   kept: Kept | null = null;
   personsTab = 1;
@@ -51,7 +73,8 @@ class FakeChrome implements ChromeTabs {
     return id;
   }
   async removeTab(tabId: number) {
-    for (const w of this.windows.values()) w.tabs = w.tabs.filter((t) => t !== tabId);
+    for (const w of this.windows.values())
+      w.tabs = w.tabs.filter((t) => t !== tabId);
   }
   async removeWindow(windowId: number) {
     this.windows.delete(windowId);
@@ -59,7 +82,11 @@ class FakeChrome implements ChromeTabs {
   async activate() {}
   async focusWindow() {}
   async personsWindow(desk: number) {
-    return this.persons !== null && this.persons !== desk && this.windows.has(this.persons) ? this.persons : null;
+    return this.persons !== null &&
+      this.persons !== desk &&
+      this.windows.has(this.persons)
+      ? this.persons
+      : null;
   }
   async moveTab(tabId: number, windowId: number) {
     for (const [id, w] of this.windows) {
@@ -67,7 +94,10 @@ class FakeChrome implements ChromeTabs {
       // As Chrome does: a window left with no tab closes.
       if (w.tabs.length === 0 && id !== windowId) this.windows.delete(id);
     }
-    for (const g of Object.keys(this.groups)) this.groups[Number(g)] = this.groups[Number(g)]!.filter((t) => t !== tabId);
+    for (const g of Object.keys(this.groups))
+      this.groups[Number(g)] = this.groups[Number(g)]!.filter(
+        (t) => t !== tabId,
+      );
     this.windows.get(windowId)!.tabs.push(tabId);
   }
   async windowWith(tabId: number) {
@@ -86,7 +116,15 @@ class FakeChrome implements ChromeTabs {
 
 /** Runs page functions against this test's document, as Chrome would in
  *  Desk's tab. */
-const execOn = (url = "https://shop.example/cart"): Exec & { navigated: string[]; captured: number; active: number | null; raised: number[]; front_: { active: boolean; focused: boolean } } => {
+const execOn = (
+  url = "https://shop.example/cart",
+): Exec & {
+  navigated: string[];
+  captured: number;
+  active: number | null;
+  raised: number[];
+  front_: { active: boolean; focused: boolean };
+} => {
   const e = {
     navigated: [] as string[],
     raised: [] as number[],
@@ -94,7 +132,11 @@ const execOn = (url = "https://shop.example/cart"): Exec & { navigated: string[]
     captured: 0,
     at: url,
     active: null as number | null,
-    async run<A extends unknown[], R>(_tab: number, func: (...args: A) => R, args: A) {
+    async run<A extends unknown[], R>(
+      _tab: number,
+      func: (...args: A) => R,
+      args: A,
+    ) {
       return func(...args);
     },
     async navigate(_tab: number, to: string) {
@@ -129,11 +171,16 @@ const execOn = (url = "https://shop.example/cart"): Exec & { navigated: string[]
 describe("the protocol", () => {
   it("is the same file the hub reads, where the hub at hub.ref has it", async () => {
     const fsName = "node:fs";
-    const { existsSync, readFileSync } = (await import(/* @vite-ignore */ fsName)) as {
+    const { existsSync, readFileSync } = (await import(
+      /* @vite-ignore */ fsName
+    )) as {
       existsSync(p: URL): boolean;
       readFileSync(p: URL, encoding: string): string;
     };
-    const hub = new URL("../../../workforce-public-desk/crates/hub/src/desk_chrome/protocol-v1.json", import.meta.url);
+    const hub = new URL(
+      "../../../workforce-public-desk/crates/hub/src/desk_chrome/protocol-v1.json",
+      import.meta.url,
+    );
     if (!existsSync(hub)) return;
     expect(JSON.parse(readFileSync(hub, "utf8"))).toEqual(fixture);
   });
@@ -142,13 +189,47 @@ describe("the protocol", () => {
     expect(fixture.protocol).toBe(PROTOCOL);
     expect(fixture.proof_prefix).toBe(PROOF_PREFIX);
     const from = fixture.from_hub;
-    for (const m of [from.challenge, from.waiting, from.ready, from.refused, from.status, ...from.calls]) expect(fromHub(m)).toEqual(m);
-    for (const bad of [null, "x", { type: "call", cmd: "click" }, { type: "challenge" }, { type: "exec" }]) expect(fromHub(bad)).toBeNull();
+    for (const m of [
+      from.challenge,
+      from.waiting,
+      from.ready,
+      from.refused,
+      from.status,
+      ...from.calls,
+    ])
+      expect(fromHub(m)).toEqual(m);
+    for (const bad of [
+      null,
+      "x",
+      { type: "call", cmd: "click" },
+      { type: "challenge" },
+      { type: "exec" },
+    ])
+      expect(fromHub(bad)).toBeNull();
   });
 
   it("names every command the fixture holds, and the fixture holds every command", () => {
     const cmds = fixture.from_hub.calls.map((c) => c.cmd).sort();
-    const known: Command["cmd"][] = ["capture", "capture_key", "click", "close", "fill", "front", "hand_over", "navigate", "open", "press", "read", "select", "shown", "stop", "type", "upload", "wait", "where"];
+    const known: Command["cmd"][] = [
+      "capture",
+      "capture_key",
+      "click",
+      "close",
+      "fill",
+      "front",
+      "hand_over",
+      "navigate",
+      "open",
+      "press",
+      "read",
+      "select",
+      "shown",
+      "stop",
+      "type",
+      "upload",
+      "wait",
+      "where",
+    ];
     expect(cmds).toEqual([...known].sort());
   });
 });
@@ -157,7 +238,9 @@ describe("what Desk Helper and the extension say to each other", () => {
   it("stamps this build with the fixture's revision, and reads what Desk Helper says", () => {
     expect(REVISION).toBe(helperFixture.revision);
     expect(helperFixture.to_chrome.expects.revision).toBe(REVISION);
-    expect(fromHub(helperFixture.to_chrome.expects)).toEqual(helperFixture.to_chrome.expects);
+    expect(fromHub(helperFixture.to_chrome.expects)).toEqual(
+      helperFixture.to_chrome.expects,
+    );
     expect(fromHub({ type: "expects", revision: "2" })).toBeNull();
     // The hello's other fields are the hub's, as v1.json has them.
     const { revision, ...hello } = helperFixture.from_chrome.hello;
@@ -168,13 +251,20 @@ describe("what Desk Helper and the extension say to each other", () => {
   it("is revised with the commands: a new one in v1.json is a new revision here", () => {
     // Adding a command fails this until `commands` is updated there, and
     // `revision` with it, so an unpacked build without it reloads.
-    expect([...helperFixture.commands].sort()).toEqual(fixture.from_hub.calls.map((c) => c.cmd).sort());
+    expect([...helperFixture.commands].sort()).toEqual(
+      fixture.from_hub.calls.map((c) => c.cmd).sort(),
+    );
   });
 });
 
 describe("what a page may be", () => {
   it("is the web or a blank page, never Chrome's own pages, files, scripts or the Web Store", () => {
-    for (const ok of ["https://shop.example/x", "http://127.0.0.1:8080/", "about:blank"]) expect(workable(ok)).toBe(true);
+    for (const ok of [
+      "https://shop.example/x",
+      "http://127.0.0.1:8080/",
+      "about:blank",
+    ])
+      expect(workable(ok)).toBe(true);
     for (const no of [
       "chrome://settings",
       "chrome-extension://abc/popup.html",
@@ -266,7 +356,8 @@ describe("page functions", () => {
     expect(clickOn("#save")).toBe("hidden");
     expect(clickOn("#nope")).toBe("missing");
     const el = document.getElementById("save")!;
-    el.getBoundingClientRect = () => ({ left: 0, top: 0, width: 50, height: 20 }) as DOMRect;
+    el.getBoundingClientRect = () =>
+      ({ left: 0, top: 0, width: 50, height: 20 }) as DOMRect;
     // Something laid over the button takes the click: it isn't made.
     const cover = document.createElement("div");
     document.body.appendChild(cover);
@@ -282,19 +373,33 @@ describe("page functions", () => {
   it("fill, type, select and press as a person would, with the page's events", () => {
     document.body.innerHTML = `<form id="f"><input id="name"><input id="q"><select id="size"><option value="s">Small</option><option value="m">Medium</option></select></form>`;
     const seen: string[] = [];
-    document.getElementById("name")!.addEventListener("input", () => seen.push("input"));
-    document.getElementById("name")!.addEventListener("change", () => seen.push("change"));
+    document
+      .getElementById("name")!
+      .addEventListener("input", () => seen.push("input"));
+    document
+      .getElementById("name")!
+      .addEventListener("change", () => seen.push("change"));
     expect(fillField("#name", "Allan", location.origin)).toBe("ok");
-    expect((document.getElementById("name") as HTMLInputElement).value).toBe("Allan");
+    expect((document.getElementById("name") as HTMLInputElement).value).toBe(
+      "Allan",
+    );
     expect(seen).toEqual(["input", "change"]);
     expect(typeText("#q", "shoes", location.origin)).toBe("ok");
-    expect((document.getElementById("q") as HTMLInputElement).value).toBe("shoes");
+    expect((document.getElementById("q") as HTMLInputElement).value).toBe(
+      "shoes",
+    );
     // Only on the origin the hub resolved it for: a page that moved is left.
-    expect(fillField("#name", "secret", "https://elsewhere.example")).toBe("moved");
+    expect(fillField("#name", "secret", "https://elsewhere.example")).toBe(
+      "moved",
+    );
     expect(typeText("#q", "secret", null)).toBe("moved");
-    expect((document.getElementById("name") as HTMLInputElement).value).toBe("Allan");
+    expect((document.getElementById("name") as HTMLInputElement).value).toBe(
+      "Allan",
+    );
     expect(selectOption("#size", "Medium")).toBe(true);
-    expect((document.getElementById("size") as HTMLSelectElement).value).toBe("m");
+    expect((document.getElementById("size") as HTMLSelectElement).value).toBe(
+      "m",
+    );
     expect(selectOption("#size", "Huge")).toBe(false);
     let submitted = 0;
     document.getElementById("f")!.addEventListener("submit", (e) => {
@@ -308,7 +413,9 @@ describe("page functions", () => {
   it("give a file field files, and refuse anything else", () => {
     document.body.innerHTML = `<input id="f" type="file"><input id="t">`;
     if (typeof DataTransfer === "undefined") return;
-    expect(setFiles("#t", [{ name: "a.txt", type: "text/plain", base64: "aGk=" }])).toBe(false);
+    expect(
+      setFiles("#t", [{ name: "a.txt", type: "text/plain", base64: "aGk=" }]),
+    ).toBe(false);
   });
 });
 
@@ -316,16 +423,64 @@ describe("calls", () => {
   it("work in the session's own tab, and refuse a page Desk doesn't work in", async () => {
     const tabs = new DeskTabs(new FakeChrome());
     const exec = execOn();
-    await expect(perform({ cmd: "navigate", session: "s", url: "chrome://settings" }, tabs, exec)).rejects.toBeInstanceOf(Fail);
-    await perform({ cmd: "navigate", session: "s", url: "https://shop.example/" }, tabs, exec);
+    await expect(
+      perform(
+        { cmd: "navigate", session: "s", url: "chrome://settings" },
+        tabs,
+        exec,
+      ),
+    ).rejects.toBeInstanceOf(Fail);
+    await perform(
+      { cmd: "navigate", session: "s", url: "https://shop.example/" },
+      tabs,
+      exec,
+    );
     expect(exec.navigated).toEqual(["https://shop.example/"]);
     document.body.innerHTML = `<input id="name">`;
     const here = location.origin;
-    expect(await perform({ cmd: "fill", session: "s", selector: "#name", value: "x", origin: here }, tabs, exec)).toBe(true);
-    await expect(perform({ cmd: "fill", session: "s", selector: "#nope", value: "x", origin: here }, tabs, exec)).rejects.toThrow("Nothing on the page matches");
-    await expect(perform({ cmd: "fill", session: "s", selector: "#name", value: "x", origin: "https://other.example" }, tabs, exec)).rejects.toThrow("The page moved");
+    expect(
+      await perform(
+        {
+          cmd: "fill",
+          session: "s",
+          selector: "#name",
+          value: "x",
+          origin: here,
+        },
+        tabs,
+        exec,
+      ),
+    ).toBe(true);
+    await expect(
+      perform(
+        {
+          cmd: "fill",
+          session: "s",
+          selector: "#nope",
+          value: "x",
+          origin: here,
+        },
+        tabs,
+        exec,
+      ),
+    ).rejects.toThrow("Nothing on the page matches");
+    await expect(
+      perform(
+        {
+          cmd: "fill",
+          session: "s",
+          selector: "#name",
+          value: "x",
+          origin: "https://other.example",
+        },
+        tabs,
+        exec,
+      ),
+    ).rejects.toThrow("The page moved");
     const off = execOn("chrome://settings");
-    await expect(perform({ cmd: "read", session: "s", what: "text" }, tabs, off)).rejects.toThrow("doesn't work in");
+    await expect(
+      perform({ cmd: "read", session: "s", what: "text" }, tabs, off),
+    ).rejects.toThrow("doesn't work in");
   });
 
   it("take no picture of a minimised window, and refuse an upload too big for Chrome", async () => {
@@ -333,19 +488,37 @@ describe("calls", () => {
     const tabs = new DeskTabs(c);
     const exec = execOn();
     document.body.innerHTML = `<p>Basket</p>`;
-    expect(await perform({ cmd: "capture", session: "s" }, tabs, exec)).toMatchObject({ png_base64: "iVBORw0KGgo=", url: location.href });
+    expect(
+      await perform({ cmd: "capture", session: "s" }, tabs, exec),
+    ).toMatchObject({ png_base64: "iVBORw0KGgo=", url: location.href });
     for (const w of c.windows.values()) w.state = "minimized";
-    expect(await perform({ cmd: "capture", session: "s" }, tabs, exec)).toEqual({ skipped: "minimised" });
+    expect(await perform({ cmd: "capture", session: "s" }, tabs, exec)).toEqual(
+      { skipped: "minimised" },
+    );
     expect(exec.captured).toBe(1);
     const big = "A".repeat(1_000_000);
-    await expect(perform({ cmd: "upload", session: "s", selector: "#f", files: [{ name: "x", type: "", base64: big }] }, tabs, exec)).rejects.toThrow("too big");
+    await expect(
+      perform(
+        {
+          cmd: "upload",
+          session: "s",
+          selector: "#f",
+          files: [{ name: "x", type: "", base64: big }],
+        },
+        tabs,
+        exec,
+      ),
+    ).rejects.toThrow("too big");
   });
 
   it("picture one tab at a time, and only the tab that is showing", async () => {
     const tabs = new DeskTabs(new FakeChrome());
     const exec = execOn();
     // Two sessions at once: each picture is of its own tab.
-    const [a, b] = await Promise.all([perform({ cmd: "capture", session: "a" }, tabs, exec), perform({ cmd: "capture", session: "b" }, tabs, exec)]);
+    const [a, b] = await Promise.all([
+      perform({ cmd: "capture", session: "a" }, tabs, exec),
+      perform({ cmd: "capture", session: "b" }, tabs, exec),
+    ]);
     expect(a).toHaveProperty("png_base64");
     expect(b).toHaveProperty("png_base64");
     expect(exec.captured).toBe(2);
@@ -354,7 +527,9 @@ describe("calls", () => {
     moved.activate = async () => {
       moved.active = -1;
     };
-    expect(await perform({ cmd: "capture", session: "a" }, tabs, moved)).toEqual({ skipped: "not_front" });
+    expect(
+      await perform({ cmd: "capture", session: "a" }, tabs, moved),
+    ).toEqual({ skipped: "not_front" });
     expect(moved.captured).toBe(0);
   });
 
@@ -362,8 +537,20 @@ describe("calls", () => {
     const tabs = new DeskTabs(new FakeChrome());
     const exec = execOn();
     document.body.innerHTML = `<p id="done"></p>`;
-    expect(await perform({ cmd: "wait", session: "s", selector: "#done", timeout_ms: 50 }, tabs, exec)).toBe(true);
-    await expect(perform({ cmd: "wait", session: "s", selector: "#never", timeout_ms: 0 }, tabs, exec)).rejects.toThrow("didn't appear");
+    expect(
+      await perform(
+        { cmd: "wait", session: "s", selector: "#done", timeout_ms: 50 },
+        tabs,
+        exec,
+      ),
+    ).toBe(true);
+    await expect(
+      perform(
+        { cmd: "wait", session: "s", selector: "#never", timeout_ms: 0 },
+        tabs,
+        exec,
+      ),
+    ).rejects.toThrow("didn't appear");
   });
 });
 
@@ -372,11 +559,21 @@ describe("handing a page to the person", () => {
     const c = new FakeChrome().withPersonsWindow();
     const tabs = new DeskTabs(c);
     const exec = execOn("https://staging.example.com/");
-    await perform({ cmd: "navigate", session: "s", url: "https://staging.example.com/" }, tabs, exec);
+    await perform(
+      { cmd: "navigate", session: "s", url: "https://staging.example.com/" },
+      tabs,
+      exec,
+    );
     const tab = (await tabs.existing("s"))!;
     const desk = (await tabs.windowId())!;
     const out = await perform({ cmd: "hand_over", session: "s" }, tabs, exec);
-    expect(out).toEqual({ handed: true, active: true, focused: true, url: "https://staging.example.com/", title: document.title });
+    expect(out).toEqual({
+      handed: true,
+      active: true,
+      focused: true,
+      url: "https://staging.example.com/",
+      title: document.title,
+    });
     expect(c.windows.get(50)!.tabs).toContain(tab);
     expect(exec.raised).toEqual([50]);
     // Theirs: no session's, not Desk's, never closed or adopted by Desk.
@@ -408,7 +605,9 @@ describe("handing a page to the person", () => {
     const exec = execOn();
     const tab = await tabs.tabFor("s");
     const desk = (await tabs.windowId())!;
-    expect(await perform({ cmd: "hand_over", session: "s" }, tabs, exec)).toMatchObject({ handed: true, focused: true });
+    expect(
+      await perform({ cmd: "hand_over", session: "s" }, tabs, exec),
+    ).toMatchObject({ handed: true, focused: true });
     const into = exec.raised[0]!;
     expect(into).not.toBe(desk);
     expect(c.windows.get(into)!.tabs).toEqual([tab]);
@@ -419,11 +618,21 @@ describe("handing a page to the person", () => {
     const behind = execOn();
     behind.front_ = { active: true, focused: false };
     await tabs.tabFor("s");
-    expect(await perform({ cmd: "hand_over", session: "s" }, tabs, behind)).toMatchObject({ handed: true, focused: false });
-    await expect(perform({ cmd: "hand_over", session: "none" }, tabs, execOn())).rejects.toThrow("no page open");
+    expect(
+      await perform({ cmd: "hand_over", session: "s" }, tabs, behind),
+    ).toMatchObject({ handed: true, focused: false });
+    await expect(
+      perform({ cmd: "hand_over", session: "none" }, tabs, execOn()),
+    ).rejects.toThrow("no page open");
     expect(await tabs.existing("none")).toBeNull();
     await tabs.tabFor("off");
-    await expect(perform({ cmd: "hand_over", session: "off" }, tabs, execOn("chrome://settings"))).rejects.toThrow("doesn't work in");
+    await expect(
+      perform(
+        { cmd: "hand_over", session: "off" },
+        tabs,
+        execOn("chrome://settings"),
+      ),
+    ).rejects.toThrow("doesn't work in");
     expect(await tabs.existing("off")).not.toBeNull();
   });
 });
@@ -438,7 +647,9 @@ describe("handing a page over when Desk's books can't be saved", () => {
     c.save = async () => {
       throw new Error("storage is full");
     };
-    expect(await perform({ cmd: "hand_over", session: "s" }, tabs, execOn())).toMatchObject({ handed: true });
+    expect(
+      await perform({ cmd: "hand_over", session: "s" }, tabs, execOn()),
+    ).toMatchObject({ handed: true });
     expect(c.windows.get(50)!.tabs).toContain(tab);
     expect(await tabs.existing("s")).toBeNull();
     c.save = save;
@@ -451,7 +662,11 @@ describe("the link to Desk", () => {
     const sent: ToHub[] = [];
     let take: (m: unknown) => void = () => undefined;
     let drop: (why: string | null) => void = () => undefined;
-    const p: Port & { sent: ToHub[]; hub: (m: unknown) => Promise<void>; drop: (w: string | null) => void } = {
+    const p: Port & {
+      sent: ToHub[];
+      hub: (m: unknown) => Promise<void>;
+      drop: (w: string | null) => void;
+    } = {
       sent,
       post: (m) => sent.push(m),
       onMessage: (f) => (take = f),
@@ -465,14 +680,32 @@ describe("the link to Desk", () => {
     };
     return p;
   };
-  const me = { publicKey: "KEY", label: "AAAA-BBBB-CCCC-DDDD", sign: async (n: string) => `signed:${n}` };
+  const me = {
+    publicKey: "KEY",
+    label: "AAAA-BBBB-CCCC-DDDD",
+    sign: async (n: string) => `signed:${n}`,
+  };
 
   it("says who it is, signs the challenge, and does nothing until the person confirms this Chrome", async () => {
     const p = port();
     const later: (() => void)[] = [];
-    const link = new Link(() => p, async () => me, new DeskTabs(new FakeChrome()), execOn(), "0.1.0", (f) => later.push(f));
+    const link = new Link(
+      () => p,
+      async () => me,
+      new DeskTabs(new FakeChrome()),
+      execOn(),
+      "0.1.0",
+      (f) => later.push(f),
+    );
     await link.start();
-    expect(p.sent[0]).toEqual({ type: "hello", protocol: PROTOCOL, revision: REVISION, version: "0.1.0", key: "KEY", label: "AAAA-BBBB-CCCC-DDDD" });
+    expect(p.sent[0]).toEqual({
+      type: "hello",
+      protocol: PROTOCOL,
+      revision: REVISION,
+      version: "0.1.0",
+      key: "KEY",
+      label: "AAAA-BBBB-CCCC-DDDD",
+    });
     await p.hub({ type: "challenge", nonce: "n1", state: "pending" });
     expect(p.sent[1]).toEqual({ type: "proof", signature: "signed:n1" });
     expect(link.state.state).toBe("waiting");
@@ -508,7 +741,11 @@ describe("bringing an unpacked build up to date", () => {
     };
     return p;
   };
-  const me = { publicKey: "KEY", label: "AAAA-BBBB-CCCC-DDDD", sign: async (n: string) => `signed:${n}` };
+  const me = {
+    publicKey: "KEY",
+    label: "AAAA-BBBB-CCCC-DDDD",
+    sign: async (n: string) => `signed:${n}`,
+  };
   /** Chrome's management, storage.local and runtime.reload, stood in for. */
   class FakeReloader implements Reloader {
     stored: number | null = null;
@@ -534,10 +771,24 @@ describe("bringing an unpacked build up to date", () => {
   }
   /** A connection of a build at `revision`, Desk Helper expecting `expects`:
    *  what the extension told it, with whatever it left for later run. */
-  const connect = async (r: FakeReloader, revision: number, expects: number, chrome = new FakeChrome()) => {
+  const connect = async (
+    r: FakeReloader,
+    revision: number,
+    expects: number,
+    chrome = new FakeChrome(),
+  ) => {
     const p = port();
     const later: (() => void)[] = [];
-    const link = new Link(() => p, async () => me, new DeskTabs(chrome), execOn(), "0.1.0", (f) => later.push(f), r, revision);
+    const link = new Link(
+      () => p,
+      async () => me,
+      new DeskTabs(chrome),
+      execOn(),
+      "0.1.0",
+      (f) => later.push(f),
+      r,
+      revision,
+    );
     await link.start();
     expect(p.sent[0]).toMatchObject({ type: "hello", revision });
     await p.hub({ type: "expects", revision: expects });
@@ -551,7 +802,9 @@ describe("bringing an unpacked build up to date", () => {
     const tabs = new DeskTabs(chrome);
     await tabs.tabFor("s");
     const said = await connect(r, 1, 2, chrome);
-    expect(said).toEqual([{ type: "updating", revision: 2, outcome: "reloading" }]);
+    expect(said).toEqual([
+      { type: "updating", revision: 2, outcome: "reloading" },
+    ]);
     expect(r.reloads).toBe(1);
     expect(r.stored).toBe(2);
     expect(chrome.windows.size).toBe(0);
@@ -562,7 +815,9 @@ describe("bringing an unpacked build up to date", () => {
     await connect(r, 1, 2);
     // Chrome started it again from disk, and the files were still old.
     const again = await connect(r, 1, 2);
-    expect(again).toEqual([{ type: "updating", revision: 2, outcome: "tried" }]);
+    expect(again).toEqual([
+      { type: "updating", revision: 2, outcome: "tried" },
+    ]);
     expect(r.reloads).toBe(1);
     const andAgain = await connect(r, 1, 2);
     expect(andAgain[0]).toMatchObject({ outcome: "tried" });
@@ -577,13 +832,24 @@ describe("bringing an unpacked build up to date", () => {
     r.disk = null;
     const p = port();
     const later: (() => void)[] = [];
-    const link = new Link(() => p, async () => me, new DeskTabs(new FakeChrome()), execOn(), "0.1.0", (f) => later.push(f), r, 1);
+    const link = new Link(
+      () => p,
+      async () => me,
+      new DeskTabs(new FakeChrome()),
+      execOn(),
+      "0.1.0",
+      (f) => later.push(f),
+      r,
+      1,
+    );
     await link.start();
     // Desk Helper says it once, on this connection; said again, it starts
     // no second look.
     await p.hub({ type: "expects", revision: 2 });
     await p.hub({ type: "expects", revision: 2 });
-    expect(p.sent.slice(1)).toEqual([{ type: "updating", revision: 2, outcome: "unbuilt" }]);
+    expect(p.sent.slice(1)).toEqual([
+      { type: "updating", revision: 2, outcome: "unbuilt" },
+    ]);
     expect(later).toHaveLength(1);
     const tick = async () => {
       for (const f of later.splice(0)) f();
@@ -601,7 +867,9 @@ describe("bringing an unpacked build up to date", () => {
     // The build finished: it reloads into it, with no new connection.
     r.disk = 2;
     await tick();
-    expect(p.sent.slice(2)).toEqual([{ type: "updating", revision: 2, outcome: "reloading" }]);
+    expect(p.sent.slice(2)).toEqual([
+      { type: "updating", revision: 2, outcome: "reloading" },
+    ]);
     await tick();
     expect(r.reloads).toBe(1);
     expect(later).toHaveLength(0);
@@ -610,7 +878,9 @@ describe("bringing an unpacked build up to date", () => {
   it("never reloads a Web Store install", async () => {
     for (const install of ["normal", "sideload", "admin", "other"]) {
       const r = new FakeReloader(install);
-      expect(await connect(r, 1, 2)).toEqual([{ type: "updating", revision: 2, outcome: "store" }]);
+      expect(await connect(r, 1, 2)).toEqual([
+        { type: "updating", revision: 2, outcome: "store" },
+      ]);
       expect(r.reloads).toBe(0);
       expect(r.stored).toBeNull();
     }
@@ -623,12 +893,21 @@ describe("bringing an unpacked build up to date", () => {
       expect(r.reloads).toBe(0);
       expect(r.stored).toBeNull();
     }
-    expect(await upToDate(2, 2, new FakeReloader("development"))).toBe("current");
+    expect(await upToDate(2, 2, new FakeReloader("development"))).toBe(
+      "current",
+    );
   });
 
   it("ignores what Desk Helper expects when it has no way to reload", async () => {
     const p = port();
-    const link = new Link(() => p, async () => me, new DeskTabs(new FakeChrome()), execOn(), "0.1.0", () => undefined);
+    const link = new Link(
+      () => p,
+      async () => me,
+      new DeskTabs(new FakeChrome()),
+      execOn(),
+      "0.1.0",
+      () => undefined,
+    );
     await link.start();
     await p.hub({ type: "expects", revision: REVISION + 1 });
     expect(p.sent).toHaveLength(1);
@@ -637,10 +916,18 @@ describe("bringing an unpacked build up to date", () => {
 
 describe("this Chrome's label", () => {
   it("is four groups of four from the key's SHA-256, and signs over the prefixed nonce", async () => {
-    const pair = await crypto.subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, false, ["sign", "verify"]);
+    const pair = await crypto.subtle.generateKey(
+      { name: "ECDSA", namedCurve: "P-256" },
+      false,
+      ["sign", "verify"],
+    );
     const raw = await crypto.subtle.exportKey("raw", pair.publicKey);
     expect(await labelOf(raw)).toMatch(/^[0-9A-F]{4}(-[0-9A-F]{4}){3}$/);
-    const sig = await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, pair.privateKey, new TextEncoder().encode(PROOF_PREFIX + "n"));
+    const sig = await crypto.subtle.sign(
+      { name: "ECDSA", hash: "SHA-256" },
+      pair.privateKey,
+      new TextEncoder().encode(PROOF_PREFIX + "n"),
+    );
     expect(new Uint8Array(sig)).toHaveLength(64);
   });
 });
@@ -652,56 +939,95 @@ describe("reading a new key", () => {
 
   it("reads a readonly field or text on a key page, and nothing on any other page", () => {
     document.body.innerHTML = `<input id="k" readonly value=" lin_api_abcdef0123456789 "><code id="t">sk_live_text</code>`;
-    document.getElementById("k")!.getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect;
-    expect(readKey("#k", origin, [at], 512)).toEqual({ value: "lin_api_abcdef0123456789", origin, path: at });
+    document.getElementById("k")!.getBoundingClientRect = () =>
+      ({ width: 10, height: 10 }) as DOMRect;
+    expect(readKey("#k", origin, [at], 512)).toEqual({
+      value: "lin_api_abcdef0123456789",
+      origin,
+      path: at,
+    });
     const t = document.getElementById("t")!;
     t.getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect;
-    expect(readKey("#t", origin, [at], 512)).toMatchObject({ value: "sk_live_text" });
-    expect(readKey("#k", "https://evil.example", [at], 512)).toEqual({ refused: "not a key page" });
-    expect(readKey("#k", origin, ["/elsewhere"], 512)).toEqual({ refused: "not a key page" });
+    expect(readKey("#t", origin, [at], 512)).toMatchObject({
+      value: "sk_live_text",
+    });
+    expect(readKey("#k", "https://evil.example", [at], 512)).toEqual({
+      refused: "not a key page",
+    });
+    expect(readKey("#k", origin, ["/elsewhere"], 512)).toEqual({
+      refused: "not a key page",
+    });
     expect(readKey("#k", origin, [at], 4)).toMatchObject({ value: "lin_" });
   });
 
   it("finds the one key shown on the page itself, by the service's shape", () => {
     const shape = "(?:github_pat_|ghp_)[!#-&(-~]{9,4085}";
     const sized = () => {
-      for (const el of Array.from(document.body.querySelectorAll("*"))) (el as HTMLElement).getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect;
+      for (const el of Array.from(document.body.querySelectorAll("*")))
+        (el as HTMLElement).getBoundingClientRect = () =>
+          ({ width: 10, height: 10 }) as DOMRect;
     };
     // GitHub's new token: shown in <code> inside a flash, beside a copy
     // button; the deepest element showing it is read.
     document.body.innerHTML = `<div class="flash"><p>Make sure to copy it now.</p><div><code id="new">github_pat_11ABCDEFG0123456789_abcdefXYZ</code></div><clipboard-copy value="github_pat_11ABCDEFG0123456789_abcdefXYZ">Copy</clipboard-copy></div>`;
     sized();
-    expect(readKey(null, origin, [at], 512, shape)).toEqual({ value: "github_pat_11ABCDEFG0123456789_abcdefXYZ", origin, path: at });
+    expect(readKey(null, origin, [at], 512, shape)).toEqual({
+      value: "github_pat_11ABCDEFG0123456789_abcdefXYZ",
+      origin,
+      path: at,
+    });
     // A key typed into an editable field is never one shown by the service.
     document.body.innerHTML = `<input id="e" value="ghp_typedbytheagent0123456789">`;
     sized();
-    expect(readKey(null, origin, [at], 512, shape)).toEqual({ refused: "no key shown on the page" });
+    expect(readKey(null, origin, [at], 512, shape)).toEqual({
+      refused: "no key shown on the page",
+    });
     // Hidden, or in a form with a password: not read.
     document.body.innerHTML = `<div style="display:none"><code>ghp_hidden0123456789abcdef</code></div><form><input readonly value="ghp_inform0123456789abcdef"><input type="password"></form>`;
     sized();
-    expect(readKey(null, origin, [at], 512, shape)).toEqual({ refused: "no key shown on the page" });
+    expect(readKey(null, origin, [at], 512, shape)).toEqual({
+      refused: "no key shown on the page",
+    });
     // Two different keys: it asks which.
     document.body.innerHTML = `<code>ghp_first0123456789abcdef</code><code>ghp_second0123456789abcdef</code>`;
     sized();
-    expect(readKey(null, origin, [at], 512, shape)).toMatchObject({ refused: expect.stringContaining("several keys") });
-    expect(readKey(null, origin, [at], 512, null)).toEqual({ refused: "no key shape" });
-    expect(readKey(null, "https://evil.example", [at], 512, shape)).toEqual({ refused: "not a key page" });
+    expect(readKey(null, origin, [at], 512, shape)).toMatchObject({
+      refused: expect.stringContaining("several keys"),
+    });
+    expect(readKey(null, origin, [at], 512, null)).toEqual({
+      refused: "no key shape",
+    });
+    expect(readKey(null, "https://evil.example", [at], 512, shape)).toEqual({
+      refused: "not a key page",
+    });
     // A shape with no prefix (Jira's) is looked for only in read-only
     // fields and code, never in text, an address or an email.
     const broad = "[!#-&(-~]{24,4096}";
     document.body.innerHTML = `<p>signed-in-as-someone-with-a-long-name</p><code>https://id.atlassian.com/manage-profile</code><code>sarah.long.name@acme.example.com</code><span contenteditable="true">ATATTtypedbyagent0123456789</span><input readonly value="ATATT3xFfGF0abcdefghijklmnop0123">`;
     sized();
-    expect(readKey(null, origin, [at], 512, broad)).toEqual({ value: "ATATT3xFfGF0abcdefghijklmnop0123", origin, path: at });
+    expect(readKey(null, origin, [at], 512, broad)).toEqual({
+      value: "ATATT3xFfGF0abcdefghijklmnop0123",
+      origin,
+      path: at,
+    });
   });
 
   it("says when the page asks for a password", async () => {
     document.body.innerHTML = `<form><input type="password"></form>`;
-    for (const el of Array.from(document.body.querySelectorAll("*"))) (el as HTMLElement).getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect;
+    for (const el of Array.from(document.body.querySelectorAll("*")))
+      (el as HTMLElement).getBoundingClientRect = () =>
+        ({ width: 10, height: 10 }) as DOMRect;
     expect(asksPassword()).toBe(true);
-    const exec = execOn("https://github.com/settings/personal-access-tokens/new");
+    const exec = execOn(
+      "https://github.com/settings/personal-access-tokens/new",
+    );
     const tabs = new DeskTabs(new FakeChrome());
-    expect(await perform({ cmd: "where", session: "s", password: true }, tabs, exec)).toMatchObject({ password: true });
-    expect(await perform({ cmd: "where", session: "s" }, tabs, exec)).not.toHaveProperty("password");
+    expect(
+      await perform({ cmd: "where", session: "s", password: true }, tabs, exec),
+    ).toMatchObject({ password: true });
+    expect(
+      await perform({ cmd: "where", session: "s" }, tabs, exec),
+    ).not.toHaveProperty("password");
     document.body.innerHTML = `<input type="password" style="display:none">`;
     expect(asksPassword()).toBe(false);
   });
@@ -710,10 +1036,18 @@ describe("reading a new key", () => {
     document.body.innerHTML = `<input id="e" value="typed"><input id="p" type="password" readonly value="pw">
 <input id="a" readonly autocomplete="current-password" value="pw2">
 <form><input id="f" readonly value="k"><input type="password"></form>`;
-    expect(readKey("#e", origin, [at], 512)).toEqual({ refused: "an editable field" });
-    expect(readKey("#p", origin, [at], 512)).toEqual({ refused: "a password field" });
-    expect(readKey("#a", origin, [at], 512)).toEqual({ refused: "a password field" });
-    expect(readKey("#f", origin, [at], 512)).toEqual({ refused: "in a form with a password" });
+    expect(readKey("#e", origin, [at], 512)).toEqual({
+      refused: "an editable field",
+    });
+    expect(readKey("#p", origin, [at], 512)).toEqual({
+      refused: "a password field",
+    });
+    expect(readKey("#a", origin, [at], 512)).toEqual({
+      refused: "a password field",
+    });
+    expect(readKey("#f", origin, [at], 512)).toEqual({
+      refused: "in a form with a password",
+    });
     expect(readKey("#nope", origin, [at], 512)).toEqual({ refused: "missing" });
   });
 
@@ -721,21 +1055,38 @@ describe("reading a new key", () => {
     document.body.innerHTML = `<input id="h" type="hidden" readonly value="k1"><input id="z" readonly value="k2">
 <div style="display:none"><input id="d" readonly value="k3"></div><input id="o" readonly style="opacity:0" value="k4">
 <input id="v" readonly style="visibility:hidden" value="k5"><input id="n" name="user_pass" readonly value="k6"><input id="passkey" readonly value="k7">`;
-    const sized = (id: string) => (document.getElementById(id)!.getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect);
+    const sized = (id: string) =>
+      (document.getElementById(id)!.getBoundingClientRect = () =>
+        ({ width: 10, height: 10 }) as DOMRect);
     for (const id of ["h", "d", "o", "v", "n", "passkey"]) sized(id);
-    for (const id of ["h", "z", "d", "o", "v"]) expect(readKey(`#${id}`, origin, [at], 512), id).toEqual({ refused: "hidden" });
-    for (const id of ["n", "passkey"]) expect(readKey(`#${id}`, origin, [at], 512), id).toEqual({ refused: "a password field" });
+    for (const id of ["h", "z", "d", "o", "v"])
+      expect(readKey(`#${id}`, origin, [at], 512), id).toEqual({
+        refused: "hidden",
+      });
+    for (const id of ["n", "passkey"])
+      expect(readKey(`#${id}`, origin, [at], 512), id).toEqual({
+        refused: "a password field",
+      });
   });
 
   it("holds a key page's paths a whole segment at a time", () => {
     history.replaceState(null, "", "/settings/api/new");
     try {
       document.body.innerHTML = `<code id="t">sk_live_text</code>`;
-      document.getElementById("t")!.getBoundingClientRect = () => ({ width: 10, height: 10 }) as DOMRect;
-      expect(readKey("#t", origin, ["/settings/ap"], 512)).toEqual({ refused: "not a key page" });
-      expect(readKey("#t", origin, ["/settings/api/newer"], 512)).toEqual({ refused: "not a key page" });
-      expect(readKey("#t", origin, ["/settings/api"], 512)).toMatchObject({ value: "sk_live_text" });
-      expect(readKey("#t", origin, ["/settings/api/"], 512)).toMatchObject({ value: "sk_live_text" });
+      document.getElementById("t")!.getBoundingClientRect = () =>
+        ({ width: 10, height: 10 }) as DOMRect;
+      expect(readKey("#t", origin, ["/settings/ap"], 512)).toEqual({
+        refused: "not a key page",
+      });
+      expect(readKey("#t", origin, ["/settings/api/newer"], 512)).toEqual({
+        refused: "not a key page",
+      });
+      expect(readKey("#t", origin, ["/settings/api"], 512)).toMatchObject({
+        value: "sk_live_text",
+      });
+      expect(readKey("#t", origin, ["/settings/api/"], 512)).toMatchObject({
+        value: "sk_live_text",
+      });
       expect(onKeyPage([{ origin, paths: ["/settings/ap"] }])).toBe(false);
       expect(onKeyPage([{ origin, paths: ["/settings"] }])).toBe(true);
     } finally {
@@ -745,16 +1096,61 @@ describe("reading a new key", () => {
 
   it("says whether the page is a key page now", () => {
     expect(onKeyPage([{ origin, paths: [at] }])).toBe(true);
-    expect(onKeyPage([{ origin: "https://linear.app", paths: ["/"] }])).toBe(false);
+    expect(onKeyPage([{ origin: "https://linear.app", paths: ["/"] }])).toBe(
+      false,
+    );
   });
 
   it("takes no picture of a key page, and passes a refused read on plainly", async () => {
     const tabs = new DeskTabs(new FakeChrome());
     const exec = execOn();
-    expect(await perform({ cmd: "capture", session: "s", refuse: [{ origin, paths: [at] }] }, tabs, exec)).toEqual({ skipped: "key page" });
+    expect(
+      await perform(
+        { cmd: "capture", session: "s", refuse: [{ origin, paths: [at] }] },
+        tabs,
+        exec,
+      ),
+    ).toEqual({ skipped: "key page" });
     expect(exec.captured).toBe(0);
     document.body.innerHTML = `<input id="e" value="typed">`;
-    await expect(perform({ cmd: "capture_key", session: "s", selector: "#e", origin, paths: [at] }, tabs, exec)).rejects.toThrow("an editable field");
+    await expect(
+      perform(
+        {
+          cmd: "capture_key",
+          session: "s",
+          selector: "#e",
+          origin,
+          paths: [at],
+        },
+        tabs,
+        exec,
+      ),
+    ).rejects.toThrow("an editable field");
   });
 });
 
+describe("the store's id", () => {
+  it("is the one the store's public key gives, and the one Desk's host serves", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { createHash } = await import("node:crypto");
+    const { resolve } = await import("node:path");
+    const root = resolve(import.meta.dirname, "../..");
+    const key = readFileSync(
+      resolve(root, "extension/store/public-key.txt"),
+      "utf8",
+    ).trim();
+    const id = [
+      ...createHash("sha256")
+        .update(Buffer.from(key, "base64"))
+        .digest("hex")
+        .slice(0, 32),
+    ]
+      .map((h) => String.fromCharCode(97 + parseInt(h, 16)))
+      .join("");
+    const host = readFileSync(
+      resolve(root, "crates/desk-chrome-host/src/lib.rs"),
+      "utf8",
+    );
+    expect(host).toContain(`pub const STORE_ID: &str = "${id}";`);
+  });
+});

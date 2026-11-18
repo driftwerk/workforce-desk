@@ -24,10 +24,10 @@ pub const HOST: &str = "xyz.driftwerk.desk";
 /// The one path on the hub it opens.
 pub const HUB_PATH: &str = "/ws/desk/chrome";
 
-/// Desk's extension in the Chrome Web Store. Set from the store's
-/// dashboard once the item exists (`extension/store/SUBMIT.md`); until then
-/// only a development build reaches Chrome.
-pub const STORE_ID: &str = "";
+/// Desk's extension in the Chrome Web Store, from the store's dashboard
+/// (`extension/store/SUBMIT.md`). Its public key is in
+/// `extension/store/public-key.txt`, which gives an unpacked build this id.
+pub const STORE_ID: &str = "hoacknhfncdpkigbnbmndenpepaadogg";
 
 /// An unpacked development build's id, given at build time; never in a
 /// release.
