@@ -1,12 +1,28 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent } from "react";
 import { createPortal } from "react-dom";
 
 export type MenuEntry =
   /** `checked`: a setting it turns on or off, shown ticked while on. */
   /** `disabled`: said and reachable, but choosing it does nothing. */
   /** `hint`: a quiet word after the label ("Morning · the empty pane"). */
-  | { kind: "item"; label: string; hint?: string; kbd?: string; checked?: boolean; disabled?: boolean; onSelect?: () => void; submenu?: Submenu }
-  | { kind: "separator" };
+  /** `radio`: one of a set of choices (`checked` the one in force).
+   *  `detail`: a quiet line under the label, saying what it does. */
+  | {
+      kind: "item";
+      label: string;
+      hint?: string;
+      detail?: string;
+      kbd?: string;
+      checked?: boolean;
+      radio?: boolean;
+      disabled?: boolean;
+      onSelect?: () => void;
+      submenu?: Submenu;
+    }
+  | { kind: "separator" }
+  /** A quiet line at the menu's foot, never focused: what its choices
+   *  are kept for. The menu is described by it. */
+  | { kind: "note"; text: string };
 
 /** A submenu's entries, or how to make them as it opens: for one that
  *  follows what changes often (a list of sessions), so what offers it isn't
@@ -83,6 +99,8 @@ function MenuList({
   beside?: DOMRect;
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const noteId = useId();
+  const noted = entries.some((e) => e.kind === "note");
   const [pos, setPos] = useState(at);
   const [sub, setSub] = useState<{ index: number; rect: DOMRect; focus: boolean } | null>(null);
 
@@ -154,6 +172,7 @@ function MenuList({
       className="menu"
       role="menu"
       aria-label={label}
+      aria-describedby={noted ? noteId : undefined}
       style={{ left: pos.x, top: pos.y }}
       onKeyDown={onKey}
       onContextMenu={(e) => e.preventDefault()}
@@ -161,12 +180,16 @@ function MenuList({
       {entries.map((entry, i) =>
         entry.kind === "separator" ? (
           <div key={i} className="menu-sep" role="separator" />
+        ) : entry.kind === "note" ? (
+          <p key={i} id={noteId} className="menu-note" role="none">
+            {entry.text}
+          </p>
         ) : (
           <button
             key={i}
             type="button"
-            role={entry.checked === undefined ? "menuitem" : "menuitemcheckbox"}
-            aria-checked={entry.checked}
+            role={entry.radio ? "menuitemradio" : entry.checked === undefined ? "menuitem" : "menuitemcheckbox"}
+            aria-checked={entry.radio ? !!entry.checked : entry.checked}
             aria-disabled={entry.disabled || undefined}
             className="menu-item"
             data-index={i}
@@ -183,6 +206,7 @@ function MenuList({
             <span className="menu-label">
               {entry.label}
               {entry.hint && <span className="menu-hint"> · {entry.hint}</span>}
+              {entry.detail && <span className="menu-detail">{entry.detail}</span>}
             </span>
             {entry.kbd && <span className="menu-kbd">{entry.kbd}</span>}
             {entry.checked && (

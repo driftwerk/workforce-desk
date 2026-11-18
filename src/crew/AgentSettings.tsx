@@ -23,6 +23,7 @@ import { CheckingIn, HowTheyRemember, HowTheyWork } from "./AgentAbilities";
 import { BossPlans } from "./PlanRow";
 import { UpdatesSettings } from "./Updates";
 import { OverseesTheCrew } from "./OverseesTheCrew";
+import { BossOfAGroup } from "./BossOfAGroup";
 import { WhatTheySee } from "./WhatTheySee";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
 
@@ -54,6 +55,9 @@ export function AgentSettings({ agent, hub, onOpenFiles }: { agent: Agent; hub: 
           />
         )}
         {local && <OverseesTheCrew agent={agent} />}
+        {/* An agent on a paired hub (not a machine's engine) can boss one
+            of the person's groups, through that group's Boss sheet. */}
+        {hub && !local && !hub.machine && <BossOfAGroup agent={agent} hub={hub} />}
         {local && <UpdatesSettings agent={agent} />}
         {local && <BossPlans boss={agent.id} name={agent.name} />}
         {local && <FineTuning agent={agent} onOpen={onOpenFiles} />}

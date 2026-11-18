@@ -4,6 +4,9 @@ import { useChat } from "../chat/store";
 import type { Agent, HubAccount } from "../chat/types";
 import { useOverview } from "../overview/store";
 import { BossSheet } from "./BossSheet";
+import { BossOfAGroup } from "../crew/BossOfAGroup";
+import { useGrantBosses } from "../crew/grantBoss";
+import { useSettings } from "../settings/store";
 import { useHubLayout } from "./hubLayout";
 import { fullLine, notInForce, type BossChoice, type BossEngine, type RemoteBoss } from "./remoteBoss";
 
@@ -236,6 +239,48 @@ describe("what the sheet offers as the boss stands", () => {
     fireEvent.click(screen.getByRole("button", { name: "Make Bea Acme’s boss" }));
     await waitFor(() => expect(calls.invoke).toHaveBeenCalledWith("boss_link", expect.objectContaining({ agent: "bea" })));
     expect(calls.invoke).not.toHaveBeenCalledWith("boss_unlink", expect.anything());
+  });
+});
+
+describe("making an agent on a paired hub a group's boss from their settings", () => {
+  beforeEach(() => useGrantBosses.setState({ byGroup: {}, bossed: {}, readAt: {} }));
+
+  it("picks the group, then opens its Boss sheet with them picked, to make them its boss there", async () => {
+    render(<BossOfAGroup agent={ROSTER[2]!} hub={HUBS[1]!} />);
+    fireEvent.click(screen.getByRole("button", { name: "Make Allan a group’s boss…" }));
+    const menu = screen.getByRole("menu", { name: "Which group Allan runs" });
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Acme", "New group for Allan"]);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: "Acme" }));
+    const sheet = await screen.findByRole("dialog", { name: "Acme · Boss" });
+    // Picked once Driftwerk says it offers bosses.
+    await waitFor(() => expect((within(sheet).getByRole("radio", { name: /^Allan/ }) as HTMLInputElement).checked).toBe(true));
+    fireEvent.click(within(sheet).getByRole("button", { name: "Make Allan Acme’s boss" }));
+    await waitFor(() => expect(calls.invoke).toHaveBeenCalledWith("boss_link", expect.objectContaining({ group: "acme", hub: "driftwerk", agent: "allan" })));
+  });
+
+  it("says which groups they run already", async () => {
+    status = linked({ level: "suggest", sees: "replies", budgetUsdPerDay: null });
+    render(<BossOfAGroup agent={ROSTER[2]!} hub={HUBS[1]!} />);
+    expect(await screen.findByText("Allan runs Acme, from Driftwerk.")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Make Allan a group’s boss…" }));
+    expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["Acme · runs it", "New group for Allan"]);
+  });
+
+  it("never picks an agent whose hub offers no bosses, and offers no Make for them", async () => {
+    render(<BossSheet group="acme" preselect={ROSTER[3]!} onClose={() => {}} />);
+    expect(await screen.findByText("Atlas doesn’t take bosses from Desk yet: its admin turns it on.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /^Make / })).toBeNull();
+    expect(screen.getAllByRole("radio", { checked: true }).map((r) => r.getAttribute("aria-label") ?? r.closest("label")!.textContent)).toEqual([expect.stringMatching(/Desk/)]);
+  });
+
+  it("makes a group for them when the person has none", async () => {
+    useHubLayout.setState({ layout: null, kept: false });
+    useSettings.setState({ groups: [], ungrouped: { collapsed: false, items: [] } } as never);
+    render(<BossOfAGroup agent={ROSTER[2]!} hub={HUBS[1]!} />);
+    fireEvent.click(screen.getByRole("button", { name: "Make Allan a group’s boss…" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New group for Allan" }));
+    expect(await screen.findByRole("dialog", { name: "Allan’s group · Boss" })).toBeTruthy();
+    expect(useSettings.getState().groups.map((g) => g.name)).toEqual(["Allan’s group"]);
   });
 });
 

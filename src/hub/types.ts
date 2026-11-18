@@ -2191,6 +2191,10 @@ export interface Ticket {
   /** Its files: its issue's, or what you dropped on it; absent from an
    *  older hub. */
   files?: TicketFile[];
+  /** Its issue's place on its Jira or Linear board, for As on Jira: Jira's
+   *  rank (text, compared byte by byte) or Linear's sort order (a number).
+   *  Absent from an older hub and on a Desk-only board. */
+  upstreamRank?: string | number | null;
 }
 
 export interface NewTicket {
