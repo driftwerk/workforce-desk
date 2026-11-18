@@ -30,7 +30,8 @@ use eyre::{Result, eyre};
 use objc2::AllocAnyThread;
 use objc2::rc::Retained;
 use objc2_audio_toolbox::{
-    AudioUnit, AudioUnitSetProperty, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global,
+    AudioUnit, AudioUnitGetProperty, AudioUnitSetProperty, kAudioOutputUnitProperty_CurrentDevice,
+    kAudioUnitScope_Global,
 };
 use objc2_avf_audio::{
     AVAudioEngine, AVAudioFormat, AVAudioPCMBuffer, AVAudioPlayerNode,
@@ -187,6 +188,26 @@ unsafe fn set_device(unit: AudioUnit, element: u32, uid: &str) -> Result<()> {
     Ok(())
 }
 
+/// The device on `unit`'s `element`, as the unit says.
+unsafe fn current_device(unit: AudioUnit, element: u32) -> Option<u32> {
+    if unit.is_null() {
+        return None;
+    }
+    let mut device = 0u32;
+    let mut size = size_of_val(&device) as u32;
+    let status = unsafe {
+        AudioUnitGetProperty(
+            unit,
+            kAudioOutputUnitProperty_CurrentDevice,
+            kAudioUnitScope_Global,
+            element,
+            NonNull::from(&mut device).cast::<c_void>(),
+            NonNull::from(&mut size),
+        )
+    };
+    (status == 0).then_some(device)
+}
+
 /// A tap on the microphone, voice-processed when `attempt` says, on its
 /// device; the speaker's device too, which voice processing shares the
 /// microphone's unit with.
@@ -211,6 +232,16 @@ unsafe fn listen(engine: &AVAudioEngine, to: SharedIn, attempt: &Attempt) -> Res
         }
         if let Some(uid) = &attempt.output {
             set_device(engine.outputNode().audioUnit(), output_element, uid)?;
+            // Where the microphone and speaker share one unit, the speaker's
+            // device can take the microphone's place: then this pair can't
+            // be had, and the chosen microphone is tried on its own.
+            if let Some(mic_uid) = &attempt.input
+                && current_device(mic.audioUnit(), input_element) != hal::device_id(mic_uid)
+            {
+                return Err(eyre!(
+                    "the microphone and speaker can’t be different devices here"
+                ));
+            }
         }
         let format = mic.outputFormatForBus(0);
         if format.sampleRate() == 0.0 || format.channelCount() == 0 {

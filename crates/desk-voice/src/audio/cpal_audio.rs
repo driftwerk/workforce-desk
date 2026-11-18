@@ -90,7 +90,19 @@ pub struct CpalAudio {
     /// A stream reported its device gone, or that it must be built again.
     broken: Arc<AtomicBool>,
     /// Dropping it ends the thread that owns the streams.
-    _streams: mpsc::Sender<()>,
+    streams: Option<mpsc::Sender<()>>,
+    thread: Option<std::thread::JoinHandle<()>>,
+}
+
+impl Drop for CpalAudio {
+    /// Waits for the streams to close, so the next build finds the
+    /// devices free.
+    fn drop(&mut self) {
+        drop(self.streams.take());
+        if let Some(t) = self.thread.take() {
+            let _ = t.join();
+        }
+    }
 }
 
 /// The devices there are, by cpal's ids, the system's default marked.
@@ -157,7 +169,7 @@ fn start(attempt: Attempt, to: Option<SharedIn>) -> Result<CpalAudio> {
     let broken = Arc::new(AtomicBool::new(false));
     let (ready_tx, ready_rx) = mpsc::channel();
     let (keep_tx, keep_rx) = mpsc::channel::<()>();
-    {
+    let thread = {
         let (queue, broken) = (queue.clone(), broken.clone());
         std::thread::Builder::new()
             .name("voice-audio".into())
@@ -171,8 +183,8 @@ fn start(attempt: Attempt, to: Option<SharedIn>) -> Result<CpalAudio> {
                 // Until the audio is dropped.
                 let _ = keep_rx.recv();
                 drop(streams);
-            })?;
-    }
+            })?
+    };
     let rate = ready_rx
         .recv()
         .map_err(|_| eyre!("the audio thread stopped before it started"))??;
@@ -181,7 +193,8 @@ fn start(attempt: Attempt, to: Option<SharedIn>) -> Result<CpalAudio> {
         rate,
         resampler: Mutex::new(None),
         broken,
-        _streams: keep_tx,
+        streams: Some(keep_tx),
+        thread: Some(thread),
     })
 }
 

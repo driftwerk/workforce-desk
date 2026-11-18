@@ -11,7 +11,7 @@
 //! there's no echo canceller, holds it back unless push to talk is held when
 //! that's how the person listens, and records it for Test.
 
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -397,18 +397,25 @@ impl Inner {
             wanted.echo_cancel,
             platform::HAS_ECHO_CANCELLER && platform::can_cancel_echo(input.device()),
         );
-        let mut errors = Vec::new();
+        let mut errors: Vec<(Attempt, eyre::Report)> = Vec::new();
+        // A voice-processing unit that failed winds down in the background:
+        // the plain microphone tried next starts only once it has, so that
+        // one attempt is given a few tries, `SETTLE` apart.
+        let mut winding_down = false;
         for attempt in &tries {
-            // After a voice-processing unit failed, the plain microphone
-            // starts only once it has wound down.
-            let after_vp = errors.iter().any(|(a, _): &(Attempt, _)| a.cancel_echo);
-            let rounds = if after_vp {
+            let rounds = if winding_down && !attempt.cancel_echo {
+                winding_down = false;
                 platform::RETRIES_AFTER_VP
             } else {
                 1
             };
+            // Without an echo canceller, quiet while Desk speaks from the
+            // first buffer the new tap hears.
+            self.hearing
+                .gated
+                .store(quiet_while_speaking(attempt, &wanted), Ordering::SeqCst);
             for round in 0..rounds {
-                if round > 0 || (after_vp && !attempt.cancel_echo) {
+                if rounds > 1 {
                     std::thread::sleep(platform::SETTLE);
                 }
                 let to = self.listen.then(|| {
@@ -418,9 +425,6 @@ impl Inner {
                 match objc_pool(|| platform::build(attempt, to)) {
                     Ok(backend) => {
                         let status = describe(attempt, &wanted, &devices, &input, &output);
-                        self.hearing
-                            .gated
-                            .store(status.quiet_while_speaking, Ordering::SeqCst);
                         tracing::info!(
                             why,
                             input = status.input.as_ref().map(|d| d.name.as_str()),
@@ -443,6 +447,7 @@ impl Inner {
                     Err(e) => {
                         tracing::warn!(?attempt, "voice: audio won’t open that way: {e:#}");
                         if round + 1 == rounds {
+                            winding_down |= attempt.cancel_echo;
                             errors.push((attempt.clone(), e));
                         }
                     }
@@ -610,9 +615,15 @@ impl Drop for Live {
 /// The microphone, its samples to `input`, and the speaker. The meter's
 /// microphone, if it has one open, is closed first: only one may have it.
 pub(crate) fn open(input: AudioIn) -> Result<SharedAudioOut> {
+    VOICE_OPENING.fetch_add(1, Ordering::SeqCst);
     drop(lock(&METER).take());
-    Ok(Arc::new(Live::open(true, Some(Arc::from(input)))?))
+    let opened = Live::open(true, Some(Arc::from(input)));
+    VOICE_OPENING.fetch_sub(1, Ordering::SeqCst);
+    Ok(Arc::new(opened?))
 }
+
+/// Voice is opening the microphone: the meter mustn't open a second one.
+static VOICE_OPENING: AtomicUsize = AtomicUsize::new(0);
 
 /// Just the speaker.
 pub(crate) fn output() -> Result<SharedAudioOut> {
@@ -641,7 +652,10 @@ pub fn meter(on: bool) -> Result<()> {
         drop(meter.take());
         return Ok(());
     }
-    if meter.is_none() && mic().is_none() {
+    if super::mic_access() == super::MicAccess::Denied {
+        return Err(eyre!(super::MIC_NOT_ALLOWED));
+    }
+    if meter.is_none() && mic().is_none() && VOICE_OPENING.load(Ordering::SeqCst) == 0 {
         *meter = Some(Live::open(true, None)?);
     }
     Ok(())
@@ -651,6 +665,18 @@ pub fn meter(on: bool) -> Result<()> {
 /// speaker in use. A conversation listening meanwhile hears silence rather
 /// than the test. Opens the microphone and speaker for it when nothing has.
 pub fn test(seconds: f32) -> Result<()> {
+    static ONE_AT_A_TIME: Mutex<()> = Mutex::new(());
+    let Ok(_one) = ONE_AT_A_TIME.try_lock() else {
+        return Err(eyre!("a test is already running"));
+    };
+    if super::mic_access() == super::MicAccess::Denied {
+        return Err(eyre!(super::MIC_NOT_ALLOWED));
+    }
+    let seconds = if seconds.is_finite() {
+        seconds.clamp(0.5, 10.0)
+    } else {
+        3.0
+    };
     let (inner, _opened) = match mic() {
         Some(inner) => (inner, None),
         None => {

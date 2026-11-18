@@ -207,8 +207,13 @@ impl Wake {
         match voice_activity(&self.vad_model, threshold) {
             Ok(vad) => {
                 tracing::info!(threshold, "voice: listening at a new sensitivity");
+                // The new model counts samples from zero: what's kept of the
+                // recent audio starts again with it, so segments' pre-roll
+                // is read from where they began.
                 self.vad = vad;
                 self.window.clear();
+                self.recent.clear();
+                self.onset = None;
             }
             Err(e) => tracing::warn!("voice: {e:#}"),
         }
