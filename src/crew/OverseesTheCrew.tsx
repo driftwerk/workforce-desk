@@ -28,6 +28,7 @@ import {
   parseParallel,
   parseMinutes,
   parseTime,
+  isModelName,
   readable,
   setAgentOversight,
   usd,
@@ -122,6 +123,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
   const [bossModel, setBossModel] = useState(false);
   useEffect(() => {
     let live = true;
+    setBossModel(false);
     desk
       ?.features?.()
       .then((f) => live && setBossModel(f.includes("boss-session-model")))
@@ -519,7 +521,9 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                   <span className="oversee-check-text">
                     <b>New sessions run</b>
                     <span className="oversee-sub">
-                      Every session {name} starts, unless you ask for another engine or model for that work. New session keeps its own choice for each folder
+                      {bossModel
+                        ? `Every session ${name} starts runs on this, unless you ask it for another engine or model for that work. New session's own choice for each folder is only for the sessions you start there`
+                        : `Every session ${name} starts runs on this, unless you ask it for another engine for that work. New session's own choice for each folder is only for the sessions you start there`}
                     </span>
                   </span>
                 </label>
@@ -534,7 +538,11 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                       engine={o.work.engine as Engine}
                       value={o.work.model}
                       label="Their model"
-                      onChange={(model) => update((x) => ({ ...x, work: { ...x.work, model } }))}
+                      onChange={(model) =>
+                        model !== null && !isModelName(model)
+                          ? setStatus({ state: "failed", problem: `“${model}” isn’t a model’s id: one word of letters, digits and . _ : / @ -` })
+                          : update((x) => ({ ...x, work: { ...x.work, model } }))
+                      }
                     />
                   )}
                 </span>

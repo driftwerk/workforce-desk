@@ -865,6 +865,19 @@ button.fsec-tile-head {
   flex-wrap: wrap;
   min-width: 0;
 }
+/* The model picker in the engine picker's shape, so the two read as a pair. */
+.oversee-engine .pc-engine {
+  height: 30px;
+  font-family: inherit;
+  font-size: 13px;
+  background-color: var(--sunken);
+  border-radius: var(--radius-sm);
+}
+.oversee-engine .pc-engine:focus {
+  border-color: var(--signal);
+  box-shadow: 0 0 0 3px var(--focus-ring);
+  outline: none;
+}
 .oversee-engine input.pc-model-other {
   width: min(16em, 100%);
 }

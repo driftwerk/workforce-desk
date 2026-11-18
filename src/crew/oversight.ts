@@ -148,6 +148,8 @@ const within = (v: unknown, lo: number, hi: number, d: number): number =>
 const ENGINE_WORD = /^[a-z0-9]+$/;
 /** A model's name as the hub takes one for `[oversight.work] model`. */
 const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,99}$/;
+/** Whether the hub takes `model` as `[oversight.work] model`. */
+export const isModelName = (model: string): boolean => MODEL_NAME.test(model.trim());
 const modelOf = (v: unknown): string | null => (typeof v === "string" && MODEL_NAME.test(v.trim()) ? v.trim() : null);
 const withoutModel = ({ model: _model, ...rest }: Doc): Doc => rest;
 const time = (v: unknown, d: string): string => (typeof v === "string" && (v === "" || TIME.test(v)) ? v : d);
