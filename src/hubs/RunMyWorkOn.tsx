@@ -157,10 +157,12 @@ function RouteModelsRows({
 }) {
   const ids = useId();
   const models = option.models ?? [];
+  // Every tier on Codex is the one plan model, so only its models are offered.
+  const tiers = option.kind === "codex" ? [] : TIERS;
   return (
     <>
       <span className="field-label">Models on {ROUTE_TITLES[option.kind]}</span>
-      <div className="think-rows route-models">
+      <div className="think-rows">
         {WORK.map(({ work, name, what }) => {
           const set = chosenModel(route, work);
           const known = !set || set === "chat" || models.includes(set) || TIERS.some(([t]) => t === set);
@@ -182,7 +184,7 @@ function RouteModelsRows({
                     {option.defaults ? ` · ${option.defaults[work]}` : ""}
                   </option>
                   {work !== "conversation" && <option value="chat">Same as conversation</option>}
-                  {TIERS.map(([tier, label]) => (
+                  {tiers.map(([tier, label]) => (
                     <option key={tier} value={tier}>
                       {label}
                     </option>
