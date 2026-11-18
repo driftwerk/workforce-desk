@@ -81,8 +81,10 @@ export const optionsOf = (raw: Raw): RouteOption[] =>
 /** What a workspace from before `/api/me/llm-route` answers. */
 const MISSING: Raw & { missing: true } = { missing: true };
 
-export const answer = async (res: Response): Promise<Raw & { missing?: true }> => {
-  if (res.status === 404 || res.status === 405) return MISSING;
+export const answer = async (res: Response, read = false): Promise<Raw & { missing?: true }> => {
+  // Only a read can tell an older workspace: a save there that misses is
+  // an error to show.
+  if (read && (res.status === 404 || res.status === 405)) return MISSING;
   const text = await res.text();
   const body = text ? (JSON.parse(text) as Raw & { error?: string }) : {};
   if (!res.ok) throw new Error(body.error ?? `The workspace answered ${res.status}.`);
@@ -115,13 +117,13 @@ export const agentView = (raw: Raw & { missing?: true }): AgentRouteView => ({
 });
 
 export const myRoute = async (hub: HubRef): Promise<RouteView> =>
-  view(await answer(await pairedHub(hub).fetch("GET", "/api/me/llm-route")));
+  view(await answer(await pairedHub(hub).fetch("GET", "/api/me/llm-route"), true));
 
 export const setMyRoute = async (hub: HubRef, route: PersonalRoute | null): Promise<RouteView> =>
   view(await answer(await pairedHub(hub).fetch("PUT", "/api/me/llm-route", jsonBody({ route }))));
 
 export const myAgentRoute = async (hub: HubRef, agentId: string): Promise<AgentRouteView> =>
-  agentView(await answer(await pairedHub(hub).fetch("GET", agentPath(agentId))));
+  agentView(await answer(await pairedHub(hub).fetch("GET", agentPath(agentId)), true));
 
 export const setMyAgentRoute = async (hub: HubRef, agentId: string, route: AgentRoute | null): Promise<AgentRouteView> =>
   agentView(await answer(await pairedHub(hub).fetch("PUT", agentPath(agentId), jsonBody({ route }))));

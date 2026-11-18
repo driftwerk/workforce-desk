@@ -34,7 +34,8 @@ describe("whereDataGoes", () => {
 
 describe("a workspace from before routes", () => {
   it("reads as missing, not as a failure", async () => {
-    expect((await answer(new Response("", { status: 404 }))).missing).toBe(true);
+    expect((await answer(new Response("", { status: 404 }), true)).missing).toBe(true);
+    await expect(answer(new Response("", { status: 404 }))).rejects.toThrow("404");
     await expect(answer(new Response(JSON.stringify({ error: "no" }), { status: 500 }))).rejects.toThrow("no");
   });
 

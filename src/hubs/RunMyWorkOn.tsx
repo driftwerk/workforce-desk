@@ -1,4 +1,4 @@
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 import type { HubRef } from "../hub/net";
 import { plainError } from "../ui/plainError";
 import {
@@ -103,10 +103,14 @@ function Picker({
  *  the workspace's answer shown. */
 function useRoute<V>(load: () => Promise<V>, deps: unknown[]) {
   const [view, setView] = useState<V | null>(null);
+  // Which load is current: a save answered after the hub or agent changed
+  // is dropped.
+  const current = useRef(0);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   useEffect(() => {
     let live = true;
+    current.current += 1;
     // Another agent's or workspace's choice never shows, nor takes a click.
     setView(null);
     setProblem(null);
@@ -120,12 +124,14 @@ function useRoute<V>(load: () => Promise<V>, deps: unknown[]) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, deps);
   const save = async (send: () => Promise<V>) => {
+    const at = current.current;
     setBusy(true);
     setProblem(null);
     try {
-      setView(await send());
+      const next = await send();
+      if (at === current.current) setView(next);
     } catch (e) {
-      setProblem(plainError(e));
+      if (at === current.current) setProblem(plainError(e));
     } finally {
       setBusy(false);
     }
