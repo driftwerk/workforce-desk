@@ -718,7 +718,7 @@ function Facts({ ticket: t, layout, onState }: { ticket: Ticket; layout: Layout;
   if (d?.sprint) {
     const name = sprintName(d.sprint);
     const when = d.sprint.starts && d.sprint.ends && system === "linear" ? spanText(d.sprint.starts, d.sprint.ends) : d.sprint.ends ? `ends ${dayText(d.sprint.ends)}` : null;
-    facts.sprint = { label: system === "linear" ? "Cycle" : "Sprint", value: <><CycleIcon size={12} />{name}{when && !compact && <span className="ticket-there">{when}</span>}</> };
+    facts.sprint = { label: system === "linear" ? "Cycle" : system === "github" ? "Milestone" : "Sprint", value: <><CycleIcon size={12} />{name}{when && !compact && <span className="ticket-there">{when}</span>}</> };
   }
   if (d?.labels?.length) facts.labels = { label: "Labels", value: <>{d.labels.map((l) => <LabelChip key={l} name={l} />)}</> };
   if (d?.project) facts.project = { label: "Project", value: system === "linear" ? <Dotted name={d.project} /> : d.project };

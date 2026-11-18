@@ -35,7 +35,7 @@ export const boardSyncOf = (hub: HubRef) => ({
   /** Whether `via` offers `system`'s tools, and what the dialog needs: the
    *  teams, the target's states, and how many issues the filter matches.
    *  The hub's reasons come back as an answer, not thrown. */
-  check: async (b: { system: SyncSystem; via: SyncVia; workspace?: string; target?: string; targetId?: string; filter?: SyncFilter; me?: string }): Promise<Checked> => {
+  check: async (b: { system: SyncSystem; via: SyncVia; workspace?: string; owner?: string; target?: string; targetId?: string; filter?: SyncFilter; me?: string }): Promise<Checked> => {
     const res = await pairedHub(hub).fetch("POST", "/api/desk/boards/link/check", jsonBody(b));
     if (res.ok) return { ok: true, check: (await res.json()) as LinkCheck };
     const text = await res.text().catch(() => "");
@@ -108,13 +108,37 @@ export const syncHubId = (pairedId: string): string => {
  *  `wfr_`, letters, digits, `_` and `-`, longer than 20 and shorter than 200. */
 export const looksLikeToken = (s: string): boolean => /^wfr_[A-Za-z0-9_-]{17,195}$/.test(s.trim());
 
+/** A GitHub login or organisation: letters, digits and single dashes, up to 39. */
+const GH_OWNER = "[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}";
+/** A GitHub project target: `owner/projects/7`. */
+const GH_PROJECT = new RegExp(`^${GH_OWNER}/projects/[1-9][0-9]{0,8}$`);
+/** A GitHub repository target: `owner/repo`. */
+const GH_REPO = new RegExp(`^${GH_OWNER}/[A-Za-z0-9._-]{1,100}$`);
+
 /** Whether `target` can be `system`'s project or team key, as the hub
  *  checks it: a capital, then capitals or digits (and `_` on Jira); up to
- *  20 on Jira, 10 on Linear. */
+ *  20 on Jira, 10 on Linear. On GitHub, `owner/projects/N` or `owner/repo`. */
 export const targetOk = (system: SyncSystem, target: string): boolean =>
-  system === "jira" ? /^[A-Z][A-Z0-9_]{0,19}$/.test(target) : /^[A-Z][A-Z0-9]{0,9}$/.test(target);
+  system === "github"
+    ? GH_PROJECT.test(target) || (GH_REPO.test(target) && !/^\.{1,2}$/.test(target.split("/")[1] ?? ""))
+    : system === "jira"
+      ? /^[A-Z][A-Z0-9_]{0,19}$/.test(target)
+      : /^[A-Z][A-Z0-9]{0,9}$/.test(target);
 
-export const SYSTEM_TITLE: Record<SyncSystem, string> = { jira: "Jira", linear: "Linear" };
+/** Whether a GitHub target is a project (else a repository's issues). */
+export const isGithubProject = (target: string): boolean => /\/projects\/\d+$/.test(target);
+
+/** A GitHub login or organisation as the link dialog's owner field takes it. */
+export const ownerOk = (owner: string): boolean => new RegExp(`^${GH_OWNER}$`).test(owner);
+
+export const SYSTEM_TITLE: Record<SyncSystem, string> = { jira: "Jira", linear: "Linear", github: "GitHub" };
+
+/** A board's target as a person reads it: a Jira or Linear key as it is,
+ *  a GitHub project as "acme · project 7", a repository as "acme/web". */
+export const targetWords = (system: SyncSystem, target: string): string => {
+  const m = system === "github" ? /^(.+)\/projects\/(\d+)$/.exec(target) : null;
+  return m ? `${m[1]} · project ${m[2]}` : target;
+};
 
 const hhmm = (iso: string): string => {
   const d = new Date(iso);
@@ -210,13 +234,18 @@ export const linkedTo = (b: Board, hub: string): string | null => {
   const s = b.sync;
   if (!s) return null;
   // "Linear · mantiscrm · MAN": the workspace, where the person has several.
-  const head = s.workspace ? `${SYSTEM_TITLE[s.system]} · ${s.workspace} · ${s.target}` : `${SYSTEM_TITLE[s.system]} ${s.target}`;
+  const target = targetWords(s.system, s.target);
+  const head = s.workspace ? `${SYSTEM_TITLE[s.system]} · ${s.workspace} · ${target}` : `${SYSTEM_TITLE[s.system]} ${target}`;
   if (s.via.kind !== "hub") return `${head} with this computer's keys`;
   return s.agent ? `${head} through ${agentTitle(s.agent)} on ${hub}` : `${head} via ${hub}`;
 };
 
-/** Whether a set of sync tools is Linear's (else Jira's). */
-const systemOfTools = (tools: readonly string[]): string => (tools[0]?.startsWith("linear") ? "Linear" : "Jira");
+/** Which system a set of sync tools belongs to, by the first one's name:
+ *  `linear.…`, `github.…`, else Jira's. */
+export const systemOfTools = (tools: readonly string[]): string => {
+  const first = tools[0] ?? "";
+  return first.startsWith("linear") ? "Linear" : first.startsWith("github") ? "GitHub" : "Jira";
+};
 
 /** Whether the hub stood behind who the person is: by their own key, or by
  *  the one user there with their verified email. */

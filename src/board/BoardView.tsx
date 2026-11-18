@@ -401,7 +401,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
           className="icon-btn-sm"
           aria-label="Boards"
           aria-haspopup="menu"
-          title="Other boards, rename, delete, link to Jira or Linear"
+          title="Other boards, rename, delete, link to Jira, Linear or GitHub"
           onClick={(e) => setMenu(below(e.currentTarget))}
         >
           <MoreIcon />

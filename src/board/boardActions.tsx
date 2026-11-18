@@ -1,6 +1,7 @@
-// What a board's ⋯ offers (rename, delete, link to Jira or Linear or
+// What a board's ⋯ offers (rename, delete, link to Jira, Linear or GitHub, or
 // unlink), the same from its sidebar row and from the board's header.
 
+import { SYSTEM_TITLE } from "../hub/boardSync";
 import type { Board } from "../hub/types";
 import type { MenuEntry } from "../ui/Menu";
 import { BoardDialog, DeleteBoard } from "./BoardDialogs";
@@ -17,8 +18,8 @@ export const boardEntries = (board: Board, act: (a: BoardAction) => void): MenuE
   { kind: "item", label: "Delete board…", onSelect: () => act("delete") },
   { kind: "separator" },
   board.sync
-    ? { kind: "item", label: `Unlink from ${board.sync.system === "jira" ? "Jira" : "Linear"}…`, onSelect: () => act("unlink") }
-    : { kind: "item", label: "Link to Jira or Linear…", onSelect: () => act("link") },
+    ? { kind: "item", label: `Unlink from ${SYSTEM_TITLE[board.sync.system]}…`, onSelect: () => act("unlink") }
+    : { kind: "item", label: "Link to Jira, Linear or GitHub…", onSelect: () => act("link") },
 ];
 
 /** The dialog an action opens. */

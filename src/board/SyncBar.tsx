@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import { useChat } from "../chat/store";
-import { fixOf, linkedTo, matchedBy, SYSTEM_TITLE, syncStatus, vouched } from "../hub/boardSync";
+import { fixOf, linkedTo, matchedBy, SYSTEM_TITLE, syncStatus, targetWords, vouched } from "../hub/boardSync";
 import { ChooseMe } from "./ChooseMe";
 import { openSettingsAt } from "../ui/problem";
 import { plainError } from "../ui/plainError";
@@ -282,7 +282,7 @@ export function LeftFilterShelf({ board, tickets }: { board: Board; tickets: Tic
 
 /** Asks before unlinking: the board keeps its tickets, unsynced. */
 export function UnlinkBoard({ board, onClose }: { board: Board; onClose: () => void }) {
-  const target = board.sync ? `${SYSTEM_TITLE[board.sync.system]} ${board.sync.target}` : "its project";
+  const target = board.sync ? `${SYSTEM_TITLE[board.sync.system]} ${targetWords(board.sync.system, board.sync.target)}` : "its project";
   return (
     <Confirm
       title={`Unlink “${board.name}” from ${target}?`}

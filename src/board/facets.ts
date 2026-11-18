@@ -26,6 +26,11 @@ export const FACETS: Record<SyncSystem, { id: FacetId; word: string }[]> = {
     { id: "project", word: "Project" },
     { id: "label", word: "Label" },
   ],
+  github: [
+    { id: "sprint", word: "Milestone" },
+    { id: "label", word: "Label" },
+    { id: "type", word: "Type" },
+  ],
 };
 
 /** What `t`'s issue says it is, for facet `id`: none when it doesn't. */

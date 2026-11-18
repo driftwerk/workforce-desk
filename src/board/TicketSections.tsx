@@ -248,8 +248,8 @@ function ChildRow({ child: c, me, who, onOpen }: { child: TicketChild; me?: stri
   );
 }
 
-const DEV_TITLE = { jira: "Development", linear: "Diffs" } as const;
-const DEV_FROM = { jira: "from Jira’s GitHub app", linear: "Linear’s GitHub link" } as const;
+const DEV_TITLE = { jira: "Development", linear: "Diffs", github: "Pull requests" } as const;
+const DEV_FROM = { jira: "from Jira’s GitHub app", linear: "Linear’s GitHub link", github: "from GitHub" } as const;
 
 /** A PR's state as its chip draws it: a declined one as a faint dashed
  *  chip that says so. */
