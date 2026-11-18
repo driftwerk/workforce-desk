@@ -11,7 +11,7 @@ import { useDesk, localSessions } from "../hub/store";
 import type { Board as BoardT, SyncSystem, Ticket, TicketState } from "../hub/types";
 import { useMinute } from "../floor/RightNow";
 import { Menu, type MenuEntry } from "../ui/Menu";
-import { leftFilterOf, syncStatus } from "../hub/boardSync";
+import { leftFilterOf, syncStatus, targetWords } from "../hub/boardSync";
 import { BoardDialog } from "./BoardDialogs";
 import { BoardPlans } from "./BoardPlans";
 import { LeftFilterShelf, SyncBar } from "./SyncBar";
@@ -27,9 +27,11 @@ import {
   statesOf,
   columns,
   keyOf,
+  keyTest,
   landing,
   lineAt,
   nudge,
+  hasUpstreamOrder,
   orderOn,
   shelfLabel,
   sortedLanding,
@@ -125,7 +127,7 @@ const Plans = createContext<{ of: ReadonlyMap<string, { id: string; goal: string
 const KEYS: Record<string, "up" | "down" | "left" | "right"> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
 
 /** What the Board view's header offers beyond the board itself: the
- *  board's menu (rename, delete, link to Jira or Linear) with its dialogs,
+ *  board's menu (rename, delete, link to Jira, Linear or GitHub) with its dialogs,
  *  and minting a sync token. Handed in by Desk's main window (see
  *  board/chrome.tsx), so a grid's own window, whose board panes have no
  *  such header, never reaches what mints a token. */
@@ -191,7 +193,8 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   // A synced board is synced at once when it's shown, and its hub's name
   // read for what its sync bar says.
   const synced = !!board?.sync;
-  const order = orderOn(view.order, synced);
+  const upstream = hasUpstreamOrder(board?.sync);
+  const order = orderOn(view.order, synced, upstream);
   // How the board there orders its issues: what "As on" sorts by.
   const ordering = board?.sync?.ordering ?? null;
   const priorities = board?.sync?.fields?.priorities;
@@ -224,11 +227,11 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
     () => ({ of: new Map([...ticketPlans].map(([t, p]) => [t, { id: p, goal: planNames.get(p) ?? "" }])), show: pane ? null : setPlan }),
     [ticketPlans, planNames, pane, setPlan],
   );
-  // Who the person is on the board's Jira or Linear, for Mine.
+  // Who the person is on the board's Jira, Linear or GitHub, for Mine.
   const me = board?.sync?.me ?? null;
   // A synced board's own filters (epic, type, sprint; cycle, project,
   // label), kept with the board's view.
-  // Only the facets its Jira or Linear has chips for: one kept from before
+  // Only the facets its Jira, Linear or GitHub has chips for: one kept from before
   // a relink would filter with no chip to clear it.
   const system = board?.sync?.system ?? null;
   const facets = useMemo(
@@ -259,7 +262,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   const hand = byHand(order, source);
   /** What a drag up or down says in a sorted order: the card keeps its
    *  sorted place. */
-  const sorted = () => setSaid(sortedSaid(order, board?.sync?.system ?? null, ordering));
+  const sorted = () => setSaid(sortedSaid(order, board?.sync?.system ?? null, ordering, upstream));
   const move = (id: string, shown: TicketMove) => {
     const t = all[id];
     // Placed in the whole column, whatever the filter hides: among its
@@ -290,13 +293,13 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
 
   // Enter on a typed key opens that ticket, whichever board it is on.
   const openTyped = () => {
-    const key = keyOf(q);
-    if (!key) return;
-    const found = Object.values(all).find((t) => t.key?.toUpperCase() === key);
+    const isKey = keyTest(q);
+    if (!isKey) return;
+    const found = Object.values(all).find((t) => isKey(t.key));
     if (found) {
       useBoard.getState().show(found.board);
       useBoard.getState().openTicket(found.id);
-    } else setSaid(`There's no ${key}`);
+    } else setSaid(`There's no ${keyOf(q) ?? q.trim()}`);
   };
 
   if (pane && !board) return <BoardPaneNote supported={supported} />;
@@ -399,14 +402,14 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
     <main className="board" aria-label="Board">
       <header className="board-head">
         <h1 className="display">{/board$/i.test(board.name) ? board.name : `${board.name} board`}</h1>
-        <span className="floor-time">{[board.prefix ?? board.sync?.target, boss?.name ? `run by ${boss.name}` : null].filter(Boolean).join(" · ")}</span>
+        <span className="floor-time">{[board.prefix ?? (board.sync ? targetWords(board.sync.system, board.sync.target) : null), boss?.name ? `run by ${boss.name}` : null].filter(Boolean).join(" · ")}</span>
         <button
           ref={menuButton}
           type="button"
           className="icon-btn-sm"
           aria-label="Boards"
           aria-haspopup="menu"
-          title="Other boards, rename, delete, link to Jira or Linear"
+          title="Other boards, rename, delete, link to Jira, Linear or GitHub"
           onClick={(e) => setMenu(below(e.currentTarget))}
         >
           <MoreIcon />
@@ -431,7 +434,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
             ))}
           </select>
         )}
-        <OrderChip order={order} system={board.sync?.system ?? null} ordering={ordering} onChange={(o) => setBoardView(board.id, { order: o })} />
+        <OrderChip order={order} system={board.sync?.system ?? null} ordering={ordering} upstream={upstream} onChange={(o) => setBoardView(board.id, { order: o })} />
         <label className="sr-only" htmlFor={searchId}>
           Search tickets
         </label>
@@ -439,7 +442,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
           id={searchId}
           className="board-search"
           value={q}
-          placeholder={`Search or ${board.prefix ?? board.sync?.target ?? "ACM"}-12`}
+          placeholder={board.sync?.system === "github" ? "Search or web#12" : `Search or ${board.prefix ?? board.sync?.target ?? "ACM"}-12`}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => {
             if (e.key === "Enter") openTyped();
@@ -461,7 +464,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
           board={board}
           now={now}
           onToken={tokenFor && chrome ? () => setNewToken(true) : undefined}
-          orderWhy={order === "source" && !hand ? sortedSaid(order, board.sync.system, ordering) : null}
+          orderWhy={order === "source" && !hand ? sortedSaid(order, board.sync.system, ordering, upstream) : null}
         />
       )}
       <LeftFilterShelf key={`left:${board.id}`} board={board} tickets={left} />
@@ -514,7 +517,7 @@ function Columns({
   onSorted: () => void;
   /** What its element ids start with. */
   ids: string;
-  /** The board's Jira or Linear, when it is synced. */
+  /** The board's Jira, Linear or GitHub, when it is synced. */
   system: SyncSystem | null;
   /** Column tabs, for a pane too narrow for every column (which then
    *  shows the one picked): each takes a card dropped on it. */

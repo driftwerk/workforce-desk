@@ -3,9 +3,9 @@ import { useChat } from "../chat/store";
 import { openSettingsAt } from "../ui/problem";
 import { HubError } from "../hub/client";
 import { useDesk } from "../hub/store";
-import { looksLikeToken, mintSyncToken, SYSTEM_TITLE, targetOk, type Checked } from "../hub/boardSync";
+import { isGithubProject, looksLikeToken, mintSyncToken, ownerOk, SYSTEM_TITLE, targetOk, targetWords, type Checked } from "../hub/boardSync";
 import type { Board, LinkCheck, SyncAssignee, SyncFilter, SyncSystem, SyncVia, TicketState } from "../hub/types";
-import { openUrl } from "../platform";
+import { openUrl, reportOpenFailure } from "../platform";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { STATE_TITLE } from "./board";
 import { ChooseMe } from "./ChooseMe";
@@ -17,11 +17,12 @@ import { NoAgent, ThisComputerSetup } from "./syncSetup";
  *  system's tools. */
 type Probe =
   | { state: "checking" }
-  | { state: "offered"; teams: Team[]; projects: Project[]; agent: string | null; workspaces: string[]; workspace: string | null; why: string | null }
+  | { state: "offered"; teams: Team[]; projects: Project[]; repos: Repo[]; owner: string | null; projectsWhy: string | null; agent: string | null; workspaces: string[]; workspace: string | null; why: string | null }
   | { state: "no"; error: string; noToken: boolean; noAgent: boolean }
   | { state: "needsToken" };
 type Team = { id: string; key: string; name: string };
-type Project = { key: string; name: string };
+type Project = { key: string; name: string; id?: string };
+type Repo = { key: string; name: string };
 
 type FilterKind = SyncFilter["kind"];
 
@@ -36,6 +37,13 @@ const FILTERS: Record<SyncSystem, { kind: FilterKind; label: string; sub: string
     { kind: "label", label: "A label", sub: "issues with one label" },
     { kind: "query", label: "A Jira search", sub: "a search you wrote in Jira’s issue search, kept inside the project" },
   ],
+  github: [
+    { kind: "all", label: "Whole board", sub: "every open issue, whoever has it: pick up work and see who has what" },
+    { kind: "assignedToMe", label: "Assigned to me", sub: "issues assigned to you" },
+    { kind: "label", label: "A label", sub: "issues with one label" },
+    { kind: "milestone", label: "A milestone", sub: "issues in one milestone" },
+    { kind: "query", label: "A project filter", sub: "a filter written as in the project’s own filter box, like label:bug -status:Done" },
+  ],
   linear: [
     { kind: "all", label: "Whole team", sub: "every open issue, whoever has it: pick up work and see who has what" },
     { kind: "assignedToMe", label: "Assigned to me", sub: "your issues in the team" },
@@ -44,11 +52,21 @@ const FILTERS: Record<SyncSystem, { kind: FilterKind; label: string; sub: string
   ],
 };
 
+/** The filters a link to `system` offers: a GitHub repository has no
+ *  project filter to write. */
+const filtersFor = (system: SyncSystem, project: boolean) => FILTERS[system].filter((f) => system !== "github" || project || f.kind !== "query");
+
+/** A remote state as the state map names it: GitHub's `label:x` as "Label x". */
+const stateName = (r: string): string => (r.startsWith("label:") ? `Label ${r.slice(6)}` : r);
+
+/** A GitHub login, as the hub checks one. */
+const githubLogin = (s: string): boolean => /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Za-z0-9])){0,38}$/.test(s);
+
 /** The columns a remote state can be mapped from, left to right. */
 const MAPPED: TicketState[] = ["backlog", "todo", "doing", "review", "done", "dropped"];
 
 /** What a person's several instances of a system are called. */
-const WORKSPACE: Record<SyncSystem, string> = { jira: "Jira site", linear: "Linear workspace" };
+const WORKSPACE: Record<SyncSystem, string> = { jira: "Jira site", linear: "Linear workspace", github: "GitHub account" };
 
 /** A check's answer as a probe says it. */
 const probeOf = (r: Checked): Probe =>
@@ -57,6 +75,9 @@ const probeOf = (r: Checked): Probe =>
         state: "offered",
         teams: r.check.teams ?? [],
         projects: r.check.projects ?? [],
+        repos: r.check.repos ?? [],
+        owner: r.check.owner ?? null,
+        projectsWhy: r.check.projectsWhy ?? null,
         agent: r.check.agent?.name ?? null,
         workspaces: r.check.workspaces ?? [],
         workspace: r.check.workspace ?? null,
@@ -77,11 +98,12 @@ const plainLinkError = (said: string): string => (/ORDER BY/i.test(said) && /JQL
 /** A board made for a link that failed: taken away again, here and on the
  *  hub, and the original shown. If the failure was a lost answer and the
  *  link did apply, the board is kept (`linked`) instead. `stuck`: the hub
- *  wouldn't delete it. */
-const undoMade = async (made: string, original: string): Promise<"removed" | "linked" | "stuck"> => {
+ *  wouldn't delete it. `always`: the person walked away, so it goes even
+ *  if the link applied. */
+const undoMade = async (made: string, original: string | null, always = false): Promise<"removed" | "linked" | "stuck"> => {
   const hub = useDesk.getState().hub;
   if (!hub) return "stuck";
-  const now = await hub.boards().catch(() => null);
+  const now = always ? null : await hub.boards().catch(() => null);
   const there = now?.find((b) => b.id === made);
   if (there?.sync) {
     useBoard.setState((st) => ({ boards: { ...st.boards, [made]: there }, shown: made }));
@@ -94,7 +116,7 @@ const undoMade = async (made: string, original: string): Promise<"removed" | "li
   }
   useBoard.setState((st) => {
     const { [made]: _, ...boards } = st.boards;
-    return { boards, tickets: Object.fromEntries(Object.entries(st.tickets).filter(([, t]) => t.board !== made)), shown: original };
+    return { boards, tickets: Object.fromEntries(Object.entries(st.tickets).filter(([, t]) => t.board !== made)), shown: st.shown === made ? original : st.shown };
   });
   return "removed";
 };
@@ -105,8 +127,12 @@ const undoMade = async (made: string, original: string): Promise<"removed" | "li
  *  the board's sync gets one made there by Desk where the hub allows it;
  *  otherwise the person pastes one made on that hub, once. Laid out as the
  *  Move and Continue-in dialogs are (.move-*). */
-export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tickets: number; onClose: () => void }) {
+export function LinkBoardDialog({ board, tickets = 0, onClose, onMade }: { board?: Board; tickets?: number; onClose: () => void; /** Without a board: the new board was made and linked. */ onMade?: (b: Board) => void }) {
   const ids = useId();
+  /** No board to link: one is made, named after the target, as it links. */
+  const fresh = !board;
+  /** The dialog was closed while the board was being made and linked. */
+  const walkedAway = useRef(false);
   const paired = useChat((s) => s.hubs);
   const kept = useSyncHubs((s) => s.hubs);
   const choices = useMemo(() => syncChoices(paired, kept), [paired, kept]);
@@ -117,6 +143,12 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   /** The project key typed though the hub lists projects. */
   const [typedKey, setTypedKey] = useState(false);
   const [teamId, setTeamId] = useState("");
+  /** GitHub: a project (preferred) or a repository's issues. */
+  const [ghKind, setGhKind] = useState<"project" | "repo">("project");
+  /** GitHub: the owner typed, once the person changes it from the account listed. */
+  const [ownerTyped, setOwnerTyped] = useState<string | null>(null);
+  /** GitHub project boards: the repo tickets made here become issues in. */
+  const [newRepo, setNewRepo] = useState("");
   const [filterKind, setFilterKind] = useState<FilterKind>("all");
   const [filterValue, setFilterValue] = useState("");
   const [includeDone, setIncludeDone] = useState(false);
@@ -201,7 +233,31 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   }, [wsKey]);
   /** The probe the teams and projects come from: the workspace's own,
    *  where there are several. */
-  const listed = several ? wsProbe : probe;
+  const baseListed = several ? wsProbe : probe;
+  // GitHub: another owner's projects and repos, asked for once typed.
+  const ownerAsk = ownerTyped !== null && ownerOk(ownerTyped.trim()) ? ownerTyped.trim() : null;
+  const ownerKey = viaKey && ownerAsk ? `${viaKey}:${workspace ?? ""}:${ownerAsk.toLowerCase()}:${keptKey}:${reprobe}` : null;
+  const [ofOwner, setOfOwner] = useState<Record<string, Probe>>({});
+  const ownerProbe = ownerKey ? ofOwner[ownerKey] : undefined;
+  useEffect(() => {
+    if (system !== "github" || !via || !ownerKey || !ownerAsk || !offered) return;
+    const run = ownerKey;
+    const sync = localSync();
+    if (!sync) return;
+    const t = setTimeout(() => {
+      setOfOwner((p) => (p[run] ? p : { ...p, [run]: { state: "checking" } }));
+      void sync
+        .check({ system, via, ...(workspace ? { workspace } : {}), owner: ownerAsk })
+        .then(probeOf)
+        .catch((e: unknown): Probe => ({ state: "no", error: saidOf(e), noToken: false, noAgent: false }))
+        .then((said) => setOfOwner((p) => ({ ...p, [run]: said })));
+    }, 400);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownerKey, offered]);
+  /** GitHub: a half-typed owner lists nothing, not the last owner's. */
+  const ownerInvalid = system === "github" && ownerTyped !== null && !ownerAsk;
+  const listed = ownerInvalid ? undefined : system === "github" && ownerAsk ? ownerProbe : baseListed;
   /** Teams or projects may be picked: the hub offers the system, and the
    *  workspace (where there are several) is picked and answered. */
   const ready = offered && listed?.state === "offered" && !listed.why;
@@ -214,13 +270,34 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     setNotMe(false);
     setChecked(null);
   };
+  /** GitHub: a project or a repository: what was picked is dropped. */
+  const pickGhKind = (k: "project" | "repo") => {
+    setGhKind(k);
+    setTarget("");
+    setTypedKey(false);
+    setNewRepo("");
+    setChecked(null);
+    if (k === "repo" && filterKind === "query") setFilterKind("all");
+  };
+  const pickOwner = (v: string) => {
+    setOwnerTyped(v.trim() === "" ? null : v.replace(/\s/g, ""));
+    setTarget("");
+    setNewRepo("");
+    setChecked(null);
+  };
 
   // ── The target, the filter and what they match ──────────────────────────
   const teams = ready && listed?.state === "offered" ? listed.teams : [];
   const projects = ready && listed?.state === "offered" ? listed.projects : [];
+  const repos = ready && listed?.state === "offered" ? listed.repos : [];
+  const projectsWhy = ready && listed?.state === "offered" ? listed.projectsWhy : null;
+  /** GitHub: the account listed (what the hub said, until another is typed). */
+  const ownerShown = ownerTyped ?? (listed?.state === "offered" ? (listed.owner ?? "") : (probe?.state === "offered" ? (probe.owner ?? "") : ""));
+  const asProject = system === "github" && ghKind === "project";
+  const project = asProject ? (projects.find((p) => p.key === target) ?? null) : null;
   const team = teams.find((t) => t.id === teamId) ?? null;
   const targetKey = system === "linear" ? (team?.key ?? "") : target;
-  const targetGood = !!system && !!targetKey && targetOk(system, targetKey);
+  const targetGood = !!system && !!targetKey && targetOk(system, targetKey) && (system !== "github" || isGithubProject(targetKey) === asProject);
   const filter: SyncFilter | null =
     filterKind === "all"
       ? { kind: "all", value: { includeDone } }
@@ -234,10 +311,25 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   const meKey = `${system}:${viaKey}:${workspace}:${targetKey}`;
   const heard = heardMe?.key === meKey ? heardMe : null;
   const knownMe = notMe ? null : heard ? heard.me : undefined;
-  const meNeeded = system === "linear" && filterKind === "assignedToMe" && knownMe === null;
-  const filterReady = !!filter && (!meNeeded || linearId(me.trim()));
-  const meBad = !!me.trim() && !linearId(me.trim());
-  const checkKey = JSON.stringify([system, viaKey, workspace, targetKey, team?.id, filterReady ? filter : null, meNeeded ? me.trim() : null, asked]);
+  const idOk = system === "github" ? githubLogin : linearId;
+  const meNeeded = (system === "linear" || system === "github") && filterKind === "assignedToMe" && knownMe === null;
+  const filterReady = !!filter && (!meNeeded || idOk(me.trim()));
+  const meBad = !!me.trim() && !idOk(me.trim());
+  // A typed project has no id until the hub resolves it: kept from its answer.
+  const [resolved, setResolved] = useState<{ target: string; id: string } | null>(null);
+  const targetIdOf: string | undefined = project?.id ?? (asProject && resolved?.target === targetKey ? resolved.id : undefined);
+  /** A board made from the link goes by its target: a Linear team's name, a
+   *  Jira project's key, a GitHub project's or repository's name. */
+  const newName = !system
+    ? ""
+    : system === "linear"
+      ? (team?.name ?? targetKey)
+      : system === "github"
+        ? asProject
+          ? (project?.name ?? targetWords(system, targetKey))
+          : (targetKey.split("/").pop() ?? targetKey)
+        : targetKey;
+  const checkKey = JSON.stringify([system, viaKey, workspace, ownerTyped, targetKey, team?.id, project?.id, filterReady ? filter : null, meNeeded ? me.trim() : null, asked]);
   const checkRun = useRef(0);
   useEffect(() => {
     if (!system || !via || !ready || !targetGood) return;
@@ -250,8 +342,10 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
           system,
           via,
           ...(workspace ? { workspace } : {}),
+          ...(system === "github" && ownerAsk ? { owner: ownerAsk } : {}),
           target: targetKey,
           ...(team ? { targetId: team.id } : {}),
+          ...(targetIdOf ? { targetId: targetIdOf } : {}),
           ...(filterReady && filter ? { filter } : {}),
           ...(meNeeded && filterReady ? { me: me.trim() } : {}),
         })
@@ -270,9 +364,13 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   useEffect(() => {
     if (!now || !targetKey) return;
     if (now.ok && now.check.me !== undefined) setHeardMe({ key: meKey, me: now.check.me, why: now.check.meWhy, by: now.check.meBy });
-    else if (!now.ok && now.status === 400 && system === "linear" && filterKind === "assignedToMe" && /member/i.test(now.error)) setHeardMe({ key: meKey, me: null });
+    else if (!now.ok && now.status === 400 && (system === "linear" || system === "github") && filterKind === "assignedToMe" && /member|login/i.test(now.error)) setHeardMe({ key: meKey, me: null });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [now]);
+  useEffect(() => {
+    if (found?.targetId && targetKey) setResolved({ target: targetKey, id: found.targetId });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [found]);
   const remoteStates = found?.states ?? null;
   // The state map starts from what the hub's states mean, once per target.
   useEffect(() => {
@@ -282,7 +380,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     setStates(found.prefill);
   }, [found, system, viaKey, workspace, targetKey]);
 
-  const hasTickets = tickets > 0;
+  const hasTickets = !fresh && tickets > 0;
   /** What happens to the board's own tickets: kept beside the issues, or
    *  cleared first. */
   const [own, setOwn] = useState<"keep" | "clear" | "new" | null>(null);
@@ -290,8 +388,8 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
   /** Why Link can't be pressed yet: the first thing missing, in plain words. */
   const waitingOn: { words: string; failed: boolean } | null = (() => {
     if (busy) return null;
-    if (hasTickets && !own) return { words: `Say what happens to ${board.name}’s ${tickets === 1 ? "ticket" : `${tickets} tickets`}.`, failed: false };
-    if (!system) return { words: "Pick Jira or Linear.", failed: false };
+    if (hasTickets && !own) return { words: `Say what happens to ${board!.name}’s ${tickets === 1 ? "ticket" : `${tickets} tickets`}.`, failed: false };
+    if (!system) return { words: "Pick Jira, Linear or GitHub.", failed: false };
     if (!localSync()) return { words: "Desk isn’t ready yet, so nothing can be checked or linked. Try again in a moment.", failed: true };
     if (!via) return { words: `Pick where ${SYSTEM_TITLE[system]} is reached through.`, failed: false };
     if (!offered) {
@@ -301,14 +399,34 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     }
     if (several && !workspace) return { words: (probe?.state === "offered" && probe.why) || `Pick which ${WORKSPACE[system]}.`, failed: false };
     if (several && workspace) {
-      if (!wsProbe || wsProbe.state === "checking") return { words: `Asking ${viaName} for ${workspace}’s ${system === "jira" ? "projects" : "teams"}…`, failed: false };
+      if (!wsProbe || wsProbe.state === "checking") return { words: `Asking ${viaName} for ${workspace}’s ${system === "jira" ? "projects" : system === "github" ? "projects and repositories" : "teams"}…`, failed: false };
       if (wsProbe.state === "no") return { words: wsProbe.error, failed: true };
       if (wsProbe.state === "offered" && wsProbe.why) return { words: wsProbe.why, failed: true };
     }
     // What the hub says stops the list, whatever it is.
     if (listed?.state === "offered" && listed.why) return { words: listed.why, failed: true };
-    if (!targetGood) return { words: system === "linear" ? "Pick a team." : (projects.length > 0 && !typedKey ? "Pick a project." : "Enter the Jira project key."), failed: false };
-    if (!filterReady) return { words: meNeeded ? "Enter your Linear member id." : "Say what to import.", failed: false };
+    if (system === "github" && ownerAsk && (!ownerProbe || ownerProbe.state === "checking")) return { words: `Asking ${viaName} for ${ownerAsk}’s projects and repositories…`, failed: false };
+    if (system === "github" && ownerProbe?.state === "no") return { words: "Pick another owner.", failed: true };
+    if (ownerInvalid) return { words: "Enter a GitHub login for the owner.", failed: true };
+    if (!targetGood)
+      return {
+        words:
+          system === "linear"
+            ? "Pick a team."
+            : system === "github"
+              ? asProject
+                ? projects.length > 0 && !typedKey
+                  ? "Pick a project."
+                  : "Enter the project as owner/projects/7."
+                : repos.length > 0 && !typedKey
+                  ? "Pick a repository."
+                  : "Enter the repository as owner/name."
+              : projects.length > 0 && !typedKey
+                ? "Pick a project."
+                : "Enter the Jira project key.",
+        failed: false,
+      };
+    if (!filterReady) return { words: meNeeded ? (system === "github" ? "Enter your GitHub login." : "Enter your Linear member id.") : "Say what to import.", failed: false };
     if (!now) return { words: "Waiting for the match count…", failed: false };
     if (!now.ok) return { words: `The match check failed: ${plainLinkError(now.error)}`, failed: true };
     if (now.check.matches === undefined) return { words: "Waiting for the match count…", failed: false };
@@ -321,30 +439,39 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     setBusy(true);
     setProblem(null);
     let made: Board | null = null;
+    const original = useBoard.getState().shown;
+    walkedAway.current = false;
     try {
       // Cleared first: they're Desk's own, and nothing there changes.
       if (hasTickets && own === "clear") {
-        const mine = Object.values(useBoard.getState().tickets).filter((t) => t.board === board.id);
+        const mine = Object.values(useBoard.getState().tickets).filter((t) => t.board === board!.id);
         for (const t of mine) await useBoard.getState().remove(t.id);
       }
       const mapped = Object.fromEntries(Object.entries(states).filter(([, v]) => !!v));
       // A new board takes the link and this one stays as it is.
       let into = board;
-      if (hasTickets && own === "new") {
-        made = await useBoard.getState().createBoard(`${board.name} · ${SYSTEM_TITLE[system]}`);
+      if (fresh) {
+        // No board yet: one is made, named after what it links to.
+        made = await useBoard.getState().createBoard(newName);
         into = made;
-        if (board.group) {
+        if (walkedAway.current) throw new Error("Cancelled.");
+      } else if (hasTickets && own === "new") {
+        made = await useBoard.getState().createBoard(`${board!.name} · ${SYSTEM_TITLE[system]}`);
+        into = made;
+        if (board!.group) {
           const hub = useDesk.getState().hub;
           if (hub) {
-            made = await hub.updateBoard(made.id, { group: board.group }).catch(() => made as Board);
+            made = await hub.updateBoard(made.id, { group: board!.group }).catch(() => made as Board);
             useBoard.setState((s) => ({ boards: { ...s.boards, [made!.id]: made! } }));
           }
         }
       }
-      const b = await sync.link(into.id, {
+      const b = await sync.link(into!.id, {
         system,
         target: targetKey,
         ...(team ? { targetId: team.id } : {}),
+        ...(targetIdOf ? { targetId: targetIdOf } : {}),
+        ...(asProject && newRepo ? { repo: newRepo } : {}),
         via,
         ...(workspace ? { workspace } : {}),
         filter,
@@ -353,19 +480,35 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
         ...(hasTickets && own === "keep" ? { keepTickets: true } : {}),
         states: mapped,
       });
-      useBoard.setState((s) => ({ boards: { ...s.boards, [b.id]: b } }));
+      if (walkedAway.current) throw new Error("Cancelled.");
+      useBoard.setState((s) => ({ boards: { ...s.boards, [b.id]: b }, ...(fresh ? { shown: b.id } : {}) }));
+      // The board opens on its first sync: its bar shows it as it runs.
       void sync.syncNow(b.id).catch(() => {});
+      if (fresh) onMade?.(b);
       onClose();
     } catch (e) {
       let words = saidOf(e);
+      const cancelled = walkedAway.current;
+      let outcomeWords = "";
       if (made) {
-        const outcome = await undoMade(made.id, board.id);
+        const outcome = await undoMade(made.id, fresh ? original : board!.id, cancelled);
         if (outcome === "linked") {
           void sync.syncNow(made.id).catch(() => {});
+          if (fresh) onMade?.(useBoard.getState().boards[made.id] ?? made);
           onClose();
           return;
         }
         if (outcome === "stuck") words = `${words} The new board “${made.name}” couldn’t be removed either: delete it from its menu.`;
+        else if (fresh) words = `${words} No board was made: “${made.name}” was removed again.`;
+        outcomeWords =
+          outcome === "stuck"
+            ? `You closed the new board dialog, but “${made.name}” couldn’t be removed: delete it from its menu.`
+            : `You closed the new board dialog, so “${made.name}” was removed again; no board was made.`;
+      }
+      if (cancelled) {
+        // The dialog is gone: the outcome is said where Desk says such things.
+        if (made) reportOpenFailure(new Error(outcomeWords));
+        return;
       }
       setProblem(words);
       setBusy(false);
@@ -376,21 +519,33 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
     setViaKey(key);
     setTarget("");
     setTeamId("");
+    setOwnerTyped(null);
+    setNewRepo("");
     setChecked(null);
+  };
+
+  /** Closing while the board is being made: it is taken away again. */
+  const close = () => {
+    if (fresh && busy) walkedAway.current = true;
+    onClose();
   };
 
   return (
     <Dialog
-      onClose={onClose}
+      onClose={close}
       title={(id) => (
         <header className="dialog-head">
           <span className="dialog-title">
             <h1 id={id} className="display-lg">
-              Link “{board.name}” to Jira or Linear
+              {fresh ? "New board from Linear, Jira or GitHub" : `Link “${board.name}” to Jira, Linear or GitHub`}
             </h1>
-            <p className="small">Its tickets become the project’s issues: what you move here goes out, what changes there comes in.</p>
+            <p className="small">
+              {fresh
+                ? "Desk makes a board named after what you pick, and links it: what you move here goes out, what changes there comes in."
+                : "Its tickets become the project’s issues: what you move here goes out, what changes there comes in."}
+            </p>
           </span>
-          <CloseButton onClose={onClose} />
+          <CloseButton onClose={close} />
         </header>
       )}
     >
@@ -419,7 +574,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                 <input type="radio" name={`${ids}-own`} checked={own === "clear"} disabled={busy} onChange={() => setOwn("clear")} />
                 <span className="move-opt-main">
                   <span>Clear {tickets === 1 ? "it" : "them"} first</span>
-                  <span className="move-opt-sub">Deleted from this board before it links. Nothing in Jira or Linear changes.</span>
+                  <span className="move-opt-sub">Deleted from this board before it links. Nothing in {system ? SYSTEM_TITLE[system] : "Jira, Linear or GitHub"} changes.</span>
                 </span>
               </label>
             </div>
@@ -429,7 +584,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
         <fieldset className="move-field">
           <legend>System</legend>
           <div className="seg handoff-seg" role="radiogroup" aria-label="System">
-            {(["jira", "linear"] as const).map((s) => (
+            {(["jira", "linear", "github"] as const).map((s) => (
               <button
                 key={s}
                 type="button"
@@ -440,6 +595,12 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                   setSystem(s);
                   setViaKey(null);
                   setFilterKind("all");
+                  setFilterValue("");
+                  setGhKind("project");
+                  setOwnerTyped(null);
+                  setNewRepo("");
+                  setTarget("");
+                  setTypedKey(false);
                   setChecked(null);
                 }}
               >
@@ -474,7 +635,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
 
         {system && via && offered && several && (
           <fieldset className="move-field">
-            <legend>{system === "jira" ? "Site" : "Workspace"}</legend>
+            <legend>{system === "jira" ? "Site" : system === "github" ? "Account" : "Workspace"}</legend>
             <div className="move-opts" role="radiogroup" aria-label={WORKSPACE[system]}>
               {workspaces.map((w) => (
                 <label key={w} className="move-opt">
@@ -492,7 +653,148 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
           </fieldset>
         )}
 
-        {system && via && ready && (
+        {system === "github" && via && offered && (
+          <fieldset className="move-field">
+            <legend>Where</legend>
+            <div className="seg handoff-seg" role="radiogroup" aria-label="Project or repository">
+              {(["project", "repo"] as const).map((k) => (
+                <button key={k} type="button" role="radio" aria-checked={ghKind === k} disabled={busy} onClick={() => pickGhKind(k)}>
+                  {k === "project" ? "A project" : "A repository"}
+                </button>
+              ))}
+            </div>
+            <span className="move-opt-sub">
+              {asProject ? "The project’s Status options are the board’s columns, and its own order is kept." : "A repository’s issues: open and closed, or a column for each label you map."}
+            </span>
+            <label className="field">
+              <span>Owner</span>
+              <input
+                className="mono"
+                value={ownerShown}
+                aria-label="Owner"
+                onChange={(e) => pickOwner(e.target.value)}
+                placeholder="a user or organization"
+                maxLength={39}
+                spellCheck={false}
+                autoComplete="off"
+                aria-invalid={ownerTyped !== null && !ownerAsk}
+              />
+              {ownerTyped !== null && !ownerAsk ? (
+                <span className="move-opt-sub state-blocked">A GitHub login is letters, digits and single dashes.</span>
+              ) : (
+                <span className="move-opt-sub">Whose {asProject ? "projects" : "repositories"} to list. Your own, until you name another.</span>
+              )}
+            </label>
+            {ready && projectsWhy && asProject && (
+              <p className="move-callout move-refused" role="alert">
+                {projectsWhy}{" "}
+                <button type="button" className="link" onClick={() => pickGhKind("repo")}>
+                  Link a repository’s issues instead
+                </button>
+              </p>
+            )}
+            {ready && asProject && (
+              <>
+                {projects.length > 0 && !typedKey ? (
+                  <label className="field">
+                    <span>{ownerShown ? `${ownerShown}’s` : `${viaName}’s`} GitHub project</span>
+                    <select className="board-select sync-select" value={target} onChange={(e) => setTarget(e.target.value)}>
+                      <option value="">Pick a project</option>
+                      {projects.map((p) => (
+                        <option key={p.key} value={p.key}>
+                          {p.name} · project {p.key.split("/").pop()}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <label className="field">
+                    <span>The project’s address</span>
+                    <input
+                      className="mono"
+                      value={target}
+                      onChange={(e) => setTarget(e.target.value.replace(/\s/g, ""))}
+                      placeholder="acme/projects/7"
+                      maxLength={160}
+                      spellCheck={false}
+                      autoComplete="off"
+                      aria-invalid={!!target && !targetGood}
+                    />
+                    {!!target && !targetGood && <span className="move-opt-sub state-blocked">A project is written owner/projects/7.</span>}
+                  </label>
+                )}
+                {projects.length > 0 && (
+                  <button type="button" className="link small" onClick={() => { setTypedKey(!typedKey); setTarget(""); }}>
+                    {typedKey ? "Pick from the list" : "Not listed? Type it"}
+                  </button>
+                )}
+                {targetGood && (
+                  <label className="field">
+                    <span>New tickets go to</span>
+                    <select className="board-select sync-select" aria-label="New tickets go to" value={newRepo} disabled={busy} onChange={(e) => setNewRepo(e.target.value)}>
+                      <option value="">Nowhere: tickets made here stay on Desk</option>
+                      {repos.map((r) => (
+                        <option key={r.key} value={r.key}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="move-opt-sub">A ticket made here becomes an issue in this repository and is added to the project.</span>
+                  </label>
+                )}
+              </>
+            )}
+            {ready && !asProject && (
+              <>
+                {repos.length > 0 && !typedKey ? (
+                  <label className="field">
+                    <span>{ownerShown ? `${ownerShown}’s` : `${viaName}’s`} repository</span>
+                    <select className="board-select sync-select" value={target} onChange={(e) => setTarget(e.target.value)}>
+                      <option value="">Pick a repository</option>
+                      {repos.map((r) => (
+                        <option key={r.key} value={r.key}>
+                          {r.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ) : (
+                  <label className="field">
+                    <span>The repository</span>
+                    <input
+                      className="mono"
+                      value={target}
+                      onChange={(e) => setTarget(e.target.value.replace(/\s/g, ""))}
+                      placeholder="acme/web"
+                      maxLength={160}
+                      spellCheck={false}
+                      autoComplete="off"
+                      aria-invalid={!!target && !targetGood}
+                    />
+                    {!!target && !targetGood && <span className="move-opt-sub state-blocked">A repository is written owner/name.</span>}
+                  </label>
+                )}
+                {repos.length > 0 && (
+                  <button type="button" className="link small" onClick={() => { setTypedKey(!typedKey); setTarget(""); }}>
+                    {typedKey ? "Pick from the list" : "Not listed? Type it"}
+                  </button>
+                )}
+              </>
+            )}
+            {system === "github" && ownerAsk && ownerProbe?.state === "checking" && (
+              <span className="move-opt-sub" role="status">
+                Asking {viaName} for {ownerAsk}’s projects and repositories…
+              </span>
+            )}
+            {ownerProbe?.state === "no" && (
+              <p className="move-callout move-refused" role="alert">
+                {ownerProbe.error}
+              </p>
+            )}
+          </fieldset>
+        )}
+
+        {system && system !== "github" && via && ready && (
           <fieldset className="move-field">
             <legend>{system === "jira" ? "Project" : "Team"}</legend>
             {system === "jira" && projects.length > 0 && !typedKey ? (
@@ -558,13 +860,13 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
           <fieldset className="move-field">
             <legend>Import</legend>
             <div className="seg handoff-seg" role="radiogroup" aria-label="Import">
-              {FILTERS[system].map((f) => (
-                <button key={f.kind} type="button" role="radio" aria-checked={filterKind === f.kind} disabled={busy} onClick={() => setFilterKind(f.kind)}>
+              {filtersFor(system, asProject).map((f) => (
+                <button key={f.kind} type="button" role="radio" aria-checked={filterKind === f.kind} disabled={busy} onClick={() => { setFilterKind(f.kind); setFilterValue(""); }}>
                   {f.label}
                 </button>
               ))}
             </div>
-            <span className="move-opt-sub">{FILTERS[system].find((f) => f.kind === filterKind)?.sub}</span>
+            <span className="move-opt-sub">{filtersFor(system, asProject).find((f) => f.kind === filterKind)?.sub}</span>
             {filterKind === "all" && (
               <label className="sync-done">
                 <input type="checkbox" checked={includeDone} disabled={busy} onChange={(e) => setIncludeDone(e.target.checked)} />
@@ -574,12 +876,12 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
             {meNeeded && (
               <>
                 <label className="field">
-                  <span>Your Linear member id</span>
+                  <span>{system === "github" ? "Your GitHub login" : "Your Linear member id"}</span>
                   <input
                     className="mono"
                     value={me}
                     onChange={(e) => setMe(e.target.value)}
-                    placeholder="2f8c1d3a-9b1e-4c7a-…"
+                    placeholder={system === "github" ? "octocat" : "2f8c1d3a-9b1e-4c7a-…"}
                     spellCheck={false}
                     autoComplete="off"
                     aria-invalid={meBad}
@@ -587,7 +889,11 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                   />
                 </label>
                 <span id={`${ids}-me`} className={`move-opt-sub${meBad ? " state-blocked" : ""}`}>
-                  {meBad
+                  {system === "github"
+                    ? meBad
+                      ? "That isn’t a GitHub login: letters, digits and single dashes, not your name or email."
+                      : `${viaName} uses a shared GitHub key, which can’t say who you are, so Desk asks once for the login you go by.`
+                    : meBad
                     ? "That isn’t a Linear id: it’s a long code of letters a–f, digits and dashes, not your name or email."
                     : `The long code Linear knows you by (its API calls it your user id), not your name or email. ${viaName} can’t say who you are on Linear, so Desk asks once.`}
                 </span>
@@ -599,14 +905,31 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                 <input value={filterValue} onChange={(e) => setFilterValue(e.target.value)} placeholder="desk" maxLength={100} spellCheck={false} autoComplete="off" />
               </label>
             )}
+            {filterKind === "milestone" && (
+              <label className="field">
+                <span>Milestone</span>
+                {!asProject && (found?.milestones ?? []).length > 0 ? (
+                  <select className="board-select sync-select" value={filterValue} disabled={busy} onChange={(e) => setFilterValue(e.target.value)}>
+                    <option value="">Pick a milestone</option>
+                    {(found?.milestones ?? []).map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <input value={filterValue} onChange={(e) => setFilterValue(e.target.value)} placeholder="v2.0" maxLength={100} spellCheck={false} autoComplete="off" />
+                )}
+              </label>
+            )}
             {filterKind === "query" && (
               <label className="field">
-                <span>{system === "jira" ? "The search" : "The filter"}</span>
+                <span>{system === "jira" ? "The search" : system === "github" ? "The project filter" : "The filter"}</span>
                 <textarea
                   className="move-note mono sync-query"
                   value={filterValue}
                   onChange={(e) => setFilterValue(e.target.value)}
-                  placeholder={system === "jira" ? 'status != Done AND labels = "desk"' : '{ "state": { "type": { "neq": "completed" } } }'}
+                  placeholder={system === "jira" ? 'status != Done AND labels = "desk"' : system === "github" ? "label:bug -status:Done" : '{ "state": { "type": { "neq": "completed" } } }'}
                   spellCheck={false}
                 />
               </label>
@@ -695,7 +1018,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                     <option value="">Leave it as it is</option>
                     {remoteStates.map((r) => (
                       <option key={r} value={r}>
-                        {r}
+                        {stateName(r)}
                       </option>
                     ))}
                   </select>
@@ -709,11 +1032,11 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
         <span className={`dialog-foot-note${footNote?.failed ? " state-blocked" : ""}`} role={problem ? "alert" : "status"}>
           {footNote?.words}
         </span>
-        <button type="button" className="btn btn-ghost" data-autofocus onClick={onClose}>
+        <button type="button" className="btn btn-ghost" data-autofocus onClick={close}>
           Cancel
         </button>
         <button type="button" className="btn btn-signal" disabled={!canLink} onClick={() => void link()}>
-          {busy ? "Linking…" : system && targetGood ? `Link to ${targetKey}` : "Link board"}
+          {busy ? (fresh ? "Making the board…" : "Linking…") : system && targetGood ? (fresh ? `Make “${newName}”` : `Link to ${targetWords(system, targetKey)}`) : fresh ? "Make board" : "Link board"}
         </button>
       </footer>
     </Dialog>
@@ -789,7 +1112,7 @@ function HubRow({ name, choice, system, probe, picked, disabled, onPick }: { nam
   );
 }
 
-/** This computer's own Jira or Linear keys: only when no hub offers them. */
+/** This computer's own Jira, Linear or GitHub keys: only when no hub offers them. */
 function ThisComputer({ name, system, probe, hubOffers, picked, disabled, onPick }: { name: string; system: SyncSystem; probe: Probe | undefined; hubOffers: string | null; picked: boolean; disabled: boolean; onPick: () => void }) {
   const title = SYSTEM_TITLE[system];
   const usable = probe?.state === "offered" && !hubOffers;

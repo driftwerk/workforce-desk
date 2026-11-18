@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import { useChat } from "../chat/store";
-import { fixOf, linkedTo, matchedBy, SYSTEM_TITLE, syncStatus, vouched } from "../hub/boardSync";
+import { fixOf, linkedTo, matchedBy, SYSTEM_TITLE, syncStatus, targetWords, vouched } from "../hub/boardSync";
 import { ChooseMe } from "./ChooseMe";
 import { openSettingsAt } from "../ui/problem";
 import { plainError } from "../ui/plainError";
@@ -19,6 +19,9 @@ const ago = (iso: string | null | undefined, now: number): string | null => {
   if (Number.isNaN(mins)) return null;
   return mins < 1 ? "just now" : mins < 60 ? `${mins} min ago` : `${Math.round(mins / 60)} h ago`;
 };
+
+/** How long after it was linked a board with nothing pulled is still on its first sync. */
+const FIRST_SYNC_MS = 10 * 60_000;
 
 /** A synced board's sync, under its header: what it is linked to, a chip
  *  that says synced, paused (and why) or a problem (in the hub's words),
@@ -130,6 +133,8 @@ export function SyncBar({
     }
   };
   const pulled = ago(sync.pulledAt, now);
+  // A board just linked has pulled nothing yet: its first sync is running.
+  const first = status.kind === "synced" && !sync.pulledAt && now - Date.parse(board.updatedAt) < FIRST_SYNC_MS;
   const who =
     sync.meSource === "vouched" && sync.meName
       ? `you're ${sync.meName} there`
@@ -140,11 +145,12 @@ export function SyncBar({
         : (sync.meNote ?? null);
   return (
     <div className="board-sync" aria-label={`Sync with ${SYSTEM_TITLE[sync.system]}`}>
-      <span className={`chip board-sync-chip board-sync-${status.kind}`}>{status.kind === "synced" ? "Synced" : status.kind === "paused" ? "Paused" : "Sync problem"}</span>
+      <span className={`chip board-sync-chip board-sync-${first ? "first" : status.kind}`}>{first ? "Syncing" : status.kind === "synced" ? "Synced" : status.kind === "paused" ? "Paused" : "Sync problem"}</span>
       <span className="board-sync-words" role="status">
         {status.kind === "synced" ? (
           <>
             {linkedTo(board, hub)}
+            {first && <span className="faint"> · bringing in its issues for the first time</span>}
             {pulled && <span className="faint"> · checked {pulled}</span>}
             {who && <span className="faint board-sync-me"> · {who}</span>}
           </>
@@ -295,7 +301,7 @@ export function LeftFilterShelf({ board, tickets }: { board: Board; tickets: Tic
 
 /** Asks before unlinking: the board keeps its tickets, unsynced. */
 export function UnlinkBoard({ board, onClose }: { board: Board; onClose: () => void }) {
-  const target = board.sync ? `${SYSTEM_TITLE[board.sync.system]} ${board.sync.target}` : "its project";
+  const target = board.sync ? `${SYSTEM_TITLE[board.sync.system]} ${targetWords(board.sync.system, board.sync.target)}` : "its project";
   return (
     <Confirm
       title={`Unlink “${board.name}” from ${target}?`}

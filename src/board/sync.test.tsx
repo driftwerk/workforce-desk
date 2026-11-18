@@ -60,13 +60,15 @@ vi.mock("@workforce/rich", () => ({
 }));
 
 import { useChat } from "../chat/store";
-import { boardSyncOf, fixOf, issueUrl, linkedTo, looksLikeToken, pausedWords, syncHubId, syncStatus, targetOk } from "../hub/boardSync";
+import { boardSyncOf, fixOf, isGithubProject, shortKey, issueUrl, linkedTo, looksLikeToken, pausedWords, syncHubId, syncStatus, targetOk, targetWords } from "../hub/boardSync";
 import { useDesk } from "../hub/store";
 import type { ActivityParty, Board as BoardT, SyncHub, Ticket } from "../hub/types";
 import { Board } from "./BoardView";
 import { BOARD_CHROME } from "./chrome";
 import { OpenTicket } from "./TicketDetail";
 import { LinkBoardDialog } from "./LinkBoard";
+import { BoardActionDialog } from "./boardActions";
+import { SyncBar } from "./SyncBar";
 import { useBoard } from "./store";
 import { useSyncHubs } from "./syncStore";
 import { useBoardViews } from "./views";
@@ -113,7 +115,7 @@ const localRoutes = (method: string, path: string, body: Record<string, unknown>
     return { status: 200, body: out };
   }
   const link = /^\/api\/desk\/boards\/([^/]+)\/link$/.exec(path);
-  if (method === "PUT" && link) return { status: 200, body: { ...ACME, prefix: null, sync: { link: "l1", ...body, person: "p1" } } };
+  if (method === "PUT" && link) return { status: 200, body: { ...ACME, id: link[1], prefix: null, sync: { link: "l1", ...body, person: "p1" } } };
   if (method === "POST" && /\/sync$/.test(path)) return { status: 202 };
   return { status: 404 };
 };
@@ -135,7 +137,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-const pickSystem = (s: "Jira" | "Linear") => fireEvent.click(within(screen.getByRole("radiogroup", { name: "System" })).getByRole("radio", { name: s }));
+const pickSystem = (s: "Jira" | "Linear" | "GitHub") => fireEvent.click(within(screen.getByRole("radiogroup", { name: "System" })).getByRole("radio", { name: s }));
 const via = () => within(screen.getByRole("radiogroup", { name: "Through" }));
 
 describe("the link dialog", () => {
@@ -633,6 +635,130 @@ describe("the link dialog", () => {
     expect(screen.queryByRole("radiogroup", { name: "Linear workspace" })).toBeNull();
   });
 
+  describe("GitHub", () => {
+    /** What the hub says of GitHub: acme's projects and repos, and another owner's. */
+    const ghRoutes = (hub: string, method: string, path: string, body: Record<string, unknown> | null) => {
+      if (hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "github") {
+        const owner = (body.owner as string | undefined) ?? "sam";
+        const out: Record<string, unknown> = { offered: true, owner };
+        if (!body.target) {
+          if (owner === "sam") {
+            out.projectsWhy = "This GitHub key can't read projects. Sign in again with Projects allowed, or link the repository's issues instead.";
+            out.projects = [];
+          } else out.projects = [{ key: `${owner}/projects/7`, name: "Roadmap", id: "PVT_kwDOroad" }];
+          out.repos = [{ key: `${owner}/web`, name: `${owner}/web` }];
+          return { status: 200, body: out };
+        }
+        const project = /\/projects\//.test(body.target as string);
+        out.states = project ? ["Todo", "In Progress", "Done"] : ["Open", "Closed", "label:in progress"];
+        out.prefill = project ? { todo: "Todo", doing: "In Progress", done: "Done" } : { todo: "Open", done: "Closed" };
+        if (!project) out.milestones = ["v1", "v2"];
+        out.me = { id: "sam", name: "Sam" };
+        const filter = body.filter as { kind: string } | undefined;
+        if (filter) Object.assign(out, { matches: 9, matchesAtLeast: false, ceiling: 2000 });
+        return { status: 200, body: out };
+      }
+      return localRoutes(method, path, body);
+    };
+    const open = async () => {
+      render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
+      pickSystem("GitHub");
+      await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+      fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+    };
+
+    it("offers a project first, says plainly when projects can't be read and still offers repositories", async () => {
+      native.route = ghRoutes;
+      await open();
+      const where = within(await screen.findByRole("radiogroup", { name: "Project or repository" }));
+      expect(where.getAllByRole("radio")[0]!.textContent).toBe("A project");
+      expect(where.getByRole("radio", { name: "A project" }).getAttribute("aria-checked")).toBe("true");
+      expect((await screen.findByRole("alert")).textContent).toMatch(/This GitHub key can't read projects/);
+      expect((screen.getByLabelText("Owner") as HTMLInputElement).value).toBe("sam");
+      fireEvent.click(screen.getByRole("button", { name: "Link a repository’s issues instead" }));
+      fireEvent.change(await screen.findByLabelText("sam’s repository"), { target: { value: "sam/web" } });
+      // A repository's issues: no project filter, a milestone picked from the list, states as "Label x".
+      const imports = within(await screen.findByRole("radiogroup", { name: "Import" }));
+      expect(imports.queryByRole("radio", { name: "A project filter" })).toBeNull();
+      expect(imports.queryByRole("radio", { name: /cycle|sprint/i })).toBeNull();
+      fireEvent.click(imports.getByRole("radio", { name: "A milestone" }));
+      fireEvent.change(await screen.findByLabelText("Milestone"), { target: { value: "v2" } });
+      await screen.findByText("9 issues", undefined, { timeout: 2000 });
+      const options = within(screen.getByLabelText("Doing moves its issue to")).getAllByRole("option").map((o) => o.textContent);
+      expect(options).toContain("Label in progress");
+      fireEvent.change(screen.getByLabelText("Doing moves its issue to"), { target: { value: "label:in progress" } });
+      fireEvent.click(screen.getByRole("button", { name: "Link to sam/web" }));
+      await waitFor(() => expect(native.asked.some((a) => a.method === "PUT" && a.path === `/api/desk/boards/${ACME.id}/link`)).toBe(true));
+      const linked = native.asked.find((a) => a.method === "PUT" && a.path === `/api/desk/boards/${ACME.id}/link`)!;
+      expect(linked.body).toEqual({
+        system: "github",
+        target: "sam/web",
+        via: { kind: "hub", hub: "atlas-acme-example" },
+        filter: { kind: "milestone", value: "v2" },
+        states: { todo: "Open", done: "Closed", doing: "label:in progress" },
+      });
+    });
+
+    it("lists another owner's projects when the owner is changed, and links a project with its id and a repo for new tickets", async () => {
+      native.route = ghRoutes;
+      await open();
+      fireEvent.change(await screen.findByLabelText("Owner"), { target: { value: "acme" } });
+      await waitFor(() => expect(native.asked.some((a) => a.path === "/api/desk/boards/link/check" && a.body?.owner === "acme" && !a.body?.target)).toBe(true));
+      fireEvent.change(await screen.findByLabelText("acme’s GitHub project"), { target: { value: "acme/projects/7" } });
+      const imports = within(await screen.findByRole("radiogroup", { name: "Import" }));
+      expect(imports.getByRole("radio", { name: "A project filter" })).toBeTruthy();
+      fireEvent.change(screen.getByLabelText("New tickets go to"), { target: { value: "acme/web" } });
+      await screen.findByText("9 open issues", undefined, { timeout: 2000 });
+      const checkedProject = native.asked.filter((a) => a.path === "/api/desk/boards/link/check" && a.body?.target === "acme/projects/7").at(-1)!;
+      expect(checkedProject.body).toMatchObject({ system: "github", owner: "acme", targetId: "PVT_kwDOroad" });
+      fireEvent.click(screen.getByRole("button", { name: "Link to acme · project 7" }));
+      await waitFor(() => expect(native.asked.some((a) => a.method === "PUT" && a.path === `/api/desk/boards/${ACME.id}/link`)).toBe(true));
+      const linked = native.asked.find((a) => a.method === "PUT")!;
+      expect(linked.body).toMatchObject({ system: "github", target: "acme/projects/7", targetId: "PVT_kwDOroad", repo: "acme/web" });
+    });
+
+    it("links a typed project with the id the hub resolved, and keeps the workspace when the owner changes", async () => {
+      native.route = (hub, method, path, body) => {
+        if (hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "github") {
+          if (!body.workspace && !body.target) return { status: 200, body: { offered: true, workspaces: ["acme-ws", "other-ws"], workspace: "acme-ws" } };
+          if (body.target === "acme/projects/8") {
+            const r = ghRoutes(hub, method, path, body) as { body: Record<string, unknown> };
+            return { status: 200, body: { ...r.body, targetId: "PVT_resolved" } };
+          }
+        }
+        return ghRoutes(hub, method, path, body);
+      };
+      await open();
+      fireEvent.change(await screen.findByLabelText("Owner"), { target: { value: "acme" } });
+      await waitFor(() => expect(native.asked.some((a) => a.path === "/api/desk/boards/link/check" && a.body?.owner === "acme" && a.body?.workspace === "acme-ws")).toBe(true));
+      fireEvent.click(await screen.findByRole("button", { name: "Not listed? Type it" }));
+      fireEvent.change(await screen.findByLabelText("The project’s address"), { target: { value: "acme/projects/8" } });
+      await screen.findByRole("radiogroup", { name: "Import" });
+      await screen.findByText("9 open issues", undefined, { timeout: 2000 });
+      fireEvent.click(within(screen.getByRole("radiogroup", { name: "Import" })).getByRole("radio", { name: "A label" }));
+      fireEvent.change(screen.getByPlaceholderText("desk"), { target: { value: "bug" } });
+      await waitFor(() => expect(native.asked.some((a) => a.body?.filter && (a.body.filter as { kind: string }).kind === "label" && a.body.target === "acme/projects/8")).toBe(true));
+      // The re-check with the filter carries the resolved id too.
+      expect(native.asked.filter((a) => a.body?.target === "acme/projects/8" && a.body?.filter && (a.body.filter as { kind: string }).kind === "label").at(-1)!.body).toMatchObject({ targetId: "PVT_resolved" });
+      await screen.findByText("9 issues", undefined, { timeout: 2000 });
+      fireEvent.click(screen.getByRole("button", { name: "Link to acme · project 8" }));
+      await waitFor(() => expect(native.asked.some((a) => a.method === "PUT")).toBe(true));
+      expect(native.asked.find((a) => a.method === "PUT")!.body).toMatchObject({ system: "github", target: "acme/projects/8", targetId: "PVT_resolved", workspace: "acme-ws" });
+    });
+
+    it("takes a typed repository where the hub lists none, and says what it waits on", async () => {
+      native.route = (hub, method, path, body) =>
+        hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "github" && !body.target
+          ? { status: 200, body: { offered: true, owner: "sam", projects: [], repos: [] } }
+          : ghRoutes(hub, method, path, body);
+      await open();
+      fireEvent.click(await screen.findByRole("radio", { name: "A repository" }));
+      expect(document.querySelector(".dialog-foot-note")?.textContent).toBe("Enter the repository as owner/name.");
+      fireEvent.change(await screen.findByLabelText("The repository"), { target: { value: "acme/web" } });
+      await screen.findByRole("radiogroup", { name: "Import" });
+    });
+  });
+
   it("says by the Link button what it still waits on, first thing first", async () => {
     let matching: { status: number; body: unknown } = { status: 200, body: { offered: true, states: ["Todo", "Done"], matches: 4, matchesAtLeast: false } };
     native.route = (hub, method, path, body) => {
@@ -647,7 +773,7 @@ describe("the link dialog", () => {
     const note = () => document.querySelector(".move-foot .dialog-foot-note")!.textContent;
     const button = () => screen.getByRole("button", { name: /^Link/ }) as HTMLButtonElement;
     render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
-    expect(note()).toBe("Pick Jira or Linear.");
+    expect(note()).toBe("Pick Jira, Linear or GitHub.");
     pickSystem("Linear");
     await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
     expect(note()).toBe("Pick where Linear is reached through.");
@@ -962,6 +1088,45 @@ describe("the board, synced", () => {
     expect(screen.getByRole("img", { name: "Todo" })).toBeTruthy();
   });
 
+  it("draws a GitHub board: Milestone, Label and Type chips, keys as repo#12 with the full one on hover, and As on GitHub only on a project", () => {
+    const gh = (n: number, title: string, milestone: string, labels: string[], kind: string) =>
+      ticket(n, {
+        key: `acme/web#${n}`,
+        title,
+        state: "todo",
+        upstreamRank: String(n * 1024).padStart(10, "0") as never,
+        external: ext(`acme/web#${n}`, { system: "github" as const, url: `https://github.invalid/acme/web/issues/${n}`, details: { kind, labels, sprint: { name: milestone } } }),
+      });
+    const a = gh(12, "Alpha", "v1", ["bug"], "Bug");
+    const b = gh(13, "Beta", "v2", ["ui"], "Feature");
+    const { unmount } = show(synced({ system: "github", target: "acme/projects/7" }), [a, b]);
+    expect(screen.getByText("GitHub acme · project 7 via Atlas", { exact: false })).toBeTruthy();
+    expect(screen.getByText("web#12").getAttribute("title")).toBe("GitHub issue acme/web#12");
+    expect(screen.queryByText("acme/web#12")).toBeNull();
+    expect(screen.getByRole("button", { name: "acme/web#12: Alpha" })).toBeTruthy();
+    expect([...(screen.getByRole("combobox", { name: "Milestone" }) as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["Milestone: all", "v1", "v2"]);
+    expect(screen.getByRole("combobox", { name: "Label" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Type" })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Epic" })).toBeNull();
+    fireEvent.change(screen.getByRole("combobox", { name: "Milestone" }), { target: { value: "v2" } });
+    expect(screen.queryByRole("button", { name: "acme/web#12: Alpha" })).toBeNull();
+    expect(screen.getByRole("button", { name: "acme/web#13: Beta" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Order: as on GitHub" }));
+    expect(within(screen.getByRole("menu", { name: "Order" })).getAllByRole("menuitemradio").map((i) => i.firstChild!.firstChild!.textContent)).toEqual(["As on GitHub", "Newest first", "Oldest first", "Recently changed"]);
+    expect(screen.getByText("The project's own order, as GitHub has it")).toBeTruthy();
+    // Enter on repo#12 opens that issue, owner left out.
+    const search = screen.getByLabelText("Search tickets");
+    fireEvent.change(search, { target: { value: "web#13" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(useBoard.getState().open).toBe(b.id);
+    // A repository's board has no order of its own: it offers none, and a saved one falls back.
+    unmount();
+    useBoardViews.setState({ views: { [ACME.id]: { order: "source" } } as never });
+    show(synced({ system: "github", target: "acme/web" }), [a, b]);
+    fireEvent.click(screen.getByRole("button", { name: "Order: newest first" }));
+    expect(within(screen.getByRole("menu", { name: "Order" })).getAllByRole("menuitemradio").map((i) => i.firstChild!.firstChild!.textContent)).toEqual(["Newest first", "Oldest first", "Recently changed"]);
+  });
+
   it("keeps a board's own filters and its order when it is shown again, and orders it as on Jira until another is picked", () => {
     const a = ticket(51, { key: "ACME-51", title: "Alpha", state: "todo", external: ext("ACME-51", { details: { kind: "Story", epic: { key: "ACME-1", title: "Permissions" } } }) });
     const b = ticket(52, { key: "ACME-52", title: "Beta", state: "todo", external: ext("ACME-52", { details: { kind: "Bug", epic: { key: "ACME-2", title: "Insights" } } }) });
@@ -1151,6 +1316,16 @@ describe("the board, synced", () => {
     expect(screen.queryByRole("button", { name: /alert/ })).toBeNull();
   });
 
+  it("shows a GitHub issue's type and its full key in its ticket, with the milestone as such", () => {
+    const t = ticket(9, { key: "acme/web#9", title: "Postcode", external: ext("acme/web#9", { system: "github" as const, details: { kind: "Bug", sprint: { number: 4 } } }) });
+    useDesk.setState({ hub: { ticketHistory: async () => ({ events: [], next: null }), ledger: async () => ({ rows: [], next: null }) } as never });
+    useBoard.setState({ boards: { [ACME.id]: synced({ system: "github", target: "acme/projects/7" }) }, tickets: { [t.id]: t }, open: t.id });
+    render(<OpenTicket />);
+    expect(document.querySelector(".ticket-crumb-self .ticket-crumb-key")?.textContent).toBe("acme/web#9");
+    expect(document.querySelector(".ticket-key")?.textContent).toBe("acme/web#9");
+    expect(screen.getByText("Milestone 4")).toBeTruthy();
+  });
+
   it("says beside Desk's state what its issue calls it, faint, and stacks the view under 760px", async () => {
     const t = ticket(8, { key: "ACME-8", state: "doing", external: ext("ACME-8", { details: { remoteState: "In Progress", kind: "Story" } }) });
     useDesk.setState({ hub: { ticketHistory: async () => ({ events: [], next: null }), ledger: async () => ({ rows: [], next: null }) } as never });
@@ -1183,7 +1358,7 @@ describe("the board, synced", () => {
   it("offers linking from the board's menu, and unlinking once linked", async () => {
     show(ACME, []);
     fireEvent.click(screen.getByRole("button", { name: "Boards" }));
-    expect(screen.getByRole("menuitem", { name: "Link to Jira or Linear…" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Link to Jira, Linear or GitHub…" })).toBeTruthy();
     cleanup();
     show(synced(), []);
     fireEvent.click(screen.getByRole("button", { name: "Boards" }));
@@ -1225,6 +1400,26 @@ describe("board sync's words and checks", () => {
     expect(targetOk("jira", "acme")).toBe(false);
   });
 
+  it("names a GitHub board's project or repository as a person reads it, and checks the target as the hub does", () => {
+    expect(targetOk("github", "acme/projects/7")).toBe(true);
+    expect(targetOk("github", "acme/web")).toBe(true);
+    expect(targetOk("github", "acme/projects/x")).toBe(false);
+    expect(targetOk("github", "acme")).toBe(false);
+    expect(targetOk("github", "-acme/web")).toBe(false);
+    expect(targetOk("github", "acme/..")).toBe(false);
+    expect(isGithubProject("acme/projects/7")).toBe(true);
+    expect(isGithubProject("acme/projects")).toBe(false);
+    expect(shortKey("acme/web#12")).toBe("web#12");
+    expect(shortKey("web#12")).toBe("web#12");
+    expect(targetWords("github", "acme/projects/7")).toBe("acme · project 7");
+    expect(targetWords("github", "acme/web")).toBe("acme/web");
+    expect(targetWords("jira", "ACME")).toBe("ACME");
+    const gh = { ...ACME, sync: { link: "l", system: "github", target: "acme/projects/7", via: { kind: "hub", hub: "atlas" }, person: "p", filter: { kind: "all", value: { includeDone: false } }, states: {} } } as BoardT;
+    expect(linkedTo(gh, "Atlas")).toBe("GitHub acme · project 7 via Atlas");
+    expect(pausedWords({ kind: "missing", tools: ["github.project_items"] }, "Atlas")).toBe("Paused: no agent on Atlas you can reach has GitHub switched on any more.");
+    expect(fixOf({ ...gh.sync!, paused: { kind: "missing", tools: ["github.project_items"] } }, "Atlas")?.label).toBe("Ask an agent on Atlas to switch GitHub on");
+  });
+
   it("takes a pasted token as the local hub does: wfr_, letters, digits, _ and -, longer than 20", () => {
     expect(looksLikeToken("wfr_Xk3_9-aZq0PLm2vB7cNw4Rt")).toBe(true);
     expect(looksLikeToken("  wfr_Xk3_9-aZq0PLm2vB7cNw4Rt\n")).toBe(true);
@@ -1246,5 +1441,159 @@ describe("board sync's words and checks", () => {
     await expect(api.syncNow("b1")).resolves.toBeUndefined();
     await expect(api.syncNow("b2")).rejects.toThrow("That board isn't synced.");
     await act(async () => {});
+  });
+});
+
+describe("a new board from Linear, Jira or GitHub", () => {
+  const NEW = { ...ACME, id: "b-new", name: "PLT", prefix: null } as BoardT;
+  let createBoard: ReturnType<typeof vi.fn>;
+  let deleteBoard: ReturnType<typeof vi.fn>;
+  const pickAtlasJira = async (key: string) => {
+    pickSystem("Jira");
+    await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+    fireEvent.change(await screen.findByLabelText("Atlas’s Jira project key"), { target: { value: key } });
+  };
+  const ready = (name: string) => waitFor(() => expect((screen.getByRole("button", { name }) as HTMLButtonElement).disabled).toBe(false), { timeout: 2000 });
+  beforeEach(() => {
+    createBoard = vi.fn(async (b: { name: string }) => ({ ...NEW, name: b.name }));
+    deleteBoard = vi.fn(async (_id: string) => {});
+    useDesk.setState({ hub: { createBoard, deleteBoard, boards: async () => [ACME, NEW] } as never });
+  });
+  afterEach(() => useDesk.setState({ hub: null }));
+
+  it("asks for no board, makes one named after the project, links it and shows it", async () => {
+    const closed = vi.fn();
+    const made = vi.fn();
+    render(<LinkBoardDialog onMade={made} onClose={closed} />);
+    expect(screen.getByRole("heading", { name: "New board from Linear, Jira or GitHub" })).toBeTruthy();
+    expect(screen.queryByRole("radiogroup", { name: /tickets/ })).toBeNull();
+    expect(document.querySelector(".move-foot .dialog-foot-note")!.textContent).toBe("Pick Jira, Linear or GitHub.");
+    await pickAtlasJira("PLT");
+    await ready("Make “PLT”");
+    fireEvent.click(screen.getByRole("button", { name: "Make “PLT”" }));
+    await waitFor(() => expect(closed).toHaveBeenCalled());
+    expect(createBoard).toHaveBeenCalledWith({ name: "PLT" });
+    expect(native.asked.find((a) => a.method === "PUT" && a.path === "/api/desk/boards/b-new/link")!.body).toMatchObject({ system: "jira", target: "PLT" });
+    await waitFor(() => expect(native.asked.some((a) => a.method === "POST" && a.path === "/api/desk/boards/b-new/sync")).toBe(true));
+    expect(made).toHaveBeenCalledTimes(1);
+    expect(useBoard.getState().shown).toBe("b-new");
+    expect(deleteBoard).not.toHaveBeenCalled();
+  });
+
+  it("names a Linear board after its team", async () => {
+    native.route = (hub, method, path, body) =>
+      hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "linear" && !body.target
+        ? { status: 200, body: { offered: true, teams: [{ id: "8a7b-man", key: "MAN", name: "Mantis" }] } }
+        : hub === "local"
+          ? localRoutes(method, path, body)
+          : { status: 404 };
+    render(<LinkBoardDialog onClose={() => {}} />);
+    pickSystem("Linear");
+    await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+    fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+    fireEvent.change(await screen.findByLabelText("Atlas’s Linear team"), { target: { value: "8a7b-man" } });
+    await ready("Make “Mantis”");
+    fireEvent.click(screen.getByRole("button", { name: "Make “Mantis”" }));
+    await waitFor(() => expect(createBoard).toHaveBeenCalledWith({ name: "Mantis" }));
+  });
+
+  it("removes the new board and says so when the link is refused", async () => {
+    useBoard.setState({ shown: ACME.id });
+    const closed = vi.fn();
+    const was = native.route;
+    native.route = (hub, method, path, body) =>
+      method === "PUT" && /\/boards\/b-new\/link$/.test(path) ? { status: 422, body: { error: "Atlas couldn’t read that project." } } : was(hub, method, path, body);
+    render(<LinkBoardDialog onClose={closed} />);
+    await pickAtlasJira("PLT");
+    await ready("Make “PLT”");
+    fireEvent.click(screen.getByRole("button", { name: "Make “PLT”" }));
+    const alert = await screen.findByRole("alert");
+    expect(alert.textContent).toBe("Atlas couldn’t read that project. No board was made: “PLT” was removed again.");
+    expect(deleteBoard).toHaveBeenCalledWith("b-new");
+    expect(useBoard.getState().boards["b-new"]).toBeUndefined();
+    expect(useBoard.getState().shown).toBe(ACME.id);
+    expect(closed).not.toHaveBeenCalled();
+  });
+
+  it("removes the new board when the dialog is closed while it is being made", async () => {
+    let finish: (b: BoardT) => void = () => {};
+    createBoard.mockImplementation(() => new Promise<BoardT>((r) => (finish = r)));
+    const closed = vi.fn();
+    const made = vi.fn();
+    render(<LinkBoardDialog onMade={made} onClose={closed} />);
+    await pickAtlasJira("PLT");
+    await ready("Make “PLT”");
+    fireEvent.click(screen.getByRole("button", { name: "Make “PLT”" }));
+    await screen.findByRole("button", { name: "Making the board…" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(closed).toHaveBeenCalledTimes(1);
+    await act(async () => finish(NEW));
+    await waitFor(() => expect(deleteBoard).toHaveBeenCalledWith("b-new"));
+    expect(native.asked.some((a) => a.method === "PUT" && a.path === "/api/desk/boards/b-new/link")).toBe(false);
+    expect(made).not.toHaveBeenCalled();
+    expect(useBoard.getState().boards["b-new"]).toBeUndefined();
+  });
+
+  it("shows a board that has pulled nothing yet as on its first sync, and as synced once it has", () => {
+    const linked = { ...ACME, updatedAt: new Date().toISOString(), sync: { link: "l", system: "jira", target: "PLT", via: { kind: "hub", hub: "atlas-acme-example" }, person: "p", filter: { kind: "all", value: { includeDone: false } }, states: {} } } as BoardT;
+    const { rerender } = render(<SyncBar board={linked} now={Date.now()} />);
+    expect(screen.getByText("Syncing")).toBeTruthy();
+    expect(screen.getByText(/bringing in its issues for the first time/)).toBeTruthy();
+    rerender(<SyncBar board={{ ...linked, sync: { ...linked.sync!, pulledAt: new Date().toISOString() } }} now={Date.now()} />);
+    expect(screen.getByText("Synced")).toBeTruthy();
+    expect(screen.queryByText(/for the first time/)).toBeNull();
+  });
+
+  it("says outside the dialog when a board made for a closed dialog couldn’t be removed", async () => {
+    let finish: (b: BoardT) => void = () => {};
+    createBoard.mockImplementation(() => new Promise<BoardT>((r) => (finish = r)));
+    deleteBoard.mockRejectedValue(new Error("no"));
+    const platform = await import("../platform");
+    const said = vi.fn();
+    platform.setOpenReporter(said);
+    render(<LinkBoardDialog onClose={() => {}} />);
+    await pickAtlasJira("PLT");
+    await ready("Make “PLT”");
+    fireEvent.click(screen.getByRole("button", { name: "Make “PLT”" }));
+    await screen.findByRole("button", { name: "Making the board…" });
+    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    await act(async () => finish(NEW));
+    await waitFor(() => expect(said).toHaveBeenCalled());
+    expect((said.mock.calls[0]![0] as Error).message).toMatch(/“PLT” couldn’t be removed: delete it from its menu/);
+    platform.setOpenReporter(null);
+  });
+
+  it("removes the new board, though its link applied, when the dialog was closed while linking, and leaves the view where the person went", async () => {
+    const platform = await import("../platform");
+    const said = vi.fn();
+    platform.setOpenReporter(said);
+    const was = native.route;
+    native.route = (hub, method, path, body) => {
+      if (method === "PUT" && /\/boards\/b-new\/link$/.test(path)) {
+        // Closed while the link is out; the person has gone to another board.
+        fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+        useBoard.setState({ shown: "b-other" });
+        return { status: 200, body: { ...NEW, sync: { link: "l1", ...body, person: "p" } } };
+      }
+      return was(hub, method, path, body);
+    };
+    const made = vi.fn();
+    render(<LinkBoardDialog onMade={made} onClose={() => {}} />);
+    await pickAtlasJira("PLT");
+    await ready("Make “PLT”");
+    fireEvent.click(screen.getByRole("button", { name: "Make “PLT”" }));
+    await waitFor(() => expect(deleteBoard).toHaveBeenCalledWith("b-new"));
+    await waitFor(() => expect(said).toHaveBeenCalled());
+    expect((said.mock.calls[0]![0] as Error).message).toMatch(/“PLT” was removed again; no board was made/);
+    expect(made).not.toHaveBeenCalled();
+    expect(useBoard.getState().shown).toBe("b-other");
+    platform.setOpenReporter(null);
+  });
+
+  it("is in the board's header menu, opening the same dialog", async () => {
+    expect(BOARD_CHROME.entries(ACME, () => []).find((e) => e.kind === "item" && e.label === "New board from Linear, Jira or GitHub…")).toBeTruthy();
+    render(<BoardActionDialog board={ACME} action="fromSystem" onClose={() => {}} />);
+    expect(screen.getByRole("heading", { name: "New board from Linear, Jira or GitHub" })).toBeTruthy();
   });
 });

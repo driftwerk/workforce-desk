@@ -1752,7 +1752,7 @@ export interface Board {
 
 // ── Sync with Linear or Jira (the hub's `board::Sync`) ──────────────────
 
-export type SyncSystem = "jira" | "linear";
+export type SyncSystem = "jira" | "linear" | "github";
 
 /** How a board reaches its Jira or Linear: through a linked hub (its id in
  *  the local hub's sync hubs), or with this computer's own keys. */
@@ -1766,6 +1766,8 @@ export type SyncFilter =
   | { kind: "assignedToMe" }
   | { kind: "currentCycle" }
   | { kind: "label"; value: string }
+  /** GitHub only: the issues in one milestone, by its title. */
+  | { kind: "milestone"; value: string }
   | { kind: "query"; value: string };
 
 /** Who has an issue on Jira or Linear: their id there and their name. */
@@ -1800,7 +1802,8 @@ export type SyncPaused =
 export interface BoardSync {
   link: string;
   system: SyncSystem;
-  /** The Jira project's key, or the Linear team's. */
+  /** The Jira project's key, or the Linear team's; GitHub's `owner/projects/7`
+   *  (a project) or `owner/repo` (a repository's issues). */
   target: string;
   targetId?: string;
   via: SyncVia;
@@ -1810,6 +1813,9 @@ export interface BoardSync {
   /** The Jira site or Linear workspace it syncs, by name, where the person
    *  has several there; absent: one made before, or an older hub. */
   workspace?: string;
+  /** GitHub project boards: the `owner/repo` tickets made in Desk become
+   *  issues in; absent: they stay on Desk. */
+  repo?: string;
   person: string;
   filter: SyncFilter;
   /** Who the person is there (a Linear user id, a Jira accountId), as the
@@ -2118,7 +2124,7 @@ export interface SyncHub {
 
 /** Which systems a hub offers its tools for, as it said when its token was
  *  tried; null when no new token was given. */
-export type SyncOffers = { jira: boolean; linear: boolean } | null;
+export type SyncOffers = { jira: boolean; linear: boolean; github?: boolean } | null;
 
 /** What `POST /api/desk/boards/link/check` found. */
 export interface LinkCheck {
@@ -2137,8 +2143,21 @@ export interface LinkCheck {
   /** Linear: the hub's teams. */
   teams?: { id: string; key: string; name: string }[];
   /** Jira: the projects the person can reach, when the hub lists them
-   *  (absent from an older hub: the key is then typed). */
-  projects?: { key: string; name: string }[];
+   *  (absent from an older hub: the key is then typed). GitHub: the owner's
+   *  Projects, by `owner/projects/7`, with the project's node id. */
+  projects?: { key: string; name: string; id?: string }[];
+  /** GitHub: the account whose projects and repos are listed. */
+  owner?: string;
+  /** GitHub: why projects can't be listed (a key without the scope, or a
+   *  fine-grained token on a user-owned project); repos are still offered. */
+  projectsWhy?: string;
+  /** GitHub: the owner's repositories, `owner/repo`. */
+  repos?: { key: string; name: string }[];
+  /** GitHub, for a typed project target sent without its id: the id the hub
+   *  resolved, to send with the link. */
+  targetId?: string;
+  /** GitHub, for a repository target: its milestones' titles. */
+  milestones?: string[];
   /** The states an issue in the target can be in. */
   states?: string[];
   /** The state map the dialog starts from. */
@@ -2171,6 +2190,8 @@ export interface LinkBoard {
   via: SyncVia;
   /** The Jira site or Linear workspace picked, where the person has several. */
   workspace?: string;
+  /** GitHub project boards: where tickets made in Desk become issues. */
+  repo?: string;
   filter: SyncFilter;
   me?: string;
   /** The person said the hub's answer of who they are isn't them. */

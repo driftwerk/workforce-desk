@@ -26,6 +26,11 @@ export const FACETS: Record<SyncSystem, { id: FacetId; word: string }[]> = {
     { id: "project", word: "Project" },
     { id: "label", word: "Label" },
   ],
+  github: [
+    { id: "sprint", word: "Milestone" },
+    { id: "label", word: "Label" },
+    { id: "type", word: "Type" },
+  ],
 };
 
 /** What `t`'s issue says it is, for facet `id`: none when it doesn't. */
@@ -38,7 +43,7 @@ export const facetOf = (t: Ticket, id: FacetId): string[] => {
     case "type":
       return d.kind ? [d.kind] : [];
     case "sprint":
-      return d.sprint ? [sprintName(d.sprint)] : [];
+      return d.sprint ? [sprintName(d.sprint, t.external?.system)] : [];
     case "project":
       return d.project ? [d.project] : [];
     case "label":
@@ -47,8 +52,8 @@ export const facetOf = (t: Ticket, id: FacetId): string[] => {
 };
 
 /** A sprint's or cycle's name: a Linear cycle without one by its number. */
-export const sprintName = (s: { name?: string; number?: number }): string =>
-  s.name ?? (s.number !== undefined ? `Cycle ${s.number}` : "");
+export const sprintName = (s: { name?: string; number?: number }, system?: SyncSystem | null): string =>
+  s.name ?? (s.number !== undefined ? `${system === "github" ? "Milestone" : "Cycle"} ${s.number}` : "");
 
 /** Whether `t` is shown by `f`: each facet set must be one it has. */
 export const shownByFacets = (t: Ticket, f: Facets | undefined): boolean =>

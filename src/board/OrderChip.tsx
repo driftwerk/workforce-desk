@@ -53,8 +53,8 @@ export const orderSays = (order: BoardOrder, system: SyncSystem | null, ordering
   switch (order) {
     case "source":
       if (ordering?.from) return `The board's own order, from ${ordering.from}`;
-      if (ordering?.by?.length && !sourceByHand(sourceSortOf({ ordering }))) return `The board's own order, as ${system === "linear" ? "Linear" : "Jira"} sorts it`;
-      return system === "linear" ? "The board's own order, as Linear has it" : "The board's own order, as Jira ranks it";
+      if (system && system !== "github" && ordering?.by?.length && !sourceByHand(sourceSortOf({ ordering }))) return `The board's own order, as ${SYSTEM_TITLE[system]} sorts it`;
+      return system === "linear" ? "The board's own order, as Linear has it" : system === "github" ? "The project's own order, as GitHub has it" : "The board's own order, as Jira ranks it";
     case "newest":
       return "Most recently created at the top";
     case "oldest":
@@ -75,10 +75,12 @@ export const orderChipSays = (order: BoardOrder, system: SyncSystem | null, orde
 /** What the board's status line says when a drag or Alt+arrow up or down
  *  can't change a sorted order: the card keeps its place, and how to move
  *  cards by hand. */
-export const sortedSaid = (order: BoardOrder, system: SyncSystem | null, ordering?: SourceOrder | null): string =>
-  order === "source" && system
-    ? `${SYSTEM_TITLE[system]} sorts this board ${sourceWords(system, ordering) ?? "itself"}, so dragging a card up or down doesn't reorder it. Reorder it in ${SYSTEM_TITLE[system]}.`
-    : `Sorted ${order === "changed" ? "by recent change" : lower(orderName(order, system))}: choose ${system ? `As on ${SYSTEM_TITLE[system]}` : "As arranged"} to move cards by hand.`;
+export const sortedSaid = (order: BoardOrder, system: SyncSystem | null, ordering?: SourceOrder | null, upstream: boolean = !!system): string =>
+  system && !upstream
+    ? `Sorted ${order === "changed" ? "by recent change" : lower(orderName(order, system))}: ${SYSTEM_TITLE[system]} keeps no order for a repository’s issues, so cards only change column.`
+    : order === "source" && system
+      ? `${SYSTEM_TITLE[system]} sorts this board ${sourceWords(system, ordering) ?? "itself"}, so dragging a card up or down doesn't reorder it. Reorder it in ${SYSTEM_TITLE[system]}.`
+      : `Sorted ${order === "changed" ? "by recent change" : lower(orderName(order, system))}: choose ${system ? `As on ${SYSTEM_TITLE[system]}` : "As arranged"} to move cards by hand.`;
 
 /** The board's Order chip, beside its filters: a menu of the orders the
  *  board offers, the one in force ticked. */
@@ -86,18 +88,21 @@ export function OrderChip({
   order,
   system,
   ordering,
+  upstream = !!system,
   onChange,
 }: {
   order: BoardOrder;
   system: SyncSystem | null;
   /** How the board there orders its issues, once read. */
   ordering?: SourceOrder | null;
+  /** Whether the board there keeps an order (a repository's issues don't). */
+  upstream?: boolean;
   onChange: (o: BoardOrder) => void;
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   const entries: MenuEntry[] = [
-    ...ordersFor(!!system).map(
+    ...ordersFor(!!system, upstream).map(
       (o): MenuEntry => ({
         kind: "item",
         radio: true,

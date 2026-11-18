@@ -25,6 +25,9 @@ import { UpdatesSettings } from "./Updates";
 import { OverseesTheCrew } from "./OverseesTheCrew";
 import { WhatTheySee } from "./WhatTheySee";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
+import { AgentRoute } from "../hubs/RunMyWorkOn";
+import { SwitchRow } from "../ui/SwitchRow";
+import { canStartThreads, setRepliesInThreads, useRepliesInThreads } from "../chat/threadReplies";
 
 /** Parts of an agent's settings only Desk's main window has, handed down
  *  by its shell (see crew/mainWindow.ts), as the Board's chrome is: a
@@ -50,6 +53,7 @@ export function AgentSettings({ agent, hub, onOpenFiles }: { agent: Agent; hub: 
         <About agent={agent} hub={hub} local={local} />
         {local ? <Thinking agent={agent} /> : <ThinkingElsewhere agent={agent} hub={hub} />}
         <Sound agent={agent} local={local} />
+        <Replying agent={agent} />
         {local && <HowTheyRemember agent={agent} ago={ago} />}
         {local && <HowTheyWork agent={agent} />}
         <WhatTheySee agent={agent} hub={hub} />
@@ -545,6 +549,7 @@ function ThinkingElsewhere({ agent, hub }: { agent: Agent; hub: HubAccount | und
         </div>
       </div>
       <p className="small faint">Set by {hub?.label ?? "their workspace"}, where {agent.name} lives.</p>
+      {hub && !hub.machine && <AgentRoute hub={hub} workspace={hub.label} agentId={agent.id} />}
     </section>
   );
 }
@@ -582,6 +587,28 @@ function Sound({ agent, local }: { agent: Agent; local: boolean }) {
           onClose={() => setChoosing(false)}
         />
       )}
+    </section>
+  );
+}
+
+/** How they reply in their DM: always in a thread, on a hub that can start
+ *  one on a new message; nothing where it can't. */
+function Replying({ agent }: { agent: Agent }) {
+  const key = agentKey(agent);
+  const features = useChat((s) => s.conversations[key]?.features ?? s.hubFeatures[agent.hubId]);
+  const on = useRepliesInThreads(key);
+  // A grid's own window saves no settings: it's changed from the main one.
+  const detached = useDesk((s) => s.detached);
+  if (!canStartThreads(features) || detached) return null;
+  return (
+    <section id="replying" className="agent-section" aria-labelledby="replying-head">
+      <h2 id="replying-head">How they reply</h2>
+      <SwitchRow
+        label="Always reply in a thread"
+        sub={`Each new message you send ${agent.name} starts a thread of its own, and ${agent.name} answers in it, as in Slack. Your chat becomes a list of those conversations.`}
+        on={on}
+        onChange={(next) => setRepliesInThreads(key, next)}
+      />
     </section>
   );
 }

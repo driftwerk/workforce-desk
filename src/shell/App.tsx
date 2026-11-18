@@ -14,6 +14,7 @@ import { ProblemNote } from "../ui/ProblemNote";
 import { setStarter } from "../ui/problem";
 import { startLocalHelper } from "../hub/helperNote";
 import { DeskReadyBanner, useDeskReady } from "../hub/DeskReady";
+import { followRepliesInThreads } from "../chat/threadReplies";
 import { focusMainWindow, hubAccounts, inApp, listen, localHub, onThemesChanged, setOpenReporter, subscribe, windowBackground } from "../platform";
 import { useSettings } from "../settings/store";
 import { reloadDesk } from "../shortcuts/reload";
@@ -248,6 +249,8 @@ export function App() {
     if (!useSettings.getState().loaded) loadSettings().catch(fail);
     void customThemesRead(() => loadCustomThemes().then(setCustom)).catch(fail);
     const unlisten = subscribe(onThemesChanged(refresh));
+    // What a grid's own window changes that this one shows (and saves).
+    const unlistenThreads = subscribe(followRepliesInThreads());
     // Workspaces connected from here work without the local hub (on
     // Windows, before Desk is set up in WSL).
     // Desk's helper may not be up yet, or may have stopped before Desk
@@ -279,6 +282,7 @@ export function App() {
       clearTimeout(retry);
       stop?.();
       unlisten();
+      unlistenThreads();
     };
   }, [connect, fail, loadSettings, setCustom, setHubs]);
 

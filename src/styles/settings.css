@@ -705,6 +705,25 @@ legend.set-label {
   flex-basis: 100%;
   margin: 0;
 }
+/* What the person's work on the workspace runs on, under its name. */
+.hub-row-route {
+  flex-basis: 100%;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.hub-row-route .oversee-card {
+  border: 0;
+  background: none;
+  padding: 0;
+}
+/* A kind that can't be picked here, shown with why. */
+.route-picker .oversee-check:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+.route-picker .field-label {
+  margin-top: 4px;
+}
 .plan-row {
   align-self: stretch;
   flex-wrap: wrap;

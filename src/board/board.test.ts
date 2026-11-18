@@ -8,6 +8,7 @@ import {
   dropAt,
   historyLine,
   keyOf,
+  keyTest,
   keyParts,
   landing,
   lineAt,
@@ -73,6 +74,18 @@ describe("the board's columns", () => {
     expect(found("rotation")).toEqual(["t12"]);
     expect(keyOf(" acm-012 ")).toBe("ACM-12");
     expect(keyOf("ACM-0")).toBeNull();
+    // A GitHub issue by repo#12, or owner/repo#12, in any case.
+    const gh = keyTest("web#12")!;
+    expect(gh("acme/web#12")).toBe(true);
+    expect(gh("acme/awweb#12")).toBe(false);
+    expect(gh("acme/web#123")).toBe(false);
+    expect(gh(null)).toBe(false);
+    expect(keyTest("ACME/Web#12")!("acme/web#12")).toBe(true);
+    expect(keyTest("other/web#12")!("acme/web#12")).toBe(false);
+    expect(keyTest("web#0")).toBeNull();
+    expect(keyTest("two words")).toBeNull();
+    expect(matches({ key: "acme/web#12", title: "x", body: "" }, "web#12")).toBe(true);
+    expect(matches({ key: "acme/web#13", title: "x", body: "" }, "web#12")).toBe(false);
     expect(matches(ticket(3), "")).toBe(true);
   });
 });

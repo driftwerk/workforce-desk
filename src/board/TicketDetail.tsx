@@ -716,9 +716,9 @@ function Facts({ ticket: t, layout, onState }: { ticket: Ticket; layout: Layout;
   else if (d?.points !== undefined)
     facts.points = system === "linear" ? { label: "Estimate", value: <><span className="mono">{d.points}</span> pts</> } : { label: "Points", value: <span className="mono">{d.points}</span> };
   if (d?.sprint) {
-    const name = sprintName(d.sprint);
+    const name = sprintName(d.sprint, system);
     const when = d.sprint.starts && d.sprint.ends && system === "linear" ? spanText(d.sprint.starts, d.sprint.ends) : d.sprint.ends ? `ends ${dayText(d.sprint.ends)}` : null;
-    facts.sprint = { label: system === "linear" ? "Cycle" : "Sprint", value: <><CycleIcon size={12} />{name}{when && !compact && <span className="ticket-there">{when}</span>}</> };
+    facts.sprint = { label: system === "linear" ? "Cycle" : system === "github" ? "Milestone" : "Sprint", value: <><CycleIcon size={12} />{name}{when && !compact && <span className="ticket-there">{when}</span>}</> };
   }
   if (d?.labels?.length) facts.labels = { label: "Labels", value: <>{d.labels.map((l) => <LabelChip key={l} name={l} />)}</> };
   if (d?.project) facts.project = { label: "Project", value: system === "linear" ? <Dotted name={d.project} /> : d.project };
@@ -921,7 +921,7 @@ function NeedRow({ ticket: o, there, onRemove }: { ticket: Ticket; there?: strin
   );
 }
 
-/** Where a synced ticket's words come from: its Jira or Linear issue, and
+/** Where a synced ticket's words come from: its Jira, Linear or GitHub issue, and
  *  whether it still syncs. Its title and description are that issue's,
  *  shown as plain text. */
 function IssueLine({ ticket: t }: { ticket: Ticket }) {

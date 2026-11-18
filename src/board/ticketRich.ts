@@ -143,7 +143,7 @@ export interface EventWords {
   deskLine: (e: ActivityEvent) => string;
 }
 
-const SYSTEM: Record<SyncSystem, string> = { jira: "Jira", linear: "Linear" };
+const SYSTEM: Record<SyncSystem, string> = { jira: "Jira", linear: "Linear", github: "GitHub" };
 
 const who = (name: string | undefined, w: EventWords): string =>
   name && w.me && name === w.me ? "You" : (name ?? (w.system ? SYSTEM[w.system] : "Someone"));
@@ -240,6 +240,7 @@ export type FactId =
 const ORDER: Record<SyncSystem | "local", FactId[]> = {
   jira: ["type", "state", "working", "spent", "assignee", "reporter", "priority", "children", "points", "sprint", "labels", "components", "fixVersion", "start", "due"],
   linear: ["state", "working", "spent", "assignee", "priority", "points", "labels", "project", "sprint", "created", "start", "due"],
+  github: ["state", "working", "spent", "assignee", "labels", "sprint", "due"],
   local: ["state", "assignee", "spent", "priority", "labels", "project", "due"],
 };
 
@@ -248,6 +249,7 @@ const ORDER: Record<SyncSystem | "local", FactId[]> = {
 const BAND: Record<SyncSystem | "local", FactId[]> = {
   jira: ["state", "working", "assignee", "priority", "type", "children", "points", "sprint", "due"],
   linear: ["state", "working", "assignee", "priority", "points", "labels", "project", "sprint", "created", "due"],
+  github: ["state", "working", "assignee", "labels", "sprint", "due"],
   local: ["state", "assignee", "spent", "priority", "labels", "project", "due"],
 };
 

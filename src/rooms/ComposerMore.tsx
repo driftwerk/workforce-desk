@@ -4,23 +4,29 @@ import { Menu, type MenuEntry } from "../ui/Menu";
 
 /** A narrow composer's one overflow button: the emoji, and whatever else
  *  its buttons do (`more`), folded into a menu. It shows only while the
- *  composer is narrow (app.css): the buttons it stands for hide then. */
+ *  composer is narrow (app.css): the buttons it stands for hide then. With
+ *  choices of its own (`kept`, which no button stands for) it shows at any
+ *  width, and holds what's folded only while the composer is narrow. */
 export function ComposerMore({
   label,
   onEmoji,
   more = [],
+  kept = [],
   disabled = false,
 }: {
   /** "More for Desk": what the button is called. */
   label: string;
   onEmoji: (emoji: string) => void;
   more?: MenuEntry[];
+  /** Choices only this menu offers, first. */
+  kept?: MenuEntry[];
   disabled?: boolean;
 }) {
   const button = useRef<HTMLButtonElement>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const [emojiAt, setEmojiAt] = useState<CSSProperties | null>(null);
-  const entries: MenuEntry[] = [
+  const [folded, setFolded] = useState(true);
+  const foldedEntries: MenuEntry[] = [
     {
       kind: "item",
       label: "Add an emoji",
@@ -28,12 +34,17 @@ export function ComposerMore({
     },
     ...more,
   ];
+  const entries: MenuEntry[] = !kept.length
+    ? foldedEntries
+    : folded
+      ? [...kept, { kind: "separator" }, ...foldedEntries]
+      : kept;
   return (
     <>
       <button
         ref={button}
         type="button"
-        className="icon-btn-sm composer-attach composer-more"
+        className={`icon-btn-sm composer-attach composer-more${kept.length ? " composer-more-kept" : ""}`}
         aria-label={label}
         aria-haspopup="menu"
         aria-expanded={menu !== null}
@@ -41,6 +52,10 @@ export function ComposerMore({
         disabled={disabled}
         onClick={(e) => {
           const r = e.currentTarget.getBoundingClientRect();
+          // The emoji button beside it shows while the composer is wide:
+          // what it stands for isn't folded in then.
+          const emoji = e.currentTarget.closest(".composer")?.querySelector(".composer-emoji");
+          setFolded(!emoji || getComputedStyle(emoji).display === "none");
           setMenu(menu ? null : { x: r.left, y: r.top - 4 });
         }}
       >

@@ -125,8 +125,8 @@ describe("Sidebar", () => {
     fireEvent.click(within(boards).getByRole("button", { name: "Acme options" }));
     expect(screen.getByRole("menuitem", { name: "Rename board…" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Delete board…" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Link to Jira or Linear…" }));
-    expect(screen.getByRole("heading", { name: "Link “Acme” to Jira or Linear" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Link to Jira, Linear or GitHub…" }));
+    expect(screen.getByRole("heading", { name: "Link “Acme” to Jira, Linear or GitHub" })).toBeTruthy();
   });
 
   it("makes a board from the +, and shows it", async () => {
@@ -136,12 +136,22 @@ describe("Sidebar", () => {
     useBoard.setState({ boards: {}, supported: true, shown: null });
     sidebar();
     fireEvent.click(screen.getByRole("button", { name: "New board" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "New board…" }));
     fireEvent.change(screen.getByPlaceholderText("Acme"), { target: { value: "Initech" } });
     fireEvent.click(screen.getByRole("button", { name: "Make board" }));
     await waitFor(() => expect(useDesk.getState().view).toBe("board"));
     expect(createBoard).toHaveBeenCalledWith({ name: "Initech" });
     expect(useBoard.getState().shown).toBe("b-new");
     expect(within(screen.getByRole("list", { name: "Boards" })).getByText("Initech")).toBeTruthy();
+  });
+
+  it("offers a board from Linear, Jira or GitHub beside New board in the +", () => {
+    useBoard.setState({ boards: {}, supported: true, shown: null });
+    sidebar();
+    fireEvent.click(screen.getByRole("button", { name: "New board" }));
+    expect(screen.getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["New board…", "New board from Linear, Jira or GitHub…"]);
+    fireEvent.click(screen.getByRole("menuitem", { name: "New board from Linear, Jira or GitHub…" }));
+    expect(screen.getByRole("heading", { name: "New board from Linear, Jira or GitHub" })).toBeTruthy();
   });
 
   it("has no Boards on a hub that keeps none", () => {

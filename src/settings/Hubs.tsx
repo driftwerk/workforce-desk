@@ -8,6 +8,7 @@ import { explain } from "../ui/problem";
 import { revokeSelf } from "../hubs/surface";
 import { useDesk } from "../hub/store";
 import { hubAccounts, removeHub, renameHub } from "../platform";
+import { WorkspaceRoute } from "../hubs/RunMyWorkOn";
 
 /** "Connected as Kings · kings@example.com", once the hub has said. */
 export const connectedAs = (who: Who | undefined): string | null => {
@@ -128,6 +129,12 @@ export function Hubs() {
                   <p className="small state-blocked hub-row-warning" role="alert">
                     Desk’s sign-in to {h.label} has expired or was revoked. Sign in again to see its agents.
                   </p>
+                )}
+                {/* Signed in as the person: what their work there runs on. */}
+                {as && !trouble && (
+                  <div className="hub-row-route">
+                    <WorkspaceRoute hub={h} workspace={h.label} />
+                  </div>
                 )}
               </div>
             );

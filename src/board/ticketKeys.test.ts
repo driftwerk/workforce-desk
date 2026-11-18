@@ -20,6 +20,10 @@ describe("ticket keys in a comment", () => {
     ].join("\n");
     expect(linkTicketKeys(md, known)).toBe(md);
   });
+  it("leaves a GitHub key alone: owner/repo#12 is no project key, lowercase or not", () => {
+    const md = "See acme/web#12 and ACME/web#12 and web-3#4 and acme/web-3#4.";
+    expect(linkTicketKeys(md, (key) => (/#/.test(key) ? ID : undefined))).toBe(md);
+  });
   it("links a key in a list item and around punctuation", () => {
     expect(linkTicketKeys("- PLT-2554, then (PLT-2554)", known)).toBe(`- ${link}, then (${link})`);
   });

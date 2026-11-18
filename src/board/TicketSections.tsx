@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useSessionName } from "../groups/names";
-import { SYSTEM_TITLE } from "../hub/boardSync";
+import { SYSTEM_TITLE, targetWords } from "../hub/boardSync";
 import { useDesk } from "../hub/store";
 import type { Board, Ticket, TicketChild, TicketLink, TicketState } from "../hub/types";
 import { openUrl } from "../platform";
@@ -87,7 +87,8 @@ export function Crumbs({ ticket: t, board, layout }: { ticket: Ticket; board: Bo
   if (!e || !sync) return null;
   const parent = d?.parent && d.parent.key !== d.epic?.key ? d.parent : undefined;
   const parentKind = parentHere?.external?.details?.stateKind;
-  const team = layout === "compact" ? sync.target : `${sync.target} · ${board.name}`;
+  const where = targetWords(sync.system, sync.target);
+  const team = layout === "compact" ? where : `${where} · ${board.name}`;
   return (
     <nav className="ticket-crumbs" aria-label="Where it sits">
       <span>{team}</span>
@@ -120,7 +121,7 @@ export function Crumbs({ ticket: t, board, layout }: { ticket: Ticket; board: Bo
           </button>
         </>
       )}
-      {e.system === "jira" && layout !== "compact" && d?.kind && (
+      {(e.system === "jira" || e.system === "github") && layout !== "compact" && d?.kind && (
         <>
           <Sep />
           <span className="ticket-crumb ticket-crumb-self">
@@ -248,8 +249,8 @@ function ChildRow({ child: c, me, who, onOpen }: { child: TicketChild; me?: stri
   );
 }
 
-const DEV_TITLE = { jira: "Development", linear: "Diffs" } as const;
-const DEV_FROM = { jira: "from Jira’s GitHub app", linear: "Linear’s GitHub link" } as const;
+const DEV_TITLE = { jira: "Development", linear: "Diffs", github: "Pull requests" } as const;
+const DEV_FROM = { jira: "from Jira’s GitHub app", linear: "Linear’s GitHub link", github: "from GitHub" } as const;
 
 /** A PR's state as its chip draws it: a declined one as a faint dashed
  *  chip that says so. */

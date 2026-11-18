@@ -19,7 +19,7 @@ export const COLUMNS: readonly { state: Exclude<TicketState, "dropped">; title: 
 ];
 
 /** What a board's menu can do, each with a dialog of its own. */
-export type BoardAction = "rename" | "delete" | "link" | "unlink";
+export type BoardAction = "rename" | "delete" | "link" | "unlink" | "fromSystem";
 
 export const STATE_TITLE: Record<TicketState, string> = {
   backlog: "Backlog",
@@ -111,13 +111,31 @@ export const keyOf = (q: string): string | null => {
   return m && Number(m[2]) > 0 ? `${m[1]!.toUpperCase()}-${Number(m[2])}` : null;
 };
 
+/** A GitHub issue as typed: `web#12`, or `acme/web#12`. */
+const GH_REF = /^(?:([A-Za-z0-9][A-Za-z0-9-]*)\/)?([A-Za-z0-9._-]+)#(\d+)$/;
+
+/** What a typed key asks for, as a test on a ticket's key: `ACM-12` exactly
+ *  (any case), or a GitHub issue by `repo#12` (the key's end, owner left
+ *  out) or `owner/repo#12`; null when `q` isn't a key. */
+export const keyTest = (q: string): ((key: string | null | undefined) => boolean) | null => {
+  const k = keyOf(q);
+  if (k) return (key) => key?.toUpperCase() === k;
+  const m = GH_REF.exec(q.trim());
+  if (!m || Number(m[3]) <= 0) return null;
+  const want = `${m[1] ? `${m[1]}/` : ""}${m[2]}#${Number(m[3])}`.toLowerCase();
+  return (key) => {
+    const have = key?.toLowerCase();
+    return !!have && (m[1] ? have === want : have === want || have.endsWith(`/${want}`));
+  };
+};
+
 /** Whether `t` is what `q` asks for: its key when `q` is one (exactly), else
  *  every word somewhere in its key, title or description. */
 export const matches = (t: Pick<Ticket, "key" | "title" | "body">, q: string): boolean => {
   const query = q.trim();
   if (!query) return true;
-  const key = keyOf(query);
-  if (key) return t.key?.toUpperCase() === key;
+  const isKey = keyTest(query);
+  if (isKey) return isKey(t.key);
   const hay = `${t.key ?? ""} ${t.title} ${t.body}`.toLowerCase();
   return query
     .toLowerCase()
@@ -133,19 +151,26 @@ const byRank = (a: Ticket, b: Ticket): number => a.rank - b.rank || a.number - b
  *  board's, by rank). */
 export type BoardOrder = "source" | "newest" | "oldest" | "changed" | "arranged";
 
+/** Whether a synced board's source keeps an order of its own: Jira's rank,
+ *  Linear's sort order, a GitHub project's item order. A GitHub repository's
+ *  issues have none. */
+export const hasUpstreamOrder = (sync: BoardSync | null | undefined): boolean => !!sync && (sync.system !== "github" || sync.target.includes("/projects/"));
+
 /** The orders a board offers, in its menu's order: a synced board's own
- *  first, a Desk-only board's hand order last. */
-export const ordersFor = (synced: boolean): readonly BoardOrder[] =>
-  synced ? ["source", "newest", "oldest", "changed"] : ["newest", "oldest", "changed", "arranged"];
+ *  first (where its source has one: `upstream`), a Desk-only board's hand
+ *  order last. */
+export const ordersFor = (synced: boolean, upstream: boolean = synced): readonly BoardOrder[] =>
+  synced ? (upstream ? ["source", "newest", "oldest", "changed"] : ["newest", "oldest", "changed"]) : ["newest", "oldest", "changed", "arranged"];
 
 /** What a board shows until the person picks: as on its Jira or Linear,
  *  else newest first. */
-export const defaultOrder = (synced: boolean): BoardOrder => (synced ? "source" : "newest");
+export const defaultOrder = (synced: boolean, upstream: boolean = synced): BoardOrder => (synced && upstream ? "source" : "newest");
 
 /** `order` where the board offers it, else the board's default (a board
- *  linked or unlinked since it was picked). */
-export const orderOn = (order: BoardOrder | undefined, synced: boolean): BoardOrder =>
-  order && ordersFor(synced).includes(order) ? order : defaultOrder(synced);
+ *  linked or unlinked since it was picked, or a repository's, which has no
+ *  order of its own to keep). */
+export const orderOn = (order: BoardOrder | undefined, synced: boolean, upstream: boolean = synced): BoardOrder =>
+  order && ordersFor(synced, upstream).includes(order) ? order : defaultOrder(synced, upstream);
 
 /** How a synced board's "As on Jira/Linear" sorts: the keys its board
  *  there orders by (none: by Rank or the manual order), and the Jira
