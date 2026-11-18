@@ -5,8 +5,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Ticket } from "../hub/types";
 import { restore } from "../restore/boot";
 import { DeskStateStore, stable, type LocalState, type StateEntry } from "../restore/store";
-import { anchored, byHand, columns, createdOf, defaultOrder, orderOn, ordersFor, sortedLanding, type BoardOrder } from "./board";
-import { orderChipSays, sortedSaid } from "./OrderChip";
+import { anchored, byHand, columns, createdOf, defaultOrder, hasUpstreamOrder, orderOn, ordersFor, sortedLanding, type BoardOrder } from "./board";
+import { orderChipSays, orderSays, sortedSaid } from "./OrderChip";
 import { ticket } from "./testing";
 import { BOARD_VIEWS_KEY, boardViews, readViews, setBoardView, useBoardViews } from "./views";
 
@@ -99,6 +99,24 @@ describe("a board's order", () => {
     expect(orderOn("source", false)).toBe("newest");
     expect(orderOn("oldest", true)).toBe("oldest");
     expect(orderOn(undefined, false)).toBe("newest");
+  });
+
+  it("offers As on GitHub only on a project board, and a repository's board falls back to newest first", () => {
+    const sync = (target: string) => ({ link: "l", system: "github", target, via: { kind: "thisHub" }, person: "p", filter: { kind: "assignedToMe" }, states: {} }) as never;
+    expect(hasUpstreamOrder(sync("acme/projects/7"))).toBe(true);
+    expect(hasUpstreamOrder(sync("acme/web"))).toBe(false);
+    expect(hasUpstreamOrder({ ...(sync("acme/web") as object), system: "jira" } as never)).toBe(true);
+    expect(hasUpstreamOrder(null)).toBe(false);
+    expect(ordersFor(true, false)).toEqual(["newest", "oldest", "changed"]);
+    expect(defaultOrder(true, false)).toBe("newest");
+    expect(orderOn("source", true, false)).toBe("newest");
+    expect(orderOn("source", true, true)).toBe("source");
+    expect(orderChipSays("source", "github")).toBe("Order: as on GitHub");
+    expect(orderSays("source", "github")).toBe("The project's own order, as GitHub has it");
+    expect(sortedSaid("newest", "jira")).toBe("Sorted newest first: choose As on Jira to move cards by hand.");
+    expect(sortedSaid("newest", null)).toBe("Sorted newest first: choose As arranged to move cards by hand.");
+    expect(sortedSaid("newest", "github", true)).toBe("Sorted newest first: choose As on GitHub to move cards by hand.");
+    expect(sortedSaid("newest", "github", false)).toMatch(/keeps no order for a repository’s issues, so cards only change column/);
   });
 
   it("says itself on its chip", () => {

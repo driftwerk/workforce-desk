@@ -26,7 +26,7 @@ export const orderName = (order: BoardOrder, system: SyncSystem | null): string 
 export const orderSays = (order: BoardOrder, system: SyncSystem | null): string => {
   switch (order) {
     case "source":
-      return system === "linear" ? "The board's own order, as Linear has it" : "The board's own order, as Jira ranks it";
+      return system === "linear" ? "The board's own order, as Linear has it" : system === "github" ? "The project's own order, as GitHub has it" : "The board's own order, as Jira ranks it";
     case "newest":
       return "Most recently created at the top";
     case "oldest":
@@ -47,16 +47,18 @@ export const orderChipSays = (order: BoardOrder, system: SyncSystem | null): str
 /** What the board's status line says when a drag or Alt+arrow up or down
  *  can't change a sorted order: the card keeps its place, and how to move
  *  cards by hand. */
-export const sortedSaid = (order: BoardOrder, system: SyncSystem | null): string =>
-  `Sorted ${order === "changed" ? "by recent change" : lower(orderName(order, system))}: choose ${system ? `As on ${SYSTEM_TITLE[system]}` : "As arranged"} to move cards by hand.`;
+export const sortedSaid = (order: BoardOrder, system: SyncSystem | null, upstream: boolean = !!system): string =>
+  `Sorted ${order === "changed" ? "by recent change" : lower(orderName(order, system))}${
+    system && !upstream ? `: ${SYSTEM_TITLE[system]} keeps no order for a repository’s issues, so cards only change column.` : `: choose ${system ? `As on ${SYSTEM_TITLE[system]}` : "As arranged"} to move cards by hand.`
+  }`;
 
 /** The board's Order chip, beside its filters: a menu of the orders the
  *  board offers, the one in force ticked. */
-export function OrderChip({ order, system, onChange }: { order: BoardOrder; system: SyncSystem | null; onChange: (o: BoardOrder) => void }) {
+export function OrderChip({ order, system, upstream = !!system, onChange }: { order: BoardOrder; system: SyncSystem | null; upstream?: boolean; onChange: (o: BoardOrder) => void }) {
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const button = useRef<HTMLButtonElement>(null);
   const entries: MenuEntry[] = [
-    ...ordersFor(!!system).map(
+    ...ordersFor(!!system, upstream).map(
       (o): MenuEntry => ({ kind: "item", radio: true, checked: o === order, label: orderName(o, system), detail: orderSays(o, system), onSelect: () => onChange(o) }),
     ),
     { kind: "note", text: "Kept for this board, with its filters." },

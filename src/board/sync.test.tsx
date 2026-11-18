@@ -60,7 +60,7 @@ vi.mock("@workforce/rich", () => ({
 }));
 
 import { useChat } from "../chat/store";
-import { boardSyncOf, fixOf, isGithubProject, issueUrl, linkedTo, looksLikeToken, pausedWords, syncHubId, syncStatus, targetOk, targetWords } from "../hub/boardSync";
+import { boardSyncOf, fixOf, isGithubProject, shortKey, issueUrl, linkedTo, looksLikeToken, pausedWords, syncHubId, syncStatus, targetOk, targetWords } from "../hub/boardSync";
 import { useDesk } from "../hub/store";
 import type { ActivityParty, Board as BoardT, SyncHub, Ticket } from "../hub/types";
 import { Board } from "./BoardView";
@@ -1086,6 +1086,45 @@ describe("the board, synced", () => {
     expect(screen.getByRole("img", { name: "Todo" })).toBeTruthy();
   });
 
+  it("draws a GitHub board: Milestone, Label and Type chips, keys as repo#12 with the full one on hover, and As on GitHub only on a project", () => {
+    const gh = (n: number, title: string, milestone: string, labels: string[], kind: string) =>
+      ticket(n, {
+        key: `acme/web#${n}`,
+        title,
+        state: "todo",
+        upstreamRank: String(n * 1024).padStart(10, "0") as never,
+        external: ext(`acme/web#${n}`, { system: "github" as const, url: `https://github.invalid/acme/web/issues/${n}`, details: { kind, labels, sprint: { name: milestone } } }),
+      });
+    const a = gh(12, "Alpha", "v1", ["bug"], "Bug");
+    const b = gh(13, "Beta", "v2", ["ui"], "Feature");
+    const { unmount } = show(synced({ system: "github", target: "acme/projects/7" }), [a, b]);
+    expect(screen.getByText("GitHub acme · project 7 via Atlas", { exact: false })).toBeTruthy();
+    expect(screen.getByText("web#12").getAttribute("title")).toBe("GitHub issue acme/web#12");
+    expect(screen.queryByText("acme/web#12")).toBeNull();
+    expect(screen.getByRole("button", { name: "acme/web#12: Alpha" })).toBeTruthy();
+    expect([...(screen.getByRole("combobox", { name: "Milestone" }) as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["Milestone: all", "v1", "v2"]);
+    expect(screen.getByRole("combobox", { name: "Label" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Type" })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Epic" })).toBeNull();
+    fireEvent.change(screen.getByRole("combobox", { name: "Milestone" }), { target: { value: "v2" } });
+    expect(screen.queryByRole("button", { name: "acme/web#12: Alpha" })).toBeNull();
+    expect(screen.getByRole("button", { name: "acme/web#13: Beta" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Order: as on GitHub" }));
+    expect(within(screen.getByRole("menu", { name: "Order" })).getAllByRole("menuitemradio").map((i) => i.firstChild!.firstChild!.textContent)).toEqual(["As on GitHub", "Newest first", "Oldest first", "Recently changed"]);
+    expect(screen.getByText("The project's own order, as GitHub has it")).toBeTruthy();
+    // Enter on repo#12 opens that issue, owner left out.
+    const search = screen.getByLabelText("Search tickets");
+    fireEvent.change(search, { target: { value: "web#13" } });
+    fireEvent.keyDown(search, { key: "Enter" });
+    expect(useBoard.getState().open).toBe(b.id);
+    // A repository's board has no order of its own: it offers none, and a saved one falls back.
+    unmount();
+    useBoardViews.setState({ views: { [ACME.id]: { order: "source" } } as never });
+    show(synced({ system: "github", target: "acme/web" }), [a, b]);
+    fireEvent.click(screen.getByRole("button", { name: "Order: newest first" }));
+    expect(within(screen.getByRole("menu", { name: "Order" })).getAllByRole("menuitemradio").map((i) => i.firstChild!.firstChild!.textContent)).toEqual(["Newest first", "Oldest first", "Recently changed"]);
+  });
+
   it("keeps a board's own filters and its order when it is shown again, and orders it as on Jira until another is picked", () => {
     const a = ticket(51, { key: "ACME-51", title: "Alpha", state: "todo", external: ext("ACME-51", { details: { kind: "Story", epic: { key: "ACME-1", title: "Permissions" } } }) });
     const b = ticket(52, { key: "ACME-52", title: "Beta", state: "todo", external: ext("ACME-52", { details: { kind: "Bug", epic: { key: "ACME-2", title: "Insights" } } }) });
@@ -1275,6 +1314,16 @@ describe("the board, synced", () => {
     expect(screen.queryByRole("button", { name: /alert/ })).toBeNull();
   });
 
+  it("shows a GitHub issue's type and its full key in its ticket, with the milestone as such", () => {
+    const t = ticket(9, { key: "acme/web#9", title: "Postcode", external: ext("acme/web#9", { system: "github" as const, details: { kind: "Bug", sprint: { number: 4 } } }) });
+    useDesk.setState({ hub: { ticketHistory: async () => ({ events: [], next: null }), ledger: async () => ({ rows: [], next: null }) } as never });
+    useBoard.setState({ boards: { [ACME.id]: synced({ system: "github", target: "acme/projects/7" }) }, tickets: { [t.id]: t }, open: t.id });
+    render(<OpenTicket />);
+    expect(document.querySelector(".ticket-crumb-self .ticket-crumb-key")?.textContent).toBe("acme/web#9");
+    expect(document.querySelector(".ticket-key")?.textContent).toBe("acme/web#9");
+    expect(screen.getByText("Milestone 4")).toBeTruthy();
+  });
+
   it("says beside Desk's state what its issue calls it, faint, and stacks the view under 760px", async () => {
     const t = ticket(8, { key: "ACME-8", state: "doing", external: ext("ACME-8", { details: { remoteState: "In Progress", kind: "Story" } }) });
     useDesk.setState({ hub: { ticketHistory: async () => ({ events: [], next: null }), ledger: async () => ({ rows: [], next: null }) } as never });
@@ -1358,6 +1407,8 @@ describe("board sync's words and checks", () => {
     expect(targetOk("github", "acme/..")).toBe(false);
     expect(isGithubProject("acme/projects/7")).toBe(true);
     expect(isGithubProject("acme/projects")).toBe(false);
+    expect(shortKey("acme/web#12")).toBe("web#12");
+    expect(shortKey("web#12")).toBe("web#12");
     expect(targetWords("github", "acme/projects/7")).toBe("acme · project 7");
     expect(targetWords("github", "acme/web")).toBe("acme/web");
     expect(targetWords("jira", "ACME")).toBe("ACME");
