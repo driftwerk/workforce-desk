@@ -5,6 +5,8 @@ import type { Agent, HubAccount } from "../chat/types";
 import { useOverview } from "../overview/store";
 import { BossSheet } from "./BossSheet";
 import { BossOfAGroup } from "../crew/BossOfAGroup";
+import { AgentSettings, MainWindowParts } from "../crew/AgentSettings";
+import { MAIN_WINDOW_PARTS } from "../crew/mainWindow";
 import { useGrantBosses } from "../crew/grantBoss";
 import { useSettings } from "../settings/store";
 import { useHubLayout } from "./hubLayout";
@@ -271,6 +273,21 @@ describe("making an agent on a paired hub a group's boss from their settings", (
     expect(await screen.findByText("Atlas doesn’t take bosses from Desk yet: its admin turns it on.")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /^Make / })).toBeNull();
     expect(screen.getAllByRole("radio", { checked: true }).map((r) => r.getAttribute("aria-label") ?? r.closest("label")!.textContent)).toEqual([expect.stringMatching(/Desk/)]);
+  });
+
+  it("is offered in the main window's agent settings, and never in a grid window's", () => {
+    const settings = <AgentSettings agent={ROSTER[2]!} hub={HUBS[1]!} onOpenFiles={() => {}} />;
+    // A grid's own window: no main-window parts handed down.
+    const { unmount } = render(settings);
+    expect(screen.queryByRole("button", { name: /a group’s boss/ })).toBeNull();
+    unmount();
+    render(<MainWindowParts.Provider value={MAIN_WINDOW_PARTS}>{settings}</MainWindowParts.Provider>);
+    expect(screen.getByRole("button", { name: "Make Allan a group’s boss…" })).toBeTruthy();
+    // Handed down by the main window's shell alone, never set on import.
+    const importers = Object.entries(import.meta.glob("../**/*.{ts,tsx}", { query: "?raw", import: "default", eager: true }) as Record<string, string>)
+      .filter(([f, text]) => !f.includes(".test.") && /crew\/mainWindow"/.test(text))
+      .map(([f]) => f);
+    expect(importers).toEqual(["../shell/App.tsx"]);
   });
 
   it("makes a group for them when the person has none", async () => {

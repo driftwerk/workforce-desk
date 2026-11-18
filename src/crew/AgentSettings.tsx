@@ -1,4 +1,4 @@
-import { useEffect, useState, type ComponentType } from "react";
+import { createContext, useContext, useEffect, useState, type ComponentType } from "react";
 import { agentIdsOn, useChat } from "../chat/store";
 import { agentKey, providerLabel, type Agent, type HubAccount } from "../chat/types";
 import { effortName } from "../hub/providers";
@@ -26,10 +26,14 @@ import { OverseesTheCrew } from "./OverseesTheCrew";
 import { WhatTheySee } from "./WhatTheySee";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
 
-/** Parts of an agent's settings only Desk's main window has, set by its
- *  shell (see crew/mainWindow.ts): a grid's own window, which can show an
- *  agent's settings, never reaches the boss commands they use. */
-export const MAIN_WINDOW: { BossOfAGroup?: ComponentType<{ agent: Agent; hub: HubAccount }> } = {};
+/** Parts of an agent's settings only Desk's main window has, handed down
+ *  by its shell (see crew/mainWindow.ts), as the Board's chrome is: a
+ *  grid's own window, which can show an agent's settings, has none, and
+ *  never reaches the boss commands they use. */
+export interface AgentSettingsParts {
+  BossOfAGroup?: ComponentType<{ agent: Agent; hub: HubAccount }>;
+}
+export const MainWindowParts = createContext<AgentSettingsParts>({});
 
 const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
@@ -37,6 +41,7 @@ const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
  *  files, and removing them. Agents elsewhere show what their hub says. */
 export function AgentSettings({ agent, hub, onOpenFiles }: { agent: Agent; hub: HubAccount | undefined; onOpenFiles: () => void }) {
   const local = hub?.local ?? false;
+  const { BossOfAGroup } = useContext(MainWindowParts);
   return (
     <div className="agent-page">
       <div className="agent-settings">
@@ -61,7 +66,7 @@ export function AgentSettings({ agent, hub, onOpenFiles }: { agent: Agent; hub: 
         {local && <OverseesTheCrew agent={agent} />}
         {/* An agent on a paired hub (not a machine's engine) can boss one
             of the person's groups, through that group's Boss sheet. */}
-        {hub && !local && !hub.machine && MAIN_WINDOW.BossOfAGroup && <MAIN_WINDOW.BossOfAGroup agent={agent} hub={hub} />}
+        {hub && !local && !hub.machine && BossOfAGroup && <BossOfAGroup agent={agent} hub={hub} />}
         {local && <UpdatesSettings agent={agent} />}
         {local && <BossPlans boss={agent.id} name={agent.name} />}
         {local && <FineTuning agent={agent} onOpen={onOpenFiles} />}

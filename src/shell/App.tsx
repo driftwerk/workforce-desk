@@ -53,7 +53,8 @@ import { BrowserPill } from "../browser/BrowserPill";
 import { useBrowserWatch, useLocalBrowser } from "../browser/store";
 import { OpenTicket } from "../board/TicketDetail";
 import { BOARD_CHROME } from "../board/chrome";
-import "../crew/mainWindow";
+import { MAIN_WINDOW_PARTS } from "../crew/mainWindow";
+import { MainWindowParts } from "../crew/AgentSettings";
 import { useBoard } from "../board/store";
 import { Settings } from "../settings/Settings";
 import { ErrorBoundary } from "../ui/ErrorBoundary";
@@ -422,77 +423,79 @@ export function App() {
     });
   }
   return (
-    <div className="app" data-hub-down={hubDown || undefined}>
-      {/* On macOS the window has no title bar (traffic lights overlay the
-          content), so this strip is what moves it; elsewhere the system's
-          title bar does. */}
-      {platform === "macos" && <div className="titlebar" onMouseDown={dragWindow} />}
-      <BrowserPill place={platform === "macos" ? "titlebar" : "band"} />
-      {setupOpen && (
-        <ErrorBoundary name="setup">
-          <WindowsSetup />
-        </ErrorBoundary>
-      )}
-      {settings ? (
-        <ErrorBoundary name="settings">
-          <Settings onClose={closeSettings} />
-        </ErrorBoundary>
-      ) : (
-        <>
-          <ErrorBoundary name="sidebar">
-            <Sidebar
-              onAsk={() => setAsking(true)}
-              onNewSession={(group) => setNewSession({ group })}
-              onNewRoom={() => setNewRoom(true)}
-              onNewCrew={() => setNewCrew(true)}
-              onSettings={() => openSettings()}
-            />
+    <MainWindowParts.Provider value={MAIN_WINDOW_PARTS}>
+      <div className="app" data-hub-down={hubDown || undefined}>
+        {/* On macOS the window has no title bar (traffic lights overlay the
+            content), so this strip is what moves it; elsewhere the system's
+            title bar does. */}
+        {platform === "macos" && <div className="titlebar" onMouseDown={dragWindow} />}
+        <BrowserPill place={platform === "macos" ? "titlebar" : "band"} />
+        {setupOpen && (
+          <ErrorBoundary name="setup">
+            <WindowsSetup />
           </ErrorBoundary>
-          <Stage
-            mainKey={mainKey}
-            mainName={mainName}
-            panels={panels}
-            notice={
-              <>
-                <UpdateNotice />
-                <SetupDock />
-              </>
-            }
-            main={
-              <ErrorBoundary name="main">
-                {view === "floor" ? (
-                  <Dashboard onNewSession={() => setNewSession({})} />
-                ) : view === "grids" ? (
-                  <GridsMain />
-                ) : view === "board" ? (
-                  <Board chrome={BOARD_CHROME} />
-                ) : (
-                  <Rooms />
-                )}
-              </ErrorBoundary>
-            }
-          />
-        </>
-      )}
-      {newSession && <NewSession group={newSession.group} onClose={() => setNewSession(null)} />}
-      {asking && <QuickAsk onClose={() => setAsking(false)} />}
-      {recalling && <SearchMemory onClose={() => setRecalling(false)} />}
-      {newRoom && <NewRoom onClose={() => setNewRoom(false)} />}
-      <OpenRoomDetails />
-      <MoveDialog />
-      <HandoffDialog />
-      <LifecycleDialogs />
-      <ShareAsk />
-      <SetupLauncher />
-      {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
-      <DeskReadyBanner readiness={readiness} onRetry={retryReady} />
-      <Watchers />
-      {error && (
-        <div className="toast toast-error toast-problem" role="alert">
-          <ProblemNote problem={error} onDone={clearError} />
-        </div>
-      )}
-    </div>
+        )}
+        {settings ? (
+          <ErrorBoundary name="settings">
+            <Settings onClose={closeSettings} />
+          </ErrorBoundary>
+        ) : (
+          <>
+            <ErrorBoundary name="sidebar">
+              <Sidebar
+                onAsk={() => setAsking(true)}
+                onNewSession={(group) => setNewSession({ group })}
+                onNewRoom={() => setNewRoom(true)}
+                onNewCrew={() => setNewCrew(true)}
+                onSettings={() => openSettings()}
+              />
+            </ErrorBoundary>
+            <Stage
+              mainKey={mainKey}
+              mainName={mainName}
+              panels={panels}
+              notice={
+                <>
+                  <UpdateNotice />
+                  <SetupDock />
+                </>
+              }
+              main={
+                <ErrorBoundary name="main">
+                  {view === "floor" ? (
+                    <Dashboard onNewSession={() => setNewSession({})} />
+                  ) : view === "grids" ? (
+                    <GridsMain />
+                  ) : view === "board" ? (
+                    <Board chrome={BOARD_CHROME} />
+                  ) : (
+                    <Rooms />
+                  )}
+                </ErrorBoundary>
+              }
+            />
+          </>
+        )}
+        {newSession && <NewSession group={newSession.group} onClose={() => setNewSession(null)} />}
+        {asking && <QuickAsk onClose={() => setAsking(false)} />}
+        {recalling && <SearchMemory onClose={() => setRecalling(false)} />}
+        {newRoom && <NewRoom onClose={() => setNewRoom(false)} />}
+        <OpenRoomDetails />
+        <MoveDialog />
+        <HandoffDialog />
+        <LifecycleDialogs />
+        <ShareAsk />
+        <SetupLauncher />
+        {newCrew && <NewCrew onClose={() => setNewCrew(false)} />}
+        <DeskReadyBanner readiness={readiness} onRetry={retryReady} />
+        <Watchers />
+        {error && (
+          <div className="toast toast-error toast-problem" role="alert">
+            <ProblemNote problem={error} onDone={clearError} />
+          </div>
+        )}
+      </div>
+    </MainWindowParts.Provider>
   );
 }
 
