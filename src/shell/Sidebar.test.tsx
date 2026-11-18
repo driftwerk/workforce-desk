@@ -125,8 +125,8 @@ describe("Sidebar", () => {
     fireEvent.click(within(boards).getByRole("button", { name: "Acme options" }));
     expect(screen.getByRole("menuitem", { name: "Rename board…" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "Delete board…" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("menuitem", { name: "Link to Jira or Linear…" }));
-    expect(screen.getByRole("heading", { name: "Link “Acme” to Jira or Linear" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("menuitem", { name: "Link to Jira, Linear or GitHub…" }));
+    expect(screen.getByRole("heading", { name: "Link “Acme” to Jira, Linear or GitHub" })).toBeTruthy();
   });
 
   it("makes a board from the +, and shows it", async () => {

@@ -60,7 +60,7 @@ vi.mock("@workforce/rich", () => ({
 }));
 
 import { useChat } from "../chat/store";
-import { boardSyncOf, fixOf, issueUrl, linkedTo, looksLikeToken, pausedWords, syncHubId, syncStatus, targetOk } from "../hub/boardSync";
+import { boardSyncOf, fixOf, isGithubProject, issueUrl, linkedTo, looksLikeToken, pausedWords, syncHubId, syncStatus, targetOk, targetWords } from "../hub/boardSync";
 import { useDesk } from "../hub/store";
 import type { ActivityParty, Board as BoardT, SyncHub, Ticket } from "../hub/types";
 import { Board } from "./BoardView";
@@ -135,7 +135,7 @@ beforeEach(() => {
 });
 afterEach(cleanup);
 
-const pickSystem = (s: "Jira" | "Linear") => fireEvent.click(within(screen.getByRole("radiogroup", { name: "System" })).getByRole("radio", { name: s }));
+const pickSystem = (s: "Jira" | "Linear" | "GitHub") => fireEvent.click(within(screen.getByRole("radiogroup", { name: "System" })).getByRole("radio", { name: s }));
 const via = () => within(screen.getByRole("radiogroup", { name: "Through" }));
 
 describe("the link dialog", () => {
@@ -633,6 +633,130 @@ describe("the link dialog", () => {
     expect(screen.queryByRole("radiogroup", { name: "Linear workspace" })).toBeNull();
   });
 
+  describe("GitHub", () => {
+    /** What the hub says of GitHub: acme's projects and repos, and another owner's. */
+    const ghRoutes = (hub: string, method: string, path: string, body: Record<string, unknown> | null) => {
+      if (hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "github") {
+        const owner = (body.owner as string | undefined) ?? "sam";
+        const out: Record<string, unknown> = { offered: true, owner };
+        if (!body.target) {
+          if (owner === "sam") {
+            out.projectsWhy = "This GitHub key can't read projects. Sign in again with Projects allowed, or link the repository's issues instead.";
+            out.projects = [];
+          } else out.projects = [{ key: `${owner}/projects/7`, name: "Roadmap", id: "PVT_kwDOroad" }];
+          out.repos = [{ key: `${owner}/web`, name: `${owner}/web` }];
+          return { status: 200, body: out };
+        }
+        const project = /\/projects\//.test(body.target as string);
+        out.states = project ? ["Todo", "In Progress", "Done"] : ["Open", "Closed", "label:in progress"];
+        out.prefill = project ? { todo: "Todo", doing: "In Progress", done: "Done" } : { todo: "Open", done: "Closed" };
+        if (!project) out.milestones = ["v1", "v2"];
+        out.me = { id: "sam", name: "Sam" };
+        const filter = body.filter as { kind: string } | undefined;
+        if (filter) Object.assign(out, { matches: 9, matchesAtLeast: false, ceiling: 2000 });
+        return { status: 200, body: out };
+      }
+      return localRoutes(method, path, body);
+    };
+    const open = async () => {
+      render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
+      pickSystem("GitHub");
+      await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
+      fireEvent.click(via().getByRole("radio", { name: /^Atlas/ }));
+    };
+
+    it("offers a project first, says plainly when projects can't be read and still offers repositories", async () => {
+      native.route = ghRoutes;
+      await open();
+      const where = within(await screen.findByRole("radiogroup", { name: "Project or repository" }));
+      expect(where.getAllByRole("radio")[0]!.textContent).toBe("A project");
+      expect(where.getByRole("radio", { name: "A project" }).getAttribute("aria-checked")).toBe("true");
+      expect((await screen.findByRole("alert")).textContent).toMatch(/This GitHub key can't read projects/);
+      expect((screen.getByLabelText("Owner") as HTMLInputElement).value).toBe("sam");
+      fireEvent.click(screen.getByRole("button", { name: "Link a repository’s issues instead" }));
+      fireEvent.change(await screen.findByLabelText("sam’s repository"), { target: { value: "sam/web" } });
+      // A repository's issues: no project filter, a milestone picked from the list, states as "Label x".
+      const imports = within(await screen.findByRole("radiogroup", { name: "Import" }));
+      expect(imports.queryByRole("radio", { name: "A project filter" })).toBeNull();
+      expect(imports.queryByRole("radio", { name: /cycle|sprint/i })).toBeNull();
+      fireEvent.click(imports.getByRole("radio", { name: "A milestone" }));
+      fireEvent.change(await screen.findByLabelText("Milestone"), { target: { value: "v2" } });
+      await screen.findByText("9 issues", undefined, { timeout: 2000 });
+      const options = within(screen.getByLabelText("Doing moves its issue to")).getAllByRole("option").map((o) => o.textContent);
+      expect(options).toContain("Label in progress");
+      fireEvent.change(screen.getByLabelText("Doing moves its issue to"), { target: { value: "label:in progress" } });
+      fireEvent.click(screen.getByRole("button", { name: "Link to sam/web" }));
+      await waitFor(() => expect(native.asked.some((a) => a.method === "PUT" && a.path === `/api/desk/boards/${ACME.id}/link`)).toBe(true));
+      const linked = native.asked.find((a) => a.method === "PUT" && a.path === `/api/desk/boards/${ACME.id}/link`)!;
+      expect(linked.body).toEqual({
+        system: "github",
+        target: "sam/web",
+        via: { kind: "hub", hub: "atlas-acme-example" },
+        filter: { kind: "milestone", value: "v2" },
+        states: { todo: "Open", done: "Closed", doing: "label:in progress" },
+      });
+    });
+
+    it("lists another owner's projects when the owner is changed, and links a project with its id and a repo for new tickets", async () => {
+      native.route = ghRoutes;
+      await open();
+      fireEvent.change(await screen.findByLabelText("Owner"), { target: { value: "acme" } });
+      await waitFor(() => expect(native.asked.some((a) => a.path === "/api/desk/boards/link/check" && a.body?.owner === "acme" && !a.body?.target)).toBe(true));
+      fireEvent.change(await screen.findByLabelText("acme’s GitHub project"), { target: { value: "acme/projects/7" } });
+      const imports = within(await screen.findByRole("radiogroup", { name: "Import" }));
+      expect(imports.getByRole("radio", { name: "A project filter" })).toBeTruthy();
+      fireEvent.change(screen.getByLabelText("New tickets go to"), { target: { value: "acme/web" } });
+      await screen.findByText("9 open issues", undefined, { timeout: 2000 });
+      const checkedProject = native.asked.filter((a) => a.path === "/api/desk/boards/link/check" && a.body?.target === "acme/projects/7").at(-1)!;
+      expect(checkedProject.body).toMatchObject({ system: "github", owner: "acme", targetId: "PVT_kwDOroad" });
+      fireEvent.click(screen.getByRole("button", { name: "Link to acme · project 7" }));
+      await waitFor(() => expect(native.asked.some((a) => a.method === "PUT" && a.path === `/api/desk/boards/${ACME.id}/link`)).toBe(true));
+      const linked = native.asked.find((a) => a.method === "PUT")!;
+      expect(linked.body).toMatchObject({ system: "github", target: "acme/projects/7", targetId: "PVT_kwDOroad", repo: "acme/web" });
+    });
+
+    it("links a typed project with the id the hub resolved, and keeps the workspace when the owner changes", async () => {
+      native.route = (hub, method, path, body) => {
+        if (hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "github") {
+          if (!body.workspace && !body.target) return { status: 200, body: { offered: true, workspaces: ["acme-ws", "other-ws"], workspace: "acme-ws" } };
+          if (body.target === "acme/projects/8") {
+            const r = ghRoutes(hub, method, path, body) as { body: Record<string, unknown> };
+            return { status: 200, body: { ...r.body, targetId: "PVT_resolved" } };
+          }
+        }
+        return ghRoutes(hub, method, path, body);
+      };
+      await open();
+      fireEvent.change(await screen.findByLabelText("Owner"), { target: { value: "acme" } });
+      await waitFor(() => expect(native.asked.some((a) => a.path === "/api/desk/boards/link/check" && a.body?.owner === "acme" && a.body?.workspace === "acme-ws")).toBe(true));
+      fireEvent.click(await screen.findByRole("button", { name: "Not listed? Type it" }));
+      fireEvent.change(await screen.findByLabelText("The project’s address"), { target: { value: "acme/projects/8" } });
+      await screen.findByRole("radiogroup", { name: "Import" });
+      await screen.findByText("9 open issues", undefined, { timeout: 2000 });
+      fireEvent.click(within(screen.getByRole("radiogroup", { name: "Import" })).getByRole("radio", { name: "A label" }));
+      fireEvent.change(screen.getByPlaceholderText("desk"), { target: { value: "bug" } });
+      await waitFor(() => expect(native.asked.some((a) => a.body?.filter && (a.body.filter as { kind: string }).kind === "label" && a.body.target === "acme/projects/8")).toBe(true));
+      // The re-check with the filter carries the resolved id too.
+      expect(native.asked.filter((a) => a.body?.target === "acme/projects/8" && a.body?.filter && (a.body.filter as { kind: string }).kind === "label").at(-1)!.body).toMatchObject({ targetId: "PVT_resolved" });
+      await screen.findByText("9 issues", undefined, { timeout: 2000 });
+      fireEvent.click(screen.getByRole("button", { name: "Link to acme · project 8" }));
+      await waitFor(() => expect(native.asked.some((a) => a.method === "PUT")).toBe(true));
+      expect(native.asked.find((a) => a.method === "PUT")!.body).toMatchObject({ system: "github", target: "acme/projects/8", targetId: "PVT_resolved", workspace: "acme-ws" });
+    });
+
+    it("takes a typed repository where the hub lists none, and says what it waits on", async () => {
+      native.route = (hub, method, path, body) =>
+        hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "github" && !body.target
+          ? { status: 200, body: { offered: true, owner: "sam", projects: [], repos: [] } }
+          : ghRoutes(hub, method, path, body);
+      await open();
+      fireEvent.click(await screen.findByRole("radio", { name: "A repository" }));
+      expect(document.querySelector(".dialog-foot-note")?.textContent).toBe("Enter the repository as owner/name.");
+      fireEvent.change(await screen.findByLabelText("The repository"), { target: { value: "acme/web" } });
+      await screen.findByRole("radiogroup", { name: "Import" });
+    });
+  });
+
   it("says by the Link button what it still waits on, first thing first", async () => {
     let matching: { status: number; body: unknown } = { status: 200, body: { offered: true, states: ["Todo", "Done"], matches: 4, matchesAtLeast: false } };
     native.route = (hub, method, path, body) => {
@@ -647,7 +771,7 @@ describe("the link dialog", () => {
     const note = () => document.querySelector(".move-foot .dialog-foot-note")!.textContent;
     const button = () => screen.getByRole("button", { name: /^Link/ }) as HTMLButtonElement;
     render(<LinkBoardDialog board={ACME} tickets={0} onClose={() => {}} />);
-    expect(note()).toBe("Pick Jira or Linear.");
+    expect(note()).toBe("Pick Jira, Linear or GitHub.");
     pickSystem("Linear");
     await waitFor(() => expect((via().getByRole("radio", { name: /^Atlas/ }) as HTMLInputElement).disabled).toBe(false));
     expect(note()).toBe("Pick where Linear is reached through.");
@@ -1183,7 +1307,7 @@ describe("the board, synced", () => {
   it("offers linking from the board's menu, and unlinking once linked", async () => {
     show(ACME, []);
     fireEvent.click(screen.getByRole("button", { name: "Boards" }));
-    expect(screen.getByRole("menuitem", { name: "Link to Jira or Linear…" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "Link to Jira, Linear or GitHub…" })).toBeTruthy();
     cleanup();
     show(synced(), []);
     fireEvent.click(screen.getByRole("button", { name: "Boards" }));
@@ -1223,6 +1347,24 @@ describe("board sync's words and checks", () => {
     expect(targetOk("jira", "ACME_WEB")).toBe(true);
     expect(targetOk("linear", "ACME_WEB")).toBe(false);
     expect(targetOk("jira", "acme")).toBe(false);
+  });
+
+  it("names a GitHub board's project or repository as a person reads it, and checks the target as the hub does", () => {
+    expect(targetOk("github", "acme/projects/7")).toBe(true);
+    expect(targetOk("github", "acme/web")).toBe(true);
+    expect(targetOk("github", "acme/projects/x")).toBe(false);
+    expect(targetOk("github", "acme")).toBe(false);
+    expect(targetOk("github", "-acme/web")).toBe(false);
+    expect(targetOk("github", "acme/..")).toBe(false);
+    expect(isGithubProject("acme/projects/7")).toBe(true);
+    expect(isGithubProject("acme/projects")).toBe(false);
+    expect(targetWords("github", "acme/projects/7")).toBe("acme · project 7");
+    expect(targetWords("github", "acme/web")).toBe("acme/web");
+    expect(targetWords("jira", "ACME")).toBe("ACME");
+    const gh = { ...ACME, sync: { link: "l", system: "github", target: "acme/projects/7", via: { kind: "hub", hub: "atlas" }, person: "p", filter: { kind: "all", value: { includeDone: false } }, states: {} } } as BoardT;
+    expect(linkedTo(gh, "Atlas")).toBe("GitHub acme · project 7 via Atlas");
+    expect(pausedWords({ kind: "missing", tools: ["github.project_items"] }, "Atlas")).toBe("Paused: no agent on Atlas you can reach has GitHub switched on any more.");
+    expect(fixOf({ ...gh.sync!, paused: { kind: "missing", tools: ["github.project_items"] } }, "Atlas")?.label).toBe("Ask an agent on Atlas to switch GitHub on");
   });
 
   it("takes a pasted token as the local hub does: wfr_, letters, digits, _ and -, longer than 20", () => {

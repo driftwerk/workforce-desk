@@ -11,6 +11,7 @@ import { useBoard } from "../board/store";
 import { shownState } from "../floor/background";
 import { useSessionNames } from "../groups/names";
 import { useLayout } from "../groups/store";
+import { SYSTEM_TITLE, targetWords } from "../hub/boardSync";
 import { localSessions, sortedSessions, useDesk } from "../hub/store";
 import { useAuthor } from "../rooms/names";
 import { arranged, useRoomOrder } from "../rooms/order";
@@ -67,7 +68,7 @@ function usePicks(): Pick[] {
         (r): Pick => ({ kind: "room", key: `room:${r.id}`, name: r.name, meta: [...r.members.map((m) => author(memberKey(m)).name), "you"].join(", "), content: roomContent(r.id) }),
       ),
       ...arrangedBoards(boards, boardOrder).map(
-        (b): Pick => ({ kind: "board", key: `board:${b.id}`, name: b.name, meta: b.sync ? `${b.sync.system === "jira" ? "Jira" : "Linear"} ${b.sync.target}` : (b.prefix ?? ""), content: boardContent(b.id) }),
+        (b): Pick => ({ kind: "board", key: `board:${b.id}`, name: b.name, meta: b.sync ? `${SYSTEM_TITLE[b.sync.system]} ${targetWords(b.sync.system, b.sync.target)}` : (b.prefix ?? ""), content: boardContent(b.id) }),
       ),
       { kind: "floor", key: "floor:", name: "Everything", meta: "the whole Floor", content: floorContent() },
       ...groups.map((g): Pick => ({ kind: "floor", key: `floor:${g.id}`, name: `Floor › ${g.name}`, meta: "one group", content: floorContent(g.id) })),

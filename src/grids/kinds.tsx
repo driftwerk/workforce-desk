@@ -15,7 +15,7 @@ import { FloorIds, FloorScope } from "../floor/scope";
 import { layoutSettled, useLayout } from "../groups/store";
 import { useHubLayout } from "../groups/hubLayout";
 import { useSettings } from "../settings/store";
-import { SYSTEM_TITLE, syncStatus } from "../hub/boardSync";
+import { SYSTEM_TITLE, syncStatus, targetWords } from "../hub/boardSync";
 import { useDesk } from "../hub/store";
 import { useCrewFloor, FloorColumn, type CrewFloorRead } from "../overview/CrewFloor";
 import { useOverview } from "../overview/store";
@@ -78,7 +78,7 @@ export interface ViewLabel {
 const syncLine = (b: NonNullable<ReturnType<typeof useBoard.getState>["boards"][string]>, hub: string): string | null => {
   const status = syncStatus(b, hub);
   if (!b.sync || !status) return null;
-  return `${SYSTEM_TITLE[b.sync.system]} ${b.sync.target} · ${status.kind === "synced" ? "synced" : status.kind === "paused" ? "paused" : "sync problem"}`;
+  return `${SYSTEM_TITLE[b.sync.system]} ${targetWords(b.sync.system, b.sync.target)} · ${status.kind === "synced" ? "synced" : status.kind === "paused" ? "paused" : "sync problem"}`;
 };
 
 /** The header of a pane showing a room, a board or the Floor; null for
