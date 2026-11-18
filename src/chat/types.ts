@@ -136,6 +136,9 @@ export interface ChatMessage {
   edited?: boolean;
   /** An answer to a message you deleted since. */
   answeredDeleted?: boolean;
+  /** Your message in the DM that started the thread on itself, where the
+   *  agent answered it. */
+  startsThread?: boolean;
   /** Where a kept message is in the hub's archive: higher was kept later. */
   seq?: number;
   /** The client id of the message whose turn said this: an answer, the
@@ -199,6 +202,10 @@ export const FEATURES = {
   /** A DM has threads: a conversation of its own on a message, listed by the
    *  hub, a reply in one optionally also sent to the DM (./thread.ts). */
   dmThreads: "desk.dm_threads",
+  /** A message in the DM may start the thread on itself (`starts_thread`):
+   *  the hub keeps it in the DM, as the thread's parent, and the agent
+   *  answers it in the thread from the first reply (./threadReplies.ts). */
+  threadStarts: "desk.thread_starts",
   /** A room turn may name the room's members (`members`), which the hub
    *  tells the agent in its own words. A hub without it is told them as a
    *  line of the room's, from Desk. */
@@ -254,6 +261,9 @@ export interface DeskTurn {
   /** In a DM, on a hub with `desk.edit`: this replaces your latest message,
    *  `replaces` (the id the hub keeps it under). */
   edit?: { replaces: string };
+  /** In a DM thread, on a hub with `desk.thread_starts`: this message starts
+   *  the thread on itself, `message` being the thread's parent. */
+  starts_thread?: boolean;
 }
 
 /** A room's member, as a room turn names them. */
@@ -294,6 +304,9 @@ export interface DeskMark {
   edited?: boolean;
   /** An answer to a message the person deleted since. */
   answered_deleted?: boolean;
+  /** Your message in the DM that started the thread on itself: its answer
+   *  is in the thread. */
+  starts_thread?: boolean;
 }
 
 /** What a live turn is doing, as a snapshot says. */
