@@ -7,7 +7,7 @@ import { localSync } from "./syncStore";
 
 const saidOf = (e: unknown): string => (e instanceof HubError || e instanceof Error ? e.message : String(e));
 
-/** Choose who you are on a board's Jira or Linear, when the hub's key is
+/** Choose who you are on a board's Jira, Linear or GitHub, when the hub's key is
  *  shared: type part of your name there, pick yourself. Only names and
  *  pictures come back, never emails; the choice is yours alone, kept on
  *  the hub, and goes before your verified email. `chosen`: there's a

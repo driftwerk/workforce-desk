@@ -124,7 +124,7 @@ const Plans = createContext<{ of: ReadonlyMap<string, { id: string; goal: string
 const KEYS: Record<string, "up" | "down" | "left" | "right"> = { ArrowUp: "up", ArrowDown: "down", ArrowLeft: "left", ArrowRight: "right" };
 
 /** What the Board view's header offers beyond the board itself: the
- *  board's menu (rename, delete, link to Jira or Linear) with its dialogs,
+ *  board's menu (rename, delete, link to Jira, Linear or GitHub) with its dialogs,
  *  and minting a sync token. Handed in by Desk's main window (see
  *  board/chrome.tsx), so a grid's own window, whose board panes have no
  *  such header, never reaches what mints a token. */
@@ -219,11 +219,11 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
     () => ({ of: new Map([...ticketPlans].map(([t, p]) => [t, { id: p, goal: planNames.get(p) ?? "" }])), show: pane ? null : setPlan }),
     [ticketPlans, planNames, pane, setPlan],
   );
-  // Who the person is on the board's Jira or Linear, for Mine.
+  // Who the person is on the board's Jira, Linear or GitHub, for Mine.
   const me = board?.sync?.me ?? null;
   // A synced board's own filters (epic, type, sprint; cycle, project,
   // label), kept with the board's view.
-  // Only the facets its Jira or Linear has chips for: one kept from before
+  // Only the facets its Jira, Linear or GitHub has chips for: one kept from before
   // a relink would filter with no chip to clear it.
   const system = board?.sync?.system ?? null;
   const facets = useMemo(
@@ -501,7 +501,7 @@ function Columns({
   onSorted: () => void;
   /** What its element ids start with. */
   ids: string;
-  /** The board's Jira or Linear, when it is synced. */
+  /** The board's Jira, Linear or GitHub, when it is synced. */
   system: SyncSystem | null;
   /** Column tabs, for a pane too narrow for every column (which then
    *  shows the one picked): each takes a card dropped on it. */
