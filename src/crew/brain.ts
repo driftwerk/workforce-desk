@@ -126,6 +126,32 @@ const WORK_KEY: Record<Work, string> = { light: "light_model", heavy: "heavy_mod
 /** What a background setting says to mean the agent's own (chat) model. */
 export const SAME_AS_CHAT = "chat";
 
+/** The `[llm.model_preferences]` key the hub picks a plain chat turn's
+ *  model by. */
+const CONVERSATION_KEY = "conversation";
+
+/** What an agent chats on, as `[llm.model_preferences] conversation` says:
+ *  a model id or a tier; null is its own (chat) model. */
+export const conversationOf = (source: string): string | null => {
+  const prefs = ((parseDoc(source).llm ?? {}) as Doc).model_preferences;
+  const v = prefs && typeof prefs === "object" ? (prefs as Doc)[CONVERSATION_KEY] : undefined;
+  return typeof v === "string" && v.trim() ? v.trim() : null;
+};
+
+/** An agent's config chatting on `model` (null: its own model). The other
+ *  task types' preferences stay, and the table goes once it's empty. */
+export const withConversation = (source: string, model: string | null): string => {
+  const doc = parseDoc(source);
+  const llm: Doc = { ...((doc.llm ?? {}) as Doc) };
+  const was = llm.model_preferences && typeof llm.model_preferences === "object" ? (llm.model_preferences as Doc) : {};
+  const { [CONVERSATION_KEY]: _was, ...rest } = was;
+  const prefs: Doc = model ? { ...rest, [CONVERSATION_KEY]: model } : rest;
+  if (Object.keys(prefs).length > 0) llm.model_preferences = prefs;
+  else delete llm.model_preferences;
+  doc.llm = llm;
+  return stringify(doc) + "\n";
+};
+
 /** What each kind of background work runs on, as the config says: a model
  *  id, `chat`, a tier name, or null for the hub's default (the provider's
  *  cheap tier for light work, its standard tier for heavy). */
@@ -167,6 +193,14 @@ export const withBrain = (source: string, brain: Brain): string => {
   const llm: Doc = { ...was, provider: brain.runsOn ?? brain.provider, default_model: brain.model };
   if (was.provider !== undefined && providerKey(was.provider) !== providerKey(llm.provider)) {
     for (const key of Object.values(WORK_KEY)) if (!portable(llm[key])) delete llm[key];
+    // A conversation model of the provider it leaves goes too; one it can
+    // still name (a tier, a model named with its provider) stays.
+    const prefs = llm.model_preferences && typeof llm.model_preferences === "object" ? { ...(llm.model_preferences as Doc) } : null;
+    if (prefs && CONVERSATION_KEY in prefs && (!portable(prefs[CONVERSATION_KEY]) || prefs[CONVERSATION_KEY] === SAME_AS_CHAT)) {
+      delete prefs[CONVERSATION_KEY];
+      if (Object.keys(prefs).length > 0) llm.model_preferences = prefs;
+      else delete llm.model_preferences;
+    }
   }
   if (brain.effort) llm.effort = brain.effort;
   else delete llm.effort;

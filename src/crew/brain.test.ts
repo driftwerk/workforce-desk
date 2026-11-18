@@ -12,11 +12,13 @@ import {
   isDefaultModel,
   newAgentBrain,
   brainReady,
+  conversationOf,
   resolveBrain,
   usesAnotherProvider,
   withAnotherProvider,
   withBackground,
   withBrain,
+  withConversation,
   withDeskSettings,
 } from "./brain";
 
@@ -118,6 +120,25 @@ describe("an agent's brain in its config", () => {
     const before = withBrain("", { provider: "claude-code", model: "claude-code-mid", effort: "high" });
     const after = withBrain(before, resolveBrain({ provider: "openrouter", effort: "high" }, ROUTER));
     expect(llmOf(after)).toEqual({ provider: "openrouter", default_model: "openrouter-mid" });
+  });
+
+  it("chats on the conversation model it is given, under [llm.model_preferences] as the hub reads it, keeping the other task types", () => {
+    const toml = withConversation('[llm]\nprovider = "claude-code"\n\n[llm.model_preferences]\ncoding = "opus"\n', "claude-code-mid");
+    expect(llmOf(toml)?.model_preferences).toEqual({ coding: "opus", conversation: "claude-code-mid" });
+    expect(conversationOf(toml)).toBe("claude-code-mid");
+    const back = withConversation(toml, null);
+    expect(llmOf(back)?.model_preferences).toEqual({ coding: "opus" });
+    expect(conversationOf(back)).toBeNull();
+    // The table goes once nothing is left in it.
+    expect(llmOf(withConversation(withConversation("", "cheap"), null))).not.toHaveProperty("model_preferences");
+  });
+
+  it("drops a conversation model of the provider it leaves, and keeps one it can still name", () => {
+    const before = withConversation(withBrain("", { provider: "claude-code", model: "claude-code-mid" }), "claude-code-big");
+    const after = withBrain(before, resolveBrain({ provider: "openrouter" }, ROUTER));
+    expect(llmOf(after)).not.toHaveProperty("model_preferences");
+    const tier = withBrain(withConversation(before, "cheap"), resolveBrain({ provider: "openrouter" }, ROUTER));
+    expect(conversationOf(tier)).toBe("cheap");
   });
 
   it("reads back what it wrote", () => {

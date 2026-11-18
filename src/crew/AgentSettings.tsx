@@ -10,10 +10,10 @@ import { useProviders } from "../providers/store";
 import { useSettings } from "../settings/store";
 import { plainError } from "../ui/plainError";
 import { useAgentBrain, useAgentConfigs } from "./agentBrain";
-import { backgroundOf, effortShort, isDefaultEffort, isDefaultModel, modelName, modelOf, SAME_AS_CHAT, type Work } from "./brain";
+import { backgroundOf, conversationOf, effortShort, isDefaultEffort, isDefaultModel, modelName, modelOf, SAME_AS_CHAT, type Work } from "./brain";
 import { Failover } from "./Failover";
 import { AGENT_FILES, ago, useDrafts } from "./files";
-import { NAME_TAKEN, nameTaken, purposeOf, renameLocalAgent, setAgentBackground, setAgentBrain, setAgentPurpose, setAgentVoice } from "./local";
+import { NAME_TAKEN, nameTaken, purposeOf, renameLocalAgent, setAgentBackground, setAgentBrain, setAgentConversation, setAgentPurpose, setAgentVoice } from "./local";
 import { tickFloor, useFloor } from "../floor/store";
 import type { Choice, Need } from "../hub/types";
 import { useUi } from "../shell/ui";
@@ -341,6 +341,7 @@ function Thinking({ agent }: { agent: Agent }) {
         )}
         {brain && desk && (
           <>
+            <BackgroundRow agent={agent} work="conversation" config={config} provider={provider} chat={chatName} />
             <BackgroundRow agent={agent} work="light" config={config} provider={provider} chat={chatName} />
             <BackgroundRow agent={agent} work="heavy" config={config} provider={provider} chat={chatName} />
           </>
@@ -372,8 +373,19 @@ function Thinking({ agent }: { agent: Agent }) {
   );
 }
 
-/** What each kind of background work is for, as its row says it. */
-const WORK: Record<Work, { name: string; what: string; tier: string; byDefault: string }> = {
+/** A model the agent's work runs on beside its own: plain chatting, or a
+ *  kind of background work. */
+type ModelFor = Work | "conversation";
+
+/** What each kind of work is for, as its row says it. */
+const WORK: Record<ModelFor, { name: string; what: string; tier: string | null; byDefault: string | null }> = {
+  conversation: {
+    name: "Conversation",
+    what: "Plain chatting with you; other work stays on the chat model",
+    tier: null,
+    // Its own model, named as the chat model is.
+    byDefault: null,
+  },
   light: {
     name: "Light background",
     what: "Session notes, gists, memory and running accounts",
@@ -391,9 +403,11 @@ const WORK: Record<Work, { name: string; what: string; tier: string; byDefault: 
 /** The default's value in the picker: the setting left unset. */
 const DEFAULT = "";
 
-/** One kind of background work: what it runs on, beside the chat model.
- *  The default (unset) is the provider's cheap or standard tier; a model of
- *  the provider, or the chat model itself, can be picked instead. */
+/** One kind of work: what it runs on, beside the chat model. For
+ *  background work the default (unset) is the provider's cheap or standard
+ *  tier, and a model of the provider or the chat model itself can be picked
+ *  instead; for conversation the default is the chat model, and a model of
+ *  the provider can be picked (`[llm.model_preferences] conversation`). */
 function BackgroundRow({
   agent,
   work,
@@ -402,7 +416,7 @@ function BackgroundRow({
   chat,
 }: {
   agent: Agent;
-  work: Work;
+  work: ModelFor;
   config: string;
   provider: Provider | undefined;
   chat: string;
@@ -412,11 +426,11 @@ function BackgroundRow({
   const [saving, setSaving] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const w = WORK[work];
-  const set = backgroundOf(config)[work];
+  const set = work === "conversation" ? conversationOf(config) : backgroundOf(config)[work];
   // A tier the file names is the default when it is the default's tier.
   const value = set === null || set === w.tier ? DEFAULT : set;
   const models = provider?.models ?? [];
-  const known = value === DEFAULT || value === SAME_AS_CHAT || models.some((m) => m.id === value);
+  const known = value === DEFAULT || (work !== "conversation" && value === SAME_AS_CHAT) || models.some((m) => m.id === value);
   const id = `${agentKey(agent)}-${work}-model`;
 
   const choose = async (next: string) => {
@@ -424,7 +438,11 @@ function BackgroundRow({
     setSaving(true);
     setProblem(null);
     try {
-      putConfig(agentKey(agent), await setAgentBackground(desk, agent.id, work, next === DEFAULT ? null : next));
+      const model = next === DEFAULT ? null : next;
+      putConfig(
+        agentKey(agent),
+        await (work === "conversation" ? setAgentConversation(desk, agent.id, model) : setAgentBackground(desk, agent.id, work, model)),
+      );
     } catch (e) {
       setProblem(plainError(e));
       // A file changed elsewhere holds the save: its choice shows above.
@@ -446,13 +464,13 @@ function BackgroundRow({
           aria-describedby={`${id}-what`}
           onChange={(e) => void choose(e.target.value)}
         >
-          <option value={DEFAULT}>Default · {w.byDefault}</option>
+          <option value={DEFAULT}>Default · {w.byDefault ?? (chat ? `same as chat · ${chat}` : "same as chat")}</option>
           {models.map((m) => (
             <option key={m.id} value={m.id}>
               {m.name}
             </option>
           ))}
-          <option value={SAME_AS_CHAT}>Same as chat{chat ? ` · ${chat}` : ""}</option>
+          {work !== "conversation" && <option value={SAME_AS_CHAT}>Same as chat{chat ? ` · ${chat}` : ""}</option>}
           {!known && <option value={value}>{value}</option>}
         </select>
         <span id={`${id}-what`} className={problem ? "small state-blocked" : "small faint"} role={problem ? "alert" : undefined}>
