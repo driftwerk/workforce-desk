@@ -44,6 +44,7 @@ let settings = {
   customVoices: {},
   voice: false,
   voiceEngine: "cascade",
+  audio: { input: null, output: null, echoCancel: true, sensitivity: 0.5, pushToTalkOnly: false },
   shortcuts: {} as Record<string, string>,
   groups: [] as unknown[],
   ungrouped: { collapsed: false, items: [] as string[] },
@@ -345,12 +346,50 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
     default:
       // Voice and Tuple live in the app process; in the preview they are off.
       if (cmd === "voice_status") return answer({ state: "off" });
+      // A computer's microphones and speakers, and a level that moves, for
+      // Settings › Voice in screenshots.
+      if (cmd === "voice_audio_devices") return answer(PREVIEW_DEVICES);
+      if (cmd === "voice_audio_status") return answer(previewAudio());
+      if (cmd === "voice_audio_test") return new Promise((done) => setTimeout(() => done(undefined as T), 3000));
       if (cmd === "voice_lookup") return answer({ state: "failed", message: "Looking a voice up needs the Desk app." });
       if (cmd === "voice_engine_voices" || cmd === "voice_kokoro_voices") return answer([]);
       if (/^(voice|tuple)_/.test(cmd)) return answer(undefined);
       throw new Error(`${cmd} is only available in the Desk app`);
   }
 }
+
+// ── Audio devices, for Settings › Voice in the preview ─────────────────────
+
+const PREVIEW_DEVICES = {
+  inputs: [
+    { id: "lg", name: "LG UltraFine Display Audio", isDefault: true },
+    { id: "yeti", name: "Yeti Stereo Microphone", isDefault: false },
+    { id: "builtin-mic", name: "MacBook Pro Microphone", isDefault: false },
+    { id: "poly-in", name: "Poly VFOCUS2 Series", isDefault: false },
+  ],
+  outputs: [
+    { id: "poly-out", name: "Poly VFOCUS2 Series", isDefault: true },
+    { id: "builtin-out", name: "MacBook Pro Speakers", isDefault: false },
+    { id: "lg-out", name: "LG UltraFine Display Audio", isDefault: false },
+  ],
+};
+
+/** What's in use: the chosen devices (or the system's), a level like speech. */
+const previewAudio = () => {
+  const pick = (list: { id: string; name: string; isDefault: boolean }[], choice: { id: string; name: string } | null) =>
+    list.find((d) => d.id === choice?.id) ?? list.find((d) => d.isDefault) ?? null;
+  const t = Date.now() / 1000;
+  const level = 0.004 + 0.03 * Math.abs(Math.sin(t * 2.3) * Math.sin(t * 0.7));
+  return {
+    listening: true,
+    input: pick(PREVIEW_DEVICES.inputs, settings.audio.input),
+    output: pick(PREVIEW_DEVICES.outputs, settings.audio.output),
+    echoCancelled: settings.audio.echoCancel,
+    quietWhileSpeaking: false,
+    notes: [] as string[],
+    level,
+  };
+};
 
 // ── WSL, for Windows' first run in the preview ─────────────────────────────
 

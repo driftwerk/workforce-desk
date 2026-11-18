@@ -67,6 +67,27 @@ export interface SetupProgress {
   at?: string;
 }
 
+/** A microphone or speaker the person chose: by its stable id, and by
+ *  name for when the id changes (plugged into another port). */
+export interface DeviceChoice {
+  id: string;
+  name: string;
+}
+
+/** How voice uses the microphone and speaker. */
+export interface AudioPrefs {
+  /** Null: whichever the system uses. */
+  input: DeviceChoice | null;
+  output: DeviceChoice | null;
+  /** On macOS, Apple's echo canceller; elsewhere, the microphone goes quiet
+   *  while Desk speaks. Off suits headphones. */
+  echoCancel: boolean;
+  /** 0 hears only close, clear speech; 1 quiet and distant speech too. */
+  sensitivity: number;
+  /** The microphone is heard only while push to talk is held. */
+  pushToTalkOnly: boolean;
+}
+
 export interface Settings {
   theme: string;
   /** The sidebar chooser's theme, kept while Auto, Night or Day is on;
@@ -87,6 +108,8 @@ export interface Settings {
   writtenReplies?: string[];
   /** "cascade" (on-device), "gpt-live" or "gemini-live". */
   voiceEngine: string;
+  /** The microphone and speaker; older files have none (the system's). */
+  audio?: AudioPrefs;
   /** The keyboard shortcuts chosen in place of their defaults, by id
    *  ("ask", "newSession"), as the global-shortcut plugin reads them
    *  ("Control+Shift+Space"). */

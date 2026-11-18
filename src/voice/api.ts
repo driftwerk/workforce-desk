@@ -83,3 +83,43 @@ export const kokoroVoices = (): Promise<VoiceOption[]> => invoke("voice_kokoro_v
 
 /** The voices "kokoro", "gpt-live" or "gemini-live" offer. */
 export const engineVoices = (engine: string): Promise<VoiceOption[]> => invoke("voice_engine_voices", { engine });
+
+/** A microphone or speaker; `id` is the system's stable id for it. */
+export interface AudioDevice {
+  id: string;
+  name: string;
+  /** The one the system uses now. */
+  isDefault: boolean;
+}
+
+export interface AudioDevices {
+  inputs: AudioDevice[];
+  outputs: AudioDevice[];
+}
+
+/** The audio in use, and how loud the microphone is now. */
+export interface AudioNow {
+  /** A microphone is open (voice, or the meter). */
+  listening: boolean;
+  input: AudioDevice | null;
+  output: AudioDevice | null;
+  /** The echo canceller is removing Desk's voice from the microphone. */
+  echoCancelled: boolean;
+  /** No echo canceller: the microphone goes quiet while Desk speaks. */
+  quietWhileSpeaking: boolean;
+  /** What isn't as chosen, in the person's words. */
+  notes: string[];
+  /** Root mean square, 0 to 1. */
+  level: number;
+}
+
+export const audioDevices = (): Promise<AudioDevices> => invoke("voice_audio_devices");
+
+export const audioNow = (): Promise<AudioNow> => invoke("voice_audio_status");
+
+/** Keeps a microphone open for the level meter while `on`. */
+export const audioMeter = (on: boolean): Promise<void> => invoke("voice_audio_meter", { on });
+
+/** Records a few seconds from the microphone in use and plays them back on
+ *  the speaker in use. */
+export const audioTest = (): Promise<void> => invoke("voice_audio_test");

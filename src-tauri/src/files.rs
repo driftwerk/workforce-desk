@@ -109,6 +109,11 @@ pub struct Settings {
     /// "gemini-live". Kept as text so a newer Desk's choice survives.
     #[serde(default = "default_voice_engine")]
     pub voice_engine: String,
+    /// The microphone and speaker voice uses, echo cancelling, how readily
+    /// speech is heard, and push to talk only. Older files have none: the
+    /// system's devices, echo cancelled, as Desk always listened.
+    #[serde(default)]
+    pub audio: desk_voice::audio::AudioPrefs,
     /// The keyboard shortcuts chosen in place of their defaults, by id
     /// (`ask`, `newSession`), as the global-shortcut plugin reads them
     /// (`Control+Shift+Space`). Kept as text so a newer Desk's survive; the
@@ -204,6 +209,7 @@ impl Default for Settings {
             voice: false,
             written_replies: Vec::new(),
             voice_engine: default_voice_engine(),
+            audio: Default::default(),
             shortcuts: Default::default(),
             groups: Vec::new(),
             ungrouped: Ungrouped::default(),
@@ -585,6 +591,33 @@ mod tests {
                 .unwrap()
                 .contains(r#""voiceEngine": "gemini-live""#)
         );
+        assert_eq!(load_settings(&paths).unwrap(), chosen);
+    }
+
+    #[test]
+    fn the_audio_devices_round_trip_and_older_files_use_the_systems() {
+        use desk_voice::audio::{AudioPrefs, DeviceChoice};
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        std::fs::write(paths.settings(), r#"{"theme":"system","voice":true}"#).unwrap();
+        assert_eq!(load_settings(&paths).unwrap().audio, AudioPrefs::default());
+        let chosen = Settings {
+            audio: AudioPrefs {
+                input: Some(DeviceChoice {
+                    id: "AppleUSBAudioEngine:Blue Microphones:Yeti:1".into(),
+                    name: "Yeti Stereo Microphone".into(),
+                }),
+                echo_cancel: false,
+                sensitivity: 0.75,
+                push_to_talk_only: true,
+                ..AudioPrefs::default()
+            },
+            ..Settings::default()
+        };
+        save_settings(&paths, &chosen).unwrap();
+        let file = std::fs::read_to_string(paths.settings()).unwrap();
+        assert!(file.contains(r#""echoCancel": false"#), "{file}");
+        assert!(file.contains(r#""pushToTalkOnly": true"#), "{file}");
         assert_eq!(load_settings(&paths).unwrap(), chosen);
     }
 

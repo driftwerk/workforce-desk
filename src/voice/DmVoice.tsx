@@ -1,5 +1,6 @@
 import { useRef, useState } from "react";
-import { useSettings } from "../settings/store";
+import { deviceEntries, useAudioDevices } from "../settings/Audio";
+import { setAudio, useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { stopSpeaking } from "./api";
@@ -26,6 +27,19 @@ function TalkIcon() {
   );
 }
 
+/** The microphone, speaker and echo cancelling, as a menu's entries: to
+ *  change them mid-conversation without going to Settings. */
+const useAudioEntries = (on: boolean): MenuEntry[] => {
+  const devices = useAudioDevices(on ? "once" : "off");
+  const audio = useSettings((s) => s.audio);
+  return [
+    { kind: "separator" },
+    { kind: "item", label: "Microphone", hint: audio.input?.name ?? "Same as system", submenu: () => deviceEntries(devices.inputs, audio.input, (input) => setAudio({ input })) },
+    { kind: "item", label: "Speaker", hint: audio.output?.name ?? "Same as system", submenu: () => deviceEntries(devices.outputs, audio.output, (output) => setAudio({ output })) },
+    { kind: "item", label: "Echo cancelling", detail: "Off suits headphones", checked: audio.echoCancel, onSelect: () => setAudio({ echoCancel: !audio.echoCancel }) },
+  ];
+};
+
 /** Whether voice runs in this window: Desk's main window runs it, a grid in
  *  a window of its own shows none of it. */
 const useVoiceHere = (): boolean => useVoiceStore((s) => s.here);
@@ -41,6 +55,7 @@ export function DmVoiceControls({ agent, name }: { agent: string; name: string }
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const more = useRef<HTMLButtonElement>(null);
   const here = useVoiceHere();
+  const audioEntries = useAudioEntries(menu !== null);
   if (!here) return null;
   const answers = written ? "answers in writing" : "answers aloud";
   return (
@@ -101,11 +116,12 @@ export function DmVoiceControls({ agent, name }: { agent: string; name: string }
       </button>
       {menu && (
         <Menu
-          label={`How ${name} answers when you talk`}
+          label={`How ${name} answers, and the microphone and speaker`}
           at={menu}
           entries={[
             { kind: "item", label: `${name} answers aloud`, checked: !written, onSelect: () => setReply(agent, "spoken") },
             { kind: "item", label: `${name} answers in writing`, checked: written, onSelect: () => setReply(agent, "written") },
+            ...audioEntries,
           ]}
           onClose={(refocus) => {
             setMenu(null);
@@ -127,6 +143,7 @@ export function useDmVoiceEntries(agent: string, name: string): MenuEntry[] {
   const holdKeys = useSettings((s) => s.keys.holdToTalkHere);
   const talkKeys = useSettings((s) => s.keys.talkHere);
   const here = useVoiceHere();
+  const audioEntries = useAudioEntries(here);
   if (!here) return [];
   return [
     { kind: "separator" },
@@ -140,6 +157,7 @@ export function useDmVoiceEntries(agent: string, name: string): MenuEntry[] {
     { kind: "separator" },
     { kind: "item", label: `${name} answers aloud`, checked: !written, onSelect: () => setReply(agent, "spoken") },
     { kind: "item", label: `${name} answers in writing`, checked: written, onSelect: () => setReply(agent, "written") },
+    ...audioEntries,
   ];
 }
 

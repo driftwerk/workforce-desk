@@ -167,7 +167,11 @@ fn settings_load(app: State<'_, App>) -> CommandResult<files::Settings> {
 
 #[tauri::command]
 fn settings_save(app: State<'_, App>, settings: files::Settings) -> CommandResult<()> {
-    files::save_settings(&app.paths, &settings).map_err(text)
+    files::save_settings(&app.paths, &settings).map_err(text)?;
+    // Running audio follows at once: a new device or echo cancelling
+    // rebuilds it, the rest applies as it is.
+    desk_voice::audio::prefs::set(settings.audio);
+    Ok(())
 }
 
 #[tauri::command]
@@ -1077,6 +1081,10 @@ pub fn run() {
                 });
             }
             let watcher = files::watch_themes(app.handle().clone(), &paths.themes())?;
+            // Voice opens the microphone the person chose from the start.
+            if let Ok(settings) = files::load_settings(&paths) {
+                desk_voice::audio::prefs::set(settings.audio);
+            }
             app.manage(voice::Voice::new(&paths, backend.clone()));
             // Every hub socket the page holds, the local hub's admin ones
             // and every paired hub's, and the hubs it reaches by id.
@@ -1356,6 +1364,10 @@ pub fn run() {
             voice::voice_engine_voices,
             voice::voice_lookup,
             voice::voice_status,
+            voice::voice_audio_devices,
+            voice::voice_audio_status,
+            voice::voice_audio_meter,
+            voice::voice_audio_test,
             wsl::wsl_detect,
             wsl::wsl_install,
             wsl::wsl_forget_resume,

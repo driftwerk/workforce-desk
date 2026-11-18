@@ -446,6 +446,8 @@ pub fn voice_set_roster(voice: State<'_, Voice>, roster: Vec<Member>) {
 #[tauri::command]
 pub fn voice_push_to_talk(app: AppHandle, voice: State<'_, Voice>, pressed: bool) {
     voice.held.store(pressed, Ordering::SeqCst);
+    // With push to talk only, the microphone is heard while this is held.
+    desk_voice::audio::prefs::set_held(pressed);
     if !voice.with_engine(|e| e.push_to_talk(pressed)) && !pressed {
         let _ = app.emit("voice-unheard", ());
     }
@@ -592,6 +594,61 @@ pub fn voice_status(voice: State<'_, Voice>) -> VoiceState {
         None => lock(&voice.state).clone(),
     }
 }
+
+/// The microphones and speakers there are, the system's own marked.
+#[tauri::command]
+pub async fn voice_audio_devices() -> CommandResult<desk_voice::audio::Devices> {
+    tauri::async_runtime::spawn_blocking(desk_voice::audio::devices::list)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// The audio in use, and how loud the microphone is now.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioNow {
+    #[serde(flatten)]
+    status: desk_voice::audio::AudioStatus,
+    /// Root mean square, 0 to 1; 0 with no microphone open.
+    level: f32,
+}
+
+#[tauri::command]
+pub fn voice_audio_status() -> AudioNow {
+    AudioNow {
+        status: desk_voice::audio::status(),
+        level: desk_voice::audio::level(),
+    }
+}
+
+/// Keeps the microphone open for Settings' level meter while `on`, if voice
+/// hasn't it open already.
+#[tauri::command]
+pub async fn voice_audio_meter(on: bool) -> CommandResult<()> {
+    if on && desk_voice::audio::mic_access() == desk_voice::audio::MicAccess::Denied {
+        return Err(desk_voice::audio::MIC_NOT_ALLOWED.into());
+    }
+    tauri::async_runtime::spawn_blocking(move || desk_voice::audio::meter(on))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// Records a few seconds from the microphone in use and plays them back on
+/// the speaker in use; a conversation listening meanwhile doesn't hear it.
+#[tauri::command]
+pub async fn voice_audio_test() -> CommandResult<()> {
+    if desk_voice::audio::mic_access() == desk_voice::audio::MicAccess::Denied {
+        return Err(desk_voice::audio::MIC_NOT_ALLOWED.into());
+    }
+    tauri::async_runtime::spawn_blocking(|| desk_voice::audio::test(TEST_SECONDS))
+        .await
+        .map_err(|e| e.to_string())?
+        .map_err(|e| format!("{e:#}"))
+}
+
+/// How long Test records.
+const TEST_SECONDS: f32 = 3.0;
 
 #[cfg(test)]
 mod tests {
