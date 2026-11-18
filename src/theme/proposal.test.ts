@@ -104,7 +104,7 @@ describe("a revision", () => {
   const first = propose(parsePropose({ name: "Moss", dark: true, background: "#2A2A2A", signal: "#3355AA", text: "#8A8A8A" }), NIGHT, []);
 
   it("changes only what it names, and reads again", () => {
-    const { spec } = revise(first.spec, parseRevise({ theme: "moss", signal: "#FFAA33" }), first.nudged);
+    const { spec } = revise(first.spec, parseRevise({ theme: "moss", signal: "#FFAA33" }), first);
     expect(spec.signal).toBe("#FFAA33");
     expect(spec.background).toBe(first.spec.background);
     expect(spec.name).toBe("Moss");

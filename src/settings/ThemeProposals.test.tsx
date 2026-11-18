@@ -45,7 +45,7 @@ describe("an agent's theme proposal", () => {
     expect(card.textContent).toContain("“something murky”");
     expect(screen.getByLabelText("Preview of Murk")).toBeTruthy();
     expect(screen.getByLabelText("Terminal colours").querySelectorAll(".term-swatch")).toHaveLength(16);
-    expect(card.textContent).toMatch(/Desk moved \d+ colours so every pair reads/);
+    expect(card.textContent).toMatch(/Desk moved \d+ colours so its text and terminal read/);
   });
 
   it("is kept as the person's theme, and put on", async () => {

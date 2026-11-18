@@ -76,7 +76,9 @@ export function ProposalCard({ proposal: p, inChat = false }: { proposal: Propos
       {p.changes.length > 0 ? (
         <details className="proposal-changes small">
           <summary className="muted">
-            Desk moved {p.changes.length} colour{p.changes.length === 1 ? "" : "s"} so every pair reads
+            {p.changes.some((c) => c.startsWith("Still too faint"))
+              ? "Some colours still read too faintly"
+              : `Desk moved ${p.changes.length} colour${p.changes.length === 1 ? "" : "s"} so its text and terminal read`}
           </summary>
           <ul>
             {p.changes.map((c) => (
@@ -87,7 +89,7 @@ export function ProposalCard({ proposal: p, inChat = false }: { proposal: Propos
           </ul>
         </details>
       ) : (
-        <span className="small muted">Every pair reads.</span>
+        <span className="small muted">Its text and terminal read as they are.</span>
       )}
       {asking ? (
         <form
@@ -325,6 +327,7 @@ export function ThemeProposals() {
   return (
     <section className="set-group theme-proposals" aria-label="From your agents">
       <span className="set-label">From your agents</span>
+      {!list.length && <span className="small faint">Ask an agent for a theme, from words or a picture. It proposes one here, and nothing changes until you keep it.</span>}
       {list.map((p) => (
         <ProposalCard key={p.spec.id} proposal={p} />
       ))}

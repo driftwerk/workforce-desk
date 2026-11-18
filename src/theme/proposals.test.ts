@@ -30,7 +30,7 @@ describe("an agent's theme calls", () => {
   it("propose saves a proposal only: no theme is written, none is applied", async () => {
     const a = await answerJob("local", job("propose", { name: "Moss", dark: true, background: "#13201A", signal: "#9BE38A", reason: "mossy" }));
     expect(a.ok).toBe(true);
-    expect(a.body).toMatchObject({ id: "moss", name: "Moss", dark: true, moved: "nothing: every pair reads" });
+    expect(a.body).toMatchObject({ id: "moss", name: "Moss", dark: true, moved: "nothing: every pair Desk checks reads" });
     expect([...files.keys()]).toEqual(["moss"]);
     expect(writeTheme).not.toHaveBeenCalled();
     expect(useThemeStore.getState().choice).toBe("night");
@@ -108,4 +108,34 @@ it("a chat shows the proposals its agent made in its turn", async () => {
   expect(proposalsFrom(list, "local", "allan")).toHaveLength(0);
   expect(proposalsFrom(list, "other", "atlas")).toHaveLength(0);
   expect(proposalsFrom(list, "local", "atlas", new Date(now + 60_000).toISOString())).toHaveLength(0);
+});
+
+describe("proposals kept", () => {
+  it("two calls at once never take one id", async () => {
+    const input = { name: "Moss", dark: true, background: "#13201A", signal: "#9BE38A" };
+    await Promise.all([answerJob("local", job("propose", input)), answerJob("remote", job("propose", input))]);
+    expect([...files.keys()].sort()).toEqual(["moss", "moss-2"]);
+  });
+
+  it("are stamped with the hub's time of asking, which the chat's messages are on", async () => {
+    await answerJob("local", { ...job("propose", { name: "Moss", dark: true, background: "#13201A", signal: "#9BE38A" }), at: "2026-11-18T09:00:00Z" });
+    expect(useProposals.getState().list[0]!.at).toBe("2026-11-18T09:00:00.000Z");
+  });
+
+  it("are twenty at most: a newer one drops the oldest", async () => {
+    for (let i = 0; i < 22; i++)
+      await answerJob("local", { ...job("propose", { name: `T${i}`, dark: true, background: "#13201A", signal: "#9BE38A" }), at: new Date(Date.UTC(2026, 10, 18, 9, i)).toISOString() });
+    expect(useProposals.getState().list).toHaveLength(20);
+    expect(files.has("t0")).toBe(false);
+    expect(files.has("t21")).toBe(true);
+  });
+
+  it("a new one is never kept over a theme the person made since", async () => {
+    await answerJob("local", job("propose", { name: "Moss", dark: true, background: "#13201A", signal: "#9BE38A" }));
+    const { NIGHT } = await import("./builtin");
+    useThemeStore.setState({ custom: [{ ...NIGHT, id: "moss", name: "My moss" }] });
+    await useProposals.getState().keep(useProposals.getState().list[0]!);
+    expect(writeTheme).toHaveBeenCalledWith("moss-2", expect.any(String));
+    expect(useThemeStore.getState().choice).toBe("moss-2");
+  });
 });

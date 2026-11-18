@@ -38,6 +38,7 @@ import { layOut, newTerminal, setPlacement, useGrids } from "./store";
 import { startGridsHere } from "./windows";
 import { customThemesRead } from "../theme/boot";
 import { loadCustomThemes } from "../theme/custom";
+import { useProposals } from "../theme/proposals";
 import { startUnread } from "../unread/summary";
 import { watchFloor } from "../floor/store";
 import { isView } from "./kinds";
@@ -98,7 +99,11 @@ export function GridWindow({ gridId }: { gridId: string }) {
     // Settings are only read here: the main window is the one that saves them.
     // Read before the first render (theme/boot); again only if that failed.
     if (!useSettings.getState().loaded) void useSettings.getState().load().catch(fail);
-    const refresh = () => loadCustomThemes().then(useThemeStore.getState().setCustom).catch(fail);
+    // Its chat cards' proposals too: made, kept or discarded elsewhere.
+    const refresh = () => {
+      loadCustomThemes().then(useThemeStore.getState().setCustom).catch(fail);
+      useProposals.getState().load().catch(fail);
+    };
     void customThemesRead(() => loadCustomThemes().then(useThemeStore.getState().setCustom)).catch(fail);
     const unlisten = subscribe(onThemesChanged(refresh));
     // What the main window changes that this one shows.

@@ -139,7 +139,7 @@
   max-width: 560px;
 }
 .proposal-card-chat {
-  margin-top: 10px;
+  margin: 10px 0 4px;
   background: var(--surface);
 }
 .proposal-head {

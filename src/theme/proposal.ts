@@ -188,13 +188,32 @@ export interface Check {
   pass: boolean;
 }
 
-const TERMINAL: readonly Token[] = ["ansiRed", "ansiGreen", "ansiYellow", "ansiBlue", "ansiMagenta", "ansiCyan", "ansiWhite"];
+/** The terminal's colours checked on its ground: all but black, the
+ *  ground's own end. */
+const TERMINAL: readonly Token[] = [
+  "ansiRed",
+  "ansiGreen",
+  "ansiYellow",
+  "ansiBlue",
+  "ansiMagenta",
+  "ansiCyan",
+  "ansiWhite",
+  "ansiBrightBlack",
+  "ansiBrightRed",
+  "ansiBrightGreen",
+  "ansiBrightYellow",
+  "ansiBrightBlue",
+  "ansiBrightMagenta",
+  "ansiBrightCyan",
+  "ansiBrightWhite",
+];
 
 export const allChecks = (theme: Theme): Check[] => [
   ...contrastChecks(theme).map(({ label, fg, bg, ratio, bar, pass }) => ({ label, fg, bg, ratio, bar, pass })),
   ...TERMINAL.map((t): Check => {
     const ratio = contrast(theme.colors[t], theme.colors.sunken);
-    return { label: `Terminal ${t.slice(4).toLowerCase()}`, fg: t, bg: "sunken", ratio, bar: 4.5, pass: ratio >= 4.5 };
+    const name = t.slice(4).replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase();
+    return { label: `Terminal ${name}`, fg: t, bg: "sunken", ratio, bar: 4.5, pass: ratio >= 4.5 };
   }),
 ];
 
@@ -229,6 +248,9 @@ export interface Nudged {
   changes: string[];
   /** The colours it set to do so. */
   nudged: Token[];
+  /** How many pairs still read too faintly (none, but for a theme Desk
+   *  couldn't put right). */
+  low: number;
 }
 
 /** `spec` with every colour that reads too faintly moved until it reads,
@@ -287,7 +309,7 @@ export const nudge = (start: ThemeSpec, dark: boolean): Nudged => {
     }
     // As far as it goes and still short: what it is drawn on moves. The
     // panels and the terminal follow the background.
-    const end = until(c[fg], light, c[bg], bar);
+    const end = toward;
     if (end !== c[fg]) set(fg, end, low, c[fg]);
     if (GROUNDS[bg] && !(bg in spec.overrides)) {
       movedGround ??= low;
@@ -305,7 +327,10 @@ export const nudge = (start: ThemeSpec, dark: boolean): Nudged => {
     nudged.push(token);
     changes.push(`${m.label} read ${said(m.ratio)}, under ${m.bar}; Desk moved ${token} ${m.from} → ${now[token]}.`);
   }
-  return { spec, changes, nudged };
+  // Said, should any pair still read too faintly: never "every pair reads".
+  const still = allChecks(derive(spec)).filter((c) => !c.pass);
+  if (still.length) changes.push(`Still too faint: ${still.map((c) => `${c.label} (${said(c.ratio)}, under ${c.bar})`).join(", ")}.`);
+  return { spec, changes, nudged, low: still.length };
 };
 
 /** A new theme from what an agent gave: every colour Desk works out from
@@ -328,7 +353,8 @@ export const propose = (input: ProposeInput, like: ThemeSpec, taken: readonly st
 /** `base` changed as an agent asked. Overrides Desk set to put a pair right
  *  are tuned to the colours they were set against, so they go when a base
  *  colour moves, and are worked out again. */
-export const revise = (base: ThemeSpec, input: ReviseInput, nudged: readonly Token[] = []): Nudged => {
+export const revise = (base: ThemeSpec, input: ReviseInput, earlier: { nudged: readonly Token[]; changes: readonly string[] } = { nudged: [], changes: [] }): Nudged => {
+  const nudged = earlier.nudged;
   const moved = input.background !== undefined || input.signal !== undefined || input.text !== undefined || input.dark !== undefined;
   const overrides: Partial<Palette> = { ...base.overrides };
   if (moved) for (const t of nudged) delete overrides[t];
@@ -346,7 +372,13 @@ export const revise = (base: ThemeSpec, input: ReviseInput, nudged: readonly Tok
     density: input.density ?? base.density,
     corners: input.corners ?? base.corners,
   };
-  return nudge(spec, input.dark ?? isDarkGround(spec.background));
+  const made = nudge(spec, input.dark ?? isDarkGround(spec.background));
+  // What Desk moved before still stands when no base colour moved: said
+  // again, beside what it moved now. When one did, those were worked out
+  // again, and that is said.
+  const kept = moved ? [] : earlier.changes.filter((c) => !c.startsWith("Still too faint"));
+  const redone = moved && nudged.length ? [`Desk worked out again the colours it had set (${nudged.join(", ")}).`] : [];
+  return { ...made, changes: [...redone, ...kept, ...made.changes], nudged: [...new Set([...(moved ? [] : nudged), ...made.nudged])] };
 };
 
 const PROPOSAL = "proposal";

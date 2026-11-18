@@ -14,7 +14,7 @@ import { dimVariables } from "./theme/xterm";
 const SOURCES: Record<string, string> = Object.fromEntries(
   Object.entries(
     import.meta.glob<string>(
-      ["./**/*.{css,ts,tsx}", "!./theme/tokens.ts", "!./theme/builtin.ts", "!./theme/import.ts", "!./theme/xterm.ts", "!./testing/**", "!./**/*.test.{ts,tsx}", "!./**/*.d.ts"],
+      ["./**/*.{css,ts,tsx}", "!./theme/tokens.ts", "!./theme/builtin.ts", "!./theme/import.ts", "!./theme/xterm.ts", "!./theme/proposal.ts", "!./testing/**", "!./**/*.test.{ts,tsx}", "!./**/*.d.ts"],
       { query: "?raw", import: "default", eager: true },
     ),
   ).map(([path, source]) => [path.replace(/^\.\//, ""), source]),
@@ -33,6 +33,11 @@ const ALLOWED: { file: string; snippet: string; why: string }[] = [
     file: "settings/editing.ts",
     snippet: `["ansi${n}", "${n.toLowerCase()}"]`,
     why: "the editor's label for a terminal colour, not a colour",
+  })),
+  ...['background = \"#0F1E24\"', 'signal = \"#5FE0C8\"', "Desk moved faint #7E8C8F → #8A979A."].map((snippet) => ({
+    file: "devBridge.ts",
+    snippet,
+    why: "the browser preview's sample proposal: a theme file's colours, not drawn by Desk",
   })),
   { file: "settings/voiceCatalog.ts", snippet: 'id: "coral", name: "Coral"', why: "a voice's name" },
   { file: "board/ticketDirectives.tsx", snippet: '"danger", "purple", "neutral"]', why: "the hub's tone names, mapped to tokens in board.css" },

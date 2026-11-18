@@ -12,6 +12,8 @@ const MOST_BACKOFF_MS = 60_000;
 const OLD_HUB_MS = 10 * 60_000;
 
 const JOBS = "/api/me/desk-theme-jobs";
+/** An empty answer sooner than this wasn't held open. */
+const QUICK_MS = 1000;
 
 /** Takes agents' `theme.*` calls from hub `hub` and answers each, until
  *  `stopped`. A proposal is saved here, by Desk, as a proposal only. */
@@ -20,8 +22,12 @@ export const takeThemeJobs = (hub: HubAccount, stopped: () => boolean): void => 
   const loop = async () => {
     while (!stopped()) {
       try {
+        const asked = Date.now();
         const { jobs } = await deskCall<{ jobs?: ThemeJob[] }>(hub, "GET", `${JOBS}?wait=${HOLD_S}`);
         backoff = 1000;
+        // A hub (or something before it) that answers at once with nothing
+        // isn't asked again at once.
+        if (!jobs?.length && Date.now() - asked < QUICK_MS) await new Promise((r) => setTimeout(r, QUICK_MS * 2));
         // Answered even when stopped meanwhile: the hub handed them here.
         for (const job of jobs ?? []) {
           const answer = await answerJob(hub.id, job);
