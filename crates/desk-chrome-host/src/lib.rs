@@ -106,8 +106,8 @@ mod tests {
 
     #[test]
     fn a_release_serves_the_store_id_only() {
-        // The store's id isn't known until the item exists: until then a
-        // release serves nobody, and never a development id.
+        // A release serves the store's extension, and never a development
+        // id.
         if !cfg!(debug_assertions) {
             assert_eq!(dev_id(), None);
         }
