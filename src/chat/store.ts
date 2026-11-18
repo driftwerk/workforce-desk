@@ -121,6 +121,10 @@ interface ChatStore {
    *  the hub keeps it in the DM and the agent answers in the thread. The
    *  thread's parent id once sent, null if it couldn't be. */
   startThread: (key: string, content: string, opts?: { attachments?: Attachment[]; message?: string }) => Promise<string | null>;
+  /** Lets thread `key`'s connection go while nothing goes on in it: no turn
+   *  running, nothing queued, and no message of yours left undelivered. It
+   *  opens again when the thread is shown. */
+  release: (key: string) => void;
   /** What's queued in each DM for its agent's next turn, by agent key. */
   queues: Record<string, Queue>;
   /** Queues a message for the agent's next turn; behind a paused queue it
@@ -180,6 +184,16 @@ export interface SendOptions {
    *  so a hub that has it already takes it once. */
   message?: string;
 }
+
+/** Forgets the messages starting threads in DM `base` that the hub's copy
+ *  of it has now. */
+const pruneStarting = (base: string): void =>
+  useChat.setState((s) => {
+    const kept = new Set((s.histories[base]?.messages ?? []).map((m) => m.id));
+    const was = s.starting[base];
+    if (!was?.some((m) => kept.has(m.id))) return s;
+    return { starting: { ...s.starting, [base]: was.filter((m) => !kept.has(m.id)) } };
+  });
 
 /** How often, and how many times, a new thread's first message is tried
  *  while its connection opens. */
@@ -491,7 +505,11 @@ const ensure = (key: string): boolean => {
     // message that started it is in the DM's copy once its turn is under way.
     if (parent && c.working !== was?.working) {
       void useChat.getState().loadThreads(base);
-      if (useChat.getState().starting[base]?.some((m) => m.id === parent)) void useChat.getState().refreshHistory(base);
+      if (useChat.getState().starting[base]?.some((m) => m.id === parent))
+        void useChat
+          .getState()
+          .refreshHistory(base)
+          .then(() => pruneStarting(base));
     }
     // A turn that ended is in the hub's copy, by the id it was saved under.
     const settled = Object.values(c.turns).filter((t) => (t.state === "ended" || t.state === "failed") && !settling.has(t.ref));
@@ -795,6 +813,18 @@ export const useChat = create<ChatStore>((set, get) => ({
   queues: {},
   threads: {},
   starting: {},
+  release: (key) => {
+    if (!splitKey(key).parent || !live.has(key)) return;
+    const s = get();
+    const c = s.conversations[key];
+    if (isRunning(c) || s.queues[key]?.items.length || c?.messages.some((m) => m.undelivered)) return;
+    // A turn not yet over, or a thread its message is still starting (not
+    // in the hub's copy of the DM yet), stays.
+    if (Object.values(c?.turns ?? {}).some((t) => t.state !== "ended" && t.state !== "failed")) return;
+    const { agent: base, parent } = splitKey(key);
+    if (s.starting[base]?.some((m) => m.id === parent)) return;
+    get().forget(key);
+  },
   startThread: (key, content, opts = {}) => {
     const id = opts.message ?? crypto.randomUUID();
     const thread = threadKey(key, id);

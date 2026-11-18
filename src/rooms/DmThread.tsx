@@ -127,6 +127,12 @@ export const StartedChip = memo(function StartedChip({
   const lost = useChat((s) => !!s.conversations[key]?.messages.some((m) => m.role === "user" && m.clientId === parent && m.undelivered));
   const openNow = useUi((u) => u.dmThreads[agent]);
   const working = running || !!thread?.working;
+  // Answered, and not shown: its connection goes until the thread is.
+  const release = useChat((s) => s.release);
+  const starting = useChat((s) => !!s.starting[agent]?.some((m) => m.id === parent));
+  useEffect(() => {
+    if (!running && !starting && openNow !== parent) release(key);
+  }, [running, starting, openNow, parent, key, release]);
   if (thread?.replies && !lost)
     return <ThreadChip agent={agent} hub={hub} name={name} inPane={inPane} thread={working ? { ...thread, working: true } : thread} />;
   return (
@@ -223,7 +229,12 @@ export function DmThreadPanel({ agent, hub, parent }: { agent: Agent; hub: HubAc
   const close = useUi((u) => u.setDmThread);
   const watch = useChat((s) => s.watchDm);
   const loadHistory = useChat((s) => s.loadHistory);
-  useEffect(() => watch(key), [key, watch]);
+  const release = useChat((s) => s.release);
+  useEffect(() => {
+    watch(key);
+    // Closed, a thread with nothing going on lets its connection go.
+    return () => release(key);
+  }, [key, watch, release]);
   const convo = useChat((s) => s.conversations[key]);
   const history = useChat((s) => s.histories[key]);
   const chat = useChat((s) => s.histories[base]);

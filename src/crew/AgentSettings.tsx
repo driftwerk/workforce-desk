@@ -597,7 +597,9 @@ function Replying({ agent }: { agent: Agent }) {
   const key = agentKey(agent);
   const features = useChat((s) => s.conversations[key]?.features ?? s.hubFeatures[agent.hubId]);
   const on = useRepliesInThreads(key);
-  if (!canStartThreads(features)) return null;
+  // A grid's own window saves no settings: it's changed from the main one.
+  const detached = useDesk((s) => s.detached);
+  if (!canStartThreads(features) || detached) return null;
   return (
     <section id="replying" className="agent-section" aria-labelledby="replying-head">
       <h2 id="replying-head">How they reply</h2>

@@ -43,6 +43,8 @@ export const followRepliesInThreads = () =>
 export const isCommand = (text: string, commands: readonly { name: string; aliases: readonly string[] }[]): boolean => {
   const word = /^\/([^\s/]+)/.exec(text.trimStart())?.[1]?.toLowerCase();
   if (!word) return false;
+  // Before the hub's list is read, any `/word` is taken for one.
+  if (!commands.length) return true;
   const bare = (n: string) => n.replace(/^\//, "").toLowerCase();
   return commands.some((c) => bare(c.name) === word || c.aliases.some((a) => bare(a) === word));
 };

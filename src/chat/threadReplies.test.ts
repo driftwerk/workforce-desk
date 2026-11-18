@@ -71,6 +71,9 @@ describe("Always reply in a thread", () => {
     expect(isCommand("/model opus", commands)).toBe(true);
     expect(isCommand("/usr/bin is where?", commands)).toBe(false);
     expect(isCommand("what's /status?", commands)).toBe(false);
+    // Before the hub's list is read, any `/word` is one.
+    expect(isCommand("/status", [])).toBe(true);
+    expect(isCommand("status?", [])).toBe(false);
   });
 });
 
@@ -110,6 +113,18 @@ describe("A new message that starts its own thread", () => {
     expect(await started).toBeNull();
     expect(useChat.getState().starting[key]).toEqual([]);
     vi.useRealTimers();
+  });
+
+  it("keeps its thread's connection while it starts, and lets it go once it's answered and kept", async () => {
+    const id = (await useChat.getState().startThread(key, "first"))!;
+    const thread = `${key}#${id}`;
+    useChat.getState().release(thread);
+    expect(useChat.getState().conversations[thread]).toBeDefined();
+    // The hub's copy of the DM has it, and nothing goes on in the thread.
+    useChat.setState({ starting: { [key]: [] } });
+    useChat.getState().release(thread);
+    expect(useChat.getState().conversations[thread]).toBeUndefined();
+    expect(useChat.getState().conversations[key]).toBeDefined();
   });
 
   it("is never started from inside a thread", async () => {

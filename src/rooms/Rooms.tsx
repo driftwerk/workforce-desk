@@ -340,7 +340,15 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   // A new message starting its thread shows at once, until the hub's copy
   // of the chat has it.
   const keptAs = new Set(all.flatMap((m) => (m.clientId ? [m.id, m.clientId] : [m.id])));
-  const withStarting = !around && starting?.length ? [...all, ...starting.filter((m) => !keptAs.has(m.id))] : all;
+  const historyIds = new Set((history?.messages ?? []).map((m) => m.id));
+  const pendingStarts = !around && starting?.length ? starting.filter((m) => !keptAs.has(m.id)) : [];
+  // Each where it was sent among the live messages after the hub's copy.
+  const withStarting = pendingStarts.length
+    ? pendingStarts.reduce((list, top) => {
+        const at = list.findIndex((m) => !historyIds.has(m.id) && ms(m.at) > ms(top.at));
+        return at < 0 ? [...list, top] : [...list.slice(0, at), top, ...list.slice(at)];
+      }, all)
+    : all;
   const asideSet = new Set(aside ?? []);
   const shown = aside?.length ? withStarting.filter((m) => !asideSet.has(m.id) && !(m.clientId && asideSet.has(m.clientId))) : withStarting;
   // Your latest message, what ↑ and Edit replace: one you typed, not one
@@ -795,6 +803,8 @@ export const DmMessage = memo(function DmMessage({
 /** The answers to your message `m` in `shown`: those its turn said, by its
  *  client id, else what follows it until your next message. */
 const repliesTo = (shown: readonly ChatMessage[], m: ChatMessage): string[] => {
+  // A message that started a thread was answered there, and the thread goes with it.
+  if (m.startsThread) return [];
   const said = m.clientId ? shown.filter((x) => x.role === "assistant" && x.replyTo === m.clientId) : [];
   if (said.length) return said.map((x) => x.id);
   // Not said: what the agent said after it, until your next message, that
@@ -1121,7 +1131,9 @@ function DmComposer({
     const id = crypto.randomUUID();
     const failed = (why: string) => {
       files.setProblem(why);
-      if (!typedNow()) setDraft(text);
+      // What was typed comes back, before anything typed since.
+      const now = typedNow();
+      setDraft(now ? `${text}\n${now}` : text);
     };
     const unreachable = `Couldn’t reach ${agent.name}. Try again in a moment.`;
     setDraft("");
@@ -1129,7 +1141,7 @@ function DmComposer({
       void startThread(to, text, { message: id }).then((ok) => (ok ? onThreadStarted(ok) : failed(unreachable)));
       return;
     }
-    if (!hub) return;
+    if (!hub) return failed(unreachable);
     setSending(true);
     uploadAll(hub, agent.id, threadChannel(id), picked)
       .then(async (attachments) => {
