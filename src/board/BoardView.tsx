@@ -223,7 +223,13 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   const me = board?.sync?.me ?? null;
   // A synced board's own filters (epic, type, sprint; cycle, project,
   // label), kept with the board's view.
-  const facets = !pane && synced ? view.facets : undefined;
+  // Only the facets its Jira or Linear has chips for: one kept from before
+  // a relink would filter with no chip to clear it.
+  const system = board?.sync?.system ?? null;
+  const facets = useMemo(
+    () => (!pane && system && view.facets ? Object.fromEntries(FACETS[system].flatMap((f) => (view.facets?.[f.id] ? [[f.id, view.facets[f.id]]] : []))) : undefined),
+    [pane, system, view.facets],
+  ) as Facets | undefined;
   const setFacet = (id: FacetId, v: string | undefined) => {
     if (!board) return;
     const { [id]: _was, ...rest } = facets ?? {};

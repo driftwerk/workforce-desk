@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType } from "react";
 import { agentIdsOn, useChat } from "../chat/store";
 import { agentKey, providerLabel, type Agent, type HubAccount } from "../chat/types";
 import { effortName } from "../hub/providers";
@@ -23,9 +23,13 @@ import { CheckingIn, HowTheyRemember, HowTheyWork } from "./AgentAbilities";
 import { BossPlans } from "./PlanRow";
 import { UpdatesSettings } from "./Updates";
 import { OverseesTheCrew } from "./OverseesTheCrew";
-import { BossOfAGroup } from "./BossOfAGroup";
 import { WhatTheySee } from "./WhatTheySee";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
+
+/** Parts of an agent's settings only Desk's main window has, set by its
+ *  shell (see crew/mainWindow.ts): a grid's own window, which can show an
+ *  agent's settings, never reaches the boss commands they use. */
+export const MAIN_WINDOW: { BossOfAGroup?: ComponentType<{ agent: Agent; hub: HubAccount }> } = {};
 
 const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 
@@ -57,7 +61,7 @@ export function AgentSettings({ agent, hub, onOpenFiles }: { agent: Agent; hub: 
         {local && <OverseesTheCrew agent={agent} />}
         {/* An agent on a paired hub (not a machine's engine) can boss one
             of the person's groups, through that group's Boss sheet. */}
-        {hub && !local && !hub.machine && <BossOfAGroup agent={agent} hub={hub} />}
+        {hub && !local && !hub.machine && MAIN_WINDOW.BossOfAGroup && <MAIN_WINDOW.BossOfAGroup agent={agent} hub={hub} />}
         {local && <UpdatesSettings agent={agent} />}
         {local && <BossPlans boss={agent.id} name={agent.name} />}
         {local && <FineTuning agent={agent} onOpen={onOpenFiles} />}

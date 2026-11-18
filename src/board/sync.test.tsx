@@ -982,6 +982,16 @@ describe("the board, synced", () => {
     expect(screen.queryByRole("button", { name: "ACME-51: Alpha" })).toBeNull();
   });
 
+  it("drops a kept filter its Jira or Linear has no chip for, as when the board was linked to the other", () => {
+    useBoardViews.setState({ views: { [ACME.id]: { facets: { epic: "Insights", label: "Feature" } } } });
+    const lin = (n: number, title: string, labels: string[]) =>
+      ticket(n, { key: `MAN-${n}`, title, state: "todo", external: { ...ext(`MAN-${n}`), system: "linear" as const, details: { labels } } });
+    show(synced({ system: "linear", target: "MAN" }), [lin(61, "Gamma", ["Bug"]), lin(62, "Delta", ["Feature"])]);
+    // The epic (Jira's) is left out; the label (Linear's) still filters.
+    expect(screen.queryByRole("button", { name: "MAN-61: Gamma" })).toBeNull();
+    expect(screen.getByRole("button", { name: "MAN-62: Delta" })).toBeTruthy();
+  });
+
   it("shows a card's created date beside Take it, never under it, with the full date on hover", () => {
     const free = ticket(71, { key: "ACME-71", state: "todo", external: ext("ACME-71", { assignee: null, details: { created: "2026-11-17T14:02:00Z" } }) });
     const held = ticket(72, { key: "ACME-72", state: "todo", external: ext("ACME-72", { assignee: { id: "u2", name: "Kate Fisher" }, details: { created: "2026-03-04T10:00:00Z" } }) });

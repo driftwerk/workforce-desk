@@ -53,6 +53,7 @@ import { BrowserPill } from "../browser/BrowserPill";
 import { useBrowserWatch, useLocalBrowser } from "../browser/store";
 import { OpenTicket } from "../board/TicketDetail";
 import { BOARD_CHROME } from "../board/chrome";
+import "../crew/mainWindow";
 import { useBoard } from "../board/store";
 import { Settings } from "../settings/Settings";
 import { ErrorBoundary } from "../ui/ErrorBoundary";
