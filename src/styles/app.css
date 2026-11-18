@@ -2660,6 +2660,21 @@ button.thread-bar:hover {
   color: var(--faint);
   font-weight: 400;
 }
+/* What a choice does, on its own line under its label. */
+.menu-detail {
+  display: block;
+  margin-top: 2px;
+  color: var(--muted);
+  font-size: 12px;
+}
+/* A quiet line at a menu's foot: what its choices are kept for. */
+.menu-note {
+  margin: 4px 0 0;
+  padding: 8px 10px 4px;
+  border-top: 1px solid var(--border);
+  color: var(--faint);
+  font-size: 12px;
+}
 .menu-kbd {
   font-family: var(--font-mono);
   font-size: 11px;

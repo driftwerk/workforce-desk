@@ -16,6 +16,7 @@ import { useOverview } from "../overview/store";
 import { SETTLE_AFTER_MS } from "./board";
 import { Board } from "./BoardView";
 import { useBoard } from "./store";
+import { useBoardViews } from "./views";
 import { OpenTicket } from "./TicketDetail";
 import { SessionTicketChip, TicketKeys } from "./TicketChip";
 import { ACME, API, WEB, ticket } from "./testing";
@@ -160,6 +161,9 @@ beforeEach(() => {
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
   hub = new FakeHub();
   useBoard.setState({ boards: {}, tickets: {}, supported: null, shown: null, open: null });
+  // These cards move by hand: As arranged, not a Desk-only board's newest
+  // first (board.test.ts and order.test.tsx say what the sorted orders do).
+  useBoardViews.setState({ views: { [ACME.id]: { order: "arranged" } } });
   useChat.setState({ hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" }], roster: [] });
   useOverview.setState({ manager: null, managerSupport: "no", overviewSupport: "no", suggestions: {}, suggestionsLoaded: true });
   useDesk.setState({ error: null });
@@ -253,6 +257,63 @@ describe("the board", () => {
     const asked = moves().length;
     fireEvent.keyDown(screen.getByRole("button", { name: /^ACM-1:/ }), { key: "ArrowUp", altKey: true });
     expect(moves().length).toBe(asked);
+  });
+
+  it("sorts a board of its own newest first until another order is picked, and keeps the one picked for the board", async () => {
+    useBoardViews.setState({ views: {} });
+    for (const t of [
+      ticket(1, { state: "todo", rank: 1024, createdAt: "2026-11-01T09:00:00Z" }),
+      ticket(2, { state: "todo", rank: 2048, createdAt: "2026-11-03T09:00:00Z" }),
+      ticket(3, { state: "doing", rank: 1024 }),
+    ])
+      hub.tickets.set(t.id, t);
+    await connect();
+    render(<Board />);
+    const chip = screen.getByRole("button", { name: "Order: newest first" });
+    expect(cardsIn("To do")).toEqual(["ACM-2", "ACM-1"]);
+    // Up or down a sorted column: nothing is asked, and the board says why.
+    fireEvent.keyDown(screen.getByRole("button", { name: /^ACM-1:/ }), { key: "ArrowUp", altKey: true });
+    expect(moves()).toEqual([]);
+    expect(screen.getByText("Sorted newest first: choose As arranged to move cards by hand.")).toBeTruthy();
+    // To another column: only its column changes.
+    await act(async () => void fireEvent.keyDown(screen.getByRole("button", { name: /^ACM-2:/ }), { key: "ArrowLeft", altKey: true }));
+    expect(moves().at(-1)).toEqual({ route: "POST /api/desk/tickets/t2/move", body: { state: "backlog" } });
+    await waitFor(() => expect(cardsIn("Backlog")).toEqual(["ACM-2"]));
+
+    fireEvent.click(chip);
+    const menu = screen.getByRole("menu", { name: "Order" });
+    const items = within(menu).getAllByRole("menuitemradio");
+    expect(items.map((i) => [i.textContent, i.getAttribute("aria-checked")])).toEqual([
+      ["Newest firstMost recently created at the top✓", "true"],
+      ["Oldest firstThe first created at the top", "false"],
+      ["Recently changedThe last one touched at the top", "false"],
+      ["As arrangedYour own order: drag cards to arrange them", "false"],
+    ]);
+    expect(menu.getAttribute("aria-describedby")).toBeTruthy();
+    expect(document.getElementById(menu.getAttribute("aria-describedby")!)!.textContent).toBe("Kept for this board, with its filters.");
+    fireEvent.click(within(menu).getByRole("menuitemradio", { name: /As arranged/ }));
+    expect(screen.getByRole("button", { name: "Order: as arranged" })).toBeTruthy();
+    expect(useBoardViews.getState().views[ACME.id]).toEqual({ order: "arranged" });
+
+    // Shown again (another board, or Desk restarted): as it was left.
+    cleanup();
+    render(<Board />);
+    expect(screen.getByRole("button", { name: "Order: as arranged" })).toBeTruthy();
+    await act(async () => void fireEvent.keyDown(screen.getByRole("button", { name: /^ACM-2:/ }), { key: "ArrowRight", altKey: true }));
+    expect(moves().at(-1)!.body).toEqual({ state: "todo", before: "t1" });
+  });
+
+  it("keeps each board's quick filter while another board is shown", async () => {
+    hub.tickets.set("t1", ticket(1, { state: "todo", pinned: true }));
+    hub.tickets.set("t2", ticket(2, { state: "todo" }));
+    await connect();
+    render(<Board />);
+    fireEvent.click(screen.getByRole("button", { name: "Pinned" }));
+    expect(cardsIn("To do")).toEqual(["ACM-1"]);
+    cleanup();
+    render(<Board />);
+    expect(screen.getByRole("button", { name: "Pinned" }).getAttribute("aria-pressed")).toBe("true");
+    expect(cardsIn("To do")).toEqual(["ACM-1"]);
   });
 
   it("puts a card back where it was when the hub refuses the move, and says why", async () => {

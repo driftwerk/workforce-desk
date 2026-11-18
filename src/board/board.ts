@@ -127,6 +127,67 @@ export const matches = (t: Pick<Ticket, "key" | "title" | "body">, q: string): b
 
 const byRank = (a: Ticket, b: Ticket): number => a.rank - b.rank || a.number - b.number;
 
+/** The order a board's columns show their cards in: as its Jira or Linear
+ *  has them (`source`, a synced board's), by when they were made or last
+ *  changed, or as the person arranged them (`arranged`, a Desk-only
+ *  board's, by rank). */
+export type BoardOrder = "source" | "newest" | "oldest" | "changed" | "arranged";
+
+/** The orders a board offers, in its menu's order: a synced board's own
+ *  first, a Desk-only board's hand order last. */
+export const ordersFor = (synced: boolean): readonly BoardOrder[] =>
+  synced ? ["source", "newest", "oldest", "changed"] : ["newest", "oldest", "changed", "arranged"];
+
+/** What a board shows until the person picks: as on its Jira or Linear,
+ *  else newest first. */
+export const defaultOrder = (synced: boolean): BoardOrder => (synced ? "source" : "newest");
+
+/** `order` where the board offers it, else the board's default (a board
+ *  linked or unlinked since it was picked). */
+export const orderOn = (order: BoardOrder | undefined, synced: boolean): BoardOrder =>
+  order && ordersFor(synced).includes(order) ? order : defaultOrder(synced);
+
+/** Whether a drag up or down a column moves the card in `order`; in the
+ *  sorted ones a card's place is its date, so a drag only changes its
+ *  column. */
+export const byHand = (order: BoardOrder): boolean => order === "source" || order === "arranged";
+
+const ms = (iso: string | null | undefined): number => {
+  const n = iso ? Date.parse(iso) : NaN;
+  return Number.isNaN(n) ? 0 : n;
+};
+
+/** When a ticket was made: its issue's own date on a synced board (the
+ *  ticket here was made when it was imported), else the ticket's. */
+export const createdOf = (t: Pick<Ticket, "createdAt" | "external">): string => t.external?.details?.created ?? t.createdAt;
+
+/** Its issue's place on its Jira or Linear board: Jira's rank (compared as
+ *  text, byte by byte) or Linear's sort order (a number). */
+const byUpstream = (a: Ticket, b: Ticket): number => {
+  const x = a.upstreamRank ?? null;
+  const y = b.upstreamRank ?? null;
+  if (x === null || y === null) return x === y ? byRank(a, b) : x === null ? 1 : -1;
+  if (typeof x !== typeof y) return typeof x === "number" ? -1 : 1;
+  const d = typeof x === "number" ? x - (y as number) : x < y ? -1 : x > y ? 1 : 0;
+  return d || byRank(a, b);
+};
+
+/** How `order` sorts a column's cards, top first. */
+export const sortFor = (order: BoardOrder): ((a: Ticket, b: Ticket) => number) => {
+  switch (order) {
+    case "source":
+      return byUpstream;
+    case "newest":
+      return (a, b) => ms(createdOf(b)) - ms(createdOf(a)) || b.number - a.number;
+    case "oldest":
+      return (a, b) => ms(createdOf(a)) - ms(createdOf(b)) || a.number - b.number;
+    case "changed":
+      return (a, b) => ms(b.updatedAt) - ms(a.updatedAt) || b.number - a.number;
+    case "arranged":
+      return byRank;
+  }
+};
+
 export interface Column {
   state: Exclude<TicketState, "dropped">;
   title: string;
@@ -156,6 +217,8 @@ export const columns = (
     me?: string | null;
     /** A synced board's own filters: epic, type, sprint, project, label. */
     facets?: Facets;
+    /** How each column is sorted; by rank when not said. */
+    order?: BoardOrder;
   },
 ): Column[] => {
   const shown = tickets.filter(
@@ -166,11 +229,12 @@ export const columns = (
       shownBy(t, opts.filter, opts.waiting, opts.me) &&
       shownByFacets(t, opts.facets),
   );
-  // One pass into the columns, each then ordered by rank.
+  // One pass into the columns, each then sorted in the board's order.
   const by = new Map<TicketState, Ticket[]>(COLUMNS.map(({ state }) => [state, []]));
   for (const t of shown) by.get(t.state === "dropped" ? "done" : t.state)?.push(t);
+  const sort = sortFor(opts.order ?? "arranged");
   return COLUMNS.map(({ state, title }) => {
-    const mine = by.get(state)!.sort(byRank);
+    const mine = by.get(state)!.sort(sort);
     return state === "done"
       ? { state, title, cards: mine.filter((t) => !settled(t, opts.now)), shelf: mine.filter((t) => settled(t, opts.now)) }
       : { state, title, cards: mine, shelf: [] };
@@ -302,6 +366,16 @@ export const landing = (cols: readonly Column[], source: string, over: Over): Ti
   return dropAt(col.state, others, index);
 };
 
+/** What dropping `source` at `over` does in a sorted order, where a card's
+ *  place is its date: it moves to another column (where it shows in its
+ *  sorted place), or, dropped in its own, it stays (`sorted`: the board
+ *  says why). Null where there's nothing to drop on. */
+export const sortedLanding = (cols: readonly Column[], source: Pick<Ticket, "state">, over: Over): TicketMove | "sorted" | null => {
+  const to = lineAt(cols, over)?.state;
+  if (!to || source.state === "dropped") return null;
+  return to === source.state ? "sorted" : { state: to };
+};
+
 /** Plain text in parts: its words, and the keys in it of tickets there are
  *  (`known`, upper-case keys), for a chip each. */
 export const keyParts = (text: string, known: ReadonlySet<string>): ({ kind: "text"; text: string } | { kind: "key"; key: string })[] => {
@@ -321,10 +395,10 @@ export const keyParts = (text: string, known: ReadonlySet<string>): ({ kind: "te
  *  (`tickets`: the board's, the moved one too): between the card it lands
  *  after and the one truly next to it, hidden by a filter or not, so the
  *  hub's rank falls where it was shown. */
-export const anchored = (mv: TicketMove, tickets: readonly Ticket[], source: string): TicketMove => {
+export const anchored = (mv: TicketMove, tickets: readonly Ticket[], source: string, order: BoardOrder = "arranged"): TicketMove => {
   const column = tickets
     .filter((t) => t.state === mv.state && t.id !== source)
-    .sort(byRank)
+    .sort(sortFor(order))
     .map((t) => t.id);
   const at = (id: string) => column.indexOf(id);
   if (mv.before && at(mv.before) >= 0) {

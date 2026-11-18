@@ -16,12 +16,36 @@ import { BoardDialog } from "./BoardDialogs";
 import { BoardPlans } from "./BoardPlans";
 import { LeftFilterShelf, SyncBar } from "./SyncBar";
 import { hubNameOf, localSync, syncChoices, useSyncHubs, type SyncChoice } from "./syncStore";
-import { type BoardAction, FILTERS, STATE_TITLE, anchored, planOfTickets, statesOf, columns, keyOf, landing, lineAt, nudge, shelfLabel, snoozed, waitingOnYou, type BoardFilter, type Column, type Over } from "./board";
+import {
+  type BoardAction,
+  FILTERS,
+  STATE_TITLE,
+  anchored,
+  byHand,
+  planOfTickets,
+  statesOf,
+  columns,
+  keyOf,
+  landing,
+  lineAt,
+  nudge,
+  orderOn,
+  shelfLabel,
+  sortedLanding,
+  snoozed,
+  waitingOnYou,
+  type BoardFilter,
+  type Column,
+  type Over,
+} from "./board";
 import { NewTicket } from "./NewTicket";
 import { TicketOpener } from "./opener";
 import { shownBoard, useBoard } from "./store";
 import { TicketCard } from "./TicketCard";
 import { FACETS, facetChoices, pointsOf, type FacetId, type Facets } from "./facets";
+import { OrderChip, sortedSaid } from "./OrderChip";
+import { setBoardView, useBoardView } from "./views";
+import type { TicketMove } from "../hub/types";
 
 /** Whether a ticket's session or agent waits on the person, by the Floor's
  *  own rule (its needs, else the session's state). */
@@ -134,9 +158,12 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   const boss = useBoss();
   const waiting = useWaiting();
   const now = useMinute();
-  const [ownFilter, setOwnFilter] = useState<BoardFilter>("all");
-  const filter = pane?.filter ?? ownFilter;
-  const setFilter = pane?.onFilter ?? setOwnFilter;
+  // The board's order, quick filter and (synced) own filters, kept for
+  // each board across switching and restarts. A grid's pane has its own
+  // filter, in its header, and no facet chips, so it filters by neither.
+  const view = useBoardView(board?.id);
+  const filter = pane?.filter ?? view.filter ?? "all";
+  const setFilter = pane?.onFilter ?? ((f: BoardFilter) => board && setBoardView(board.id, { filter: f }));
   // Ids of its own: a grid can show more than one board.
   const uid = useId();
   const searchId = `${uid}-search`;
@@ -163,6 +190,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   // A synced board is synced at once when it's shown, and its hub's name
   // read for what its sync bar says.
   const synced = !!board?.sync;
+  const order = orderOn(view.order, synced);
   useEffect(() => {
     if (!board || !synced) return;
     void useSyncHubs.getState().load();
@@ -194,11 +222,23 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   // Who the person is on the board's Jira or Linear, for Mine.
   const me = board?.sync?.me ?? null;
   // A synced board's own filters (epic, type, sprint; cycle, project,
-  // label), kept per board while it is shown.
-  const [facetsOf, setFacetsOf] = useState<{ board: string; facets: Facets } | null>(null);
-  const facets = board && facetsOf?.board === board.id ? facetsOf.facets : undefined;
-  const setFacet = (id: FacetId, v: string | undefined) => board && setFacetsOf({ board: board.id, facets: { ...facets, [id]: v } });
-  const cols = useMemo(() => columns(onBoard, { filter, q, now, waiting, plan: planTickets, me, facets }), [onBoard, filter, q, now, waiting, planTickets, me, facets]);
+  // label), kept with the board's view.
+  // Only the facets its Jira or Linear has chips for: one kept from before
+  // a relink would filter with no chip to clear it.
+  const system = board?.sync?.system ?? null;
+  const facets = useMemo(
+    () => (!pane && system && view.facets ? Object.fromEntries(FACETS[system].flatMap((f) => (view.facets?.[f.id] ? [[f.id, view.facets[f.id]]] : []))) : undefined),
+    [pane, system, view.facets],
+  ) as Facets | undefined;
+  const setFacet = (id: FacetId, v: string | undefined) => {
+    if (!board) return;
+    const { [id]: _was, ...rest } = facets ?? {};
+    setBoardView(board.id, { facets: v ? { ...rest, [id]: v } : rest });
+  };
+  const cols = useMemo(
+    () => columns(onBoard, { filter, q, now, waiting, plan: planTickets, me, facets, order }),
+    [onBoard, filter, q, now, waiting, planTickets, me, facets, order],
+  );
   const counts = useMemo(() => columns(onBoard, { filter: "all", q: "", now, waiting }), [onBoard, now, waiting]);
   // Each chip counts the cards it would show, as the search and plan
   // leave them.
@@ -211,10 +251,16 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   }, [onBoard, q, now, waiting, planTickets, me, facets]);
 
   const states = useMemo(() => statesOf(all), [all]);
-  const move = (id: string, shown: Parameters<ReturnType<typeof useBoard.getState>["move"]>[1]) => {
+  const hand = byHand(order);
+  /** What a drag up or down says in a sorted order: the card keeps its
+   *  sorted place. */
+  const sorted = () => setSaid(sortedSaid(order, board?.sync?.system ?? null));
+  const move = (id: string, shown: TicketMove) => {
     const t = all[id];
-    // Placed in the whole column, whatever the filter hides.
-    const mv = anchored(shown, mine, id);
+    // Placed in the whole column, whatever the filter hides: among its
+    // neighbours as the board shows them when cards move by hand, else at
+    // the end of the column's hand order (it shows in its sorted place).
+    const mv = hand ? anchored(shown, mine, id, order) : anchored({ state: shown.state }, mine, id);
     useBoard
       .getState()
       .move(id, mv)
@@ -231,6 +277,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
     if (!dir) return;
     e.preventDefault();
     if (t.state === "dropped") return setSaid(`${t.key ?? "It"} is dropped: Bring it back from its panel first`);
+    if (!hand && (dir === "up" || dir === "down")) return sorted();
     const mv = nudge(cols, t.id, dir);
     if (!mv) return setSaid(dir === "up" ? "Already at the top" : dir === "down" ? "Already at the bottom" : dir === "left" ? "Already in the first column" : "Already in the last column");
     move(t.id, mv);
@@ -312,6 +359,8 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
             shelfOpen={shelfOpen}
             onShelf={() => setShelfOpen((o) => !o)}
             onMove={move}
+            byHand={hand}
+            onSorted={sorted}
             onCardKey={onCardKey}
             register={(id, el) => (el ? cards.current.set(id, el) : cards.current.delete(id))}
             ids={uid}
@@ -377,6 +426,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
             ))}
           </select>
         )}
+        <OrderChip order={order} system={board.sync?.system ?? null} onChange={(o) => setBoardView(board.id, { order: o })} />
         <label className="sr-only" htmlFor={searchId}>
           Search tickets
         </label>
@@ -436,12 +486,19 @@ function Columns({
   shelfOpen,
   onShelf,
   onMove,
+  byHand: hand,
+  onSorted,
   onCardKey,
   register,
   ids,
   tabs = false,
   system,
 }: {
+  /** Whether a drag up or down moves a card (the board's order is by
+   *  hand); else a drop only changes its column, and one in its own column
+   *  says why it didn't move (`onSorted`). */
+  byHand: boolean;
+  onSorted: () => void;
   /** What its element ids start with. */
   ids: string;
   /** The board's Jira or Linear, when it is synced. */
@@ -456,7 +513,7 @@ function Columns({
   waiting: (t: Ticket) => boolean;
   shelfOpen: boolean;
   onShelf: () => void;
-  onMove: (id: string, mv: { state: TicketState; before?: string; after?: string }) => void;
+  onMove: (id: string, mv: TicketMove) => void;
   onCardKey: (t: Ticket, e: KeyboardEvent<HTMLElement>) => void;
   register: (id: string, el: HTMLElement | null) => void;
 }) {
@@ -500,8 +557,18 @@ function Columns({
         dragged.current = true;
         setTimeout(() => (dragged.current = false), 0);
         if (!source || !over) return;
-        const mv = landing(cols, String(source.id), over);
-        if (mv) onMove(String(source.id), mv);
+        const id = String(source.id);
+        if (!hand) {
+          // Sorted: the card goes to the column it was dropped in, in its
+          // sorted place; dropped in its own, it stays and the board says why.
+          const t = all[id];
+          const mv = t ? sortedLanding(cols, t, over) : null;
+          if (mv === "sorted") return onSorted();
+          if (mv) onMove(id, mv);
+          return;
+        }
+        const mv = landing(cols, id, over);
+        if (mv) onMove(id, mv);
       }}
     >
       {tabs && (
@@ -530,7 +597,7 @@ function Columns({
             count={counts[i]!.cards.length + counts[i]!.shelf.length}
             all={all}
             waiting={waiting}
-            line={line?.state === c.state ? line.before : undefined}
+            line={hand && line?.state === c.state ? line.before : undefined}
             hidden={every[i]!.cards.length - c.cards.length}
             onMore={() => setLimits((l) => ({ ...l, [c.state]: (l[c.state] ?? CARD_PAGE) + CARD_PAGE }))}
             shelfOpen={shelfOpen}

@@ -11,7 +11,7 @@ import type { ActivityParty, SyncAssignee, SyncSystem, Ticket } from "../hub/typ
 import { useLocalAgent } from "../overview/people";
 import { SYSTEM_TITLE, takeable } from "../hub/boardSync";
 import { Mark } from "../ui/Mark";
-import { blockers, needsLine } from "./board";
+import { blockers, createdOf, needsLine } from "./board";
 import {
   ClipIcon,
   CommentIcon,
@@ -23,6 +23,7 @@ import {
   PrChip,
   PriorityBars,
   Ring,
+  fullDate,
   prChip,
   shortDate,
 } from "./cardFacts";
@@ -269,7 +270,11 @@ export function TicketCard({
         )}
       </span>
     ) : null;
-  const when = system === "linear" && facts?.created && !settled && !canTake ? shortDate(facts.created) : "";
+  // When its issue was made, on a synced card: always shown, Take it beside
+  // it, the full date and time on hover.
+  const created = system && !settled ? createdOf(t) : null;
+  const when = created ? shortDate(created) : "";
+  const whenTitle = created ? `Created ${fullDate(created)}` : undefined;
   // Who has it: a Desk session first, with whom its issue's assignee is
   // there beside it, else the assignee there.
   const there = upstream ? (
@@ -283,7 +288,7 @@ export function TicketCard({
     ) : upstream !== undefined && system ? (
       <Upstream who={upstream} me={board?.sync?.me} system={system} />
     ) : null;
-  const foot = who || more || when;
+  const foot = who || more || when || canTake;
   // What its glyphs and chips say, for a screen reader: the button's label
   // is its key and title only.
   const descId = useId();
@@ -302,7 +307,7 @@ export function TicketCard({
         .join(". ")
     : "";
   return (
-    <div className={canTake ? "board-card-wrap board-card-wrap-take" : "board-card-wrap"}>
+    <div className="board-card-wrap">
     <button
       ref={buttonRef}
       type="button"
@@ -365,11 +370,36 @@ export function TicketCard({
         <span className="board-card-foot">
           {who}
           {more}
-          {when && <span className="board-when">{when}</span>}
+          {(when || canTake) && (
+            <span className="board-foot-end">
+              {/* Room for Take it, which is a button of its own beside the
+                  card's (never inside it), laid over this place. */}
+              {canTake && (
+                <span className="btn btn-sm board-take board-take-room" aria-hidden="true">
+                  Take it
+                </span>
+              )}
+              {when && (
+                <span className="board-when" title={whenTitle}>
+                  {when}
+                </span>
+              )}
+            </span>
+          )}
         </span>
       )}
     </button>
-      {canTake && <TakeIt ticket={t} className="btn btn-sm board-take" />}
+      {canTake && (
+        <span className="board-take-end">
+          <TakeIt ticket={t} className="btn btn-sm board-take" />
+          {/* The date's width, so Take it sits just before the card's own. */}
+          {when && (
+            <span className="board-when board-when-room" aria-hidden="true">
+              {when}
+            </span>
+          )}
+        </span>
+      )}
       {menu && (
         <Menu
           label={`${t.key ?? "Ticket"} options`}

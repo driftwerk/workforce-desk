@@ -69,6 +69,7 @@ import { OpenTicket } from "./TicketDetail";
 import { LinkBoardDialog } from "./LinkBoard";
 import { useBoard } from "./store";
 import { useSyncHubs } from "./syncStore";
+import { useBoardViews } from "./views";
 import { useAgentConfigs } from "../crew/agentBrain";
 import { useUi } from "../shell/ui";
 import { ACME, ticket } from "./testing";
@@ -129,6 +130,7 @@ beforeEach(() => {
   native.mint = () => ({ kind: "notAllowed", status: 403, error: "this hub's admin hasn't let paired devices make remote MCP tokens" });
   useChat.setState({ hubs: [LOCAL, ATLAS, GLOBEX, MACHINE] as never });
   useSyncHubs.setState({ hubs: null });
+  useBoardViews.setState({ views: {} });
   useBoard.setState({ boards: { [ACME.id]: ACME }, tickets: {}, supported: true, shown: ACME.id, open: null });
 });
 afterEach(cleanup);
@@ -958,6 +960,59 @@ describe("the board, synced", () => {
     expect(screen.queryByRole("button", { name: "MAN-61: Gamma" })).toBeNull();
     expect(screen.getByRole("button", { name: "MAN-62: Delta" })).toBeTruthy();
     expect(screen.getByRole("img", { name: "Todo" })).toBeTruthy();
+  });
+
+  it("keeps a board's own filters and its order when it is shown again, and orders it as on Jira until another is picked", () => {
+    const a = ticket(51, { key: "ACME-51", title: "Alpha", state: "todo", external: ext("ACME-51", { details: { kind: "Story", epic: { key: "ACME-1", title: "Permissions" } } }) });
+    const b = ticket(52, { key: "ACME-52", title: "Beta", state: "todo", external: ext("ACME-52", { details: { kind: "Bug", epic: { key: "ACME-2", title: "Insights" } } }) });
+    const { unmount } = show(synced(), [a, b]);
+    fireEvent.change(screen.getByRole("combobox", { name: "Epic" }), { target: { value: "Insights" } });
+    fireEvent.click(screen.getByRole("button", { name: "Order: as on Jira" }));
+    expect(within(screen.getByRole("menu", { name: "Order" })).getAllByRole("menuitemradio").map((i) => i.firstChild!.firstChild!.textContent)).toEqual([
+      "As on Jira",
+      "Newest first",
+      "Oldest first",
+      "Recently changed",
+    ]);
+    fireEvent.click(screen.getByRole("menuitemradio", { name: /Oldest first/ }));
+    unmount();
+    show(synced(), [a, b]);
+    expect(screen.getByRole("button", { name: "Order: oldest first" })).toBeTruthy();
+    expect((screen.getByRole("combobox", { name: "Epic" }) as HTMLSelectElement).value).toBe("Insights");
+    expect(screen.queryByRole("button", { name: "ACME-51: Alpha" })).toBeNull();
+  });
+
+  it("drops a kept filter its Jira or Linear has no chip for, as when the board was linked to the other", () => {
+    useBoardViews.setState({ views: { [ACME.id]: { facets: { epic: "Insights", label: "Feature" } } } });
+    const lin = (n: number, title: string, labels: string[]) =>
+      ticket(n, { key: `MAN-${n}`, title, state: "todo", external: { ...ext(`MAN-${n}`), system: "linear" as const, details: { labels } } });
+    show(synced({ system: "linear", target: "MAN" }), [lin(61, "Gamma", ["Bug"]), lin(62, "Delta", ["Feature"])]);
+    // The epic (Jira's) is left out; the label (Linear's) still filters.
+    expect(screen.queryByRole("button", { name: "MAN-61: Gamma" })).toBeNull();
+    expect(screen.getByRole("button", { name: "MAN-62: Delta" })).toBeTruthy();
+  });
+
+  it("shows a card's created date beside Take it, never under it, with the full date on hover", () => {
+    const free = ticket(71, { key: "ACME-71", state: "todo", external: ext("ACME-71", { assignee: null, details: { created: "2026-11-17T14:02:00Z" } }) });
+    const held = ticket(72, { key: "ACME-72", state: "todo", external: ext("ACME-72", { assignee: { id: "u2", name: "Kate Fisher" }, details: { created: "2026-03-04T10:00:00Z" } }) });
+    show(synced({ me: "557058:sam", meName: "Sam", meSource: "vouched" }), [free, held]);
+    const card = screen.getByRole("button", { name: /^ACME-71:/ });
+    const take = screen.getByRole("button", { name: "Take ACME-71" });
+    // Take it is its own button beside the card's, never inside it.
+    expect(card.contains(take)).toBe(false);
+    expect(take.closest(".board-card-wrap")).toBe(card.closest(".board-card-wrap"));
+    // The card's own date, in its foot after Take it's place.
+    const end = card.querySelector(".board-foot-end")!;
+    expect([...end.children].map((c) => c.className)).toEqual(["btn btn-sm board-take board-take-room", "board-when"]);
+    const when = end.querySelector(".board-when")!;
+    expect(when.textContent).toBe("Nov 17");
+    expect(when.getAttribute("title")).toBe("Created 17 Nov 2026, 14:02 UTC");
+    // The room Take it lies over, and the date's width beside Take it, are unseen.
+    expect(end.querySelector(".board-take-room")!.getAttribute("aria-hidden")).toBe("true");
+    expect(take.parentElement!.querySelector(".board-when-room")!.textContent).toBe("Nov 17");
+    // A card someone has shows its date as well.
+    expect(screen.getByRole("button", { name: /^ACME-72:/ }).querySelector(".board-when")!.textContent).toBe("Mar 4");
+    expect(screen.getByRole("button", { name: /^ACME-72:/ }).querySelector(".board-take-room")).toBeNull();
   });
 
   it("says why it is paused, and pauses and resumes", async () => {

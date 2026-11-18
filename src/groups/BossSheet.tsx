@@ -60,7 +60,10 @@ const declined = (d: BossDone): boolean => d.failed.some((f) => f.why.includes("
 const spentToday = (status: RemoteBoss): string =>
   `Spent today: ${status.spentTodayUsd === null ? "not known" : usd(status.spentTodayUsd)}`;
 
-export function BossSheet({ group, onClose }: { group: string; onClose: () => void }) {
+/** `preselect`: an agent on a paired hub to pick as it opens (from that
+ *  agent's settings, Make them a group's boss…): picked once their hub
+ *  offers them, never while it is still asked or when it doesn't. */
+export function BossSheet({ group, preselect, onClose }: { group: string; preselect?: Agent; onClose: () => void }) {
   const ids = useId();
   const layout = useLayout();
   const roster = useChat((s) => s.roster);
@@ -124,7 +127,15 @@ export function BossSheet({ group, onClose }: { group: string; onClose: () => vo
     return own ? { kind: "local", agent: own } : { kind: "desk" };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, remoteAgent, localBoss, roster]);
-  const picked = who ?? now;
+  // The agent asked for, picked once their hub offers bosses and lists them
+  // (as the Who rows below do), until the person picks another.
+  const presetOffer = preselect ? offers[preselect.hubId] : undefined;
+  const presetAgent =
+    preselect && presetOffer && presetOffer !== "asking" && presetOffer.kind !== "not" && !refused.has(agentKey(preselect))
+      ? (roster.find((a) => agentKey(a) === agentKey(preselect)) ?? null)
+      : null;
+  const preset: Who | null = presetAgent && teamHubs.some((h) => h.id === presetAgent.hubId) ? { kind: "remote", agent: presetAgent } : null;
+  const picked = who ?? (now ? preset : null) ?? now;
   const bossName = picked?.kind === "desk" ? "Desk" : (picked?.agent.name ?? "the boss");
   const remote = picked?.kind === "remote";
   const linkedHere = remote && status && now && sameWho(picked, now);

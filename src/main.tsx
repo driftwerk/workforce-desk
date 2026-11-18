@@ -17,6 +17,7 @@ import { keepFileDrafts } from "./restore/drafts";
 import { mainUi } from "./restore/ui";
 import { followRooms, roomOrder, ROOMS_PREFIX } from "./rooms/order";
 import { boardOrder } from "./board/order";
+import { boardViews } from "./board/views";
 import { App } from "./shell/App";
 import { SECRET_WINDOW, SecretWindow } from "./machines/SecretWindow";
 import { thisWindow } from "./grids/windows";
@@ -78,7 +79,7 @@ if (secret)
     </StrictMode>,
   );
 else void Promise.all([
-  restoreBeforeRender(grid ? [] : [mainUi, roomOrder, boardOrder, machineSessions]),
+  restoreBeforeRender(grid ? [] : [mainUi, roomOrder, boardOrder, boardViews, machineSessions]),
   loadHost().catch(() => undefined),
   paintSavedTheme().catch(() => undefined),
 ]).then(() => {
