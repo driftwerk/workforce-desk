@@ -24,6 +24,7 @@ interface SettingsStore extends Settings {
   setup: SetupProgress;
   writtenReplies: string[];
   audio: AudioPrefs;
+  audioAt?: string;
   /** Each shortcut's keys: the chosen ones, else the default. */
   keys: Record<ShortcutId, string>;
   loaded: boolean;
@@ -62,6 +63,7 @@ const readSettings = async (set: (patch: Partial<SettingsStore>) => void): Promi
     setup: s.setup ?? NO_SETUP,
     writtenReplies: s.writtenReplies ?? [],
     audio: { ...DEFAULT_AUDIO, ...s.audio },
+    audioAt: s.audioAt,
     loaded: true,
   });
 };
@@ -114,6 +116,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       writtenReplies: s.writtenReplies,
       voiceEngine: s.voiceEngine,
       audio: s.audio,
+      audioAt: s.audioAt,
       shortcuts: s.shortcuts,
       groups: s.groups,
       ungrouped: s.ungrouped,
@@ -140,14 +143,14 @@ export const addCustomVoice = (provider: string, voice: CustomVoice): void => {
   set({ customVoices: { ...customVoices, [provider]: [...others, voice] } });
 };
 
-/** Forgets a voice added by id. Agents already speaking with it keep it:
- *  their voice is the id itself, which goes on working. */
 /** Changes some of how voice uses the microphone and speaker. */
 export const setAudio = (patch: Partial<AudioPrefs>): void => {
   const { audio, set } = useSettings.getState();
-  set({ audio: { ...audio, ...patch } });
+  set({ audio: { ...audio, ...patch }, audioAt: new Date().toISOString() });
 };
 
+/** Forgets a voice added by id. Agents already speaking with it keep it:
+ *  their voice is the id itself, which goes on working. */
 export const removeCustomVoice = (provider: string, id: string): void => {
   const { customVoices, set } = useSettings.getState();
   const left = (customVoices[provider] ?? []).filter((v) => v.id !== id);

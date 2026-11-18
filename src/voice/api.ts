@@ -117,8 +117,18 @@ export const audioDevices = (): Promise<AudioDevices> => invoke("voice_audio_dev
 
 export const audioNow = (): Promise<AudioNow> => invoke("voice_audio_status");
 
-/** Keeps a microphone open for the level meter while `on`. */
-export const audioMeter = (on: boolean): Promise<void> => invoke("voice_audio_meter", { on });
+/** How loud the microphone is now (RMS, 0 to 1). */
+export const audioLevel = (): Promise<number> => invoke("voice_audio_level");
+
+let meterCalls: Promise<unknown> = Promise.resolve();
+
+/** Keeps a microphone open for the level meter while `on`. Calls go one
+ *  after another, so a close is never overtaken by an open sent before it. */
+export const audioMeter = (on: boolean): Promise<void> => {
+  const call = meterCalls.then(() => invoke<void>("voice_audio_meter", { on }));
+  meterCalls = call.catch(() => undefined);
+  return call;
+};
 
 /** Records a few seconds from the microphone in use and plays them back on
  *  the speaker in use. */

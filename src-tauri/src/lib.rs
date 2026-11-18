@@ -167,10 +167,11 @@ fn settings_load(app: State<'_, App>) -> CommandResult<files::Settings> {
 
 #[tauri::command]
 fn settings_save(app: State<'_, App>, settings: files::Settings) -> CommandResult<()> {
-    files::save_settings(&app.paths, &settings).map_err(text)?;
-    // Running audio follows at once: a new device or echo cancelling
-    // rebuilds it, the rest applies as it is.
-    desk_voice::audio::prefs::set(settings.audio);
+    let written = files::save_settings(&app.paths, &settings).map_err(text)?;
+    // Running audio follows at once (what was written: an older window's
+    // audio isn't): a new device or echo cancelling rebuilds it, the rest
+    // applies as it is.
+    desk_voice::audio::prefs::set(written.audio);
     Ok(())
 }
 
@@ -1366,6 +1367,7 @@ pub fn run() {
             voice::voice_status,
             voice::voice_audio_devices,
             voice::voice_audio_status,
+            voice::voice_audio_level,
             voice::voice_audio_meter,
             voice::voice_audio_test,
             wsl::wsl_detect,
@@ -1449,6 +1451,29 @@ mod tests {
             declared.len(),
             commands::COMMANDS.len(),
             "declared once each"
+        );
+    }
+
+    /// The main window is granted every command but the ones only the
+    /// machine-secret prompt may call: a command added without its grant is
+    /// refused there, and the page's call fails quietly.
+    #[test]
+    fn the_main_window_is_granted_every_command() {
+        const ONLY_THE_SECRET_PROMPT: &[&str] = &[
+            "machine_secret_request",
+            "machine_secret_submit",
+            "machine_secret_cancel",
+        ];
+        let main = include_str!("../capabilities/main.json");
+        let missing: Vec<&str> = commands::COMMANDS
+            .iter()
+            .copied()
+            .filter(|c| !ONLY_THE_SECRET_PROMPT.contains(c))
+            .filter(|c| !main.contains(&format!("\"allow-{}\"", c.replace('_', "-"))))
+            .collect();
+        assert!(
+            missing.is_empty(),
+            "not granted to the main window: {missing:?}"
         );
     }
 

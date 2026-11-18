@@ -4,16 +4,15 @@ import type { AudioPrefs, DeviceChoice } from "../platform";
 import { perPlatform, useHost } from "../shell/host";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { SwitchRow } from "../ui/SwitchRow";
-import { audioDevices, audioMeter, audioNow, audioTest, type AudioDevice, type AudioDevices, type AudioNow } from "../voice/api";
+import { audioDevices, audioLevel, audioMeter, audioNow, audioTest, type AudioDevice, type AudioDevices, type AudioNow } from "../voice/api";
 import { ShortcutField } from "./ShortcutField";
 import { setAudio, useSettings } from "./store";
 
-/** How often the meter reads the microphone, and the device list is read
- *  again (for one plugged in meanwhile). */
+/** How often the meter reads the level; what's in use (and why not what
+ *  was chosen); and the device list (for one plugged in meanwhile). */
 const METER_MS = 100;
+const STATUS_MS = 1000;
 const DEVICES_MS = 3000;
-/** How long Test records, as the app does. */
-const TEST_MS = 3000;
 
 /** The level as the meter's fill, 0 to 1: −60 dB (silence) to 0 dB. */
 export const meterFill = (rms: number): number => (rms > 0 ? Math.min(1, Math.max(0, (20 * Math.log10(rms) + 60) / 60)) : 0);
@@ -48,13 +47,16 @@ const chosenLabel = (devices: AudioDevice[], chosen: DeviceChoice | null): strin
  *  most every couple of seconds however many ask. */
 const useDeviceList = create<{ devices: AudioDevices; at: number }>(() => ({ devices: { inputs: [], outputs: [] }, at: 0 }));
 
-const refreshDevices = (): void => {
+export const refreshDevices = (): void => {
   if (Date.now() - useDeviceList.getState().at < DEVICES_MS - 500) return;
   useDeviceList.setState({ at: Date.now() });
   audioDevices()
     .then((d) => d && Array.isArray(d.inputs) && useDeviceList.setState({ devices: d }))
     .catch(() => undefined);
 };
+
+/** The microphones and speakers as last read. */
+export const currentDevices = (): AudioDevices => useDeviceList.getState().devices;
 
 /** The microphones and speakers: `"watch"` reads them now and every few
  *  seconds (for one plugged in meanwhile), `"once"` reads them now. */
@@ -115,23 +117,46 @@ function Picker({
   );
 }
 
-/** How loud the microphone is, as a bar. */
-export function LevelMeter({ level }: { level: number }) {
-  const fill = meterFill(level);
+/** How loud the microphone is, as a bar: read ten times a second while
+ *  shown and the window is in view, without re-rendering anything else. */
+export function LevelMeter() {
+  const bar = useRef<HTMLSpanElement>(null);
+  const fill = useRef<HTMLSpanElement>(null);
+  useEffect(() => {
+    let live = true;
+    const t = setInterval(() => {
+      if (document.hidden) return;
+      audioLevel()
+        .then((level) => {
+          if (!live || typeof level !== "number") return;
+          const f = meterFill(level);
+          if (fill.current) fill.current.style.width = `${f * 100}%`;
+          bar.current?.setAttribute("aria-valuenow", String(Math.round(f * 100)));
+        })
+        .catch(() => undefined);
+    }, METER_MS);
+    return () => {
+      live = false;
+      clearInterval(t);
+    };
+  }, []);
   return (
-    <span className="audio-meter" role="meter" aria-label="Microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(fill * 100)}>
-      <span className="audio-meter-fill" style={{ width: `${fill * 100}%` }} />
+    <span ref={bar} className="audio-meter" role="meter" aria-label="Microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={0}>
+      <span ref={fill} className="audio-meter-fill" style={{ width: "0%" }} />
     </span>
   );
 }
 
-type Testing = { state: "idle" } | { state: "recording" } | { state: "playing" } | { state: "done" } | { state: "failed"; why: string };
+type Testing = { state: "idle" } | { state: "testing" } | { state: "done" } | { state: "failed"; why: string };
 
 /** Settings › Voice's microphone and speaker: which of each, with a live
  *  level, echo cancelling, how readily speech is heard, push to talk only,
  *  and a test that records a moment and plays it back. */
 export function AudioSettings() {
   const audio = useSettings((s) => s.audio);
+  // The meter opens a microphone: only once voice is on, so looking at
+  // Settings never asks for the microphone or lights its indicator.
+  const voiceOn = useSettings((s) => s.voice);
   const platform = useHost((s) => s.platform);
   const devices = useAudioDevices();
   const [now, setNow] = useState<AudioNow | null>(null);
@@ -140,25 +165,27 @@ export function AudioSettings() {
   const senseId = useId();
   useEffect(() => setSense(audio.sensitivity), [audio.sensitivity]);
 
-  // The meter's microphone, while this is open (voice's own when it has one).
+  // The meter's microphone while this is shown (voice's own when it has
+  // one), and what's in use.
   useEffect(() => {
     let live = true;
     let ticks = 0;
     const read = () => {
+      if (document.hidden) return;
       // Opened again now and then: voice closing its microphone closes it.
-      if (ticks++ % 20 === 0) void audioMeter(true).catch(() => undefined);
+      if (voiceOn && ticks++ % 3 === 0) void audioMeter(true).catch(() => undefined);
       audioNow()
         .then((n) => live && n && typeof n.level === "number" && setNow(n))
         .catch(() => undefined);
     };
     read();
-    const t = setInterval(read, METER_MS);
+    const t = setInterval(read, STATUS_MS);
     return () => {
       live = false;
       clearInterval(t);
-      void audioMeter(false).catch(() => undefined);
+      if (voiceOn) void audioMeter(false).catch(() => undefined);
     };
-  }, []);
+  }, [voiceOn]);
 
   const set = (patch: Partial<AudioPrefs>) => setAudio(patch);
   const commitSense = () => {
@@ -166,15 +193,12 @@ export function AudioSettings() {
   };
 
   const test = async () => {
-    setTesting({ state: "recording" });
-    const playing = setTimeout(() => setTesting({ state: "playing" }), TEST_MS);
+    setTesting({ state: "testing" });
     try {
       await audioTest();
       setTesting({ state: "done" });
     } catch (e) {
       setTesting({ state: "failed", why: String(e) });
-    } finally {
-      clearTimeout(playing);
     }
   };
 
@@ -192,7 +216,7 @@ export function AudioSettings() {
           <span className="card-text">
             <b>Microphone</b>
             <span>{now?.input ? `Hearing ${now.input.name}` : "The one Desk listens to"}</span>
-            <LevelMeter level={now?.level ?? 0} />
+            {voiceOn ? <LevelMeter /> : <span className="small faint">Turn on Talk to agents to see the level.</span>}
           </span>
           <Picker label="Microphone" devices={devices.inputs} chosen={audio.input} onChoose={(input) => set({ input })} />
         </div>
@@ -208,14 +232,13 @@ export function AudioSettings() {
             <b>Test</b>
             <span aria-live="polite">
               {testing.state === "idle" && "Records three seconds from the microphone and plays them back on the speaker."}
-              {testing.state === "recording" && "Recording — say something…"}
-              {testing.state === "playing" && "Playing it back…"}
+              {testing.state === "testing" && "Say something — it plays back in three seconds…"}
               {testing.state === "done" && "Done. Heard nothing? Choose another microphone, or turn sensitivity up."}
               {testing.state === "failed" && <span className="state-blocked">{testing.why}</span>}
             </span>
           </span>
-          <button type="button" className="btn" disabled={testing.state === "recording" || testing.state === "playing"} onClick={() => void test()}>
-            {testing.state === "recording" || testing.state === "playing" ? "Testing…" : "Test"}
+          <button type="button" className="btn" disabled={testing.state === "testing"} onClick={() => void test()}>
+            {testing.state === "testing" ? "Testing…" : "Test"}
           </button>
         </div>
       </div>

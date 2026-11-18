@@ -34,10 +34,11 @@ let tested: () => void = () => {};
 beforeEach(() => {
   vi.useFakeTimers({ shouldAdvanceTime: true });
   useHost.setState(DEFAULT_HOST);
-  useSettings.setState({ loaded: true, audio: DEFAULT_AUDIO });
+  useSettings.setState({ loaded: true, voice: true, audio: DEFAULT_AUDIO });
   vi.mocked(invoke).mockImplementation(((cmd: string) => {
     if (cmd === "voice_audio_devices") return Promise.resolve(DEVICES);
     if (cmd === "voice_audio_status") return Promise.resolve(NOW);
+    if (cmd === "voice_audio_level") return Promise.resolve(NOW.level);
     if (cmd === "voice_audio_test") return new Promise<void>((done) => (tested = done));
     return Promise.resolve(undefined);
   }) as typeof invoke);
@@ -64,13 +65,30 @@ it("offers the system's microphone by name and every other, and keeps the one ch
   expect(screen.getByRole("button", { name: "Microphone: Yeti Stereo Microphone" })).toBeTruthy();
 });
 
-it("shows how loud the microphone is and which one is heard", async () => {
+it("shows how loud the microphone is and which one is heard, and closes the meter on leaving", async () => {
   await show();
   expect(screen.getByText("Hearing LG UltraFine Display Audio")).toBeTruthy();
   expect(Number(screen.getByRole("meter", { name: "Microphone level" }).getAttribute("aria-valuenow"))).toBeGreaterThan(0);
   expect(invoke).toHaveBeenCalledWith("voice_audio_meter", { on: true });
   cleanup();
-  expect(invoke).toHaveBeenCalledWith("voice_audio_meter", { on: false });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(0);
+  });
+  expect(vi.mocked(invoke).mock.calls.filter(([c]) => c === "voice_audio_meter").at(-1)).toEqual(["voice_audio_meter", { on: false }]);
+});
+
+it("never opens a microphone for the meter while voice is off", async () => {
+  useSettings.setState({ voice: false });
+  await show();
+  expect(invoke).not.toHaveBeenCalledWith("voice_audio_meter", { on: true });
+  expect(screen.queryByRole("meter")).toBeNull();
+  expect(screen.getByText(/Turn on Talk to agents to see the level/)).toBeTruthy();
+});
+
+it("marks a change to the audio with when, so an older window can't undo it", async () => {
+  await show();
+  fireEvent.click(screen.getByRole("switch", { name: "Echo cancelling" }));
+  expect(useSettings.getState().audioAt).toMatch(/^\d{4}-\d\d-\d\dT/);
 });
 
 it("says what isn't as chosen", async () => {
@@ -108,14 +126,11 @@ it("asks for the keys when push to talk only is on", async () => {
   expect(screen.getByRole("button", { name: /shortcut$/ })).toBeTruthy();
 });
 
-it("records, then plays back, then says it's done", async () => {
+it("tests, then says it's done", async () => {
   await show();
   fireEvent.click(screen.getByRole("button", { name: "Test" }));
-  expect(screen.getByText("Recording — say something…")).toBeTruthy();
-  await act(async () => {
-    await vi.advanceTimersByTimeAsync(3100);
-  });
-  expect(screen.getByText("Playing it back…")).toBeTruthy();
+  expect(screen.getByText(/Say something/)).toBeTruthy();
+  expect((screen.getByRole("button", { name: "Testing…" }) as HTMLButtonElement).disabled).toBe(true);
   await act(async () => tested());
   expect(screen.getByText(/^Done\./)).toBeTruthy();
 });

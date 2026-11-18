@@ -114,6 +114,10 @@ pub struct Settings {
     /// system's devices, echo cancelled, as Desk always listened.
     #[serde(default)]
     pub audio: desk_voice::audio::AudioPrefs,
+    /// When `audio` last changed (RFC 3339), so a window whose store is
+    /// older never puts back a microphone the person moved away from.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audio_at: Option<String>,
     /// The keyboard shortcuts chosen in place of their defaults, by id
     /// (`ask`, `newSession`), as the global-shortcut plugin reads them
     /// (`Control+Shift+Space`). Kept as text so a newer Desk's survive; the
@@ -210,6 +214,7 @@ impl Default for Settings {
             written_replies: Vec::new(),
             voice_engine: default_voice_engine(),
             audio: Default::default(),
+            audio_at: None,
             shortcuts: Default::default(),
             groups: Vec::new(),
             ungrouped: Ungrouped::default(),
@@ -274,19 +279,34 @@ fn migrated(mut settings: Settings) -> Settings {
     settings
 }
 
-/// Writes `settings`, keeping the setup the file already holds when it
-/// changed later than the one written: a window whose store is older (it
-/// read the file before another moved the setup on) never rolls it back.
-pub fn save_settings(paths: &Paths, settings: &Settings) -> Result<()> {
+/// Writes `settings`, keeping the setup and the audio the file already
+/// holds when they changed later than the ones written: a window whose
+/// store is older (it read the file before another moved them on) never
+/// rolls them back. Returns what was written.
+pub fn save_settings(paths: &Paths, settings: &Settings) -> Result<Settings> {
     let mut settings = settings.clone();
-    if let Ok(Some(held)) = std::fs::read_to_string(paths.settings())
+    if let Some(held) = std::fs::read_to_string(paths.settings())
         .ok()
-        .map(|s| serde_json::from_str::<Settings>(&s).map(|s| s.setup))
-        .transpose()
+        .and_then(|s| serde_json::from_str::<Settings>(&s).ok())
     {
-        settings.setup = later_setup(settings.setup, held);
+        settings.setup = later_setup(settings.setup, held.setup);
+        if later(&settings.audio_at, &held.audio_at) {
+            settings.audio = held.audio;
+            settings.audio_at = held.audio_at;
+        }
     }
-    desk_core::write_private(&paths.settings(), &serde_json::to_string_pretty(&settings)?)
+    desk_core::write_private(&paths.settings(), &serde_json::to_string_pretty(&settings)?)?;
+    Ok(settings)
+}
+
+/// Whether `held` changed later than `mine` (RFC 3339, so they compare as
+/// text); a time said beats none.
+fn later(mine: &Option<String>, held: &Option<String>) -> bool {
+    match (mine, held) {
+        (_, None) => false,
+        (None, Some(_)) => true,
+        (Some(a), Some(b)) => b > a,
+    }
 }
 
 /// The later of two setups by when each last changed (RFC 3339, so they
@@ -619,6 +639,43 @@ mod tests {
         assert!(file.contains(r#""echoCancel": false"#), "{file}");
         assert!(file.contains(r#""pushToTalkOnly": true"#), "{file}");
         assert_eq!(load_settings(&paths).unwrap(), chosen);
+    }
+
+    #[test]
+    fn an_older_window_never_puts_back_the_audio_another_changed() {
+        use desk_voice::audio::{AudioPrefs, DeviceChoice};
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let yeti = Settings {
+            audio: AudioPrefs {
+                input: Some(DeviceChoice {
+                    id: "yeti".into(),
+                    name: "Yeti".into(),
+                }),
+                ..AudioPrefs::default()
+            },
+            audio_at: Some("2026-11-18T10:00:00Z".into()),
+            ..Settings::default()
+        };
+        save_settings(&paths, &yeti).unwrap();
+        // A window that read the file before: no time, the old audio.
+        let older = Settings {
+            theme: "night".into(),
+            ..Settings::default()
+        };
+        let written = save_settings(&paths, &older).unwrap();
+        assert_eq!(written.audio, yeti.audio);
+        assert_eq!(written.theme, "night");
+        assert_eq!(load_settings(&paths).unwrap().audio, yeti.audio);
+        // A later change does land.
+        let back = Settings {
+            audio_at: Some("2026-11-18T11:00:00Z".into()),
+            ..Settings::default()
+        };
+        assert_eq!(
+            save_settings(&paths, &back).unwrap().audio,
+            AudioPrefs::default()
+        );
     }
 
     #[test]

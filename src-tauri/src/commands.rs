@@ -142,6 +142,7 @@ pub const COMMANDS: &[&str] = &[
     "voice_status",
     "voice_audio_devices",
     "voice_audio_status",
+    "voice_audio_level",
     "voice_audio_meter",
     "voice_audio_test",
     "wsl_detect",

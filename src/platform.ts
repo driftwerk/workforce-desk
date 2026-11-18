@@ -110,6 +110,9 @@ export interface Settings {
   voiceEngine: string;
   /** The microphone and speaker; older files have none (the system's). */
   audio?: AudioPrefs;
+  /** When `audio` last changed (ISO 8601): a window whose store is older
+   *  never puts back what another changed. */
+  audioAt?: string;
   /** The keyboard shortcuts chosen in place of their defaults, by id
    *  ("ask", "newSession"), as the global-shortcut plugin reads them
    *  ("Control+Shift+Space"). */

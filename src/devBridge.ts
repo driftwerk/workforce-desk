@@ -350,6 +350,7 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
       // Settings › Voice in screenshots.
       if (cmd === "voice_audio_devices") return answer(PREVIEW_DEVICES);
       if (cmd === "voice_audio_status") return answer(previewAudio());
+      if (cmd === "voice_audio_level") return answer(previewAudio().level);
       if (cmd === "voice_audio_test") return new Promise((done) => setTimeout(() => done(undefined as T), 3000));
       if (cmd === "voice_lookup") return answer({ state: "failed", message: "Looking a voice up needs the Desk app." });
       if (cmd === "voice_engine_voices" || cmd === "voice_kokoro_voices") return answer([]);

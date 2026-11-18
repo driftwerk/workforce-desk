@@ -621,6 +621,13 @@ pub fn voice_audio_status() -> AudioNow {
     }
 }
 
+/// How loud the microphone is now (RMS, 0 to 1): only a number read, for the
+/// meter's quick polling.
+#[tauri::command]
+pub fn voice_audio_level() -> f32 {
+    desk_voice::audio::level()
+}
+
 /// Keeps the microphone open for Settings' level meter while `on`, if voice
 /// hasn't it open already.
 #[tauri::command]

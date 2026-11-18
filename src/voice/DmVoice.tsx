@@ -1,5 +1,5 @@
-import { useRef, useState } from "react";
-import { deviceEntries, useAudioDevices } from "../settings/Audio";
+import { useEffect, useRef, useState } from "react";
+import { currentDevices, deviceEntries, refreshDevices } from "../settings/Audio";
 import { setAudio, useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { Menu, type MenuEntry } from "../ui/Menu";
@@ -29,13 +29,21 @@ function TalkIcon() {
 
 /** The microphone, speaker and echo cancelling, as a menu's entries: to
  *  change them mid-conversation without going to Settings. */
-const useAudioEntries = (on: boolean): MenuEntry[] => {
-  const devices = useAudioDevices(on ? "once" : "off");
+const useAudioEntries = (): MenuEntry[] => {
   const audio = useSettings((s) => s.audio);
+  // Read once here (shared and spaced out however many rows ask), so the
+  // first submenu has them.
+  useEffect(refreshDevices, []);
+  // Read as each submenu opens (and again for next time), so a headset
+  // plugged in since shows.
+  const list = (which: "inputs" | "outputs") => {
+    refreshDevices();
+    return currentDevices()[which];
+  };
   return [
     { kind: "separator" },
-    { kind: "item", label: "Microphone", hint: audio.input?.name ?? "Same as system", submenu: () => deviceEntries(devices.inputs, audio.input, (input) => setAudio({ input })) },
-    { kind: "item", label: "Speaker", hint: audio.output?.name ?? "Same as system", submenu: () => deviceEntries(devices.outputs, audio.output, (output) => setAudio({ output })) },
+    { kind: "item", label: "Microphone", hint: audio.input?.name ?? "Same as system", submenu: () => deviceEntries(list("inputs"), audio.input, (input) => setAudio({ input })) },
+    { kind: "item", label: "Speaker", hint: audio.output?.name ?? "Same as system", submenu: () => deviceEntries(list("outputs"), audio.output, (output) => setAudio({ output })) },
     { kind: "item", label: "Echo cancelling", detail: "Off suits headphones", checked: audio.echoCancel, onSelect: () => setAudio({ echoCancel: !audio.echoCancel }) },
   ];
 };
@@ -55,7 +63,11 @@ export function DmVoiceControls({ agent, name }: { agent: string; name: string }
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const more = useRef<HTMLButtonElement>(null);
   const here = useVoiceHere();
-  const audioEntries = useAudioEntries(menu !== null);
+  const audioEntries = useAudioEntries();
+  // Read when the menu opens, so its submenus have the devices.
+  useEffect(() => {
+    if (menu) refreshDevices();
+  }, [menu]);
   if (!here) return null;
   const answers = written ? "answers in writing" : "answers aloud";
   return (
@@ -143,7 +155,7 @@ export function useDmVoiceEntries(agent: string, name: string): MenuEntry[] {
   const holdKeys = useSettings((s) => s.keys.holdToTalkHere);
   const talkKeys = useSettings((s) => s.keys.talkHere);
   const here = useVoiceHere();
-  const audioEntries = useAudioEntries(here);
+  const audioEntries = useAudioEntries();
   if (!here) return [];
   return [
     { kind: "separator" },
