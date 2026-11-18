@@ -1047,6 +1047,11 @@ describe("the board, synced", () => {
     expect(screen.getByText("Synced")).toBeTruthy();
     act(() => useBoard.setState((s) => ({ boards: { ...s.boards, [ACME.id]: synced({ orderProblem: null }) } })));
     expect(screen.queryByText(said)).toBeNull();
+    act(() => useBoard.setState((s) => ({ boards: { ...s.boards, [ACME.id]: synced({ orderProblem: said }) } })));
+    expect(screen.getByText(said)).toBeTruthy();
+    // A board without the field at all, as an older hub's.
+    act(() => useBoard.setState((s) => ({ boards: { ...s.boards, [ACME.id]: synced() } })));
+    expect(screen.queryByText(said)).toBeNull();
   });
 
   it("gives each pause and problem its own fix button, none telling you to unlink and link again", async () => {
