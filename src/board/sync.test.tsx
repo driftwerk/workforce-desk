@@ -1040,6 +1040,20 @@ describe("the board, synced", () => {
     expect(screen.getByRole("button", { name: "New token…" })).toBeTruthy();
   });
 
+  it("says a drag the hub couldn't make there on the bar, and clears it once the board no longer says it", () => {
+    const said = "ACME-1 stays where you dropped it here, but couldn't be moved on Jira: no permission. Its place there comes back on the next sync.";
+    show(synced({ orderProblem: said }), []);
+    expect(screen.getByText(said).className).toContain("board-sync-failed");
+    expect(screen.getByText("Synced")).toBeTruthy();
+    act(() => useBoard.setState((s) => ({ boards: { ...s.boards, [ACME.id]: synced({ orderProblem: null }) } })));
+    expect(screen.queryByText(said)).toBeNull();
+    act(() => useBoard.setState((s) => ({ boards: { ...s.boards, [ACME.id]: synced({ orderProblem: said }) } })));
+    expect(screen.getByText(said)).toBeTruthy();
+    // A board without the field at all, as an older hub's.
+    act(() => useBoard.setState((s) => ({ boards: { ...s.boards, [ACME.id]: synced() } })));
+    expect(screen.queryByText(said)).toBeNull();
+  });
+
   it("gives each pause and problem its own fix button, none telling you to unlink and link again", async () => {
     const words = () => document.querySelector(".board-sync")!.textContent!;
     let u = show(synced({ paused: { kind: "hubUnpaired" } }), []);

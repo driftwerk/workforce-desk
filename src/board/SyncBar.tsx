@@ -169,6 +169,12 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
           {busy === "sync" ? "Syncing…" : "Sync now"}
         </button>
       </span>
+      {/* A drag the hub couldn't make there: said here while the board says it, until a later one goes out. */}
+      {sync.orderProblem && (
+        <span className="board-sync-failed" role="status">
+          {sync.orderProblem}
+        </span>
+      )}
       {failed && (
         <span className="board-sync-failed" role="alert">
           {failed.words}{" "}

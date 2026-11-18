@@ -1832,6 +1832,11 @@ export interface BoardSync {
   failures?: number;
   /** What it last couldn't do, in the hub's words. */
   problem?: string | null;
+  /** The last drag within a column that couldn't move its issue there (no
+   *  right to rank, a hub without the call): the card stays where it was
+   *  dropped until the next sync puts it back. Gone once a later drag goes
+   *  out. */
+  orderProblem?: string | null;
 }
 
 /** A ticket's Jira or Linear issue. `synced`: false once it left the
