@@ -8,10 +8,56 @@ import { jsonBody, pairedHub, type HubRef } from "../hub/net";
 export type RouteKind = "claude-code" | "codex" | "devin";
 export type RouteFallback = "wait" | "hub";
 
-export interface PersonalRoute {
+/** The models a person's route runs by kind of work, in an agent's own
+ *  words (`model_preferences.conversation`, `light_model`, `heavy_model`):
+ *  a tier, one of the route's models, or for background work `chat`.
+ *  Unset is the route's default. */
+export interface RouteModels {
+  model_preferences?: { conversation?: string };
+  light_model?: string;
+  heavy_model?: string;
+}
+
+export interface PersonalRoute extends RouteModels {
   kind: RouteKind;
   fallback: RouteFallback;
 }
+
+export type RouteWork = "conversation" | "light" | "heavy";
+
+/** What each kind of work runs when nothing is chosen, as a picker says it. */
+export interface RouteDefaults {
+  conversation: string;
+  light: string;
+  heavy: string;
+}
+
+/** The model `route` runs for `work` as set; `undefined` is the default. */
+export const chosenModel = (route: RouteModels | null | undefined, work: RouteWork): string | undefined => {
+  if (!route) return undefined;
+  const set = work === "conversation" ? route.model_preferences?.conversation : route[`${work}_model`];
+  return set?.trim() || undefined;
+};
+
+/** `route` with `work` on `model`; `undefined` is back on the default. */
+export const withModel = <R extends object>(route: R, work: RouteWork, model: string | undefined): R & RouteModels => {
+  const next = { ...(route as R & RouteModels) };
+  if (work === "conversation") {
+    if (model) next.model_preferences = { conversation: model };
+    else delete next.model_preferences;
+  } else if (model) next[`${work}_model`] = model;
+  else delete next[`${work}_model`];
+  return next;
+};
+
+/** What of `route` to keep when it changes to `kind`: its models on the
+ *  same kind, none on another provider's. */
+export const keptModels = (route: PersonalRoute | null | undefined, kind: RouteKind): RouteModels => {
+  if (!route || route.kind !== kind) return {};
+  let kept: RouteModels = {};
+  for (const work of ["conversation", "light", "heavy"] as const) kept = withModel(kept, work, chosenModel(route, work));
+  return kept;
+};
 
 /** A person's setting for one agent: their own route, or the workspace's. */
 export type AgentRoute = PersonalRoute | "hub";
@@ -20,6 +66,10 @@ export type AgentRoute = PersonalRoute | "hub";
 export interface RouteOption {
   kind: RouteKind;
   refused: string | null;
+  /** The models a route of this kind can run beside the tiers; absent on a
+   *  workspace from before people chose their route's models. */
+  models?: string[];
+  defaults?: RouteDefaults;
 }
 
 export interface RouteView {
@@ -55,9 +105,7 @@ const PROVIDERS: Record<RouteKind, string> = {
 
 /** The line saying where a person's conversations go; `null` is the workspace's models. */
 export const whereDataGoes = (kind: RouteKind | null, workspace: string): string =>
-  kind
-    ? `Your conversations, and the tool results in them, go to ${PROVIDERS[kind]}.`
-    : `Your conversations stay on ${workspace}’s own models.`;
+  kind ? `Your conversations, and the tool results in them, go to ${PROVIDERS[kind]}.` : `Your conversations stay on ${workspace}’s own models.`;
 
 interface Raw {
   available?: boolean;
@@ -65,7 +113,12 @@ interface Raw {
   route?: unknown;
   every_agent?: PersonalRoute | null;
   effective?: PersonalRoute | null;
-  options?: { kind: RouteKind; refused?: string | null }[];
+  options?: {
+    kind: RouteKind;
+    refused?: string | null;
+    models?: string[];
+    defaults?: RouteDefaults;
+  }[];
 }
 
 const NOT_YET = "this workspace doesn’t say yet whether it can run your work on this";
@@ -75,8 +128,16 @@ const NOT_YET = "this workspace doesn’t say yet whether it can run your work o
  *  is offered, and the hub's own check answers if it can't be. */
 export const optionsOf = (raw: Raw): RouteOption[] =>
   raw.options
-    ? raw.options.map((o) => ({ kind: o.kind, refused: o.refused ?? null }))
-    : KINDS.map((kind) => ({ kind, refused: raw.allow?.includes(kind) ? null : NOT_YET }));
+    ? raw.options.map((o) => ({
+        kind: o.kind,
+        refused: o.refused ?? null,
+        ...(o.models ? { models: o.models } : {}),
+        ...(o.defaults ? { defaults: o.defaults } : {}),
+      }))
+    : KINDS.map((kind) => ({
+        kind,
+        refused: raw.allow?.includes(kind) ? null : NOT_YET,
+      }));
 
 /** What a workspace from before `/api/me/llm-route` answers. */
 const MISSING: Raw & { missing: true } = { missing: true };
@@ -108,16 +169,11 @@ export const agentView = (raw: Raw & { missing?: true }): AgentRouteView => ({
   // A workspace that doesn't say: the agent's own setting, else the
   // every-agent one, as the narrower wins.
   effective:
-    raw.effective !== undefined
-      ? raw.effective
-      : raw.route === "hub"
-        ? null
-        : ((raw.route as PersonalRoute | null) ?? raw.every_agent ?? null),
+    raw.effective !== undefined ? raw.effective : raw.route === "hub" ? null : ((raw.route as PersonalRoute | null) ?? raw.every_agent ?? null),
   options: optionsOf(raw),
 });
 
-export const myRoute = async (hub: HubRef): Promise<RouteView> =>
-  view(await answer(await pairedHub(hub).fetch("GET", "/api/me/llm-route"), true));
+export const myRoute = async (hub: HubRef): Promise<RouteView> => view(await answer(await pairedHub(hub).fetch("GET", "/api/me/llm-route"), true));
 
 export const setMyRoute = async (hub: HubRef, route: PersonalRoute | null): Promise<RouteView> =>
   view(await answer(await pairedHub(hub).fetch("PUT", "/api/me/llm-route", jsonBody({ route }))));
