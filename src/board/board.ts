@@ -6,7 +6,7 @@
 // by) without asking it again.
 
 import { shownByFacets, type Facets } from "./facets";
-import type { ActivityEvent, BoardSync, LedgerRow, Session, Ticket, TicketMove, TicketState } from "../hub/types";
+import type { ActivityEvent, BoardSync, LedgerRow, Session, SourceOrderKey, Ticket, TicketMove, TicketState } from "../hub/types";
 import { totalTokens } from "../spend/spend";
 
 /** The columns, left to right; Dropped has none and folds under Done. */
@@ -172,10 +172,48 @@ export const defaultOrder = (synced: boolean, upstream: boolean = synced): Board
 export const orderOn = (order: BoardOrder | undefined, synced: boolean, upstream: boolean = synced): BoardOrder =>
   order && ordersFor(synced, upstream).includes(order) ? order : defaultOrder(synced, upstream);
 
+/** How a synced board's "As on Jira/Linear" sorts: the keys its board
+ *  there orders by (none: by Rank or the manual order), and the Jira
+ *  site's priorities, highest first. */
+export interface SourceSort {
+  by: readonly SourceOrderKey[];
+  priorities: readonly string[];
+  /** Its first key is one this Desk doesn't know (a newer hub's): sorted
+   *  by Rank or the manual order, but never moved by hand there. */
+  unknown?: boolean;
+}
+
+/** What `sync` says its board there sorts by; null for an older hub's, or
+ *  one not read yet (by Rank or the manual order, as before). */
+export const sourceSortOf = (sync: Pick<BoardSync, "ordering" | "fields"> | null | undefined): SourceSort | null => {
+  if (!sync?.ordering) return null;
+  // A key a newer hub names that this Desk doesn't know ends the list there.
+  const by: SourceOrderKey[] = [];
+  for (const k of sync.ordering.by ?? []) {
+    if (!SOURCE_FIELDS.includes(k.field)) break;
+    by.push(k);
+  }
+  const unknown = !!sync.ordering.by?.length && !by.length;
+  return { by, priorities: sync.fields?.priorities ?? [], ...(unknown ? { unknown } : {}) };
+};
+
+const SOURCE_FIELDS: readonly SourceOrderKey["field"][] = ["manual", "rank", "priority", "prioritySort", "created", "updated", "due"];
+
+/** Whether the board there is ordered by hand (Linear's manual order,
+ *  Jira's Rank): only then does a drag up or down move its issue. */
+export const sourceByHand = (source: SourceSort | null | undefined): boolean => {
+  if (source?.unknown) return false;
+  const first = source?.by[0];
+  // Rank going down would put a drop's neighbours the wrong way round there.
+  return !first || first.field === "manual" || (first.field === "rank" && !first.desc);
+};
+
 /** Whether a drag up or down a column moves the card in `order`; in the
  *  sorted ones a card's place is its date, so a drag only changes its
- *  column. */
-export const byHand = (order: BoardOrder): boolean => order === "source" || order === "arranged";
+ *  column, and "As on" a board ordered there by priority or a date sorts
+ *  itself too. */
+export const byHand = (order: BoardOrder, source: SourceSort | null): boolean =>
+  order === "arranged" || (order === "source" && sourceByHand(source));
 
 const ms = (iso: string | null | undefined): number => {
   const n = iso ? Date.parse(iso) : NaN;
@@ -197,11 +235,77 @@ const byUpstream = (a: Ticket, b: Ticket): number => {
   return d || byRank(a, b);
 };
 
-/** How `order` sorts a column's cards, top first. */
-export const sortFor = (order: BoardOrder): ((a: Ticket, b: Ticket) => number) => {
+/** Its issue's place by Rank or the manual order, nothing else. */
+const upstreamOnly = (a: Ticket, b: Ticket): number => {
+  const x = a.upstreamRank ?? null;
+  const y = b.upstreamRank ?? null;
+  if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
+  if (typeof x !== typeof y) return typeof x === "number" ? -1 : 1;
+  return typeof x === "number" ? x - (y as number) : x < y ? -1 : x > y ? 1 : 0;
+};
+
+const time = (iso: string | null | undefined): number | null => {
+  const n = iso ? Date.parse(iso) : NaN;
+  return Number.isNaN(n) ? null : n;
+};
+
+/** What `t` holds for `field`, as a number that grows the way `desc`
+ *  reads it (a priority grows more urgent); null when it has none. */
+const valueOf = (t: Ticket, field: SourceOrderKey["field"], priorities: readonly string[]): number | null => {
+  const d = t.external?.details;
+  switch (field) {
+    case "priority": {
+      // A Jira site's own priorities, when read; else its bars (Linear's
+      // are its urgency itself).
+      if (t.external?.system === "jira" && priorities.length) {
+        const name = d?.priority?.trim().toLowerCase();
+        const at = name ? priorities.findIndex((p) => p.trim().toLowerCase() === name) : -1;
+        return at < 0 ? null : -at;
+      }
+      return d?.priorityRank ? -d.priorityRank : null;
+    }
+    case "prioritySort":
+      return typeof d?.prioritySort === "number" ? d.prioritySort : null;
+    case "created":
+      return time(createdOf(t));
+    case "updated":
+      // Its issue's own change there, never Desk's (an import's).
+      return time(t.external ? t.external.remoteUpdatedAt : t.updatedAt);
+    case "due":
+      return time(d?.due);
+    case "manual":
+    case "rank":
+      return null;
+  }
+};
+
+/** The board there's own order, key by key, then by Rank or the manual
+ *  order, then Desk's own. */
+const bySource = (source: SourceSort) => (a: Ticket, b: Ticket): number => {
+  for (const k of source.by) {
+    let d: number;
+    if (k.field === "manual" || k.field === "rank") {
+      d = upstreamOnly(a, b);
+      // Going down, those with a place still come before those without.
+      const placed = a.upstreamRank != null && b.upstreamRank != null;
+      if (k.field === "rank" && k.desc && placed) d = -d;
+    } else {
+      const x = valueOf(a, k.field, source.priorities);
+      const y = valueOf(b, k.field, source.priorities);
+      if (x === null || y === null) d = x === y ? 0 : (x === null) === !!k.emptyFirst ? -1 : 1;
+      else d = k.desc ? y - x : x - y;
+    }
+    if (d) return d;
+  }
+  return byUpstream(a, b);
+};
+
+/** How `order` sorts a column's cards, top first; "As on" by how the
+ *  board there is ordered (`source`), else by Rank or the manual order. */
+export const sortFor = (order: BoardOrder, source?: SourceSort | null): ((a: Ticket, b: Ticket) => number) => {
   switch (order) {
     case "source":
-      return byUpstream;
+      return source?.by.length ? bySource(source) : byUpstream;
     case "newest":
       return (a, b) => ms(createdOf(b)) - ms(createdOf(a)) || b.number - a.number;
     case "oldest":
@@ -244,6 +348,8 @@ export const columns = (
     facets?: Facets;
     /** How each column is sorted; by rank when not said. */
     order?: BoardOrder;
+    /** How a synced board's board there orders its issues. */
+    source?: SourceSort | null;
   },
 ): Column[] => {
   const shown = tickets.filter(
@@ -257,7 +363,7 @@ export const columns = (
   // One pass into the columns, each then sorted in the board's order.
   const by = new Map<TicketState, Ticket[]>(COLUMNS.map(({ state }) => [state, []]));
   for (const t of shown) by.get(t.state === "dropped" ? "done" : t.state)?.push(t);
-  const sort = sortFor(opts.order ?? "arranged");
+  const sort = sortFor(opts.order ?? "arranged", opts.source);
   return COLUMNS.map(({ state, title }) => {
     const mine = by.get(state)!.sort(sort);
     return state === "done"
@@ -420,10 +526,16 @@ export const keyParts = (text: string, known: ReadonlySet<string>): ({ kind: "te
  *  (`tickets`: the board's, the moved one too): between the card it lands
  *  after and the one truly next to it, hidden by a filter or not, so the
  *  hub's rank falls where it was shown. */
-export const anchored = (mv: TicketMove, tickets: readonly Ticket[], source: string, order: BoardOrder = "arranged"): TicketMove => {
+export const anchored = (
+  mv: TicketMove,
+  tickets: readonly Ticket[],
+  source: string,
+  order: BoardOrder = "arranged",
+  sourceSort: SourceSort | null = null,
+): TicketMove => {
   const column = tickets
     .filter((t) => t.state === mv.state && t.id !== source)
-    .sort(sortFor(order))
+    .sort(sortFor(order, sourceSort))
     .map((t) => t.id);
   const at = (id: string) => column.indexOf(id);
   if (mv.before && at(mv.before) >= 0) {

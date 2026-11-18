@@ -1843,6 +1843,36 @@ export interface BoardSync {
    *  dropped until the next sync puts it back. Gone once a later drag goes
    *  out. */
   orderProblem?: string | null;
+  /** How the board there orders its issues, once read: what "As on Jira"
+   *  or "As on Linear" sorts by. Absent from an older hub, or before it is
+   *  read: by Rank or Linear's manual order. */
+  ordering?: SourceOrder | null;
+  /** The Jira site's own fields, once read: its priorities, highest first,
+   *  are what a board ordered by priority there sorts by. */
+  fields?: { priorities?: string[] } | null;
+}
+
+/** What a board there sorts its issues by. */
+export type SourceOrderField = "manual" | "rank" | "priority" | "prioritySort" | "created" | "updated" | "due";
+
+/** One key a board there sorts by. `desc`: highest first (the most urgent
+ *  priority, the latest date). `emptyFirst`: issues without it first (Jira
+ *  going down), else last. */
+export interface SourceOrderKey {
+  field: SourceOrderField;
+  desc?: boolean;
+  emptyFirst?: boolean;
+}
+
+/** How a board there orders its issues. `by` empty: by Rank or the manual
+ *  order, as before; `note` says why when it couldn't follow the board's
+ *  own. */
+export interface SourceOrder {
+  by?: SourceOrderKey[];
+  /** Where it was read, in plain words ("your own view settings"). */
+  from?: string | null;
+  note?: string | null;
+  readAt: string;
 }
 
 /** A ticket's Jira or Linear issue. `synced`: false once it left the
@@ -1907,6 +1937,9 @@ export interface TicketDetails {
   start?: string;
   /** How many comments it has there, when the listing says. */
   comments?: number;
+  /** Linear's place for it among its priority's issues, lower first: a
+   *  view ordered by priority's tie-break. */
+  prioritySort?: number;
   prs?: PrSummary;
   /** Its children there: a Jira story's sub-tasks, a Jira epic's issues,
    *  or a Linear issue's sub-issues. */

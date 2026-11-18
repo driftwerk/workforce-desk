@@ -2,10 +2,10 @@
 // and each board's view kept across switching and restarts.
 
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import type { Ticket } from "../hub/types";
+import type { SourceOrder, Ticket } from "../hub/types";
 import { restore } from "../restore/boot";
 import { DeskStateStore, stable, type LocalState, type StateEntry } from "../restore/store";
-import { anchored, byHand, columns, createdOf, defaultOrder, hasUpstreamOrder, orderOn, ordersFor, sortedLanding, type BoardOrder } from "./board";
+import { anchored, byHand, columns, createdOf, defaultOrder, hasUpstreamOrder, orderOn, ordersFor, sortedLanding, sourceSortOf, type BoardOrder } from "./board";
 import { orderChipSays, orderSays, sortedSaid } from "./OrderChip";
 import { ticket } from "./testing";
 import { BOARD_VIEWS_KEY, boardViews, readViews, setBoardView, useBoardViews } from "./views";
@@ -115,8 +115,8 @@ describe("a board's order", () => {
     expect(orderSays("source", "github")).toBe("The project's own order, as GitHub has it");
     expect(sortedSaid("newest", "jira")).toBe("Sorted newest first: choose As on Jira to move cards by hand.");
     expect(sortedSaid("newest", null)).toBe("Sorted newest first: choose As arranged to move cards by hand.");
-    expect(sortedSaid("newest", "github", true)).toBe("Sorted newest first: choose As on GitHub to move cards by hand.");
-    expect(sortedSaid("newest", "github", false)).toMatch(/keeps no order for a repository’s issues, so cards only change column/);
+    expect(sortedSaid("newest", "github", null, true)).toBe("Sorted newest first: choose As on GitHub to move cards by hand.");
+    expect(sortedSaid("newest", "github", null, false)).toMatch(/keeps no order for a repository’s issues, so cards only change column/);
   });
 
   it("says itself on its chip", () => {
@@ -130,9 +130,9 @@ describe("a board's order", () => {
 describe("a drag in each order", () => {
   const cols = columns(T, opts("newest"));
   it("moves a card by hand only as on Jira or Linear and as arranged", () => {
-    expect(byHand("source")).toBe(true);
-    expect(byHand("arranged")).toBe(true);
-    for (const o of ["newest", "oldest", "changed"] as const) expect(byHand(o)).toBe(false);
+    expect(byHand("source", null)).toBe(true);
+    expect(byHand("arranged", null)).toBe(true);
+    for (const o of ["newest", "oldest", "changed"] as const) expect(byHand(o, null)).toBe(false);
   });
 
   it("only changes the column in a sorted order: dropped in its own, it stays and the board says why", () => {
@@ -221,5 +221,103 @@ describe("each board's view", () => {
     boardViews.write({ views: { x: { order: 12 } } });
     expect(useBoardViews.getState().views).toEqual({});
     expect(orderOn(useBoardViews.getState().views.x?.order, false)).toBe("newest");
+  });
+});
+
+describe("as on Jira or Linear, ordered there by more than its rank", () => {
+  const ordering = (by: SourceOrder["by"], extra: Partial<SourceOrder> = {}): SourceOrder => ({ by, readAt: "2026-11-18T10:00:00Z", ...extra });
+  const linear = (n: number, priorityRank: number | undefined, prioritySort: number | undefined, sortOrder: number) =>
+    ticket(n, {
+      state: "todo",
+      upstreamRank: sortOrder,
+      external: { system: "linear", remoteUpdatedAt: "2026-11-10T00:00:00Z", details: { priorityRank, prioritySort } } as Ticket["external"],
+    });
+  // Manual order 1, 2, 3, 4; Urgent: 3, then 2 (by its priority order);
+  // 1 has none.
+  const L = [linear(1, undefined, 1, 1), linear(2, 1, 5, 2), linear(3, 1, 2, 3), linear(4, 3, 1, 4)];
+  const byPriority = sourceSortOf({ ordering: ordering([{ field: "priority", desc: true }, { field: "prioritySort" }]) });
+  const shown = (tickets: Ticket[], source: ReturnType<typeof sourceSortOf>) =>
+    columns(tickets, { ...opts("source"), source }).find((c) => c.state === "todo")!.cards.map((t) => t.key);
+
+  it("sorts as Linear's priority does: the most urgent first, ties by Linear's priority order, none last", () => {
+    expect(shown(L, byPriority)).toEqual(["ACM-3", "ACM-2", "ACM-4", "ACM-1"]);
+    // Read before it was kept, or by hand there: the manual order.
+    expect(shown(L, null)).toEqual(["ACM-1", "ACM-2", "ACM-3", "ACM-4"]);
+    expect(shown(L, sourceSortOf({ ordering: ordering([{ field: "manual" }]) }))).toEqual(["ACM-1", "ACM-2", "ACM-3", "ACM-4"]);
+    // Couldn't follow it: as before.
+    expect(shown(L, sourceSortOf({ ordering: ordering([], { note: "…" }) }))).toEqual(["ACM-1", "ACM-2", "ACM-3", "ACM-4"]);
+  });
+
+  it("sorts as a Jira site's own priorities go, and an empty value as Jira does", () => {
+    const jira = (n: number, priority: string | undefined, due: string | undefined, rank: string) =>
+      ticket(n, { state: "todo", upstreamRank: rank, external: { system: "jira", remoteUpdatedAt: "2026-11-10T00:00:00Z", details: { priority, due } } as Ticket["external"] });
+    const J = [jira(1, "Low", "2026-12-01", "a"), jira(2, "Highest", undefined, "b"), jira(3, "Medium", "2026-11-20", "c"), jira(4, "Highest", "2026-11-25", "d")];
+    const priorities = ["Highest", "High", "Medium", "Low", "Lowest"];
+    const s = (by: SourceOrder["by"]) => sourceSortOf({ ordering: ordering(by), fields: { priorities } });
+    // Highest first, ties by Rank.
+    expect(shown(J, s([{ field: "priority", desc: true, emptyFirst: true }]))).toEqual(["ACM-2", "ACM-4", "ACM-3", "ACM-1"]);
+    // Due going up: the soonest first, none last; going down, none first.
+    expect(shown(J, s([{ field: "due" }]))).toEqual(["ACM-3", "ACM-4", "ACM-1", "ACM-2"]);
+    expect(shown(J, s([{ field: "due", desc: true, emptyFirst: true }]))).toEqual(["ACM-2", "ACM-1", "ACM-4", "ACM-3"]);
+  });
+
+  it("moves a card by hand only while the board there is ordered by hand, and says why not", () => {
+    expect(byHand("source", byPriority)).toBe(false);
+    expect(byHand("source", sourceSortOf({ ordering: ordering([{ field: "rank" }]) }))).toBe(true);
+    expect(byHand("source", sourceSortOf({ ordering: ordering([{ field: "rank", desc: true }]) }))).toBe(false);
+    expect(byHand("source", null)).toBe(true);
+    const prio = ordering([{ field: "priority", desc: true }]);
+    expect(sortedSaid("source", "linear", prio)).toBe("Linear sorts this board by priority, so dragging a card up or down doesn't reorder it. Reorder it in Linear.");
+  });
+
+  it("names the ordering it follows on its chip", () => {
+    expect(orderChipSays("source", "linear", ordering([{ field: "priority", desc: true }]))).toBe("Order: as on Linear · by priority");
+    expect(orderChipSays("source", "linear", ordering([], { note: "…" }))).toBe("Order: as on Linear · manual order");
+    expect(orderChipSays("source", "jira", ordering([{ field: "rank" }]))).toBe("Order: as on Jira · by rank");
+    expect(orderChipSays("source", "jira", ordering([{ field: "created", desc: true }]))).toBe("Order: as on Jira · newest first");
+    expect(orderChipSays("source", "jira", null)).toBe("Order: as on Jira");
+  });
+
+  it("falls back sensibly where a value or a list is missing", () => {
+    const jira = (n: number, priority: string, priorityRank: number, rank: string) =>
+      ticket(n, { state: "todo", upstreamRank: rank, external: { system: "jira", remoteUpdatedAt: "2026-11-10T00:00:00Z", details: { priority, priorityRank } } as Ticket["external"] });
+    const J = [jira(1, "low", 4, "a"), jira(2, "Highest", 1, "b"), jira(3, "Nope", 2, "c")];
+    // Names matched whatever their case; one the site doesn't list is empty.
+    const listed = sourceSortOf({ ordering: ordering([{ field: "priority", desc: true }]), fields: { priorities: ["Highest", "High", "Low"] } });
+    expect(shown(J, listed)).toEqual(["ACM-2", "ACM-1", "ACM-3"]);
+    // The site's priorities unread: by its bars.
+    expect(shown(J, sourceSortOf({ ordering: ordering([{ field: "priority", desc: true }]) }))).toEqual(["ACM-2", "ACM-3", "ACM-1"]);
+    // Updated: its issue's change there, and one without isn't Desk's import time.
+    const u = (n: number, remote: string | undefined) =>
+      ticket(n, { state: "todo", upstreamRank: `${n}`, updatedAt: "2026-11-18T11:00:00Z", external: { system: "linear", remoteUpdatedAt: remote, details: {} } as unknown as Ticket["external"] });
+    expect(shown([u(1, "2026-11-01T00:00:00Z"), u(2, undefined), u(3, "2026-11-05T00:00:00Z")], sourceSortOf({ ordering: ordering([{ field: "updated", desc: true }]) }))).toEqual(["ACM-3", "ACM-1", "ACM-2"]);
+    // Rank going down keeps those without a place last.
+    const r = [ticket(1, { state: "todo", upstreamRank: "a" }), ticket(2, { state: "todo" }), ticket(3, { state: "todo", upstreamRank: "b" })];
+    expect(shown(r, sourceSortOf({ ordering: ordering([{ field: "rank", desc: true }]) }))).toEqual(["ACM-3", "ACM-1", "ACM-2"]);
+    // A key this Desk doesn't know ends the list; first, it is by Rank or
+    // the manual order, never moved by hand there.
+    const newer = sourceSortOf({ ordering: ordering([{ field: "title" as never }]) });
+    expect(newer?.by).toEqual([]);
+    expect(byHand("source", newer)).toBe(false);
+    const later = sourceSortOf({ ordering: ordering([{ field: "rank" }, { field: "title" as never }]) });
+    expect(later?.by).toEqual([{ field: "rank" }]);
+    expect(byHand("source", later)).toBe(true);
+  });
+
+  it("breaks a tie by the next key, then by Rank, whatever order the cards come in", () => {
+    const L2 = [linear(1, 2, 9, 4), linear(2, 2, 1, 3), linear(3, 1, 5, 2), linear(4, undefined, 1, 1), linear(5, 2, 1, 0)];
+    const want = ["ACM-3", "ACM-5", "ACM-2", "ACM-1", "ACM-4"];
+    expect(shown(L2, byPriority)).toEqual(want);
+    expect(shown([...L2].reverse(), byPriority)).toEqual(want);
+    expect(shown([L2[2]!, L2[0]!, L2[4]!, L2[3]!, L2[1]!], byPriority)).toEqual(want);
+    // Least urgent first: no priority still last, as Linear puts it.
+    expect(shown(L2, sourceSortOf({ ordering: ordering([{ field: "priority" }, { field: "prioritySort" }]) }))).toEqual(["ACM-5", "ACM-2", "ACM-1", "ACM-3", "ACM-4"]);
+  });
+
+  it("says where its order comes from, and how it sorts, in the menu", () => {
+    expect(orderSays("source", "linear", ordering([{ field: "priority", desc: true }], { from: "your own view settings" }))).toBe("The board's own order, from your own view settings");
+    expect(orderSays("source", "jira", ordering([{ field: "due" }]))).toBe("The board's own order, as Jira sorts it");
+    expect(orderSays("source", "jira", ordering([{ field: "rank" }]))).toBe("The board's own order, as Jira ranks it");
+    expect(orderChipSays("source", "linear", ordering([{ field: "priority" }]))).toBe("Order: as on Linear · by priority, lowest first");
   });
 });

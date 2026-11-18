@@ -26,7 +26,19 @@ const FIRST_SYNC_MS = 10 * 60_000;
 /** A synced board's sync, under its header: what it is linked to, a chip
  *  that says synced, paused (and why) or a problem (in the hub's words),
  *  and Pause or Resume and Sync now. */
-export function SyncBar({ board, now, onToken }: { board: Board; now: number; onToken?: () => void }) {
+export function SyncBar({
+  board,
+  now,
+  onToken,
+  orderWhy,
+}: {
+  board: Board;
+  now: number;
+  onToken?: () => void;
+  /** Why a drag up or down doesn't reorder the board's cards, when its
+   *  "As on" follows an order the board there sets (by priority, a date). */
+  orderWhy?: string | null;
+}) {
   const kept = useSyncHubs((s) => s.hubs);
   const paired = useChat((s) => s.hubs);
   const [busy, setBusy] = useState<"pause" | "sync" | "me" | null>(null);
@@ -175,6 +187,7 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
           {busy === "sync" ? "Syncing…" : "Sync now"}
         </button>
       </span>
+      {orderWhy && <span className="board-sync-order">{orderWhy}</span>}
       {/* A drag the hub couldn't make there: said here while the board says it, until a later one goes out. */}
       {sync.orderProblem && (
         <span className="board-sync-failed" role="status">
