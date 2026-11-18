@@ -55,9 +55,6 @@ export const refreshDevices = (): void => {
     .catch(() => undefined);
 };
 
-/** The microphones and speakers as last read. */
-export const currentDevices = (): AudioDevices => useDeviceList.getState().devices;
-
 /** The microphones and speakers: `"watch"` reads them now and every few
  *  seconds (for one plugged in meanwhile), `"once"` reads them now. */
 export const useAudioDevices = (how: "watch" | "once" | "off" = "watch"): AudioDevices => {

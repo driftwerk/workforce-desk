@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { currentDevices, deviceEntries, refreshDevices } from "../settings/Audio";
+import { deviceEntries, refreshDevices, useAudioDevices } from "../settings/Audio";
 import { setAudio, useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { Menu, type MenuEntry } from "../ui/Menu";
@@ -31,14 +31,13 @@ function TalkIcon() {
  *  change them mid-conversation without going to Settings. */
 const useAudioEntries = (): MenuEntry[] => {
   const audio = useSettings((s) => s.audio);
-  // Read once here (shared and spaced out however many rows ask), so the
-  // first submenu has them.
-  useEffect(refreshDevices, []);
-  // Read as each submenu opens (and again for next time), so a headset
-  // plugged in since shows.
+  // Subscribed, so a read made as a submenu opens shows in it at once.
+  const devices = useAudioDevices("off");
+  // Read as a submenu opens (outside the render; shared and spaced out
+  // however many rows ask), so a headset plugged in since shows.
   const list = (which: "inputs" | "outputs") => {
-    refreshDevices();
-    return currentDevices()[which];
+    queueMicrotask(refreshDevices);
+    return devices[which];
   };
   return [
     { kind: "separator" },
