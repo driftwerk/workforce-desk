@@ -643,7 +643,7 @@ export function LinkBoardDialog({ board, tickets, onClose }: { board: Board; tic
                       <option value="">Pick a project</option>
                       {projects.map((p) => (
                         <option key={p.key} value={p.key}>
-                          {p.name} · {targetWords("github", p.key)}
+                          {p.name} · project {p.key.split("/").pop()}
                         </option>
                       ))}
                     </select>
