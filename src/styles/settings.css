@@ -123,6 +123,142 @@
   width: 45%;
 }
 
+/* ── Agents' proposals ──────────────────────────────────────────────────── */
+
+.theme-proposals {
+  max-width: 760px;
+}
+.proposal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card-fill);
+  max-width: 560px;
+}
+.proposal-card-chat {
+  margin: 10px 0 4px;
+  background: var(--surface);
+}
+.proposal-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.proposal-head b {
+  font-size: 15px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.proposal-reason {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.proposal-card .preview {
+  min-height: 200px;
+}
+/* A narrow pane squeezes the preview: its marks, dot and button keep their shape. */
+.proposal-card .pv-mark,
+.proposal-card .pv-dot {
+  flex: none;
+}
+.proposal-card .pv-ask {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.proposal-changes summary {
+  cursor: pointer;
+}
+.proposal-changes ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.proposal-ask,
+.theme-ask {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.proposal-ask textarea,
+.theme-ask textarea {
+  width: 100%;
+  resize: vertical;
+  background: var(--raised);
+}
+.theme-ask {
+  max-width: 560px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--card-fill);
+}
+.theme-ask .field > span:first-child {
+  font-size: 13px;
+  color: var(--muted);
+}
+.theme-ask-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.theme-ask .field.theme-ask-agent {
+  flex-direction: row;
+  align-items: center;
+  gap: 8px;
+}
+.theme-ask-image {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.theme-ask-image .mono {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 220px;
+}
+
+/* The terminal's colours on its own ground. */
+.term-swatches {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 8px 10px;
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
+}
+.term-swatches-text {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 11px;
+}
+.term-swatches-cursor {
+  width: 7px;
+  height: 13px;
+}
+.term-swatches-row {
+  display: grid;
+  grid-template-columns: repeat(8, 14px);
+  gap: 4px;
+}
+.term-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 4px;
+}
+
 /* ── Editor ─────────────────────────────────────────────────────────────── */
 
 .appearance-grid {

@@ -177,6 +177,14 @@ export const systemFonts = (): Promise<string[]> => invoke("fonts_list");
 
 export const writeTheme = (id: string, source: string): Promise<void> => invoke("themes_write", { id, source });
 
+/** The theme proposals agents made, as `<id>.proposal.toml` beside the themes. */
+export const proposalFiles = (): Promise<ThemeFile[]> => invoke("themes_proposals");
+
+/** Saves a theme proposal: only ever a proposal's file, in the themes folder. */
+export const writeProposal = (id: string, source: string): Promise<void> => invoke("themes_propose", { id, source });
+
+export const removeProposal = (id: string): Promise<void> => invoke("themes_proposal_remove", { id });
+
 export const revealThemes = (): Promise<void> => invoke("themes_reveal");
 
 export const onThemesChanged = (f: () => void): Promise<() => void> => listen("themes-changed", f);

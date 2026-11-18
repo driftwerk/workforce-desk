@@ -359,13 +359,70 @@ pub fn list_themes(dir: &Path) -> Result<Vec<ThemeFile>> {
     Ok(themes)
 }
 
-pub fn write_theme(dir: &Path, id: &str, source: &str) -> Result<()> {
+/// The ids no theme file may have: Desk's built-in themes' (`BUILTIN` in
+/// `src/theme/builtin.ts`) and Auto's, which a file would shadow.
+pub const RESERVED_THEME_IDS: [&str; 4] = ["night", "day", "harbour", "system"];
+
+/// What a theme proposal's file ends with: `<id>.proposal.toml`, which the
+/// chooser never lists (its stem isn't a theme's id).
+const PROPOSAL_SUFFIX: &str = ".proposal.toml";
+
+fn writable_theme_id(id: &str) -> Result<()> {
     if !valid_theme_id(id) {
         eyre::bail!("theme names are lowercase letters, digits and dashes");
     }
+    if RESERVED_THEME_IDS.contains(&id) {
+        eyre::bail!("\"{id}\" is one of Desk's own themes, which can't be changed");
+    }
+    Ok(())
+}
+
+pub fn write_theme(dir: &Path, id: &str, source: &str) -> Result<()> {
+    writable_theme_id(id)?;
     std::fs::create_dir_all(dir)?;
     std::fs::write(dir.join(format!("{id}.toml")), source)?;
     Ok(())
+}
+
+/// The theme proposals agents made, by their ids: `<id>.proposal.toml`.
+pub fn list_proposals(dir: &Path) -> Result<Vec<ThemeFile>> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(vec![]);
+    };
+    let mut proposals: Vec<ThemeFile> = entries
+        .flatten()
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            let id = name.strip_suffix(PROPOSAL_SUFFIX)?.to_string();
+            valid_theme_id(&id).then_some(())?;
+            e.file_type().ok()?.is_file().then_some(())?;
+            Some(ThemeFile {
+                source: std::fs::read_to_string(e.path()).ok()?,
+                id,
+            })
+        })
+        .collect();
+    proposals.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(proposals)
+}
+
+/// Saves proposal `id`: only ever a proposal's file, in the themes folder.
+pub fn write_proposal(dir: &Path, id: &str, source: &str) -> Result<()> {
+    writable_theme_id(id)?;
+    std::fs::create_dir_all(dir)?;
+    std::fs::write(dir.join(format!("{id}{PROPOSAL_SUFFIX}")), source)?;
+    Ok(())
+}
+
+/// Drops proposal `id`; one already gone is no error.
+pub fn remove_proposal(dir: &Path, id: &str) -> Result<()> {
+    if !valid_theme_id(id) {
+        eyre::bail!("theme names are lowercase letters, digits and dashes");
+    }
+    match std::fs::remove_file(dir.join(format!("{id}{PROPOSAL_SUFFIX}"))) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e.into()),
+        _ => Ok(()),
+    }
 }
 
 /// Emits `themes-changed` whenever a file in the themes folder changes.
@@ -776,9 +833,38 @@ mod tests {
     }
 
     #[test]
+    fn proposals_are_kept_apart_from_themes_and_never_take_a_built_ins_id() {
+        let dir = tempfile::tempdir().unwrap();
+        write_proposal(dir.path(), "moss", "name = \"Moss\"\n").unwrap();
+        write_theme(dir.path(), "fern", "name = \"Fern\"\n").unwrap();
+        // The chooser lists the theme alone; the proposal is listed apart.
+        let themes: Vec<String> = list_themes(dir.path())
+            .unwrap()
+            .into_iter()
+            .map(|t| t.id)
+            .collect();
+        assert_eq!(themes, vec!["fern"]);
+        let proposals = list_proposals(dir.path()).unwrap();
+        assert_eq!(proposals.len(), 1);
+        assert_eq!(proposals[0].id, "moss");
+        for id in RESERVED_THEME_IDS {
+            assert!(write_proposal(dir.path(), id, "").is_err());
+            assert!(write_theme(dir.path(), id, "").is_err());
+        }
+        for id in ["../x", "a/b", "Moss", "", "a.b"] {
+            assert!(write_proposal(dir.path(), id, "").is_err(), "{id}");
+            assert!(remove_proposal(dir.path(), id).is_err(), "{id}");
+        }
+        remove_proposal(dir.path(), "moss").unwrap();
+        remove_proposal(dir.path(), "moss").unwrap();
+        assert!(list_proposals(dir.path()).unwrap().is_empty());
+        assert!(dir.path().join("fern.toml").exists());
+    }
+
+    #[test]
     fn only_well_named_toml_files_are_themes() {
         let dir = tempfile::tempdir().unwrap();
-        write_theme(dir.path(), "harbour", "name = \"Harbour\"").unwrap();
+        write_theme(dir.path(), "tide", "name = \"Tide\"").unwrap();
         std::fs::write(dir.path().join("Bad Name.toml"), "x").unwrap();
         std::fs::write(dir.path().join("notes.txt"), "x").unwrap();
         let ids: Vec<_> = list_themes(dir.path())
@@ -786,7 +872,7 @@ mod tests {
             .into_iter()
             .map(|t| t.id)
             .collect();
-        assert_eq!(ids, ["harbour"]);
+        assert_eq!(ids, ["tide"]);
         assert!(write_theme(dir.path(), "../escape", "x").is_err());
     }
 }

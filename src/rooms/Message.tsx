@@ -1,3 +1,4 @@
+import { ProposalCards, proposalsMade } from "../settings/ThemeProposals";
 import { RichHostProvider, RichMarkdown, type RichHost } from "@workforce/rich";
 import { memo, useMemo, type ReactNode } from "react";
 import { Attachments, type FileHome } from "../attachments/Attachments";
@@ -158,6 +159,7 @@ export const Message = memo(function Message({
     [onSubmitForm, answered],
   );
   const setups = message.role === "assistant" ? Math.max(setupsStarted(steps), setupsStarted(message.tools)) : 0;
+  const proposals = message.role === "assistant" ? Math.max(proposalsMade(steps), proposalsMade(message.tools)) : 0;
   const fromOverseer = relayed?.by === "overseer";
   const you = message.role === "user" && !fromOverseer;
   const name = fromOverseer ? relayed.overseer : you ? "You" : message.role === "system" ? "Desk" : author;
@@ -250,6 +252,9 @@ export const Message = memo(function Message({
         )}
         {message.role === "assistant" && origin && setups > 0 && (
           <SetupCards origin={origin} since={setupsSince(message, turnSince)} until={turnUntil} count={setups} />
+        )}
+        {message.role === "assistant" && origin && proposals > 0 && (
+          <ProposalCards hub={origin.hub} agent={origin.agent} since={turnSince ?? message.at} until={turnUntil} />
         )}
         {message.attachments && <Attachments files={message.attachments} home={origin} />}
         {message.undelivered && you && (

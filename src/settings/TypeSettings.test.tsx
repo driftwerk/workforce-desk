@@ -9,8 +9,10 @@ import { Appearance } from "./Appearance";
 import { DESK_FONTS, FontPicker, fontOptions, matching } from "./FontPicker";
 import { sizeFor } from "./TypeSettings";
 
-vi.mock("../platform", () => ({
+vi.mock("../platform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../platform")>()),
   writeTheme: vi.fn(() => Promise.resolve()),
+  proposalFiles: vi.fn(() => Promise.resolve([])),
   revealThemes: vi.fn(() => Promise.resolve()),
   systemFonts: vi.fn(() => Promise.resolve(["Georgia", "Inter", "Menlo", "Figtree Variable"])),
 }));

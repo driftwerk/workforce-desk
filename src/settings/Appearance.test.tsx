@@ -10,7 +10,9 @@ import { derive } from "../theme/tokens";
 import { Appearance } from "./Appearance";
 import { applyEdit, isBuiltin, uniqueId } from "./editing";
 
-vi.mock("../platform", () => ({
+vi.mock("../platform", async (original) => ({
+  ...(await original<typeof import("../platform")>()),
+  proposalFiles: vi.fn(() => Promise.resolve([])),
   writeTheme: vi.fn(() => Promise.resolve()),
   revealThemes: vi.fn(() => Promise.resolve()),
   systemFonts: vi.fn(() => Promise.resolve(["Georgia", "Menlo"])),

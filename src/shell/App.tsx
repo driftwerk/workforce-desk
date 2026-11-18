@@ -63,6 +63,8 @@ import { applyTheme, useTheme, useThemeStore } from "../theme/store";
 import { useTerminalColors } from "../theme/hubColors";
 import { customThemesRead } from "../theme/boot";
 import { loadCustomThemes } from "../theme/custom";
+import { useProposals } from "../theme/proposals";
+import { useThemeJobs } from "../theme/themeJobs";
 import { QuickAsk } from "./QuickAsk";
 import { SearchMemory } from "../memory/SearchMemory";
 import { LifecycleDialogs } from "../session/LifecycleDialogs";
@@ -201,6 +203,8 @@ export function App() {
     if (inApp) void windowBackground(theme.colors.bg).catch(() => undefined);
   }, [theme]);
   useTerminalColors(theme);
+  // Agents' theme calls, answered here: their proposals are saved beside the themes.
+  useThemeJobs();
 
   // Workspaces add, remove and share agents without telling Desk, so their
   // agent lists are read again every minute and whenever Desk comes forward.
@@ -244,7 +248,11 @@ export function App() {
 
   useEffect(() => {
     let stop: (() => void) | undefined;
-    const refresh = () => loadCustomThemes().then(setCustom).catch(fail);
+    const refresh = () => {
+      loadCustomThemes().then(setCustom).catch(fail);
+      useProposals.getState().load().catch(fail);
+    };
+    useProposals.getState().load().catch(fail);
     // Read before the first render (theme/boot); again only if that failed.
     if (!useSettings.getState().loaded) loadSettings().catch(fail);
     void customThemesRead(() => loadCustomThemes().then(setCustom)).catch(fail);

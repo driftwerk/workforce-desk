@@ -223,6 +223,50 @@ const helperStands = () => {
   }
 };
 
+// ── Themes, for this tab ──────────────────────────────────────────────────
+// The themes folder: the themes saved here, and the proposals agents made.
+// `desk.dev.themeProposal` = "1" starts it with one, as Atlas would make it.
+const previewThemes = new Map<string, string>();
+let proposals: Map<string, string> | null = null;
+const previewProposals = (): Map<string, string> => {
+  if (proposals) return proposals;
+  proposals = new Map();
+  if (localStorage.getItem("desk.dev.themeProposal") === "1") {
+    proposals.set(
+      "tidepool",
+      [
+        'name = "Tidepool"',
+        "",
+        "[colors]",
+        'background = "#0F1E24"',
+        'signal = "#5FE0C8"',
+        "",
+        "[type]",
+        'display = "Bricolage Grotesque Variable"',
+        'ui = "Figtree Variable"',
+        'mono = "Geist Mono Variable"',
+        "size = 14",
+        "chat_size = 14",
+        "code_size = 12.5",
+        "",
+        "[shape]",
+        'density = "cozy"',
+        'corners = "soft"',
+        "",
+        "[proposal]",
+        'hub = "local"',
+        'agent = "atlas"',
+        `at = "${new Date(Date.now() - 60_000).toISOString()}"`,
+        'reason = "Something calm, like the sea at dusk, from my photo"',
+        'changes = ["Labels on the terminal read 4.2:1, under 4.5; Desk moved faint #7E8C8F → #8A979A."]',
+        'nudged = ["faint"]',
+        "",
+      ].join("\n"),
+    );
+  }
+  return proposals;
+};
+
 export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
   const answer = (v: unknown) => v as T;
   const state = stateCommand(cmd, args);
@@ -302,7 +346,18 @@ export async function devInvoke<T>(cmd: string, args?: Record<string, unknown>):
       settings = args?.settings as typeof settings;
       return answer(undefined);
     case "themes_list":
-      return answer([]);
+      return answer([...previewThemes].map(([id, source]) => ({ id, source })));
+    case "themes_write":
+      previewThemes.set(String(args?.id), String(args?.source));
+      return answer(undefined);
+    case "themes_proposals":
+      return answer([...previewProposals()].map(([id, source]) => ({ id, source })));
+    case "themes_propose":
+      previewProposals().set(String(args?.id), String(args?.source));
+      return answer(undefined);
+    case "themes_proposal_remove":
+      previewProposals().delete(String(args?.id));
+      return answer(undefined);
     case "machine_probe":
       // `desk.dev.forwards` = "1": the SSH config forwards ports for it.
       if (localStorage.getItem("desk.dev.forwards") === "1")
@@ -645,6 +700,11 @@ export async function devHub<T>(method: string, path: string, body?: unknown): P
   const state = stateRoute(method, path, body);
   if (state) return answer(state.answer);
   if (method === "GET" && path === "/api/desk/providers") return answer({ providers: fixtures });
+  // No agent asks for a theme in the preview: an ask held open, then none.
+  if (method === "GET" && path.startsWith("/api/me/desk-theme-jobs")) {
+    await new Promise((r) => setTimeout(r, 20_000));
+    return answer({ jobs: [] });
+  }
   const m = path.match(/^\/api\/desk\/providers\/([^/]+)(\/connect)?$/);
   const p = m && fixtures.find((f) => f.id === decodeURIComponent(m[1]!));
   if (!p) throw new Error(`the preview has no ${method} ${path}`);

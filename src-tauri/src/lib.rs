@@ -185,6 +185,24 @@ fn themes_write(app: State<'_, App>, id: String, source: String) -> CommandResul
     files::write_theme(&app.paths.themes(), &id, &source).map_err(text)
 }
 
+/// The theme proposals agents made, which the person hasn't kept.
+#[tauri::command]
+fn themes_proposals(app: State<'_, App>) -> CommandResult<Vec<files::ThemeFile>> {
+    files::list_proposals(&app.paths.themes()).map_err(text)
+}
+
+/// Saves an agent's theme proposal: a proposal's file in the themes folder,
+/// never a theme, nor one of Desk's own.
+#[tauri::command]
+fn themes_propose(app: State<'_, App>, id: String, source: String) -> CommandResult<()> {
+    files::write_proposal(&app.paths.themes(), &id, &source).map_err(text)
+}
+
+#[tauri::command]
+fn themes_proposal_remove(app: State<'_, App>, id: String) -> CommandResult<()> {
+    files::remove_proposal(&app.paths.themes(), &id).map_err(text)
+}
+
 /// Opens the themes folder in the system's file manager.
 #[tauri::command]
 fn themes_reveal(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult<()> {
@@ -1293,6 +1311,9 @@ pub fn run() {
             settings_save,
             themes_list,
             themes_write,
+            themes_proposals,
+            themes_propose,
+            themes_proposal_remove,
             themes_reveal,
             hubs_list,
             hubs_remove,
