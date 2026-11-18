@@ -265,7 +265,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
     // Placed in the whole column, whatever the filter hides: among its
     // neighbours as the board shows them when cards move by hand, else at
     // the end of the column's hand order (it shows in its sorted place).
-    const mv = hand ? anchored(shown, mine, id, order) : anchored({ state: shown.state }, mine, id);
+    const mv = hand ? anchored(shown, mine, id, order, source) : anchored({ state: shown.state }, mine, id);
     useBoard
       .getState()
       .move(id, mv)

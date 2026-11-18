@@ -3,7 +3,7 @@ import { below } from "../groups/rows";
 import { SYSTEM_TITLE } from "../hub/boardSync";
 import type { SourceOrder, SourceOrderKey, SyncSystem } from "../hub/types";
 import { Menu, type MenuEntry } from "../ui/Menu";
-import { ordersFor, type BoardOrder } from "./board";
+import { ordersFor, sourceByHand, sourceSortOf, type BoardOrder } from "./board";
 
 /** What a board there orders by, after "·": "by priority", "manual
  *  order". Without an ordering read (an older hub), nothing. */
@@ -17,8 +17,9 @@ export const sourceWords = (system: SyncSystem | null, ordering: SourceOrder | n
     case "rank":
       return first?.desc ? "by rank, reversed" : "by rank";
     case "priority":
+      return first?.desc ? "by priority" : "by priority, lowest first";
     case "prioritySort":
-      return first?.desc === false ? "by priority, lowest first" : "by priority";
+      return "by priority";
     case "created":
       return first?.desc ? "newest first" : "oldest first";
     case "updated":
@@ -52,6 +53,7 @@ export const orderSays = (order: BoardOrder, system: SyncSystem | null, ordering
   switch (order) {
     case "source":
       if (ordering?.from) return `The board's own order, from ${ordering.from}`;
+      if (ordering?.by?.length && !sourceByHand(sourceSortOf({ ordering }))) return `The board's own order, as ${system === "linear" ? "Linear" : "Jira"} sorts it`;
       return system === "linear" ? "The board's own order, as Linear has it" : "The board's own order, as Jira ranks it";
     case "newest":
       return "Most recently created at the top";
@@ -75,7 +77,7 @@ export const orderChipSays = (order: BoardOrder, system: SyncSystem | null, orde
  *  cards by hand. */
 export const sortedSaid = (order: BoardOrder, system: SyncSystem | null, ordering?: SourceOrder | null): string =>
   order === "source" && system
-    ? `${SYSTEM_TITLE[system]} sorts this board ${sourceWords(system, ordering) ?? "itself"}, so dragging a card up or down doesn't reorder it.`
+    ? `${SYSTEM_TITLE[system]} sorts this board ${sourceWords(system, ordering) ?? "itself"}, so dragging a card up or down doesn't reorder it; reorder it in ${SYSTEM_TITLE[system]}.`
     : `Sorted ${order === "changed" ? "by recent change" : lower(orderName(order, system))}: choose ${system ? `As on ${SYSTEM_TITLE[system]}` : "As arranged"} to move cards by hand.`;
 
 /** The board's Order chip, beside its filters: a menu of the orders the
