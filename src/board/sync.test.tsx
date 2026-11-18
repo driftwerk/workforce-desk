@@ -1057,6 +1057,40 @@ describe("the board, synced", () => {
     expect(screen.getByRole("img", { name: "Todo" })).toBeTruthy();
   });
 
+  it("draws a GitHub board: Milestone, Label and Type chips, keys as repo#12 with the full one on hover, and As on GitHub only on a project", () => {
+    const gh = (n: number, title: string, milestone: string, labels: string[], kind: string) =>
+      ticket(n, {
+        key: `acme/web#${n}`,
+        title,
+        state: "todo",
+        upstreamRank: String(n * 1024).padStart(10, "0") as never,
+        external: ext(`acme/web#${n}`, { system: "github" as const, url: `https://github.invalid/acme/web/issues/${n}`, details: { kind, labels, sprint: { name: milestone } } }),
+      });
+    const a = gh(12, "Alpha", "v1", ["bug"], "Bug");
+    const b = gh(13, "Beta", "v2", ["ui"], "Feature");
+    const { unmount } = show(synced({ system: "github", target: "acme/projects/7" }), [a, b]);
+    expect(screen.getByText("GitHub acme · project 7 via Atlas", { exact: false })).toBeTruthy();
+    expect(screen.getByText("web#12").getAttribute("title")).toBe("GitHub issue acme/web#12");
+    expect(screen.queryByText("acme/web#12")).toBeNull();
+    expect(screen.getByRole("button", { name: "acme/web#12: Alpha" })).toBeTruthy();
+    expect([...(screen.getByRole("combobox", { name: "Milestone" }) as HTMLSelectElement).options].map((o) => o.textContent)).toEqual(["Milestone: all", "v1", "v2"]);
+    expect(screen.getByRole("combobox", { name: "Label" })).toBeTruthy();
+    expect(screen.getByRole("combobox", { name: "Type" })).toBeTruthy();
+    expect(screen.queryByRole("combobox", { name: "Epic" })).toBeNull();
+    fireEvent.change(screen.getByRole("combobox", { name: "Milestone" }), { target: { value: "v2" } });
+    expect(screen.queryByRole("button", { name: "acme/web#12: Alpha" })).toBeNull();
+    expect(screen.getByRole("button", { name: "acme/web#13: Beta" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Order: as on GitHub" }));
+    expect(within(screen.getByRole("menu", { name: "Order" })).getAllByRole("menuitemradio").map((i) => i.firstChild!.firstChild!.textContent)).toEqual(["As on GitHub", "Newest first", "Oldest first", "Recently changed"]);
+    expect(screen.getByText("The project's own order, as GitHub has it")).toBeTruthy();
+    // A repository's board has no order of its own: it offers none, and a saved one falls back.
+    unmount();
+    useBoardViews.setState({ views: { [ACME.id]: { order: "source" } } as never });
+    show(synced({ system: "github", target: "acme/web" }), [a, b]);
+    fireEvent.click(screen.getByRole("button", { name: "Order: newest first" }));
+    expect(within(screen.getByRole("menu", { name: "Order" })).getAllByRole("menuitemradio").map((i) => i.firstChild!.firstChild!.textContent)).toEqual(["Newest first", "Oldest first", "Recently changed"]);
+  });
+
   it("keeps a board's own filters and its order when it is shown again, and orders it as on Jira until another is picked", () => {
     const a = ticket(51, { key: "ACME-51", title: "Alpha", state: "todo", external: ext("ACME-51", { details: { kind: "Story", epic: { key: "ACME-1", title: "Permissions" } } }) });
     const b = ticket(52, { key: "ACME-52", title: "Beta", state: "todo", external: ext("ACME-52", { details: { kind: "Bug", epic: { key: "ACME-2", title: "Insights" } } }) });

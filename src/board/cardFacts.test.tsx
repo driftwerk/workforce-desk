@@ -5,7 +5,7 @@
 import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { PriorityBars, prChip, seriesOf, shortDate, stateShape, typeShape } from "./cardFacts";
-import { facetChoices, facetOf, pointsOf, shownByFacets, sprintName } from "./facets";
+import { FACETS, facetChoices, facetOf, pointsOf, shownByFacets, sprintName } from "./facets";
 import { ticket } from "./testing";
 import type { Ticket, TicketDetails } from "../hub/types";
 
@@ -93,6 +93,16 @@ describe("a synced board's facets", () => {
     expect(facetOf(c, "label")).toEqual(["Backend", "Feature"]);
     expect(facetOf(c, "sprint")).toEqual(["Cycle 41"]);
     expect(facetOf(plain, "type")).toEqual([]);
+    // GitHub's: its milestone as the sprint, its labels and its issue type.
+    expect(FACETS.github).toEqual([
+      { id: "sprint", word: "Milestone" },
+      { id: "label", word: "Label" },
+      { id: "type", word: "Type" },
+    ]);
+    const gh = ticket(9, { external: { system: "github", key: "acme/web#9", url: "https://github.invalid/x", remoteUpdatedAt: "2026-11-05T09:00:00Z", synced: true, link: "l", details: { kind: "Bug", labels: ["bug"], sprint: { name: "v2.0" } } } });
+    expect(facetOf(gh, "sprint")).toEqual(["v2.0"]);
+    expect(facetOf(gh, "type")).toEqual(["Bug"]);
+    expect(facetOf(gh, "label")).toEqual(["bug"]);
     expect(sprintName({})).toBe("");
   });
 

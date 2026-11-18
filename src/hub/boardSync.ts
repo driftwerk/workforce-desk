@@ -125,6 +125,10 @@ export const targetOk = (system: SyncSystem, target: string): boolean =>
       ? /^[A-Z][A-Z0-9_]{0,19}$/.test(target)
       : /^[A-Z][A-Z0-9]{0,9}$/.test(target);
 
+/** A GitHub issue's key as a narrow card says it: `repo#12`, without its
+ *  owner (`acme/web#12`); the full key stays in the ticket and its title. */
+export const shortKey = (key: string): string => key.replace(/^[^/]+\//, "");
+
 /** Whether a GitHub target is a project (else a repository's issues). */
 export const isGithubProject = (target: string): boolean => /\/projects\/\d+$/.test(target);
 

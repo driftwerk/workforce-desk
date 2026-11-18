@@ -9,7 +9,7 @@ import { Menu } from "../ui/Menu";
 import { useDesk } from "../hub/store";
 import type { ActivityParty, SyncAssignee, SyncSystem, Ticket } from "../hub/types";
 import { useLocalAgent } from "../overview/people";
-import { SYSTEM_TITLE, takeable } from "../hub/boardSync";
+import { shortKey, SYSTEM_TITLE, takeable } from "../hub/boardSync";
 import { Mark } from "../ui/Mark";
 import { blockers, createdOf, needsLine } from "./board";
 import {
@@ -197,7 +197,7 @@ export function TicketCard({
   const movable = useHubLayout((s) => s.layout !== null);
   // A synced board's ticket shows its issue's key; one made here waits for
   // its key until it is created there.
-  const keyShown = t.key ?? (system ? `Not on ${SYSTEM_TITLE[system]} yet` : null);
+  const keyShown = t.key ? (system === "github" ? shortKey(t.key) : t.key) : system ? `Not on ${SYSTEM_TITLE[system]} yet` : null;
   // Who has its issue there: shown once the hub has said (an older one
   // doesn't), and Take it while no one does.
   const upstream = system && ext && ext.assignee !== undefined && !settled ? ext.assignee : undefined;
@@ -211,7 +211,7 @@ export function TicketCard({
   // One meta row, in a fixed order: priority, labels (Linear's), points,
   // sub-items, the PR. A finished card keeps only its PR.
   const pr = prChip(t, facts?.prs);
-  const labels = system === "linear" ? (facts?.labels ?? []) : [];
+  const labels = system === "linear" || system === "github" ? (facts?.labels ?? []) : [];
   const points = facts?.points;
   const sub = facts?.subItems;
   const meta = [
@@ -240,7 +240,7 @@ export function TicketCard({
   const blocks = (facts?.links ?? []).filter((l) => l.rel === "blocks");
   const files = t.files?.length ?? 0;
   const comments = facts?.comments ?? 0;
-  const cycle = system === "linear" && facts?.sprint ? (facts.sprint.name ?? (facts.sprint.number !== undefined ? `Cycle ${facts.sprint.number}` : null)) : null;
+  const cycle = (system === "linear" || system === "github") && facts?.sprint ? (facts.sprint.name ?? (facts.sprint.number !== undefined ? `Cycle ${facts.sprint.number}` : null)) : null;
   const more =
     ext && !settled && (blocks.length > 0 || files > 0 || comments > 0 || cycle) ? (
       <span className="board-counts">

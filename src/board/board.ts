@@ -6,7 +6,7 @@
 // by) without asking it again.
 
 import { shownByFacets, type Facets } from "./facets";
-import type { ActivityEvent, LedgerRow, Session, Ticket, TicketMove, TicketState } from "../hub/types";
+import type { ActivityEvent, BoardSync, LedgerRow, Session, Ticket, TicketMove, TicketState } from "../hub/types";
 import { totalTokens } from "../spend/spend";
 
 /** The columns, left to right; Dropped has none and folds under Done. */
@@ -133,19 +133,26 @@ const byRank = (a: Ticket, b: Ticket): number => a.rank - b.rank || a.number - b
  *  board's, by rank). */
 export type BoardOrder = "source" | "newest" | "oldest" | "changed" | "arranged";
 
+/** Whether a synced board's source keeps an order of its own: Jira's rank,
+ *  Linear's sort order, a GitHub project's item order. A GitHub repository's
+ *  issues have none. */
+export const hasUpstreamOrder = (sync: BoardSync | null | undefined): boolean => !!sync && (sync.system !== "github" || sync.target.includes("/projects/"));
+
 /** The orders a board offers, in its menu's order: a synced board's own
- *  first, a Desk-only board's hand order last. */
-export const ordersFor = (synced: boolean): readonly BoardOrder[] =>
-  synced ? ["source", "newest", "oldest", "changed"] : ["newest", "oldest", "changed", "arranged"];
+ *  first (where its source has one: `upstream`), a Desk-only board's hand
+ *  order last. */
+export const ordersFor = (synced: boolean, upstream: boolean = synced): readonly BoardOrder[] =>
+  synced ? (upstream ? ["source", "newest", "oldest", "changed"] : ["newest", "oldest", "changed"]) : ["newest", "oldest", "changed", "arranged"];
 
 /** What a board shows until the person picks: as on its Jira or Linear,
  *  else newest first. */
-export const defaultOrder = (synced: boolean): BoardOrder => (synced ? "source" : "newest");
+export const defaultOrder = (synced: boolean, upstream: boolean = synced): BoardOrder => (synced && upstream ? "source" : "newest");
 
 /** `order` where the board offers it, else the board's default (a board
- *  linked or unlinked since it was picked). */
-export const orderOn = (order: BoardOrder | undefined, synced: boolean): BoardOrder =>
-  order && ordersFor(synced).includes(order) ? order : defaultOrder(synced);
+ *  linked or unlinked since it was picked, or a repository's, which has no
+ *  order of its own to keep). */
+export const orderOn = (order: BoardOrder | undefined, synced: boolean, upstream: boolean = synced): BoardOrder =>
+  order && ordersFor(synced, upstream).includes(order) ? order : defaultOrder(synced, upstream);
 
 /** Whether a drag up or down a column moves the card in `order`; in the
  *  sorted ones a card's place is its date, so a drag only changes its
