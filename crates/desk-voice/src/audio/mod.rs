@@ -1,12 +1,21 @@
 //! The microphone and the speaker: AVAudioEngine with Apple's echo
-//! canceller on macOS, cpal elsewhere. Without an echo canceller the
-//! microphone goes quiet while Desk speaks ([`gate`]).
+//! canceller on macOS, cpal elsewhere, on the devices the person chose
+//! ([`prefs`]) or the system's, and kept on them as devices come and go
+//! ([`live`]). Without an echo canceller the microphone goes quiet while
+//! Desk speaks ([`gate`]).
 
 #[cfg(not(target_os = "macos"))]
 mod cpal_audio;
+pub mod devices;
 pub mod gate;
+mod live;
 #[cfg(target_os = "macos")]
 mod mac;
+pub mod prefs;
+
+pub use devices::{Device, Devices};
+pub use live::{AudioStatus, level, meter, status, test};
+pub use prefs::{AudioPrefs, DeviceChoice};
 
 #[cfg(not(target_os = "macos"))]
 use cpal_audio as platform;
@@ -60,12 +69,12 @@ pub fn open(input: AudioIn) -> Result<SharedAudioOut> {
     if mic_access() == MicAccess::Denied {
         return Err(eyre::eyre!(MIC_NOT_ALLOWED));
     }
-    platform::open(input)
+    live::open(input)
 }
 
 /// Just the speaker side: for playing a sample while voice is off.
 pub fn output() -> Result<SharedAudioOut> {
-    platform::output()
+    live::output()
 }
 
 #[cfg(test)]

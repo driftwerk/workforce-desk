@@ -69,6 +69,10 @@ pub enum Sound {
 /// with the recent audio kept by sample index.
 pub struct Wake {
     vad: VoiceActivityDetector,
+    vad_model: String,
+    /// The voice activity threshold `vad` was made with: Settings'
+    /// sensitivity, which can change while listening.
+    threshold: f32,
     tokenizer: SentencePiece,
     vocabulary: HashSet<String>,
     spotter_config: KeywordSpotterConfig,
@@ -83,25 +87,32 @@ const MIN_SPEECH_SECONDS: f32 = 0.25;
 /// How far into speech the voice model reports it, at best, in samples.
 const ONSET_LATE: u64 = (MIN_SPEECH_SECONDS * SPEECH_RATE as f32) as u64 + VAD_WINDOW as u64;
 
+/// Silero, hearing speech above `threshold`.
+fn voice_activity(model: &str, threshold: f32) -> Result<VoiceActivityDetector> {
+    VoiceActivityDetector::create(
+        &VadModelConfig {
+            silero_vad: SileroVadModelConfig {
+                model: Some(model.to_string()),
+                threshold,
+                min_silence_duration: 0.7,
+                min_speech_duration: MIN_SPEECH_SECONDS,
+                window_size: VAD_WINDOW as i32,
+                max_speech_duration: MAX_SPEECH_SECONDS,
+            },
+            sample_rate: RATE,
+            num_threads: 1,
+            ..Default::default()
+        },
+        30.0,
+    )
+    .ok_or_else(|| eyre!("couldn't load the voice activity model"))
+}
+
 impl Wake {
     pub fn new(models: &Models) -> Result<Self> {
-        let vad = VoiceActivityDetector::create(
-            &VadModelConfig {
-                silero_vad: SileroVadModelConfig {
-                    model: Some(models.file_str(&VAD, "silero_vad.onnx")),
-                    threshold: 0.5,
-                    min_silence_duration: 0.7,
-                    min_speech_duration: MIN_SPEECH_SECONDS,
-                    window_size: VAD_WINDOW as i32,
-                    max_speech_duration: MAX_SPEECH_SECONDS,
-                },
-                sample_rate: RATE,
-                num_threads: 1,
-                ..Default::default()
-            },
-            30.0,
-        )
-        .ok_or_else(|| eyre!("couldn't load the voice activity model"))?;
+        let vad_model = models.file_str(&VAD, "silero_vad.onnx");
+        let threshold = crate::audio::prefs::vad_threshold();
+        let vad = voice_activity(&vad_model, threshold)?;
         let tokenizer = SentencePiece::parse(&std::fs::read(models.file(&KWS, "bpe.model"))?)
             .context("reading the wake model")?;
         let vocabulary = vocabulary(&std::fs::read_to_string(models.file(&KWS, "tokens.txt"))?);
@@ -118,6 +129,8 @@ impl Wake {
         spotter_config.keywords_threshold = 0.15;
         Ok(Self {
             vad,
+            vad_model,
+            threshold,
             tokenizer,
             vocabulary,
             spotter_config,
@@ -165,6 +178,7 @@ impl Wake {
     /// 16 kHz mono audio, in any chunk size. Names in a chunk are reported
     /// before its speech edges.
     pub fn feed(&mut self, samples: &[f32], out: &mut dyn FnMut(Sound)) {
+        self.follow_sensitivity();
         self.recent.push(samples);
         self.spot(samples, out);
         for &s in samples {
@@ -181,6 +195,24 @@ impl Wake {
     pub fn flush(&mut self, out: &mut dyn FnMut(Sound)) {
         self.vad.flush();
         self.after_window(out);
+    }
+
+    /// A new sensitivity takes a new voice activity model, made between
+    /// stretches of speech so none is cut in two.
+    fn follow_sensitivity(&mut self) {
+        let threshold = crate::audio::prefs::vad_threshold();
+        if (threshold - self.threshold).abs() < 1e-4 || self.in_speech {
+            return;
+        }
+        match voice_activity(&self.vad_model, threshold) {
+            Ok(vad) => {
+                tracing::info!(threshold, "voice: listening at a new sensitivity");
+                self.vad = vad;
+                self.window.clear();
+            }
+            Err(e) => tracing::warn!("voice: {e:#}"),
+        }
+        self.threshold = threshold;
     }
 
     fn spot(&mut self, samples: &[f32], out: &mut dyn FnMut(Sound)) {

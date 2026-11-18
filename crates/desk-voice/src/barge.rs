@@ -32,6 +32,9 @@ const SUSTAINED: usize = 10;
 const MARGIN: f32 = 2.0;
 /// Under this it isn't anyone at the computer, whatever the echo: a normal
 /// voice measures 0.02-0.1, and the microphone 0.0001 during processed playback.
+/// At the default sensitivity; Settings' sensitivity moves it
+/// ([`crate::audio::AudioPrefs::barge_floor`]).
+#[cfg(test)]
 const FLOOR: f32 = 0.002;
 /// `echo` falls this much a frame, so a loud moment is forgotten in seconds.
 const DECAY: f32 = 0.995;
@@ -348,7 +351,7 @@ impl Barge {
     }
 
     fn count(&mut self, level: f32) {
-        if level > FLOOR.max(self.echo * MARGIN) {
+        if level > crate::audio::prefs::barge_floor().max(self.echo * MARGIN) {
             self.loud += 1;
             self.loud_level += level;
         }
