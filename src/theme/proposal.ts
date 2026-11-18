@@ -248,9 +248,6 @@ export interface Nudged {
   changes: string[];
   /** The colours it set to do so. */
   nudged: Token[];
-  /** How many pairs still read too faintly (none, but for a theme Desk
-   *  couldn't put right). */
-  low: number;
 }
 
 /** `spec` with every colour that reads too faintly moved until it reads,
@@ -330,7 +327,7 @@ export const nudge = (start: ThemeSpec, dark: boolean): Nudged => {
   // Said, should any pair still read too faintly: never "every pair reads".
   const still = allChecks(derive(spec)).filter((c) => !c.pass);
   if (still.length) changes.push(`Still too faint: ${still.map((c) => `${c.label} (${said(c.ratio)}, under ${c.bar})`).join(", ")}.`);
-  return { spec, changes, nudged, low: still.length };
+  return { spec, changes, nudged };
 };
 
 /** A new theme from what an agent gave: every colour Desk works out from
@@ -376,7 +373,8 @@ export const revise = (base: ThemeSpec, input: ReviseInput, earlier: { nudged: r
   // What Desk moved before still stands when no base colour moved: said
   // again, beside what it moved now. When one did, those were worked out
   // again, and that is said.
-  const kept = moved ? [] : earlier.changes.filter((c) => !c.startsWith("Still too faint"));
+  const set = Object.keys(input.colors ?? {});
+  const kept = moved ? [] : earlier.changes.filter((c) => !c.startsWith("Still too faint") && !set.some((t) => c.includes(`Desk moved ${t} `)));
   const redone = moved && nudged.length ? [`Desk worked out again the colours it had set (${nudged.join(", ")}).`] : [];
   return { ...made, changes: [...redone, ...kept, ...made.changes], nudged: [...new Set([...(moved ? [] : nudged), ...made.nudged])] };
 };

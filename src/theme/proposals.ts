@@ -40,9 +40,10 @@ export const useProposals = create<ProposalsState>((set, get) => ({
   },
   save: async (p) => {
     await writeProposal(p.spec.id, serializeProposal(p));
-    const list = newestFirst([p, ...get().list.filter((x) => x.spec.id !== p.spec.id)]);
-    for (const old of list.slice(MOST_PROPOSALS)) await removeProposal(old.spec.id).catch(() => undefined);
-    set({ list: list.slice(0, MOST_PROPOSALS) });
+    // The one just saved always stays, whatever its hub's clock says.
+    const others = newestFirst(get().list.filter((x) => x.spec.id !== p.spec.id));
+    for (const old of others.slice(MOST_PROPOSALS - 1)) await removeProposal(old.spec.id).catch(() => undefined);
+    set({ list: newestFirst([p, ...others.slice(0, MOST_PROPOSALS - 1)]) });
   },
   keep: async (p) => {
     // A proposal that changes one of the person's themes is kept as it;
@@ -159,12 +160,12 @@ const answer = async (hub: string, job: ThemeJob): Promise<{ ok: boolean; body: 
   }
 };
 
-/** The proposals hub `hub`'s agent `agent` made between `since` and
- *  `until` (ISO; a few seconds either side), for the card in its chat. */
 /** How long after its start a turn's proposals may come, on the newest
  *  message. */
 const TURN_MOST_MS = 15 * 60_000;
 
+/** The proposals hub `hub`'s agent `agent` made between `since` and
+ *  `until` (ISO; a few seconds either side), for the card in its chat. */
 export const proposalsFrom = (list: readonly Proposal[], hub: string, agent: string, since?: string, until?: string): Proposal[] => {
   const slack = 5000;
   const from = since ? Date.parse(since) - slack : -Infinity;
