@@ -77,7 +77,7 @@ export const orderChipSays = (order: BoardOrder, system: SyncSystem | null, orde
  *  cards by hand. */
 export const sortedSaid = (order: BoardOrder, system: SyncSystem | null, ordering?: SourceOrder | null): string =>
   order === "source" && system
-    ? `${SYSTEM_TITLE[system]} sorts this board ${sourceWords(system, ordering) ?? "itself"}, so dragging a card up or down doesn't reorder it; reorder it in ${SYSTEM_TITLE[system]}.`
+    ? `${SYSTEM_TITLE[system]} sorts this board ${sourceWords(system, ordering) ?? "itself"}, so dragging a card up or down doesn't reorder it. Reorder it in ${SYSTEM_TITLE[system]}.`
     : `Sorted ${order === "changed" ? "by recent change" : lower(orderName(order, system))}: choose ${system ? `As on ${SYSTEM_TITLE[system]}` : "As arranged"} to move cards by hand.`;
 
 /** The board's Order chip, beside its filters: a menu of the orders the

@@ -153,6 +153,9 @@ export const orderOn = (order: BoardOrder | undefined, synced: boolean): BoardOr
 export interface SourceSort {
   by: readonly SourceOrderKey[];
   priorities: readonly string[];
+  /** Its first key is one this Desk doesn't know (a newer hub's): sorted
+   *  by Rank or the manual order, but never moved by hand there. */
+  unknown?: boolean;
 }
 
 /** What `sync` says its board there sorts by; null for an older hub's, or
@@ -165,7 +168,8 @@ export const sourceSortOf = (sync: Pick<BoardSync, "ordering" | "fields"> | null
     if (!SOURCE_FIELDS.includes(k.field)) break;
     by.push(k);
   }
-  return { by, priorities: sync.fields?.priorities ?? [] };
+  const unknown = !!sync.ordering.by?.length && !by.length;
+  return { by, priorities: sync.fields?.priorities ?? [], ...(unknown ? { unknown } : {}) };
 };
 
 const SOURCE_FIELDS: readonly SourceOrderKey["field"][] = ["manual", "rank", "priority", "prioritySort", "created", "updated", "due"];
@@ -173,6 +177,7 @@ const SOURCE_FIELDS: readonly SourceOrderKey["field"][] = ["manual", "rank", "pr
 /** Whether the board there is ordered by hand (Linear's manual order,
  *  Jira's Rank): only then does a drag up or down move its issue. */
 export const sourceByHand = (source: SourceSort | null | undefined): boolean => {
+  if (source?.unknown) return false;
   const first = source?.by[0];
   // Rank going down would put a drop's neighbours the wrong way round there.
   return !first || first.field === "manual" || (first.field === "rank" && !first.desc);

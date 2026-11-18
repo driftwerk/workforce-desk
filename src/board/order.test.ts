@@ -249,7 +249,7 @@ describe("as on Jira or Linear, ordered there by more than its rank", () => {
     expect(byHand("source", sourceSortOf({ ordering: ordering([{ field: "rank", desc: true }]) }))).toBe(false);
     expect(byHand("source", null)).toBe(true);
     const prio = ordering([{ field: "priority", desc: true }]);
-    expect(sortedSaid("source", "linear", prio)).toBe("Linear sorts this board by priority, so dragging a card up or down doesn't reorder it; reorder it in Linear.");
+    expect(sortedSaid("source", "linear", prio)).toBe("Linear sorts this board by priority, so dragging a card up or down doesn't reorder it. Reorder it in Linear.");
   });
 
   it("names the ordering it follows on its chip", () => {
@@ -276,10 +276,14 @@ describe("as on Jira or Linear, ordered there by more than its rank", () => {
     // Rank going down keeps those without a place last.
     const r = [ticket(1, { state: "todo", upstreamRank: "a" }), ticket(2, { state: "todo" }), ticket(3, { state: "todo", upstreamRank: "b" })];
     expect(shown(r, sourceSortOf({ ordering: ordering([{ field: "rank", desc: true }]) }))).toEqual(["ACM-3", "ACM-1", "ACM-2"]);
-    // A key this Desk doesn't know ends the list: as by hand.
+    // A key this Desk doesn't know ends the list; first, it is by Rank or
+    // the manual order, never moved by hand there.
     const newer = sourceSortOf({ ordering: ordering([{ field: "title" as never }]) });
     expect(newer?.by).toEqual([]);
-    expect(byHand("source", newer)).toBe(true);
+    expect(byHand("source", newer)).toBe(false);
+    const later = sourceSortOf({ ordering: ordering([{ field: "rank" }, { field: "title" as never }]) });
+    expect(later?.by).toEqual([{ field: "rank" }]);
+    expect(byHand("source", later)).toBe(true);
   });
 
   it("breaks a tie by the next key, then by Rank, whatever order the cards come in", () => {
