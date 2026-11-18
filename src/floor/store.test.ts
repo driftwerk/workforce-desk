@@ -6,6 +6,7 @@ import { merged } from "./merge";
 import { SETTLE_MS, TICK_MS, floorHeard, floorUnheard, useFloor, useFloorTick, useLocalFloor, watchFloor } from "./store";
 import { agent, approval, fakeFetch, fakeHub, hub, need, view, work, type FakeHub } from "./testing";
 import { renderHook } from "@testing-library/react";
+import type { FloorView } from "../hub/types";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 
@@ -47,6 +48,16 @@ describe("the floor's store", () => {
     expect(hubs.local!.days).toHaveLength(2);
     useChat.setState({ hubs: [hub("local")] });
     expect(floorOf("b")).toBeUndefined();
+  });
+
+  it("reads a floor that leaves its needs out as one with none", async () => {
+    const { needs: _left, ...bare } = view();
+    hubs.b = fakeHub({ floor: bare as FloorView });
+    vi.stubGlobal("fetch", fakeFetch(hubs));
+    useChat.setState({ hubs: [hub("b")] });
+    await settle();
+    expect(floorOf("b")?.state).toBe("ready");
+    expect(floorOf("b")?.floor?.needs).toEqual([]);
   });
 
   it("reads a hub paired again afresh", async () => {
