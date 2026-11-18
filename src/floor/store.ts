@@ -244,7 +244,10 @@ export const watchFloor = (): (() => void) => {
     const lineQuestion = e.type === "line" && e.message.kind === "ask";
     // A boss's plan proposed, changed or approved: its need comes or goes.
     const plan = e.type === "plan";
-    if (lineQuestion || plan || (MOVES.has(e.type) && !useFloor.getState().heard[local])) ask([local]);
+    // Something new waits on the person (a session the line's loop guard
+    // stopped): the floor signal doesn't cover it either.
+    const needsYou = e.type === "activity" && e.event.kind === "needs_you";
+    if (lineQuestion || plan || needsYou || (MOVES.has(e.type) && !useFloor.getState().heard[local])) ask([local]);
   };
   deskListeners.add(heard);
   let midnight: ReturnType<typeof setTimeout> | undefined;
