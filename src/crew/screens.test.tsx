@@ -394,6 +394,31 @@ describe("Background work in Settings", () => {
     expect(saveAgentConfig).toHaveBeenCalledTimes(3);
   });
 
+  it("chats on the chat model until the person picks a conversation model, listed first", async () => {
+    let saved = FILE;
+    const saveAgentConfig = vi.fn((_: string, toml: string) => {
+      saved = toml;
+      return Promise.resolve();
+    });
+    show(fakeHub({ agentConfig: vi.fn(() => Promise.resolve(saved)), saveAgentConfig } as Partial<DeskHub>));
+    const chat = (await screen.findByLabelText("Conversation")) as HTMLSelectElement;
+    expect(chat.value).toBe("");
+    const options = within(chat).getAllByRole("option").map((o) => o.textContent);
+    expect(options[0]).toBe("Default · same as chat · Big");
+    // Plain chatting has no "Same as chat": that's the default.
+    expect(options.some((o) => o?.startsWith("Same as chat"))).toBe(false);
+    // Its row comes before the background ones.
+    const rows = screen.getAllByRole("combobox").map((c) => c.getAttribute("id"));
+    expect(rows.indexOf(chat.id)).toBeLessThan(rows.indexOf((screen.getByLabelText("Light background") as HTMLElement).id));
+
+    await act(async () => fireEvent.change(chat, { target: { value: "claude-code-mid" } }));
+    expect(saved).toContain("[llm.model_preferences]");
+    expect(saved).toContain('conversation = "claude-code-mid"');
+    await act(async () => fireEvent.change(chat, { target: { value: "" } }));
+    expect(saved).not.toContain("model_preferences");
+    expect(saveAgentConfig).toHaveBeenCalledTimes(2);
+  });
+
   it("says why a save was held, and offers Use it and Keep saved right there", async () => {
     const decide = vi.fn(() => Promise.resolve());
     useFloor.setState({
