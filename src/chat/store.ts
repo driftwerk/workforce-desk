@@ -18,7 +18,7 @@ import {
 import { pairedHub } from "../hub/net";
 import { HubError } from "../hub/client";
 import { deleteMessage } from "./remove";
-import { contextBefore, copyToChat, fetchThreads, splitKey, threadChannel, type ThreadSummary } from "./thread";
+import { contextBefore, copyToChat, fetchThreads, splitKey, threadChannel, threadKey, type ThreadSummary } from "./thread";
 import { readAround, type Around } from "./search";
 import { emptyQueue, heldRetryMs, keepQueue, keptItems, merged, readQueue, withKept, type Queue } from "./queue";
 import { deskState } from "../restore/boot";
@@ -113,6 +113,18 @@ interface ChatStore {
   /** Sends your reply in a thread to the DM too, marked as the thread's; false
    *  when the hub couldn't take it. */
   copyReply: (key: string, text: string) => Promise<boolean>;
+  /** Your new messages in each DM that start threads on themselves, by agent
+   *  key, shown there until the hub's copy of the DM has them. */
+  starting: Record<string, ChatMessage[]>;
+  /** Sends your new message in DM `key` as the start of a thread on itself
+   *  (on a hub with `desk.thread_starts`), under `opts.message` or a new id:
+   *  the hub keeps it in the DM and the agent answers in the thread. The
+   *  thread's parent id once sent, null if it couldn't be. */
+  startThread: (key: string, content: string, opts?: { attachments?: Attachment[]; message?: string }) => Promise<string | null>;
+  /** Lets thread `key`'s connection go while nothing goes on in it: no turn
+   *  running, nothing queued, and no message of yours left undelivered. It
+   *  opens again when the thread is shown. */
+  release: (key: string) => void;
   /** What's queued in each DM for its agent's next turn, by agent key. */
   queues: Record<string, Queue>;
   /** Queues a message for the agent's next turn; behind a paused queue it
@@ -172,6 +184,21 @@ export interface SendOptions {
    *  so a hub that has it already takes it once. */
   message?: string;
 }
+
+/** Forgets the messages starting threads in DM `base` that the hub's copy
+ *  of it has now. */
+const pruneStarting = (base: string): void =>
+  useChat.setState((s) => {
+    const kept = new Set((s.histories[base]?.messages ?? []).map((m) => m.id));
+    const was = s.starting[base];
+    if (!was?.some((m) => kept.has(m.id))) return s;
+    return { starting: { ...s.starting, [base]: was.filter((m) => !kept.has(m.id)) } };
+  });
+
+/** How often, and how many times, a new thread's first message is tried
+ *  while its connection opens. */
+const START_RETRY_MS = 150;
+const START_TRIES = 40;
 
 /** A turn in your DM with an agent. */
 /** Why an edit wasn't sent. */
@@ -414,17 +441,25 @@ const whereIs = (
   return agent && hub ? { agent, hub, ...(parent ? { parent, channel: threadChannel(parent) } : {}) } : null;
 };
 
+/** Whether the thread on `parent` in DM `base` was started by its parent
+ *  message: its own conversation holds that message as its first question. */
+export const startedByParent = (s: Pick<ChatStore, "histories" | "starting">, base: string, parent: string): boolean =>
+  !!s.starting[base]?.some((m) => m.id === parent) || !!s.histories[base]?.messages.some((m) => m.id === parent && m.startsThread);
+
 /** The turn `key`'s conversation sends: a DM turn, or in a thread one placed
- *  there, carrying the chat up to the thread's first message. */
+ *  there, carrying the chat up to the thread's first message. A thread its
+ *  parent started carries none: its own conversation began with it. */
 export const turnOf = (key: string, voice?: DeskVoice): DeskTurn => {
   const { agent: base, parent } = splitKey(key);
   const turn = dmTurn(voice);
   if (!parent) return turn;
   const s = useChat.getState();
+  const place = { kind: "dm", thread: parent } as const;
+  if (startedByParent(s, base, parent)) return { ...turn, place };
   const agent = s.roster.find((a) => agentKey(a) === base);
   const seen = new Set<string>();
   const chat = [...(s.histories[base]?.messages ?? []), ...(s.conversations[base]?.messages ?? [])].filter((m) => !seen.has(m.id) && !!seen.add(m.id));
-  return { ...turn, place: { kind: "dm", thread: parent }, context: contextBefore(chat, parent, "You", agent?.name ?? "The agent") };
+  return { ...turn, place, context: contextBefore(chat, parent, "You", agent?.name ?? "The agent") };
 };
 
 /** A live conversation with the agent, opened if it isn't yet; false for
@@ -466,8 +501,16 @@ const ensure = (key: string): boolean => {
     queueMicrotask(() => drain(key));
     // A turn whose prompt never came live: only the hub's copy has it.
     if (was?.unprompted && !c.unprompted && !c.working && c.connected) void useChat.getState().refreshHistory(key);
-    // A thread's count and who's working in it are the DM's to show.
-    if (parent && c.working !== was?.working) void useChat.getState().loadThreads(base);
+    // A thread's count and who's working in it are the DM's to show; a
+    // message that started it is in the DM's copy once its turn is under way.
+    if (parent && c.working !== was?.working) {
+      void useChat.getState().loadThreads(base);
+      if (useChat.getState().starting[base]?.some((m) => m.id === parent))
+        void useChat
+          .getState()
+          .refreshHistory(base)
+          .then(() => pruneStarting(base));
+    }
     // A turn that ended is in the hub's copy, by the id it was saved under.
     const settled = Object.values(c.turns).filter((t) => (t.state === "ended" || t.state === "failed") && !settling.has(t.ref));
     if (!settled.length) return;
@@ -723,11 +766,18 @@ export const useChat = create<ChatStore>((set, get) => ({
     }));
     settleLive(key, page.messages, { began: started, seen: new Set(was.messages.map((m) => m.id)) });
   },
-  send: (key, content, opts = {}) =>
-    (live.get(key)?.send(content, {
-      turn: { ...turnOf(key, opts.voice), ...(opts.message ? { message: opts.message } : {}) },
-      attachments: opts.attachments,
-    }) ?? false) !== false,
+  send: (key, content, opts = {}) => {
+    const { agent: base, parent } = splitKey(key);
+    // The message a thread was started by, sent (again) under its parent's
+    // id: it starts the thread, which the hub does once.
+    const starts = !!parent && opts.message === parent && !!get().starting[base]?.some((m) => m.id === parent);
+    return (
+      (live.get(key)?.send(content, {
+        turn: { ...turnOf(key, opts.voice), ...(opts.message ? { message: opts.message } : {}), ...(starts ? { starts_thread: true } : {}) },
+        attachments: opts.attachments,
+      }) ?? false) !== false
+    );
+  },
   retry: (key, id) => {
     const m = get().conversations[key]?.messages.find((x) => x.id === id && x.undelivered);
     if (!m) return false;
@@ -762,6 +812,47 @@ export const useChat = create<ChatStore>((set, get) => ({
   },
   queues: {},
   threads: {},
+  starting: {},
+  release: (key) => {
+    if (!splitKey(key).parent || !live.has(key)) return;
+    const s = get();
+    const c = s.conversations[key];
+    if (isRunning(c) || s.queues[key]?.items.length || c?.messages.some((m) => m.undelivered)) return;
+    // A turn not yet over, or a thread its message is still starting (not
+    // in the hub's copy of the DM yet), stays.
+    if (Object.values(c?.turns ?? {}).some((t) => t.state !== "ended" && t.state !== "failed")) return;
+    const { agent: base, parent } = splitKey(key);
+    if (s.starting[base]?.some((m) => m.id === parent)) return;
+    get().forget(key);
+  },
+  startThread: (key, content, opts = {}) => {
+    const id = opts.message ?? crypto.randomUUID();
+    const thread = threadKey(key, id);
+    if (splitKey(key).parent || !ensure(thread)) return Promise.resolve(null);
+    const top: ChatMessage = {
+      id,
+      clientId: id,
+      role: "user",
+      content,
+      at: new Date().toISOString(),
+      status: "complete",
+      tools: [],
+      startsThread: true,
+      ...(opts.attachments?.length ? { attachments: opts.attachments } : {}),
+    };
+    set((s) => ({ starting: { ...s.starting, [key]: [...(s.starting[key] ?? []).filter((m) => m.id !== id), top] } }));
+    // The thread's connection opens asynchronously: sent once it is up.
+    return new Promise((resolve) => {
+      let tries = 0;
+      const attempt = () => {
+        if (get().send(thread, content, { message: id, ...(opts.attachments?.length ? { attachments: opts.attachments } : {}) })) return resolve(id);
+        if (++tries < START_TRIES) return void setTimeout(attempt, START_RETRY_MS);
+        set((s) => ({ starting: { ...s.starting, [key]: (s.starting[key] ?? []).filter((m) => m.id !== id) } }));
+        resolve(null);
+      };
+      attempt();
+    });
+  },
   loadThreads: async (key) => {
     const target = whereIs(get(), key);
     if (!target || target.parent || !get().conversations[key]?.features?.has(FEATURES.dmThreads)) return;
@@ -926,8 +1017,10 @@ export const useChat = create<ChatStore>((set, get) => ({
       const { [key]: _around, ...around } = s.around;
       const { [key]: _back, ...editBack } = s.editBack;
       const { [key]: _threads, ...threads } = s.threads;
+      const { [key]: _starting, ...starting } = s.starting;
       return {
         threads,
+        starting,
         conversations,
         histories,
         queues,

@@ -25,6 +25,7 @@ interface SettingsStore extends Settings {
   writtenReplies: string[];
   audio: AudioPrefs;
   audioAt?: string;
+  threadReplies: string[];
   /** Each shortcut's keys: the chosen ones, else the default. */
   keys: Record<ShortcutId, string>;
   loaded: boolean;
@@ -64,6 +65,7 @@ const readSettings = async (set: (patch: Partial<SettingsStore>) => void): Promi
     writtenReplies: s.writtenReplies ?? [],
     audio: { ...DEFAULT_AUDIO, ...s.audio },
     audioAt: s.audioAt,
+    threadReplies: s.threadReplies ?? [],
     loaded: true,
   });
 };
@@ -81,6 +83,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   customVoices: {},
   voice: false,
   writtenReplies: [],
+  threadReplies: [],
   voiceEngine: "cascade",
   audio: DEFAULT_AUDIO,
   shortcuts: {},
@@ -114,6 +117,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       customVoices: s.customVoices,
       voice: s.voice,
       writtenReplies: s.writtenReplies,
+      threadReplies: s.threadReplies,
       voiceEngine: s.voiceEngine,
       audio: s.audio,
       audioAt: s.audioAt,

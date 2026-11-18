@@ -1303,9 +1303,14 @@ body.side-resizing * {
 .thread-body > .composer {
   flex: none;
 }
-/* Shown only while the composer is narrow, for the buttons it folds. */
+/* Shown only while the composer is narrow, for the buttons it folds;
+   always when it holds choices of its own. */
 .composer .composer-more {
   display: none;
+}
+.composer .composer-more.composer-more-kept {
+  display: inline-grid;
+  place-items: center;
 }
 @container chat (max-width: 520px) {
   /* A DM's or room's own header: its tabs go below its name, and scroll
@@ -1966,6 +1971,17 @@ button.thread-bar:hover {
 }
 .thread-chip .thread-marks > * + * {
   margin-left: -8px;
+}
+/* A message that started a thread of its own: a conversation in the DM's
+   list of them, opened by a click anywhere on it. */
+.room-msg.thread-start {
+  cursor: pointer;
+  border-radius: var(--radius);
+  transition: background-color 0.12s ease, box-shadow 0.12s ease;
+}
+.room-msg.thread-start:hover:not(.thread-open) {
+  background: var(--raised);
+  box-shadow: 0 0 0 6px var(--raised);
 }
 .room-msg.thread-open {
   background: var(--signal-soft);

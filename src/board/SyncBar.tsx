@@ -20,6 +20,9 @@ const ago = (iso: string | null | undefined, now: number): string | null => {
   return mins < 1 ? "just now" : mins < 60 ? `${mins} min ago` : `${Math.round(mins / 60)} h ago`;
 };
 
+/** How long after it was linked a board with nothing pulled is still on its first sync. */
+const FIRST_SYNC_MS = 10 * 60_000;
+
 /** A synced board's sync, under its header: what it is linked to, a chip
  *  that says synced, paused (and why) or a problem (in the hub's words),
  *  and Pause or Resume and Sync now. */
@@ -118,6 +121,8 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
     }
   };
   const pulled = ago(sync.pulledAt, now);
+  // A board just linked has pulled nothing yet: its first sync is running.
+  const first = status.kind === "synced" && !sync.pulledAt && now - Date.parse(board.updatedAt) < FIRST_SYNC_MS;
   const who =
     sync.meSource === "vouched" && sync.meName
       ? `you're ${sync.meName} there`
@@ -128,11 +133,12 @@ export function SyncBar({ board, now, onToken }: { board: Board; now: number; on
         : (sync.meNote ?? null);
   return (
     <div className="board-sync" aria-label={`Sync with ${SYSTEM_TITLE[sync.system]}`}>
-      <span className={`chip board-sync-chip board-sync-${status.kind}`}>{status.kind === "synced" ? "Synced" : status.kind === "paused" ? "Paused" : "Sync problem"}</span>
+      <span className={`chip board-sync-chip board-sync-${first ? "first" : status.kind}`}>{first ? "Syncing" : status.kind === "synced" ? "Synced" : status.kind === "paused" ? "Paused" : "Sync problem"}</span>
       <span className="board-sync-words" role="status">
         {status.kind === "synced" ? (
           <>
             {linkedTo(board, hub)}
+            {first && <span className="faint"> · bringing in its issues for the first time</span>}
             {pulled && <span className="faint"> · checked {pulled}</span>}
             {who && <span className="faint board-sync-me"> · {who}</span>}
           </>

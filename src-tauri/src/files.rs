@@ -105,6 +105,10 @@ pub struct Settings {
     /// DM; the rest answer aloud.
     #[serde(default)]
     pub written_replies: Vec<String>,
+    /// Agents, by agent key, whose DM starts a thread on each new message
+    /// sent there, the agent answering in it.
+    #[serde(default)]
+    pub thread_replies: Vec<String>,
     /// Which voice engine: "cascade" (on-device), "gpt-live" or
     /// "gemini-live". Kept as text so a newer Desk's choice survives.
     #[serde(default = "default_voice_engine")]
@@ -212,6 +216,7 @@ impl Default for Settings {
             custom_voices: Default::default(),
             voice: false,
             written_replies: Vec::new(),
+            thread_replies: Vec::new(),
             voice_engine: default_voice_engine(),
             audio: Default::default(),
             audio_at: None,

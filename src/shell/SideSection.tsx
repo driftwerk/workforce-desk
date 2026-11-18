@@ -3,9 +3,10 @@
 // what's for you inside, so nothing is hidden silently. Whether each is
 // closed is remembered in this browser's storage.
 
-import { useId, type ReactNode } from "react";
+import { useId, useRef, useState, type ReactNode } from "react";
 import { create } from "zustand";
 import type { Badge } from "../unread/badges";
+import { Menu, type MenuEntry } from "../ui/Menu";
 import { Marks } from "../unread/Marks";
 
 export type SectionId = "grids" | "rooms" | "boards" | "groups";
@@ -55,6 +56,7 @@ export function SideSection({
   className = "",
   newLabel,
   onNew,
+  newMenu,
   badge,
   marks,
   title,
@@ -66,6 +68,9 @@ export function SideSection({
   /** The "+"'s label, as "New room". */
   newLabel: string;
   onNew: () => void;
+  /** More than one way to make one: the "+" opens these (the first is
+   *  `onNew`'s) instead of making one at once. */
+  newMenu?: MenuEntry[];
   /** What's for you inside, shown on the header while it's closed. */
   badge?: Badge;
   /** In place of `badge`: what draws it, drawn only while it's closed (so
@@ -77,6 +82,8 @@ export function SideSection({
 }) {
   const open = useSections((s) => !s.closed[id]);
   const body = useId();
+  const plus = useRef<HTMLButtonElement>(null);
+  const [menuAt, setMenuAt] = useState<{ x: number; y: number } | null>(null);
   return (
     <div className={`side-section ${className}`.trim()} role="region" aria-label={label}>
       <span className="side-label side-label-action side-head">
@@ -90,18 +97,34 @@ export function SideSection({
           {!open && (marks ?? (badge && <Marks badge={badge} />))}
         </button>
         <button
+          ref={plus}
           type="button"
           className="icon-btn-sm"
           aria-label={newLabel}
           title={newLabel}
+          aria-haspopup={newMenu ? "menu" : undefined}
+          aria-expanded={newMenu ? !!menuAt : undefined}
           onClick={() => {
             // What's made shows in it.
             setSectionOpen(id, true);
-            onNew();
+            if (!newMenu) return onNew();
+            const r = plus.current?.getBoundingClientRect();
+            setMenuAt({ x: r?.left ?? 0, y: r?.bottom ?? 0 });
           }}
         >
           <Plus />
         </button>
+        {newMenu && menuAt && (
+          <Menu
+            label={newLabel}
+            at={menuAt}
+            entries={newMenu}
+            onClose={(refocus) => {
+              if (refocus) plus.current?.focus();
+              setMenuAt(null);
+            }}
+          />
+        )}
       </span>
       {open && (
         <div id={body} className="side-section-body">
