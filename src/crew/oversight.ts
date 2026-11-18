@@ -85,6 +85,9 @@ export interface Work {
   takeOn: TakeOn;
   /** The engine new sessions run on when nothing says another. */
   engine: string;
+  /** The model they run on `engine`, as it names it; null is the engine's
+   *  own default (`[oversight.work] model`). */
+  model: string | null;
   /** Its turns for its sessions' turn ends, in any hour. */
   maxTurnsPerHour: number;
   /** It closes the sessions it started once their work is done (and, at
@@ -127,7 +130,7 @@ export const DEFAULT_OVERSIGHT: Oversight = {
     handOff: false,
     setMode: false,
   },
-  work: { preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", maxTurnsPerHour: 60, closeFinished: true },
+  work: { preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", model: null, maxTurnsPerHour: 60, closeFinished: true },
   full: { anywhere: false, repos: [], workflows: [], budgetUsdPerDay: null, budgetClearedAt: null },
 };
 
@@ -143,6 +146,12 @@ const within = (v: unknown, lo: number, hi: number, d: number): number =>
   typeof v === "number" && Number.isInteger(v) && v >= lo && v <= hi ? v : d;
 /** An engine named in one word ("claude", "codex"), as the hub takes it. */
 const ENGINE_WORD = /^[a-z0-9]+$/;
+/** A model's name as the hub takes one for `[oversight.work] model`. */
+const MODEL_NAME = /^[A-Za-z0-9][A-Za-z0-9._:/@[\]-]{0,99}$/;
+/** Whether the hub takes `model` as `[oversight.work] model`. */
+export const isModelName = (model: string): boolean => MODEL_NAME.test(model.trim());
+const modelOf = (v: unknown): string | null => (typeof v === "string" && MODEL_NAME.test(v.trim()) ? v.trim() : null);
+const withoutModel = ({ model: _model, ...rest }: Doc): Doc => rest;
 const time = (v: unknown, d: string): string => (typeof v === "string" && (v === "" || TIME.test(v)) ? v : d);
 
 const TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
@@ -215,6 +224,7 @@ export const oversightOf = (source: string): Oversight => {
       parallel: within(work.parallel, 1, MAX_PARALLEL, d.work.parallel),
       takeOn: work.take_on === "handed" || work.take_on === "all" ? work.take_on : d.work.takeOn,
       engine: typeof work.engine === "string" && ENGINE_WORD.test(work.engine.trim()) ? work.engine.trim() : d.work.engine,
+      model: modelOf(work.model),
       maxTurnsPerHour: within(work.max_turns_per_hour, 1, MAX_WORK_TURNS_PER_HOUR, d.work.maxTurnsPerHour),
       closeFinished: bool(work.close_finished, d.work.closeFinished),
     },
@@ -275,7 +285,8 @@ export const withOversight = (source: string, o: Oversight): string => {
       set_mode: o.act.setMode,
     },
     work: {
-      ...table(was.work),
+      ...withoutModel(table(was.work)),
+      ...(modelOf(o.work.model) ? { model: modelOf(o.work.model) } : {}),
       prefer_sessions: o.work.preferSessions,
       parallel: Math.min(MAX_PARALLEL, Math.max(1, Math.round(o.work.parallel))),
       take_on: o.work.takeOn,

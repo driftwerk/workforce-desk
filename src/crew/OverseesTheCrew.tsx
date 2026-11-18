@@ -15,7 +15,8 @@ import { useLayout } from "../groups/store";
 import { useHubLayout } from "../groups/hubLayout";
 import { askMove } from "../groups/move";
 import { startable } from "../engines/engines";
-import type { EngineInfo } from "../hub/types";
+import { ModelSelect } from "../engines/ModelSelect";
+import type { Engine, EngineInfo } from "../hub/types";
 import {
   MAX_CHECKINS_PER_HOUR,
   MAX_WORK_TURNS_PER_HOUR,
@@ -27,6 +28,7 @@ import {
   parseParallel,
   parseMinutes,
   parseTime,
+  isModelName,
   readable,
   setAgentOversight,
   usd,
@@ -116,6 +118,20 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
   const writes = useRef<Promise<unknown>>(Promise.resolve());
   const saving = useRef(0);
   const ids = useId();
+  // Only a hub whose boss starts sessions on the model it is given is
+  // offered one: an older one would start them on the engine's default.
+  const [bossModel, setBossModel] = useState(false);
+  useEffect(() => {
+    let live = true;
+    setBossModel(false);
+    desk
+      ?.features?.()
+      .then((f) => live && setBossModel(f.includes("boss-session-model")))
+      .catch(() => live && setBossModel(false));
+    return () => {
+      live = false;
+    };
+  }, [desk]);
 
   useEffect(() => {
     if (desk && config === undefined) void useAgentConfigs.getState().load(desk, agent);
@@ -504,10 +520,32 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                 <label className="oversee-check" htmlFor={`${ids}-engine`}>
                   <span className="oversee-check-text">
                     <b>New sessions run</b>
-                    <span className="oversee-sub">Unless {name} picks another for a piece of work</span>
+                    <span className="oversee-sub">
+                      {bossModel
+                        ? `Every session ${name} starts runs on this, unless you ask it for another engine or model for that work. New session's own choice for each folder is only for the sessions you start there`
+                        : `Every session ${name} starts runs on this, unless you ask it for another engine for that work. New session's own choice for each folder is only for the sessions you start there`}
+                    </span>
                   </span>
                 </label>
-                <EngineSelect id={`${ids}-engine`} value={o.work.engine} onChange={(engine) => update((x) => ({ ...x, work: { ...x.work, engine } }))} />
+                <span className="oversee-engine">
+                  <EngineSelect
+                    id={`${ids}-engine`}
+                    value={o.work.engine}
+                    onChange={(engine) => update((x) => ({ ...x, work: { ...x.work, engine, model: engine === x.work.engine ? x.work.model : null } }))}
+                  />
+                  {bossModel && (
+                    <ModelSelect
+                      engine={o.work.engine as Engine}
+                      value={o.work.model}
+                      label="Their model"
+                      onChange={(model) =>
+                        model !== null && !isModelName(model)
+                          ? setStatus({ state: "failed", problem: `“${model}” isn’t a model’s id: one word of letters, digits and . _ : / @ -` })
+                          : update((x) => ({ ...x, work: { ...x.work, model } }))
+                      }
+                    />
+                  )}
+                </span>
               </div>
             </div>
             <div className="oversee-levels oversee-levels-2" role="radiogroup" aria-label="Which sessions it takes on">
