@@ -10,7 +10,8 @@ import { bossOfGroup, isSealed } from "../groups/bosses";
 export const PLAN_MAX = 30;
 
 /** Whether `t` can be taken on by a plan: not started yet (in Backlog or To
- *  do, no one on it) and in no plan. */
+ *  do, no session or agent of Desk's on it) and in no plan. Who has its
+ *  issue on Jira, Linear or GitHub doesn't count: the boss decides. */
 export const adoptable = (t: Ticket, inPlan: ReadonlyMap<string, unknown> | ReadonlySet<string>): boolean =>
   (t.state === "backlog" || t.state === "todo") && !t.assignee && !inPlan.has(t.id) && !t.leftFilter;
 

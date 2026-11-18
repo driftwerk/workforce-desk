@@ -341,8 +341,9 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   const makePlan = () => {
     if (!board || !bossKey || handed.tickets.length === 0) return;
     requestFocus(`agent:${bossKey}`, planAsk(board, handed));
+    // Rooms, on the DM: not a room or the unread left open there.
+    void useDesk.getState().openRoom(null);
     useChat.getState().openDm(bossKey);
-    useDesk.getState().setView("rooms");
     stopPicking();
   };
   /** What a drag up or down says in a sorted order: the card keeps its
@@ -808,7 +809,7 @@ function PickBar({
         ) : (
           `Tick tickets, or ${mac ? "⌘" : "Ctrl"}-click them, for ${boss || "the boss"} to plan.`
         )}
-        <span className="faint"> Only tickets not started yet can be: in Backlog or To do, no one on them, in no plan. Up to {PLAN_MAX} in a plan.</span>
+        <span className="faint"> Only tickets not started yet can be: in Backlog or To do, no session or agent on them, in no plan. Up to {PLAN_MAX} in a plan.</span>
       </span>
       <span className="board-sync-actions">
         {more > 0 && (

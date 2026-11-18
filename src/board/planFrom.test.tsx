@@ -222,6 +222,20 @@ describe("the boss's composer", () => {
     expect((document.querySelector("textarea") as HTMLTextAreaElement).value).toBe("Make a plan for this ticket");
   });
 
+  it("shows it in the DM even when a room was left open in Rooms", () => {
+    seed([ticket(1, { title: "Cart empties on reload" })], true);
+    useDesk.setState({ activeRoom: "r1", inbox: true, rooms: { r1: { id: "r1", name: "general" } as never } });
+    const { unmount } = render(<Board />);
+    cmdClick(card("ACM-1"));
+    fireEvent.click(within(bar()).getByRole("button", { name: "Make a plan…" }));
+    unmount();
+    expect(useDesk.getState()).toMatchObject({ view: "rooms", activeRoom: null, inbox: false });
+    dm();
+    expect((document.querySelector("textarea") as HTMLTextAreaElement).value).toBe(
+      "Make a plan for this ticket on Acme (ACM), taking it on as it is: ACM-1 “Cart empties on reload”.",
+    );
+  });
+
   it("puts it after what's typed already, when the DM is open", () => {
     seed([], true);
     dm();
@@ -229,5 +243,17 @@ describe("the boss's composer", () => {
     fireEvent.change(box, { target: { value: "One more thing" } });
     act(() => useFocus.setState((s) => ({ where: "agent:local/sarah", nonce: s.nonce + 1, insert: "Make a plan for this ticket" })));
     expect(box.value).toBe("One more thing\n\nMake a plan for this ticket");
+  });
+});
+
+describe("the plans a board shows", () => {
+  it("are its own, and those that took on one of its tickets", async () => {
+    const { plansOn } = await import("../crew/planStore");
+    const plan = { id: "p1", board: "b-desk", state: "proposed", createdAt: "2026-11-18T09:00:00Z" } as never;
+    const details = { p1: { tickets: [{ board: "b-desk" }, { board: "b-linear" }] } } as never;
+    expect(plansOn({ p1: plan }, "b-desk").map((p) => p.id)).toEqual(["p1"]);
+    expect(plansOn({ p1: plan }, "b-linear")).toEqual([]);
+    expect(plansOn({ p1: plan }, "b-linear", details).map((p) => p.id)).toEqual(["p1"]);
+    expect(plansOn({ p1: { ...(plan as object), state: "dropped" } as never }, "b-linear", details)).toEqual([]);
   });
 });
