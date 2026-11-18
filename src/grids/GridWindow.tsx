@@ -1,4 +1,5 @@
 import { emitTo } from "@tauri-apps/api/event";
+import { followRepliesInThreads } from "../chat/threadReplies";
 import { ShareAsk } from "../rooms/share";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { ProblemNote } from "../ui/ProblemNote";
@@ -100,6 +101,8 @@ export function GridWindow({ gridId }: { gridId: string }) {
     const refresh = () => loadCustomThemes().then(useThemeStore.getState().setCustom).catch(fail);
     void customThemesRead(() => loadCustomThemes().then(useThemeStore.getState().setCustom)).catch(fail);
     const unlisten = subscribe(onThemesChanged(refresh));
+    // What the main window changes that this one shows.
+    const unlistenThreads = subscribe(followRepliesInThreads());
     localHub()
       .then((t) => (stop = useDesk.getState().connect(t, { notify: false })))
       .then(() => hubAccounts())
@@ -111,6 +114,7 @@ export function GridWindow({ gridId }: { gridId: string }) {
       stop?.();
       stopGrids?.();
       unlisten();
+      unlistenThreads();
     };
   }, [gridId]);
 
