@@ -376,7 +376,7 @@ export const revise = (base: ThemeSpec, input: ReviseInput, earlier: { nudged: r
   const set = Object.keys(input.colors ?? {});
   const kept = moved ? [] : earlier.changes.filter((c) => !c.startsWith("Still too faint") && !set.some((t) => c.includes(`Desk moved ${t} `)));
   const redone = moved && nudged.length ? [`Desk worked out again the colours it had set (${nudged.join(", ")}).`] : [];
-  return { ...made, changes: [...redone, ...kept, ...made.changes], nudged: [...new Set([...(moved ? [] : nudged), ...made.nudged])] };
+  return { ...made, changes: [...redone, ...kept, ...made.changes], nudged: [...new Set([...(moved ? [] : nudged.filter((t) => !set.includes(t))), ...made.nudged])] };
 };
 
 const PROPOSAL = "proposal";

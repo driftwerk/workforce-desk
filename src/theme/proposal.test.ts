@@ -124,3 +124,15 @@ it("a proposal's file round-trips, and isn't a theme the chooser lists", () => {
   const back = parseProposal(spec.id, serializeProposal(p));
   expect(back).toEqual({ ...p, spec: { ...spec, text: spec.text } });
 });
+
+describe("revising a colour Desk had moved", () => {
+  it("makes it the agent's own: a later base change keeps it", () => {
+    const first = propose(parsePropose({ name: "Fog", dark: false, background: "#F4F4F2", signal: "#FFE45C" }), NIGHT, []);
+    const t = first.nudged[0];
+    expect(t).toBeDefined();
+    if (!t) return;
+    const mine = revise(first.spec, parseRevise({ theme: "fog", colors: { [t]: "#123456" } }), first);
+    expect(mine.nudged).not.toContain(t);
+    expect(revise(mine.spec, parseRevise({ theme: "fog", signal: "#3366FF" }), mine).spec.overrides[t]).toBe("#123456");
+  });
+});
