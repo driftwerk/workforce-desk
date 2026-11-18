@@ -163,10 +163,12 @@ export const useFloor = create<FloorStore>((set, get) => {
 });
 
 /** `view` with the boss a plan's need names (as a manager) read as the
- *  agent it is: it opens in its DM, by its name on the roster. */
+ *  agent it is: it opens in its DM, by its name on the roster. A floor that
+ *  lists no needs at all (a hub that leaves the field out) has none. */
 const asAgents = (view: FloorView): FloorView => {
   const boss = (n: Need) => n.who.kind === "manager" && n.id.startsWith("plan:");
-  return view.needs.some(boss) ? { ...view, needs: view.needs.map((n) => (boss(n) ? { ...n, who: { ...n.who, kind: "agent" as const } } : n)) } : view;
+  const needs = view.needs ?? [];
+  return { ...view, needs: needs.some(boss) ? needs.map((n) => (boss(n) ? { ...n, who: { ...n.who, kind: "agent" as const } } : n)) : needs };
 };
 
 /** How long reads asked for together wait, so they make one. */
