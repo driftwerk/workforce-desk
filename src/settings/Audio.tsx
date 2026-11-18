@@ -51,7 +51,10 @@ export const refreshDevices = (): void => {
   if (Date.now() - useDeviceList.getState().at < DEVICES_MS - 500) return;
   useDeviceList.setState({ at: Date.now() });
   audioDevices()
-    .then((d) => d && Array.isArray(d.inputs) && useDeviceList.setState({ devices: d }))
+    .then((d) => {
+      // Only a changed list is stored, so nothing re-renders for the same one.
+      if (d && Array.isArray(d.inputs) && JSON.stringify(d) !== JSON.stringify(useDeviceList.getState().devices)) useDeviceList.setState({ devices: d });
+    })
     .catch(() => undefined);
 };
 
