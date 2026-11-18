@@ -1,5 +1,6 @@
-import { useRef, useState } from "react";
-import { useSettings } from "../settings/store";
+import { useEffect, useRef, useState } from "react";
+import { deviceEntries, refreshDevices, useAudioDevices } from "../settings/Audio";
+import { setAudio, useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { stopSpeaking } from "./api";
@@ -26,6 +27,26 @@ function TalkIcon() {
   );
 }
 
+/** The microphone, speaker and echo cancelling, as a menu's entries: to
+ *  change them mid-conversation without going to Settings. */
+const useAudioEntries = (): MenuEntry[] => {
+  const audio = useSettings((s) => s.audio);
+  // Subscribed, so a read made as a submenu opens shows in it at once.
+  const devices = useAudioDevices("off");
+  // Read as a submenu opens (outside the render; shared and spaced out
+  // however many rows ask), so a headset plugged in since shows.
+  const list = (which: "inputs" | "outputs") => {
+    queueMicrotask(refreshDevices);
+    return devices[which];
+  };
+  return [
+    { kind: "separator" },
+    { kind: "item", label: "Microphone", hint: audio.input?.name ?? "Same as system", submenu: () => deviceEntries(list("inputs"), audio.input, (input) => setAudio({ input })) },
+    { kind: "item", label: "Speaker", hint: audio.output?.name ?? "Same as system", submenu: () => deviceEntries(list("outputs"), audio.output, (output) => setAudio({ output })) },
+    { kind: "item", label: "Echo cancelling", detail: "Off suits headphones", checked: audio.echoCancel, onSelect: () => setAudio({ echoCancel: !audio.echoCancel }) },
+  ];
+};
+
 /** Whether voice runs in this window: Desk's main window runs it, a grid in
  *  a window of its own shows none of it. */
 const useVoiceHere = (): boolean => useVoiceStore((s) => s.here);
@@ -41,6 +62,11 @@ export function DmVoiceControls({ agent, name }: { agent: string; name: string }
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
   const more = useRef<HTMLButtonElement>(null);
   const here = useVoiceHere();
+  const audioEntries = useAudioEntries();
+  // Read when the menu opens, so its submenus have the devices.
+  useEffect(() => {
+    if (menu) refreshDevices();
+  }, [menu]);
   if (!here) return null;
   const answers = written ? "answers in writing" : "answers aloud";
   return (
@@ -101,11 +127,12 @@ export function DmVoiceControls({ agent, name }: { agent: string; name: string }
       </button>
       {menu && (
         <Menu
-          label={`How ${name} answers when you talk`}
+          label={`How ${name} answers, and the microphone and speaker`}
           at={menu}
           entries={[
             { kind: "item", label: `${name} answers aloud`, checked: !written, onSelect: () => setReply(agent, "spoken") },
             { kind: "item", label: `${name} answers in writing`, checked: written, onSelect: () => setReply(agent, "written") },
+            ...audioEntries,
           ]}
           onClose={(refocus) => {
             setMenu(null);
@@ -127,6 +154,7 @@ export function useDmVoiceEntries(agent: string, name: string): MenuEntry[] {
   const holdKeys = useSettings((s) => s.keys.holdToTalkHere);
   const talkKeys = useSettings((s) => s.keys.talkHere);
   const here = useVoiceHere();
+  const audioEntries = useAudioEntries();
   if (!here) return [];
   return [
     { kind: "separator" },
@@ -140,6 +168,7 @@ export function useDmVoiceEntries(agent: string, name: string): MenuEntry[] {
     { kind: "separator" },
     { kind: "item", label: `${name} answers aloud`, checked: !written, onSelect: () => setReply(agent, "spoken") },
     { kind: "item", label: `${name} answers in writing`, checked: written, onSelect: () => setReply(agent, "written") },
+    ...audioEntries,
   ];
 }
 

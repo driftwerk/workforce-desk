@@ -1,6 +1,10 @@
 import { create } from "zustand";
 import { EMPTY_LAYOUT } from "../groups/model";
-import { loadSettings, saveSettings, type CustomVoice, type Settings, type SetupProgress, type VoiceSpec } from "../platform";
+import { loadSettings, saveSettings, type AudioPrefs, type CustomVoice, type Settings, type SetupProgress, type VoiceSpec } from "../platform";
+
+/** The microphone and speaker as an older file has them: the system's,
+ *  echo cancelled, as Desk always listened. */
+export const DEFAULT_AUDIO: AudioPrefs = { input: null, output: null, echoCancel: true, sensitivity: 0.5, pushToTalkOnly: false };
 
 /** The setup as an older file has it: never offered. */
 export const NO_SETUP: SetupProgress = { started: false, closed: false, skipped: [] };
@@ -19,6 +23,8 @@ interface SettingsStore extends Settings {
   imageSites: string[];
   setup: SetupProgress;
   writtenReplies: string[];
+  audio: AudioPrefs;
+  audioAt?: string;
   /** Each shortcut's keys: the chosen ones, else the default. */
   keys: Record<ShortcutId, string>;
   loaded: boolean;
@@ -56,6 +62,8 @@ const readSettings = async (set: (patch: Partial<SettingsStore>) => void): Promi
     imageSites: s.imageSites ?? [],
     setup: s.setup ?? NO_SETUP,
     writtenReplies: s.writtenReplies ?? [],
+    audio: { ...DEFAULT_AUDIO, ...s.audio },
+    audioAt: s.audioAt,
     loaded: true,
   });
 };
@@ -74,6 +82,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   voice: false,
   writtenReplies: [],
   voiceEngine: "cascade",
+  audio: DEFAULT_AUDIO,
   shortcuts: {},
   groups: EMPTY_LAYOUT.groups,
   ungrouped: EMPTY_LAYOUT.ungrouped,
@@ -106,6 +115,8 @@ export const useSettings = create<SettingsStore>((set, get) => ({
       voice: s.voice,
       writtenReplies: s.writtenReplies,
       voiceEngine: s.voiceEngine,
+      audio: s.audio,
+      audioAt: s.audioAt,
       shortcuts: s.shortcuts,
       groups: s.groups,
       ungrouped: s.ungrouped,
@@ -130,6 +141,12 @@ export const addCustomVoice = (provider: string, voice: CustomVoice): void => {
   const { customVoices, set } = useSettings.getState();
   const others = (customVoices[provider] ?? []).filter((v) => v.id !== voice.id);
   set({ customVoices: { ...customVoices, [provider]: [...others, voice] } });
+};
+
+/** Changes some of how voice uses the microphone and speaker. */
+export const setAudio = (patch: Partial<AudioPrefs>): void => {
+  const { audio, set } = useSettings.getState();
+  set({ audio: { ...audio, ...patch }, audioAt: new Date().toISOString() });
 };
 
 /** Forgets a voice added by id. Agents already speaking with it keep it:

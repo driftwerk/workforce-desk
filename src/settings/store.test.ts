@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { loadSettings, saveSettings, type Settings } from "../platform";
-import { useSettings } from "./store";
+import { setAudio, useSettings } from "./store";
 
 vi.mock("../platform", () => ({ loadSettings: vi.fn(), saveSettings: vi.fn(() => Promise.resolve()) }));
 
@@ -28,6 +28,14 @@ describe("settings", () => {
     expect(loadSettings).toHaveBeenCalledTimes(1);
     await useSettings.getState().load();
     expect(loadSettings).toHaveBeenCalledTimes(2);
+  });
+
+  it("an older settings file uses the system's microphone and speaker, and a change is saved", async () => {
+    vi.mocked(loadSettings).mockResolvedValue(older);
+    await useSettings.getState().load();
+    expect(useSettings.getState().audio).toEqual({ input: null, output: null, echoCancel: true, sensitivity: 0.5, pushToTalkOnly: false });
+    setAudio({ input: { id: "yeti", name: "Yeti Stereo Microphone" } });
+    expect(vi.mocked(saveSettings).mock.calls.at(-1)?.[0].audio).toMatchObject({ input: { id: "yeti" }, echoCancel: true });
   });
 
   it("an older settings file gets the default shortcuts", async () => {
