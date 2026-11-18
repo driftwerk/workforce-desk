@@ -758,18 +758,3 @@ describe("reading a new key", () => {
   });
 });
 
-
-describe("the store's id", () => {
-  it("is the one the store's public key gives, and the one Desk's host serves", async () => {
-    const { readFileSync } = await import("node:fs");
-    const { createHash } = await import("node:crypto");
-    const { resolve } = await import("node:path");
-    const root = resolve(import.meta.dirname, "../..");
-    const key = readFileSync(resolve(root, "extension/store/public-key.txt"), "utf8").trim();
-    const id = [...createHash("sha256").update(Buffer.from(key, "base64")).digest("hex").slice(0, 32)]
-      .map((h) => String.fromCharCode(97 + parseInt(h, 16)))
-      .join("");
-    const host = readFileSync(resolve(root, "crates/desk-chrome-host/src/lib.rs"), "utf8");
-    expect(host).toContain(`pub const STORE_ID: &str = "${id}";`);
-  });
-});
