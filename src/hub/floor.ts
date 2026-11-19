@@ -1,6 +1,6 @@
 import { deskCall } from "./client";
 import type { HubRef } from "./net";
-import type { BossPlanDetail, PlanBudget, Choice, DecideRef, FloorView, UsageView } from "./types";
+import type { BossPlanDetail, PlanBudget, Choice, DecideRef, FloorView, UsageView, WorkUsageView } from "./types";
 
 export type { Choice } from "./types";
 
@@ -10,6 +10,8 @@ export const floorOf = (hub: HubRef) => ({
   /** `day`: the start of the person's day, in their own time. */
   floor: (day: Date): Promise<FloorView> => deskCall(hub, "GET", `/api/desk/floor?${new URLSearchParams({ day: localIso(day) })}`),
   usage: (): Promise<UsageView> => deskCall(hub, "GET", "/api/desk/usage"),
+  /** What each job, monitor and boss used of the plans, today and this week. */
+  workUsage: (): Promise<WorkUsageView> => deskCall(hub, "GET", "/api/desk/usage/work"),
   decide: (at: DecideRef, choice: Choice): Promise<void> => deskCall(hub, "POST", "/api/desk/needs/decide", { at, choice }),
   /** The person's answer to a boss's plan (the decide above, for a plan):
    *  the plan as it now is. */
