@@ -98,6 +98,16 @@ it("drops a download from the channel left once it ends, and looks again", async
   expect(useUpdates.getState().waiting).toBe(false);
 });
 
+it("keeps a package install on Stable: nightlies never come as a package", async () => {
+  useSettings.setState({ updateChannel: "nightly" });
+  useUpdates.setState({ packaged: true });
+  render(<Help />);
+  expect(choice("Stable").getAttribute("aria-checked")).toBe("true");
+  expect((choice("Nightly") as HTMLButtonElement).disabled).toBe(true);
+  expect(screen.getByText(/installed as a package follows Stable/)).toBeTruthy();
+  useUpdates.setState({ packaged: false });
+});
+
 it("tells a nightly build back on Stable that it waits for the next stable", async () => {
   version.now = "0.2.11-nightly.20261120.42";
   render(<Help />);

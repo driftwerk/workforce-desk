@@ -53,6 +53,9 @@ interface Updates {
   sessionsKept: boolean;
   /** Why this install never updates (a development build), once checked. */
   never: string | null;
+  /** Its package manager updates this install (a .deb): it follows Stable,
+   *  since nightlies never come as a package. */
+  packaged: boolean;
   later: Later | null;
   /** Looks for a new version, also while one is ready or out (a newer one
    *  replaces it, and is downloaded), and downloads it. `asked`: the
@@ -131,6 +134,7 @@ export const useUpdates = create<Updates>((set, get) => ({
   waiting: false,
   sessionsKept: false,
   never: null,
+  packaged: false,
   later: readLater(),
   check: async (opts) => {
     if (opts?.asked && get().later) {
@@ -143,7 +147,11 @@ export const useUpdates = create<Updates>((set, get) => ({
     const mine = epoch;
     // Asked first: a development build never looks.
     const how = await updating();
-    set({ sessionsKept: how.sessionsKept, never: how.how === "never" ? (how.neverBecause ?? "") : null });
+    set({
+      sessionsKept: how.sessionsKept,
+      never: how.how === "never" ? (how.neverBecause ?? "") : null,
+      packaged: how.how === "package",
+    });
     if (how.how === "never") return;
     const version = await updateCheck();
     // The channel changed meanwhile: the check after the switch says.

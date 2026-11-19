@@ -99,6 +99,16 @@ impl Channel {
     }
 }
 
+/// The channel an install follows: its setting's, but Stable for one its
+/// package manager updates, since nightlies come as the AppImage, the NSIS
+/// installer and the Mac app only, never as a package.
+pub fn channel_for(how: How, setting: Channel) -> Channel {
+    match how {
+        How::Package => Channel::Stable,
+        _ => setting,
+    }
+}
+
 /// One updater manifest.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Feed {
@@ -438,6 +448,13 @@ mod tests {
         }
         assert_eq!(Channel::Stable.feeds(), &[Feed::Stable]);
         assert_eq!(Channel::Nightly.feeds(), &[Feed::Stable, Feed::Nightly]);
+    }
+
+    #[test]
+    fn a_package_follows_stable_whatever_the_setting() {
+        assert_eq!(channel_for(How::Package, Channel::Nightly), Channel::Stable);
+        assert_eq!(channel_for(How::Itself, Channel::Nightly), Channel::Nightly);
+        assert_eq!(channel_for(How::Itself, Channel::Stable), Channel::Stable);
     }
 
     #[test]

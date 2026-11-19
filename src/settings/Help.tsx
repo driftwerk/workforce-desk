@@ -134,6 +134,7 @@ export function Help() {
   const never = useUpdates((s) => s.never);
   const waiting = useUpdates((s) => s.waiting);
   const switchChannel = useUpdates((s) => s.switchChannel);
+  const packaged = useUpdates((s) => s.packaged);
   const channel = channelOf(useSettings((s) => s.updateChannel));
   const [checked, setChecked] = useState<string | null>(null);
   const [switching, setSwitching] = useState(false);
@@ -232,7 +233,7 @@ export function Help() {
         <div className="setting-card">
           <span className="card-text">
             <b>Updates</b>
-            <span>{channelLine(channel, version)}</span>
+            <span>{channelLine(channel, version, packaged)}</span>
           </span>
           <div className="seg update-channel" role="radiogroup" aria-label="Updates">
             {CHANNELS.map(([id, label]) => (
@@ -240,8 +241,8 @@ export function Help() {
                 key={id}
                 type="button"
                 role="radio"
-                aria-checked={channel === id}
-                disabled={!inApp || switching}
+                aria-checked={packaged ? id === "stable" : channel === id}
+                disabled={!inApp || switching || packaged}
                 onClick={() => void pickChannel(id)}
               >
                 {label}

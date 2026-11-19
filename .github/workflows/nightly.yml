@@ -116,7 +116,7 @@ jobs:
             fed=$(curl -fsSL "https://github.com/$RELEASES_REPO/releases/download/nightly/latest-nightly.json" | jq -r .version) || fed=
             if [ -n "$VERSION" ] && [ "$fed" = "$VERSION" ]; then
               platforms=$(curl -fsSL "https://github.com/$RELEASES_REPO/releases/download/nightly/latest-nightly.json" | jq -r '.platforms | keys | join(", ")')
-              what="Nightly $VERSION was published for $platforms only: part of its build failed."
+              what="Nightly $VERSION was published (for $platforms), but a job or a check after it failed: see the run."
             else
               what="Nightly ${VERSION:-planning} didn't finish (planning $PLAN, build ${BUILD:-not started}) and wasn't published."
             fi

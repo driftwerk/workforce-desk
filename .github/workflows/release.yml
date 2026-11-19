@@ -844,7 +844,7 @@ jobs:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
         run: |
           set -o pipefail
-          releases=$(gh release list --repo "$RELEASES_REPO" --limit 200 --json tagName,isPrerelease,isDraft,createdAt)
+          releases=$(gh release list --repo "$RELEASES_REPO" --limit 1000 --json tagName,isPrerelease,isDraft,createdAt)
           stable=$(jq -r '[.[] | select((.isPrerelease | not) and (.isDraft | not)) | .tagName | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) | ltrimstr("v")] | .[]' <<<"$releases" | sort -V | tail -1)
           [ -n "$stable" ] || exit 0
           jq -r '[.[] | select(.isPrerelease and (.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-nightly\\.")))] | sort_by(.createdAt) | reverse | .[14:] | .[].tagName' <<<"$releases" |

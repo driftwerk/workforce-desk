@@ -948,11 +948,12 @@ async fn update_check(
     app: State<'_, App>,
     pending: State<'_, PendingUpdate>,
 ) -> CommandResult<Option<String>> {
-    if let updates::How::Never(why) = how_here(&app) {
+    let how = how_here(&app);
+    if let updates::How::Never(why) = how {
         tracing::info!("not checking for updates: {why}");
         return Ok(None);
     }
-    let channel = channel_here(&app);
+    let channel = updates::channel_for(how, channel_here(&app));
     let mut found = Vec::new();
     for feed in channel.feeds() {
         let result = check_feed(&handle, *feed).await;

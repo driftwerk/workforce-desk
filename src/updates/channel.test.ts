@@ -37,6 +37,7 @@ describe("update channel", () => {
     expect(back).toContain("Desk 0.2.11 or newer");
     expect(channelLine("nightly", "0.2.10")).toContain("each day’s changes");
     expect(channelLine("nightly", "0.2.10")).toContain("Stable releases still reach you");
+    expect(channelLine("nightly", "0.2.10", true)).toContain("installed as a package follows Stable");
   });
 
   it("links a package's version to its own release", () => {

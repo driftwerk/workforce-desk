@@ -22,7 +22,9 @@ export const stableOf = (version: string): string => version.trim().replace(/^v/
 
 /** What Help says under the channel, for a Desk at `version` (empty while
  *  it's being read). */
-export const channelLine = (channel: Channel, version: string): string => {
+export const channelLine = (channel: Channel, version: string, packaged = false): string => {
+  if (packaged)
+    return "The releases everyone gets. Nightlies come only as the AppImage and the Mac and Windows apps, so a Desk installed as a package follows Stable.";
   if (channel === "nightly")
     return "A build of each day’s changes, out overnight: newer than Stable and less tested. Stable releases still reach you when they’re newer.";
   if (version && isNightly(version))

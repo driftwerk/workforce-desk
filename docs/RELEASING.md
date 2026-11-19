@@ -151,7 +151,9 @@ reaches it too. **Stable** switches back: a nightly found but not installed is
 let go, and Desk never goes back to an older version, so a nightly build waits
 until a stable newer than it is out (`0.2.11` or later for
 `0.2.11-nightly.20261120.42`). Help says so. The setting is `updateChannel` in
-`settings.json`; anything but `nightly` means Stable.
+`settings.json`; anything but `nightly` means Stable. A `.deb` install follows
+Stable whatever it says (Help shows Nightly off there): nightlies come as the
+AppImage, the NSIS installer and the Mac app only.
 
 **Versions.** A nightly is the next patch after the latest stable release, as
 a pre-release: `0.2.11-nightly.<UTC date>.<run number>`, after `0.2.10` and
