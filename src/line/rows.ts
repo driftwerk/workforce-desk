@@ -144,7 +144,12 @@ export const steerOf = (s: Session): { label: string } | null => {
 export const merged = (list: readonly LineMessage[], m: LineMessage, removed = false): LineMessage[] => {
   if (removed) return list.filter((x) => x.id !== m.id);
   const at = list.findIndex((x) => x.id === m.id);
-  if (at >= 0) return list.map((x, i) => (i === at ? { ...m, waiting: m.waiting ?? (m.delivery === x.delivery ? x.waiting : undefined) } : x));
+  if (at >= 0)
+    return list.map((x, i) => {
+      if (i !== at) return x;
+      const same = m.delivery === x.delivery;
+      return { ...m, waiting: m.waiting ?? (same ? x.waiting : undefined), actions: m.actions ?? (same ? x.actions : undefined) };
+    });
   return [...list, m].sort((a, b) => a.at.localeCompare(b.at));
 };
 

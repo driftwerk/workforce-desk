@@ -14,7 +14,7 @@ export const whyWaiting = (m: LineMessage, session: Session, now = Date.now()): 
   const waited = since(m.at, now);
   const forHow = waited && waited !== "just now" ? ` It has waited ${waited}.` : "";
   if (m.delivery === "handed")
-    return `Handed to its terminal: it goes in as soon as ${name} takes it. While a turn runs, the terminal holds it (press up there to change it).`;
+    return `Handed to its terminal: it goes in as soon as ${name} takes it.`;
   if (m.delivery === "held") return `${name} isn't running: this goes in when it runs again.${forHow}`;
   switch (m.waiting) {
     case "working":

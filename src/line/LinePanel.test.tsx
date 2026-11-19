@@ -15,7 +15,12 @@ const hub = {
   lineThread: vi.fn(() => Promise.resolve(thread)),
   dismissLine: vi.fn((id: string) => Promise.resolve({ ...thread.find((m) => m.id === id)!, asked: "dismissed" as const })),
   draftLine: vi.fn(() => Promise.resolve(lined())),
-  sendLineNow: vi.fn((id: string) => Promise.resolve({ ...thread.find((m) => m.id === id)!, waiting: "next_call" as const, actions: ["withdraw" as const] })),
+  // Sent now, the hub reads it back as waiting for the next tool call; the
+  // row it answers with says no more than that (a line event's row).
+  sendLineNow: vi.fn((id: string) => {
+    thread = thread.map((m) => (m.id === id ? { ...m, waiting: "next_call" as const, actions: ["withdraw" as const] } : m));
+    return Promise.resolve({ ...thread.find((m) => m.id === id)!, actions: undefined });
+  }),
   takeBackLine: vi.fn(() => Promise.resolve()),
   editLine: vi.fn(() => Promise.resolve()),
 };
@@ -272,7 +277,25 @@ describe("what waits to go in, under a terminal session", () => {
     expect(hub.sendLineNow).toHaveBeenCalledWith("t1");
     expect(within(panel).getByText(/^Sent now: acme-web reads this with its next tool call's result/)).toBeTruthy();
     expect(within(panel).queryByRole("button", { name: "Send now" })).toBeNull();
+    // Read back from the hub: Withdraw still there.
+    expect(within(panel).getByRole("button", { name: "Withdraw" })).toBeTruthy();
+    expect(hub.lineThread).toHaveBeenCalledTimes(2);
     expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("reads the line again when a message waiting comes in, for why it waits and what can be done", async () => {
+    await show({ state: "working" });
+    expect(screen.queryByRole("status")).toBeNull();
+    // A line event's row says neither why it waits nor what can be done.
+    thread = [held()];
+    await act(async () => useLine.getState().heard({ ...held(), waiting: undefined, actions: undefined }));
+    const bar = screen.getByRole("status");
+    expect(bar.textContent).toContain("1 message from Desk waits for this turn to end");
+    fireEvent.click(within(bar).getByRole("button", { name: /^Show/ }));
+    const panel = screen.getByRole("region", { name: "Waiting to go in" });
+    expect(within(panel).getByText(/is in the middle of a turn/)).toBeTruthy();
+    expect(within(panel).getByRole("button", { name: "Send now" })).toBeTruthy();
+    expect(within(panel).getByRole("button", { name: "Withdraw" })).toBeTruthy();
   });
 
   it("withdraws it, and says why when the hub can't", async () => {
