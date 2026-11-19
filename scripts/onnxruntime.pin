@@ -1,15 +1,7 @@
-# What scripts/onnxruntime.sh provides ONNX Runtime by, read by it (a bash
-# file of assignments). CI keys its cache of the Intel Macs' build on this
-# file alone, so a change to only the Linux pins (in onnxruntime.sh) keeps
-# that 30-60 minute build; change something here and it builds again.
+# The ONNX Runtime scripts/onnxruntime.sh provides, read by it (a bash file
+# of assignments): its version, and the v1.28.0 commit Desk built from
+# before github.com/microsoft/onnxruntime went offline, which the NuGet
+# package's .nuspec names (<repository commit=...>).
 
 VERSION=1.28.0
-# v1.28.0, as cloned when the source build was added, and as the NuGet
-# package's .nuspec names it (<repository commit=...>).
 COMMIT=da9b5e364c465de65c49d91e696cd6485270757f
-
-# The Intel build: the oldest macOS Desk runs on (tauri.macos.conf.json),
-# and its tools from PyPI, pinned by hash (universal2 wheels).
-MACOS_DEPLOYMENT_TARGET=13.0
-BUILD_TOOLS='cmake==3.31.6 --hash=sha256:da9d4fd9abd571fd016ddb27da0428b10277010b23bb21e3678f8b9e96e1686e
-ninja==1.11.1.4 --hash=sha256:b33923c8da88e8da20b6053e38deb433f53656441614207e01d283ad02c5e8e7'

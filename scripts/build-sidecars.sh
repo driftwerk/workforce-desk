@@ -28,10 +28,6 @@
 #   VELLEV_SOURCE, VELLEV_ANY_REF, VELLEV_REPO, VELLEV_CACHE, VELLEV_TARGET_DIR
 #                   the same for vellev and vellev.ref (VELLEV_REPO defaults
 #                   to https://github.com/driftwerk/vellev.git)
-#   ORT_X86_64      ONNX Runtime built for Intel Macs by
-#                   scripts/onnxruntime.sh (its DIR), which vellev links for
-#                   x86_64-apple-darwin; built there when unset (which needs
-#                   ORT_SOURCE: see that script)
 #   ORT_SHARED      on Linux, 1 links Microsoft's ONNX Runtime from its
 #                   NuGet package (scripts/onnxruntime.sh, in ORT_DIR,
 #                   default <cache>/onnxruntime-<arch>) instead of ort's own,
@@ -113,11 +109,22 @@ hub_target=${HUB_TARGET_DIR:-$hub/target}
 vellev_target=${VELLEV_TARGET_DIR:-$vellev/target}
 
 # vellev's ort links ONNX Runtime 1.28: ort's own static build for Apple
-# Silicon, ours for Intel (it has none) and, with ORT_SHARED, Microsoft's
-# shared one for Linux. A vellev.ref whose ort wants another version needs
-# onnxruntime.sh's pin moved too.
-case " $targets ${ORT_SHARED:+shared} " in
-  *" x86_64-apple-darwin "* | *" shared "*)
+# Silicon and, with ORT_SHARED, Microsoft's shared one for Linux. A
+# vellev.ref whose ort wants another version needs onnxruntime.sh's pin
+# moved too.
+#
+# Intel Macs' vellev isn't built here. Its ONNX Runtime came from a source
+# that is offline, so it is Desk 0.2.10's, pinned (scripts/intel-memory.sh).
+# That script refuses any other vellev.ref, and runs first so a mismatch
+# fails before the long builds.
+case " $targets " in
+  *" x86_64-apple-darwin "*)
+    intel_memory="$cache/intel-memory-x86_64-apple-darwin"
+    "$root/scripts/intel-memory.sh" "$intel_memory"
+    ;;
+esac
+case " ${ORT_SHARED:+shared} " in
+  *" shared "*)
     ort_sys=$(awk '/^name = "ort-sys"$/ { getline; print $3 }' "$vellev/Cargo.lock" | tr -d '"')
     [ "$ort_sys" = "2.0.0-rc.13" ] ||
       die "vellev.ref locks ort-sys $ort_sys; onnxruntime.sh builds the ONNX Runtime 2.0.0-rc.13 links (1.28.0): move its pin"
@@ -176,21 +183,12 @@ for t in $targets; do
   say "hub $ref for $t"
   CARGO_TARGET_DIR="$hub_target" cargo build --release --locked -p workforce-cli --bin workforce \
     --target "$t" --manifest-path "$hub/Cargo.toml"
-  say "vellev $vellev_ref for $t"
   # From its own folder, so its rust-toolchain.toml is the toolchain.
-  (
+  [ "$t" = x86_64-apple-darwin ] || (
+    say "vellev $vellev_ref for $t"
     cd "$vellev"
     rustup target add "$t" >/dev/null
-    if [ "$t" = x86_64-apple-darwin ]; then
-      ort=${ORT_X86_64:-$cache/onnxruntime-x86_64}
-      # As old a macOS as its ONNX Runtime (onnxruntime.sh) and Desk.
-      export MACOSX_DEPLOYMENT_TARGET=13.0
-      "$root/scripts/onnxruntime.sh" "$ort"
-      export ORT_LIB_LOCATION="$ort/Release" ORT_SKIP_DOWNLOAD=1
-      # ONNX Runtime 1.28's model packages are a library of their own, which
-      # this ort doesn't link (its list of ONNX Runtime's libraries is fixed).
-      export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=$ort/Release/model_package/libmodel_package.a"
-    elif [ "${ORT_SHARED:-}" = 1 ]; then
+    if [ "${ORT_SHARED:-}" = 1 ]; then
       ort=${ORT_DIR:-$cache/onnxruntime-${t%%-*}}
       "$root/scripts/onnxruntime.sh" "$ort" "${t%%-*}"
       export ORT_LIB_LOCATION="$ort" ORT_PREFER_DYNAMIC_LINK=1 ORT_SKIP_DOWNLOAD=1
@@ -206,6 +204,11 @@ for t in $targets; do
     IFS=: read -r name dir shipped <<<"$pair"
     out="$bin/$shipped-$t"
     rm -f "$out"
+    if [ "$name" = vellev ] && [ "$t" = x86_64-apple-darwin ]; then
+      # Desk 0.2.10's, as it shipped (already stripped).
+      cp "$intel_memory" "$out"
+      continue
+    fi
     cp "$dir/$t/release/$name" "$out"
     strip "$out"
   done

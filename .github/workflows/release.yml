@@ -25,12 +25,17 @@ on:
         description: "Version to release (e.g. 0.2.0)"
         required: true
         type: string
+      dry_run:
+        description: "Build, sign and check everything, but publish nothing: the release is kept as this run's artifact"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
+# A dry run never waits for, or holds up, a release.
 concurrency:
-  group: release
+  group: release${{ inputs.dry_run && '-dry-run' || '' }}
   cancel-in-progress: false
 
 env:
@@ -105,14 +110,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
-
-      # vellev's ONNX Runtime for Intel Macs, built from source (ort ships
-      # none): the slowest step on a cold cache, keyed by its pin.
-      - name: Cache ONNX Runtime for Intel
-        uses: actions/cache@v6
-        with:
-          path: ~/Library/Caches/desk-build/onnxruntime-x86_64
-          key: onnxruntime-x86_64-${{ hashFiles('desk/scripts/onnxruntime.pin') }}
 
       - name: Set the version
         working-directory: desk
@@ -660,7 +657,17 @@ jobs:
             '{version: $v, notes: $notes, pub_date: $date, platforms: $platforms}' > out/latest.json
           jq '.platforms | keys' out/latest.json
 
+      - name: Keep the dry run's release
+        if: ${{ inputs.dry_run }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: dry-run-release
+          path: out/
+          retention-days: 3
+          if-no-files-found: error
+
       - name: Publish the release
+        if: ${{ !inputs.dry_run }}
         env:
           VERSION: ${{ needs.version.outputs.version }}
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
