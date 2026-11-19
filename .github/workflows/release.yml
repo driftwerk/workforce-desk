@@ -1,4 +1,7 @@
 name: Release
+# A dry run says so in its title: Nightly passes over one when it looks for
+# a release under way.
+run-name: Release ${{ inputs.version || github.ref_name }}${{ inputs.dry_run && ' (dry run)' || '' }}
 
 # Builds Desk with its helper, hub (the commit in hub.ref) and memory store
 # (vellev, the commit in vellev.ref) for each system:

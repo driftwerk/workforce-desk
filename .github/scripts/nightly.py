@@ -182,11 +182,18 @@ def feed(releases_repo):
         raise
 
 
+def is_dry_run(run):
+    """A Release run that publishes nothing (its title says so: release.yml's run-name)."""
+    return "(dry run)" in (run.get("display_title") or "")
+
+
 def release_running(repo):
+    """A Release run under way that will publish, if any: a dry run doesn't count."""
     for status in ("in_progress", "queued", "waiting", "pending", "requested"):
-        runs = gh_api(f"repos/{repo}/actions/workflows/{RELEASE}/runs?status={status}&per_page=5")
-        if runs and runs.get("workflow_runs"):
-            return runs["workflow_runs"][0]["html_url"]
+        runs = gh_api(f"repos/{repo}/actions/workflows/{RELEASE}/runs?status={status}&per_page=20")
+        for r in (runs or {}).get("workflow_runs") or []:
+            if not is_dry_run(r):
+                return r["html_url"]
     return None
 
 

@@ -98,6 +98,13 @@ class Bump(unittest.TestCase):
         self.assertFalse(nightly.only_hub_ref([]))
 
 
+class Releases(unittest.TestCase):
+    def test_a_release_dry_run_doesnt_hold_up_the_nightly(self):
+        self.assertTrue(nightly.is_dry_run({"display_title": "Release 0.2.11 (dry run)"}))
+        self.assertFalse(nightly.is_dry_run({"display_title": "Release 0.2.11"}))
+        self.assertFalse(nightly.is_dry_run({}))
+
+
 class Skips(unittest.TestCase):
     def test_a_red_or_stuck_night_asks_for_a_person_and_nothing_to_do_doesnt(self):
         self.assertFalse(nightly.Skip("nothing changed").attention)

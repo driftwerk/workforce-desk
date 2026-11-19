@@ -40,7 +40,9 @@ hub keeps memories in SQLite; then it moves them into the store, once.
    bump them by hand. A stable version is `major.minor.patch` only: a tag
    with a pre-release part (`v0.3.0-rc.1`, a nightly's `v0.2.11-nightly.…`)
    starts no release, and the Release form refuses one, since no Desk on
-   Stable would ever take it.
+   Stable would ever take it. Its **dry_run** builds, signs and checks
+   everything and publishes nothing; its run's title says "(dry run)", and
+   neither waits for nor holds up a real release (nor the nightly).
 3. `.github/workflows/release.yml` then:
    - builds the three sidecars for both architectures and joins each pair
      with `lipo` (`scripts/build-sidecars.sh`). vellev embeds with ONNX

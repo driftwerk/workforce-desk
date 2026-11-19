@@ -60,8 +60,10 @@ on:
 permissions:
   contents: read
 
+# A pull request's builds replace each other; a release's (its run, a dry
+# run's or a nightly's) never wait on another's.
 concurrency:
-  group: backend-build-${{ github.ref }}-${{ github.event_name }}-${{ inputs.version }}
+  group: backend-build-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
