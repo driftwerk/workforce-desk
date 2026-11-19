@@ -1,4 +1,7 @@
 name: Release
+# A dry run says so in its title: Nightly passes over one when it looks for
+# a release under way.
+run-name: Release ${{ inputs.version || github.ref_name }}${{ inputs.dry_run && ' (dry run)' || '' }}
 
 # Builds Desk with its helper, hub (the commit in hub.ref) and memory store
 # (vellev, the commit in vellev.ref) for each system:
@@ -14,23 +17,61 @@ name: Release
 #     (Linux boxes Desk drives over SSH) as signed tarballs;
 # then publishes them with the signed updater artifacts (latest.json) as a
 # GitHub release. See docs/RELEASING.md.
+#
+# Nightly (nightly.yml) calls it with channel `nightly`: the same builds of
+# the commit it names, published as a pre-release that is never the latest,
+# with latest-nightly.json on the `nightly` release in place of latest.json.
+# Nothing on that path writes latest.json or marks a release latest, so
+# Stable's feed never offers a nightly.
 
 on:
   push:
     tags:
       - "v*"
+      # A tag with a pre-release part (a nightly's v0.2.11-nightly.…) never
+      # starts a stable release.
+      - "!v*-*"
   workflow_dispatch:
     inputs:
       version:
         description: "Version to release (e.g. 0.2.0)"
         required: true
         type: string
+      dry_run:
+        description: "Build, sign and check everything, but publish nothing"
+        type: boolean
+        default: false
+  workflow_call:
+    inputs:
+      version:
+        description: "Version to build (a nightly's: 0.2.11-nightly.20261120.42)"
+        required: true
+        type: string
+      channel:
+        description: "stable or nightly"
+        type: string
+        default: stable
+      ref:
+        description: "The Desk commit to build"
+        type: string
+        default: ""
+      dry_run:
+        description: "Build and sign everything, publish nothing"
+        type: boolean
+        default: false
+      hub_ref:
+        description: "A dry run's hub commit in place of hub.ref's (the bump it would commit)"
+        type: string
+        default: ""
 
 permissions:
   contents: write
 
+# Stable releases one at a time, and a stable dry run never waits for or
+# holds up one. A nightly has its own group, so it never takes the place of
+# a stable release waiting for its turn; a nightly dry run, one of its own.
 concurrency:
-  group: release
+  group: ${{ inputs.channel == 'nightly' && (inputs.dry_run && format('release-dry-run-{0}', github.run_id) || 'release-nightly') || format('release{0}', inputs.dry_run && '-dry-run' || '') }}
   cancel-in-progress: false
 
 env:
@@ -48,19 +89,34 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.version.outputs.version }}
+      channel: ${{ steps.version.outputs.channel }}
     steps:
+      # The version given (Release's own form, or Nightly's call), else the
+      # tag's. Stable takes a plain release version only; Nightly a
+      # nightly's only, so neither can publish the other's.
       - name: Version
         id: version
         env:
           INPUT: ${{ inputs.version }}
+          CHANNEL: ${{ inputs.channel || 'stable' }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+          HUB_REF: ${{ inputs.hub_ref }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            v="$INPUT"
-          else
-            v="${GITHUB_REF#refs/tags/v}"
-          fi
+          v="${INPUT:-${GITHUB_REF#refs/tags/}}"
           v="${v#v}"
+          case "$CHANNEL" in
+            stable)
+              [[ $v =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "::error::$v isn't a stable version (major.minor.patch)"; exit 1; } ;;
+            nightly)
+              [[ $v =~ ^[0-9]+\.[0-9]+\.[0-9]+-nightly\.[1-9][0-9]{7}\.[1-9][0-9]*$ ]] || { echo "::error::$v isn't a nightly version (0.2.11-nightly.20261120.42)"; exit 1; } ;;
+            *)
+              echo "::error::no channel $CHANNEL: stable or nightly"; exit 1 ;;
+          esac
+          if [ -n "$HUB_REF" ] && [ "$DRY_RUN" != true ]; then
+            echo "::error::a hub ref other than hub.ref's is for a dry run only"; exit 1
+          fi
           echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
 
   macos:
     needs: version
@@ -73,10 +129,17 @@ jobs:
         uses: actions/checkout@v7
         with:
           path: desk
+          ref: ${{ inputs.ref }}
 
       - name: Read the hub ref
         id: hub
-        run: echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
+        env:
+          HUB_OVERRIDE: ${{ inputs.hub_ref }}
+        # A dry run's hub bump is written into the checkout's hub.ref, as the
+        # commit it would make has it (build-sidecars.sh checks the two agree).
+        run: |
+          [ -z "$HUB_OVERRIDE" ] || echo "$HUB_OVERRIDE" > desk/hub.ref
+          echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
 
       - name: Read the vellev ref
         id: vellev
@@ -105,14 +168,6 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
-
-      # vellev's ONNX Runtime for Intel Macs, built from source (ort ships
-      # none): the slowest step on a cold cache, keyed by its pin.
-      - name: Cache ONNX Runtime for Intel
-        uses: actions/cache@v6
-        with:
-          path: ~/Library/Caches/desk-build/onnxruntime-x86_64
-          key: onnxruntime-x86_64-${{ hashFiles('desk/scripts/onnxruntime.sh') }}
 
       - name: Set the version
         working-directory: desk
@@ -179,6 +234,12 @@ jobs:
         run: |
           npx tauri build --target universal-apple-darwin --bundles app \
             --config "{\"plugins\":{\"updater\":{\"endpoints\":[\"$ENDPOINT\"]}}}"
+
+      # The app's Intel memory store is the pinned one (Desk 0.2.10's:
+      # scripts/intel-memory.sh), checked before signing replaces its
+      # signature.
+      - name: Check the Intel memory store
+        run: desk/scripts/intel-memory.sh check "$APP/Contents/MacOS/Desk Memory"
 
       - name: Import the Developer ID certificate
         id: cert
@@ -256,15 +317,19 @@ jobs:
 
       # The updater's download: the stapled app, signed with the updater key
       # whose public half is in tauri.conf.json.
+      # Signed for its version, as tauri build signs the AppImage and the
+      # installer: the app (requireSignedVersion) refuses a feed that
+      # announces one version with another's download.
       - name: Updater artifacts
         working-directory: desk
         env:
+          VERSION: ${{ needs.version.outputs.version }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
           out="${{ github.workspace }}/out"
           tar -czf "$out/Desk.app.tar.gz" -C "$(dirname "${{ github.workspace }}/$APP")" Desk.app
-          npx tauri signer sign "$out/Desk.app.tar.gz"
+          npx tauri signer sign --app-version "$VERSION" "$out/Desk.app.tar.gz"
 
       - uses: actions/upload-artifact@v7
         with:
@@ -294,10 +359,17 @@ jobs:
         uses: actions/checkout@v7
         with:
           path: desk
+          ref: ${{ inputs.ref }}
 
       - name: Read the hub ref
         id: hub
-        run: echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
+        env:
+          HUB_OVERRIDE: ${{ inputs.hub_ref }}
+        # A dry run's hub bump is written into the checkout's hub.ref, as the
+        # commit it would make has it (build-sidecars.sh checks the two agree).
+        run: |
+          [ -z "$HUB_OVERRIDE" ] || echo "$HUB_OVERRIDE" > desk/hub.ref
+          echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
 
       # For the rich renderers.
       - name: Check out the hub at hub.ref
@@ -361,6 +433,11 @@ jobs:
 
       # Where Tauri looks for the sidecars (externalBin in
       # tauri.linux.conf.json), executable again: an artifact keeps no modes.
+      # And the ONNX Runtime the memory store links, checked against its pin,
+      # which both packages put in /usr/lib/Desk (bundle.linux there), where
+      # its memory store looks for it. The AppImage's tooling (linuxdeploy)
+      # finds it there and moves a copy to usr/lib, which it points the
+      # programs at.
       - name: The helper, hub and memory store
         working-directory: desk
         run: |
@@ -368,28 +445,61 @@ jobs:
           for name in desk-helper desk-agents desk-memory; do
             install -m 755 "$GITHUB_WORKSPACE/backend/$name" "src-tauri/binaries/$name-x86_64-unknown-linux-gnu"
           done
+          scripts/onnxruntime.sh check "$GITHUB_WORKSPACE/backend/libonnxruntime.so.1" x86_64
+          install -m 644 "$GITHUB_WORKSPACE/backend/libonnxruntime.so.1" src-tauri/binaries/libonnxruntime.so.1
           ls -la src-tauri/binaries
 
       # The AppImage is the updater's download, signed with the updater key
       # (createUpdaterArtifacts in tauri.linux.conf.json); the .deb is updated
-      # by the system's package manager.
+      # by the system's package manager. A nightly builds the AppImage alone:
+      # dpkg would order 0.2.11-nightly.… after 0.2.11 (its "-" starts a
+      # Debian revision), so the stable after it would look like a downgrade.
       - name: Build the AppImage and the .deb
         working-directory: desk
         env:
+          BUNDLES: ${{ needs.version.outputs.channel == 'nightly' && 'appimage' || 'appimage,deb' }}
           ENDPOINT: https://github.com/${{ env.RELEASES_REPO }}/releases/latest/download/latest.json
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          npx tauri build --bundles appimage,deb \
+          npx tauri build --bundles "$BUNDLES" \
             --config "{\"plugins\":{\"updater\":{\"endpoints\":[\"$ENDPOINT\"]}}}"
+
+      # Each package's memory store runs and loads the ONNX Runtime the
+      # package holds, not one of the system's: the .deb's the pinned file
+      # itself; the AppImage's the copy its tooling (linuxdeploy) moved into
+      # usr/lib and stripped.
+      - name: Check the packages' ONNX Runtime
+        working-directory: desk
+        run: |
+          check() {
+            root=$(cd "$1" && pwd) want=$2
+            found=$(env -i ldd "$root/usr/bin/desk-memory" | awk '$1 == "libonnxruntime.so.1" { print $3 }')
+            [ "$(realpath "$found")" = "$(realpath "$want")" ] ||
+              { echo "$1's desk-memory loads '$found', not $want"; exit 1; }
+            env -i "$root/usr/bin/desk-memory" --help >/dev/null
+          }
+          work=$(mktemp -d)
+          # A nightly builds no .deb.
+          if [ "${{ needs.version.outputs.channel }}" != nightly ]; then
+            dpkg-deb -x target/release/bundle/deb/*.deb "$work/deb"
+            scripts/onnxruntime.sh check "$work/deb/usr/lib/Desk/libonnxruntime.so.1" x86_64
+            check "$work/deb" "$work/deb/usr/lib/Desk/libonnxruntime.so.1"
+          fi
+          appimage=$(realpath target/release/bundle/appimage/*.AppImage)
+          (cd "$work" && "$appimage" --appimage-extract >/dev/null)
+          check "$work/squashfs-root" "$work/squashfs-root/usr/lib/libonnxruntime.so.1"
+          rm -rf "$work"
 
       - name: Collect
         working-directory: desk
         run: |
           out="${{ github.workspace }}/out"
           mkdir -p "$out"
-          cp target/release/bundle/appimage/*.AppImage target/release/bundle/appimage/*.AppImage.sig \
-            target/release/bundle/deb/*.deb "$out/"
+          cp target/release/bundle/appimage/*.AppImage target/release/bundle/appimage/*.AppImage.sig "$out/"
+          if [ "${{ needs.version.outputs.channel }}" != nightly ]; then
+            cp target/release/bundle/deb/*.deb "$out/"
+          fi
           ls -la "$out"
 
       - uses: actions/upload-artifact@v7
@@ -405,6 +515,8 @@ jobs:
     uses: ./.github/workflows/backend-build.yml
     with:
       version: ${{ needs.version.outputs.version }}
+      ref: ${{ inputs.ref }}
+      hub_ref: ${{ inputs.hub_ref }}
     secrets:
       VELLEV_REPO_TOKEN: ${{ secrets.VELLEV_REPO_TOKEN }}
       HUB_REPO_TOKEN: ${{ secrets.HUB_REPO_TOKEN }}
@@ -421,10 +533,17 @@ jobs:
         uses: actions/checkout@v7
         with:
           path: desk
+          ref: ${{ inputs.ref }}
 
       - name: Read the hub ref
         id: hub
-        run: echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
+        env:
+          HUB_OVERRIDE: ${{ inputs.hub_ref }}
+        # A dry run's hub bump is written into the checkout's hub.ref, as the
+        # commit it would make has it (build-sidecars.sh checks the two agree).
+        run: |
+          [ -z "$HUB_OVERRIDE" ] || echo "$HUB_OVERRIDE" > desk/hub.ref
+          echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
 
       - name: Check out the hub at hub.ref
         uses: actions/checkout@v7
@@ -474,11 +593,16 @@ jobs:
         working-directory: desk
         run: npm ci
 
-      # The Linux backend the installers carry, which Desk installs into WSL.
+      # The Linux backend the installers carry, which Desk installs into WSL,
+      # with the pinned ONNX Runtime.
       - uses: actions/download-artifact@v7
         with:
           name: backend-linux-x86_64
           path: desk/src-tauri/resources/backend/linux-x86_64
+
+      - name: Check the backend's ONNX Runtime
+        shell: bash
+        run: desk/scripts/onnxruntime.sh check desk/src-tauri/resources/backend/linux-x86_64/libonnxruntime.so.1 x86_64
 
       - name: Build Desk Helper.exe
         working-directory: desk
@@ -489,10 +613,13 @@ jobs:
 
       # Authenticode through Azure Trusted Signing, when the WINDOWS_SIGNING
       # variable is on: the app, Desk Helper.exe and the installers. Off,
-      # the builds are unsigned and SmartScreen warns on first run.
+      # the builds are unsigned and SmartScreen warns on first run. A
+      # nightly builds the NSIS installer alone: the MSI takes no version
+      # with a pre-release part like a nightly's.
       - name: Build the installers
         working-directory: desk
         env:
+          BUNDLES: ${{ needs.version.outputs.channel == 'nightly' && 'nsis' || 'nsis,msi' }}
           ENDPOINT: https://github.com/${{ env.RELEASES_REPO }}/releases/latest/download/latest.json
           SIGNING: ${{ vars.WINDOWS_SIGNING }}
           TRUSTED_SIGNING_ENDPOINT: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
@@ -512,15 +639,17 @@ jobs:
             sign="trusted-signing-cli -e $TRUSTED_SIGNING_ENDPOINT -a $TRUSTED_SIGNING_ACCOUNT -c $TRUSTED_SIGNING_PROFILE -d Desk %1"
             config=$(jq -c --arg sign "$sign" '.bundle.windows.signCommand = $sign' <<<"$config")
           fi
-          npx tauri build --bundles nsis,msi --config "$config"
+          npx tauri build --bundles "$BUNDLES" --config "$config"
 
       - name: Collect
         working-directory: desk
         run: |
           out="${{ github.workspace }}/out"
           mkdir -p "$out"
-          cp target/release/bundle/nsis/*-setup.exe target/release/bundle/nsis/*-setup.exe.sig \
-            target/release/bundle/msi/*.msi "$out/"
+          cp target/release/bundle/nsis/*-setup.exe target/release/bundle/nsis/*-setup.exe.sig "$out/"
+          if [ "${{ needs.version.outputs.channel }}" != nightly ]; then
+            cp target/release/bundle/msi/*.msi "$out/"
+          fi
           ls -la "$out"
 
       - uses: actions/upload-artifact@v7
@@ -554,12 +683,19 @@ jobs:
         uses: actions/checkout@v7
         with:
           path: desk
+          ref: ${{ inputs.ref }}
 
       # Beside Desk, where package.json finds the rich renderers, so the
       # lockfile installs as it is (nothing here builds them).
       - name: Read the hub ref
         id: hub
-        run: echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
+        env:
+          HUB_OVERRIDE: ${{ inputs.hub_ref }}
+        # A dry run's hub bump is written into the checkout's hub.ref, as the
+        # commit it would make has it (build-sidecars.sh checks the two agree).
+        run: |
+          [ -z "$HUB_OVERRIDE" ] || echo "$HUB_OVERRIDE" > desk/hub.ref
+          echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
 
       - name: Check out the hub at hub.ref
         uses: actions/checkout@v7
@@ -601,10 +737,16 @@ jobs:
 
       # One latest.json for every system's updater: the universal app for
       # both Macs, and the AppImage for Linux and the NSIS installer for
-      # Windows when they were built.
+      # Windows when they were built. A nightly's is latest-nightly.json,
+      # kept out of out/ (everything there goes on the version's own
+      # release): it goes on the `nightly` release, with the Desk commit and
+      # hub ref it was built from, for the next nightly to compare with.
       - name: latest.json
         env:
           VERSION: ${{ needs.version.outputs.version }}
+          CHANNEL: ${{ needs.version.outputs.channel }}
+          DESK_COMMIT: ${{ inputs.ref || github.sha }}
+          HUB_REF: ${{ steps.hub.outputs.ref }}
         run: |
           base="https://github.com/$RELEASES_REPO/releases/download/v$VERSION"
           platforms=$(jq -n --arg mac "$base/Desk.app.tar.gz" --arg mac_sig "$(cat out/Desk.app.tar.gz.sig)" \
@@ -620,12 +762,62 @@ jobs:
             platforms=$(jq --arg url "$base/$name" --arg sig "$(cat "$setup.sig")" \
               '. + {"windows-x86_64": {signature: $sig, url: $url}}' <<<"$platforms")
           done
-          jq -n --arg v "$VERSION" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg notes "Desk $VERSION" \
-            --argjson platforms "$platforms" \
-            '{version: $v, notes: $notes, pub_date: $date, platforms: $platforms}' > out/latest.json
-          jq '.platforms | keys' out/latest.json
+          if [ "$CHANNEL" = nightly ]; then
+            mkdir -p feed
+            jq -n --arg v "$VERSION" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg notes "Desk $VERSION (nightly)" \
+              --arg desk "$DESK_COMMIT" --arg hub "$HUB_REF" --argjson platforms "$platforms" \
+              '{version: $v, notes: $notes, pub_date: $date, platforms: $platforms, desk_commit: $desk, hub_ref: $hub}' \
+              > feed/latest-nightly.json
+            jq '.platforms | keys' feed/latest-nightly.json
+          else
+            jq -n --arg v "$VERSION" --arg date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg notes "Desk $VERSION" \
+              --argjson platforms "$platforms" \
+              '{version: $v, notes: $notes, pub_date: $date, platforms: $platforms}' > out/latest.json
+            jq '.platforms | keys' out/latest.json
+          fi
+
+      # Each download the feed names, checked as the app will check it:
+      # against the updater key in tauri.conf.json, and signed for this
+      # version (requireSignedVersion). A nightly never carries latest.json.
+      - name: Check the feed's signatures
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          CHANNEL: ${{ needs.version.outputs.channel }}
+        run: |
+          for try in 1 2 3; do
+            sudo apt-get install -y minisign >/dev/null && break
+            sudo apt-get update >/dev/null || true
+            [ "$try" = 3 ] && exit 1
+          done
+          if [ "$CHANNEL" = nightly ]; then
+            feed=feed/latest-nightly.json
+            [ ! -e out/latest.json ] || { echo "::error::a nightly must never carry latest.json"; exit 1; }
+          else
+            feed=out/latest.json
+          fi
+          set -o pipefail
+          # Both Macs always; Linux and Windows when they were built.
+          want='["darwin-aarch64","darwin-x86_64"]'
+          ls out/*.AppImage >/dev/null 2>&1 && want=$(jq -c '. + ["linux-x86_64"]' <<<"$want")
+          ls out/*-setup.exe >/dev/null 2>&1 && want=$(jq -c '. + ["windows-x86_64"]' <<<"$want")
+          jq -e --argjson want "$want" '(.platforms | keys) == ($want | sort)' "$feed" >/dev/null ||
+            { echo "::error::the feed's platforms aren't $want"; exit 1; }
+          jq -r '.plugins.updater.pubkey' desk/src-tauri/tauri.conf.json | base64 --decode > updater.pub
+          jq -r '.platforms | to_entries[] | "\(.key) \(.value.url) \(.value.signature)"' "$feed" |
+            while read -r platform url signature; do
+              file="out/${url##*/}"
+              [ "$url" = "https://github.com/$RELEASES_REPO/releases/download/v$VERSION/${url##*/}" ] ||
+                { echo "::error::$platform's download isn't on v$VERSION's release: $url"; exit 1; }
+              base64 --decode <<<"$signature" > check.sig
+              minisign -Vq -p updater.pub -m "$file" -x check.sig
+              sed -n 's/^trusted comment: //p' check.sig | tr '\t' '\n' | grep -qx "version:$VERSION" ||
+                { echo "::error::$platform's $file isn't signed for $VERSION"; exit 1; }
+              echo "$platform: $file signed for $VERSION"
+            done
+          rm -f updater.pub check.sig
 
       - name: Publish the release
+        if: needs.version.outputs.channel == 'stable' && !inputs.dry_run
         env:
           VERSION: ${{ needs.version.outputs.version }}
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
@@ -637,3 +829,88 @@ jobs:
           fi
           gh release upload "$tag" --repo "$RELEASES_REPO" --clobber out/*
           gh release edit "$tag" --repo "$RELEASES_REPO" --draft=false --latest
+
+      # Nightly.yml's notes: the pull requests and hub commits since the
+      # last nightly.
+      - uses: actions/download-artifact@v7
+        if: needs.version.outputs.channel == 'nightly'
+        with:
+          name: nightly-notes
+          path: notes
+
+      # A dry run keeps what it would publish as the run's artifact.
+      - uses: actions/upload-artifact@v7
+        if: needs.version.outputs.channel == 'nightly' && inputs.dry_run
+        with:
+          name: nightly-dry-run
+          path: |
+            feed/latest-nightly.json
+            notes/notes.md
+          if-no-files-found: error
+
+      # Its own pre-release first, never the latest, so the feed never names
+      # a download that isn't there yet; then the feed. The tag points at
+      # the commit built when the releases are kept in this repo.
+      - name: Publish the nightly
+        if: needs.version.outputs.channel == 'nightly' && !inputs.dry_run
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          DESK_COMMIT: ${{ inputs.ref || github.sha }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
+        run: |
+          tag="v$VERSION"
+          target=()
+          [ "$RELEASES_REPO" != "$GITHUB_REPOSITORY" ] || target=(--target "$DESK_COMMIT")
+          if ! gh release view "$tag" --repo "$RELEASES_REPO" >/dev/null 2>&1; then
+            gh release create "$tag" --repo "$RELEASES_REPO" --title "Desk $VERSION (nightly)" \
+              --notes-file notes/notes.md --prerelease --latest=false --draft "${target[@]}"
+          fi
+          gh release upload "$tag" --repo "$RELEASES_REPO" --clobber out/*
+          gh release edit "$tag" --repo "$RELEASES_REPO" --draft=false --prerelease --latest=false
+          if ! gh release view nightly --repo "$RELEASES_REPO" >/dev/null 2>&1; then
+            gh release create nightly --repo "$RELEASES_REPO" --title "Desk nightly" --prerelease --latest=false \
+              --notes "Where Desk set to Nightly looks for updates (latest-nightly.json). Each nightly is its own pre-release." \
+              "${target[@]}"
+          fi
+          gh release upload nightly --repo "$RELEASES_REPO" --clobber feed/latest-nightly.json
+
+      # Stable's feed is as it was: its latest release is no nightly, and
+      # the nightly feed offers this version.
+      - name: Check both feeds
+        if: needs.version.outputs.channel == 'nightly' && !inputs.dry_run
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
+        run: |
+          latest=$(gh release view --repo "$RELEASES_REPO" --json tagName,isPrerelease --jq '"\(.tagName) \(.isPrerelease)"')
+          case "$latest" in
+            *-*|*true) echo "::error::Stable's latest release is now $latest: make the last stable the latest again"; exit 1 ;;
+          esac
+          for _ in 1 2 3 4 5; do
+            got=$(curl -fsSL "https://github.com/$RELEASES_REPO/releases/download/nightly/latest-nightly.json" | jq -r .version) || got=
+            [ "$got" = "$VERSION" ] && break
+            sleep 20
+          done
+          [ "$got" = "$VERSION" ] || { echo "::error::the nightly feed says ${got:-nothing}, not $VERSION"; exit 1; }
+          echo "Stable's latest is $latest; the nightly feed offers $VERSION."
+
+      # A nightly goes once a stable as new as it is out (a Desk on it moves
+      # to that stable, even on Stable) and 14 newer nightlies follow it.
+      # Until then it stays, with its machines' backend, for a Desk still on it.
+      - name: Prune old nightlies
+        if: needs.version.outputs.channel == 'nightly' && !inputs.dry_run
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
+        run: |
+          set -o pipefail
+          releases=$(gh release list --repo "$RELEASES_REPO" --limit 1000 --json tagName,isPrerelease,isDraft,createdAt)
+          stable=$(jq -r '[.[] | select((.isPrerelease | not) and (.isDraft | not)) | .tagName | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) | ltrimstr("v")] | .[]' <<<"$releases" | sort -V | tail -1)
+          [ -n "$stable" ] || exit 0
+          jq -r '[.[] | select(.isPrerelease and (.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-nightly\\.")))] | sort_by(.createdAt) | reverse | .[14:] | .[].tagName' <<<"$releases" |
+            while read -r tag; do
+              base=${tag#v}
+              base=${base%%-*}
+              # Superseded: its own stable (or a later one) is out.
+              [ "$(printf '%s\n%s\n' "$base" "$stable" | sort -V | tail -1)" = "$stable" ] || continue
+              gh release delete "$tag" --repo "$RELEASES_REPO" --cleanup-tag --yes || echo "::warning::couldn't remove $tag"
+            done

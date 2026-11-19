@@ -142,6 +142,10 @@ export interface Settings {
   imageSites?: string[];
   /** The first-run setup's progress; older files have none. */
   setup?: SetupProgress;
+  /** Which builds Desk updates to: "stable", or "nightly" for a build of
+   *  each day's changes too. Read here; only `setUpdateChannel` changes it
+   *  (a settings save keeps the file's). Older files have none (stable). */
+  updateChannel?: string;
 }
 
 export interface ThemeFile {
@@ -478,6 +482,9 @@ export interface Updating {
   how: "itself" | "package" | "never";
   neverBecause: string | null;
   download: string | null;
+  /** The releases page (`https://github.com/<repo>/releases`): a version's
+   *  own is `<releases>/tag/v<version>`. */
+  releases: string | null;
   /** This computer's sessions are in the PTY holder: they keep running
    *  while Desk restarts. */
   sessionsKept: boolean;
@@ -485,6 +492,9 @@ export interface Updating {
 export const updating = (): Promise<Updating> => invoke("updating");
 /** The version a new check finds, or null; always null for `never`. */
 export const updateCheck = (): Promise<string | null> => invoke("update_check");
+/** Sets which builds Desk updates to; the native side checks every
+ *  download and install against it. */
+export const setUpdateChannel = (channel: "stable" | "nightly"): Promise<void> => invoke("update_channel_set", { channel });
 /** Downloads what the last check found; refused unless it updates itself. */
 export const updateDownload = (): Promise<void> => invoke("update_download");
 /** Installs the download and restarts into it; refused natively unless

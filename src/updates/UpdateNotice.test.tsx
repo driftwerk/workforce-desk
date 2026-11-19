@@ -47,6 +47,7 @@ const how = (over: Partial<platform.Updating> = {}): platform.Updating => ({
   how: "itself",
   neverBecause: null,
   download: null,
+  releases: null,
   sessionsKept: true,
   ...over,
 });
