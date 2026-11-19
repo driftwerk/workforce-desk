@@ -11,7 +11,6 @@ import { proposalsFrom, useProposals } from "../theme/proposals";
 import { allThemes, useThemeStore } from "../theme/store";
 import { TerminalSwatches, ThemePreview } from "../theme/ThemePreview";
 import { derive } from "../theme/tokens";
-import "../styles/crew.css";
 import "../styles/settings.css";
 
 const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));

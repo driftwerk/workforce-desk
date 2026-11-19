@@ -1539,7 +1539,9 @@ legend.set-label {
   border-radius: 50%;
   background: var(--signal);
 }
-.pick-text {
+/* Scoped to its own rows: crew.css styles .pick-text for .pick, and an
+   unscoped rule here won or lost by stylesheet load order. */
+.pick-row .pick-text {
   flex: 1;
   min-width: 0;
   display: flex;
@@ -1548,11 +1550,11 @@ legend.set-label {
   flex-wrap: wrap;
   gap: 1px 10px;
 }
-.pick-text b {
+.pick-row .pick-text b {
   font-weight: 500;
   font-size: 13px;
 }
-.pick-text .muted {
+.pick-row .pick-text .muted {
   font-size: 12px;
 }
 .config-grid {

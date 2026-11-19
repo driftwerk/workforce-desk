@@ -80,7 +80,9 @@
 
 /* ── Dialogs ────────────────────────────────────────────────────────────── */
 
-.sheet-backdrop-center {
+/* Both classes, so it beats app.css's .sheet-backdrop (start, 12vh down)
+   whichever stylesheet loads first: a dialog is centred and fits the window. */
+.sheet-backdrop.sheet-backdrop-center {
   place-items: center;
   padding: 16px;
 }
