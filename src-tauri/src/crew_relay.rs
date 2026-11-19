@@ -597,14 +597,23 @@ async fn carry_machine<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool
         .await
     {
         Ok(r) if (200..300).contains(&r.status) => match serde_json::from_str::<Value>(&r.body) {
-            Ok(v) => Outcome::Answer(json!({"status": "ok", "body": v})),
+            Ok(v) => {
+                let answer = json!({"status": "ok", "body": v});
+                match answer.to_string().len() > MOST_BODY {
+                    false => Outcome::Answer(answer),
+                    true if reads => refused(format!(
+                        "{name}'s answer is too large to bring back: ask for less, like a folder further down"
+                    )),
+                    true => Outcome::Unknown(format!("{name}'s answer is too large to bring back")),
+                }
+            }
             Err(_) if reads => refused(format!("{name}'s answer couldn't be read")),
             Err(_) => Outcome::Unknown(format!("{name}'s answer couldn't be read")),
         },
         // No route there: an older Desk. A 404 of the route's own ("no
         // such folder") is its answer.
         Ok(r) if r.status == 404 && error_of(&r).is_none() => refused(format!(
-            "{name}'s Desk is older and can't answer that yet: update Desk there."
+            "{name}'s Desk is older and can't answer that yet (404): update Desk there."
         )),
         Ok(r) if (400..500).contains(&r.status) && r.status != 408 => refusal(name, &r),
         Ok(r) if reads => refused(format!("{name} couldn't answer that ({})", r.status)),
