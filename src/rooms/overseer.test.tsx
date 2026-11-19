@@ -519,18 +519,23 @@ describe("pings to the hub", () => {
     expect(asked).toContainEqual({ method: "POST", path: "/api/desk/presence", body: { attending: true, dmOnScreen: "desk" } });
   });
 
-  it("stop once an older hub says it hasn't the route; a non-boss's 404 doesn't stop them", async () => {
+  it("stop once an older hub says it hasn't the route; an unknown agent's 404, or an older hub's non-boss's, doesn't stop them", async () => {
     answer = (path) =>
       path.endsWith("/presence")
         ? new Response("", { status: 404 })
-        : new Response(JSON.stringify({ error: "There is no boss by that name here." }), { status: 404 });
+        : new Response(JSON.stringify({ error: path.includes("/scout/") ? "There is no boss by that name here." : "There is no agent by that name here." }), {
+            status: 404,
+          });
     const hub = new DeskHub(transport);
     await hub.presence(true, null);
     await hub.presence(true, null);
     await hub.dmTyping("scout");
     await hub.dmTyping("scout");
+    await hub.dmTyping("gone");
+    await hub.dmTyping("gone");
     expect(asked.filter((a) => a.path === "/api/desk/presence")).toHaveLength(1);
     expect(asked.filter((a) => a.path === "/api/desk/dm/scout/typing")).toHaveLength(2);
+    expect(asked.filter((a) => a.path === "/api/desk/dm/gone/typing")).toHaveLength(2);
   });
 });
 
