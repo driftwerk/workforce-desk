@@ -584,7 +584,8 @@ fn run_body(call: &Call) -> Result<Vec<u8>, Outcome> {
     let body = json!({
         "command": command,
         "cwd": cwd,
-        "timeout_secs": secs,
+        // Said, so the machine runs it for the time Desk reserved for it.
+        "timeout_secs": secs.unwrap_or(RUN_SECS),
         "judged": judged,
         "by_person": by_person,
     });
@@ -625,6 +626,9 @@ async fn carry_machine<E: Ends>(
     // A boss that only watches makes nothing, whatever its hub says: what
     // makes or runs something goes for a level that acts or suggests alone.
     let acts = matches!(call.level.as_str(), Some("suggest" | "act" | "full"));
+    if matches!(tool, FOLDER_MAKE | RUN) && !acts && call.level.as_str() != Some("watch") {
+        return refused("That call's level couldn't be read.".into());
+    }
     if tool == FOLDER_MAKE && !acts {
         return refused("A boss that only watches makes no folders.".into());
     }
@@ -1532,6 +1536,11 @@ mod tests {
         assert_eq!(sent.len(), 2, "a check cut off isn't sent again");
         assert_eq!(sent[1].3.as_ref().unwrap()["judged"], true);
         assert_eq!(sent[1].3.as_ref().unwrap()["by_person"], false);
+        assert_eq!(
+            sent[1].3.as_ref().unwrap()["timeout_secs"],
+            10,
+            "the time reserved"
+        );
         // Each refused for its own reason, and nothing sent.
         let at = |id: &str, level: Value, input: Value| {
             let mut c = desk_call(id, "desk.run", input);
@@ -1630,13 +1639,13 @@ mod tests {
                 "0f0e0d0c-0b0a-4909-8807-0605040302cf",
                 Value::Null,
                 json!({"command": "ls"}),
-                "only watches",
+                "level",
             ),
             (
                 "0f0e0d0c-0b0a-4909-8807-0605040302d0",
                 json!("Full"),
                 json!({"command": "ls"}),
-                "only watches",
+                "level",
             ),
         ];
         let stop = start_with(
