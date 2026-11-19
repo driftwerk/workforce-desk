@@ -17,7 +17,15 @@
           "libasound2t64 | libasound2",
           "procps",
           "curl"
-        ]
+        ],
+        "files": {
+          "/usr/lib/Desk/libonnxruntime.so.1": "binaries/libonnxruntime.so.1"
+        }
+      },
+      "appimage": {
+        "files": {
+          "/usr/lib/Desk/libonnxruntime.so.1": "binaries/libonnxruntime.so.1"
+        }
       }
     }
   }

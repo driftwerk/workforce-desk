@@ -41,9 +41,9 @@ hub keeps memories in SQLite; then it moves them into the store, once.
 3. `.github/workflows/release.yml` then:
    - builds the three sidecars for both architectures and joins each pair
      with `lipo` (`scripts/build-sidecars.sh`). vellev embeds with ONNX
-     Runtime, which `ort` ships prebuilt for Apple Silicon only: for Intel
-     the job builds ONNX Runtime 1.28 from source
-     (`scripts/onnxruntime.sh`, cached by its pin)
+     Runtime, which `ort` ships prebuilt for Apple Silicon only. Intel's
+     memory store isn't built: it is Desk 0.2.10's, pinned
+     (`scripts/intel-memory.sh`; see [ONNX Runtime](#onnx-runtime))
    - builds the app with `tauri build --target universal-apple-darwin`
    - signs inside out with the Developer ID, using the hardened runtime and
      the entitlements in `src-tauri/entitlements/`
@@ -61,9 +61,18 @@ hub keeps memories in SQLite; then it moves them into the store, once.
 5. The `backend` job (`backend-build.yml`) builds the Linux backend alone,
    for x86_64 (on `ubuntu-24.04`) and aarch64 (on `ubuntu-24.04-arm`), each
    inside manylinux_2_28 (AlmaLinux 8, glibc 2.28), with OpenSSL linked in
-   (`scripts/openssl-static.sh`) and ONNX Runtime built there
+   (`scripts/openssl-static.sh`) and Microsoft's ONNX Runtime from NuGet
    (`scripts/onnxruntime.sh`; ort's own needs glibc 2.38), so Desk's own
-   programs need only glibc 2.28.
+   programs need only glibc 2.28. That ONNX Runtime is a shared library,
+   `libonnxruntime.so.1`: every Linux backend ships it beside
+   `desk-memory`, which finds it there (rpath `$ORIGIN`). That covers the
+   artifact, the machines' tarball and the WSL copy. The Linux app's
+   packages put it in `/usr/lib/Desk`. The AppImage's tooling then moves a
+   copy into `usr/lib`, and the release checks that both packages load
+   their own copy.
+   Every place that ships it checks it against its pin
+   (`scripts/onnxruntime.sh check`). Each Desk install refuses a backend
+   whose `desk-memory` names the library but which doesn't hold it.
    - The Postgres Desk Helper embeds is built there too, from source
      (`scripts/postgres-linux.sh`): theseus-rs' builds, which
      `postgresql_embedded` downloads otherwise, are made on Debian 12 and
@@ -121,11 +130,9 @@ download the update in the background and offer **Restart to update**. A
 `.deb` is updated by the system's package manager instead: Desk says a new
 version is out and links to the release.
 
-The first build of a new hub ref takes well over an hour, and the first
-Intel ONNX Runtime build adds 30 to 60 minutes. Later builds reuse the cargo
-cache, keyed by the hub and vellev refs, and the ONNX Runtime build, keyed by
-its pin. If the runner runs out of disk, move the
-job to a larger macOS runner.
+The first build of a new hub ref takes well over an hour. Later builds
+reuse the cargo cache, keyed by the hub and vellev refs. If the runner runs
+out of disk, move the job to a larger macOS runner.
 
 ## Secrets and variables
 
@@ -195,10 +202,80 @@ echo <sha> > vellev.ref
 git commit -m "Desk ships vellev <short sha>: <why>" vellev.ref
 ```
 
-When it builds for Intel Macs, `build-sidecars.sh` refuses a vellev whose
-locked `ort-sys` is not the one `scripts/onnxruntime.sh` builds ONNX
-Runtime for; move that script's pin (version and commit) to the ONNX Runtime
-the new `ort-sys` links.
+While Intel Macs ship Desk 0.2.10's memory store, `build-sidecars.sh`
+refuses to change vellev at all for them (see [ONNX Runtime](#onnx-runtime)).
+When it builds the Linux backend, it refuses a vellev whose locked `ort-sys`
+is not the one `scripts/onnxruntime.sh` provides ONNX Runtime for. Move that script's pins
+to the ONNX Runtime the new `ort-sys` links:
+- its version and commit;
+- the NuGet package's sha256, and each Linux library's.
+
+Check a new package before pinning it (see below).
+
+## ONNX Runtime
+
+On 2026-11-18, github.com/microsoft/onnxruntime went offline: git, the web
+and the API all answer 404. Microsoft took it down, along with
+microsoft/agent-framework, hours after a malicious agent-framework release
+on PyPI. Until then `scripts/onnxruntime.sh` cloned the v1.28.0 tag from
+that repository and built it. No step of Desk's build fetches from it now:
+
+- **Linux backend.** It uses Microsoft's own build from nuget.org,
+  Microsoft.ML.OnnxRuntime 1.28.0, pinned by the package's sha256 and by
+  each library's. That version was published on 2026-07-25 and can't be
+  changed on nuget.org. Before it was pinned, it was checked on 2026-11-19:
+  - `dotnet nuget verify --all` accepted Microsoft Corporation's author
+    signature and nuget.org's repository countersignature, both
+    timestamped 2026-07-25. The author certificate expired on 2026-10-17,
+    so the signature stands on its timestamp;
+  - its sha512 matched nuget.org's catalog;
+  - its `.nuspec` names commit `da9b5e36…`, the v1.28.0 commit Desk built
+    from before;
+  - its libraries need glibc 2.27 at most.
+
+  To check a package the same way:
+
+  ```sh
+  docker run --rm -v "$PWD/x.nupkg:/p/x.nupkg:ro" \
+    mcr.microsoft.com/dotnet/sdk@sha256:1b955f179b02df4f0eb5fadedaa898cbe44d620a64aab52eec72c8e91d1355b5 \
+    dotnet nuget verify --all -v normal /p/x.nupkg
+  ```
+- **Intel Macs.** Microsoft publishes no 1.28 build for Intel Macs, on
+  NuGet or PyPI, and its source is the repository that is offline. No ONNX
+  Runtime library we built survived: the CI caches had expired, and the
+  library was never a release asset. But the memory store linked against
+  it did, inside Desk 0.2.10's signed, notarized Desk.app. Until the source
+  is back, Intel's memory store is that binary's x86_64 slice, taken with
+  `lipo -thin x86_64`.
+  - The asset was `v0.2.10/Desk.app.tar.gz`, sha256 `16e92f85…3c14`. GitHub's
+    digest agrees, and its minisign signature verified with the updater
+    key.
+  - The app passes `codesign --verify --strict --deep`, and `spctl`
+    accepted it as notarized.
+  - The slice keeps its own Developer ID signature, team `CHA3FP8ENJ`.
+  - It was built by Release run 44073317561 (tag v0.2.10, `64a7e561`) on
+    2026-11-17, before the takedown. That run built vellev `c68c9736` with
+    ONNX Runtime cloned that day and checked against commit `da9b5e36…`.
+  - It is hosted as an asset of the pre-release
+    `deps-intel-memory-vellev-c68c9736` on this repository, beside its
+    `PROVENANCE.txt`. That pre-release is not a Desk release, is never the
+    latest, and its tag doesn't start with `v`, so neither release.yml nor
+    the updater looks at it.
+  - `scripts/intel-memory.sh` pins it by sha256. It checks a private copy
+    again (a single x86_64 program, signed with that team's Developer ID,
+    for macOS 13.0) before moving it into place. `build-sidecars.sh` ships it
+    as it is and checks it again where it lands. The release checks the
+    app's Desk Memory once more before signing it.
+
+  **vellev.ref is held at `c68c9736` while this lasts**, for every platform,
+  since one vellev.ref serves them all. Both
+  `intel-memory.sh` and therefore `build-sidecars.sh` refuse any other
+  vellev before building, and `intel-sidecars.yml` runs whenever
+  `vellev.ref` changes. A vellev bump has to wait until ONNX Runtime's
+  source is settled: Microsoft's repository is back, or the release owner
+  approves another source (not a third-party mirror by default). After
+  that, the source build of Intel's ONNX Runtime comes back (see
+  `scripts/onnxruntime.sh` before this change, in git).
 
 ## Building locally
 

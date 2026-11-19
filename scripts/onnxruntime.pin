@@ -1,0 +1,7 @@
+# The ONNX Runtime scripts/onnxruntime.sh provides, read by it (a bash file
+# of assignments): its version, and the v1.28.0 commit Desk built from
+# before github.com/microsoft/onnxruntime went offline, which the NuGet
+# package's .nuspec names (<repository commit=...>).
+
+VERSION=1.28.0
+COMMIT=da9b5e364c465de65c49d91e696cd6485270757f

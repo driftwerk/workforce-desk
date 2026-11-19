@@ -25,12 +25,17 @@ on:
         description: "Version to release (e.g. 0.2.0)"
         required: true
         type: string
+      dry_run:
+        description: "Build, sign and check everything, but publish nothing"
+        type: boolean
+        default: false
 
 permissions:
   contents: write
 
+# A dry run never waits for, or holds up, a release.
 concurrency:
-  group: release
+  group: release${{ inputs.dry_run && '-dry-run' || '' }}
   cancel-in-progress: false
 
 env:
@@ -106,14 +111,6 @@ jobs:
         with:
           targets: aarch64-apple-darwin,x86_64-apple-darwin
 
-      # vellev's ONNX Runtime for Intel Macs, built from source (ort ships
-      # none): the slowest step on a cold cache, keyed by its pin.
-      - name: Cache ONNX Runtime for Intel
-        uses: actions/cache@v6
-        with:
-          path: ~/Library/Caches/desk-build/onnxruntime-x86_64
-          key: onnxruntime-x86_64-${{ hashFiles('desk/scripts/onnxruntime.sh') }}
-
       - name: Set the version
         working-directory: desk
         run: scripts/set-version.sh "${{ needs.version.outputs.version }}"
@@ -179,6 +176,12 @@ jobs:
         run: |
           npx tauri build --target universal-apple-darwin --bundles app \
             --config "{\"plugins\":{\"updater\":{\"endpoints\":[\"$ENDPOINT\"]}}}"
+
+      # The app's Intel memory store is the pinned one (Desk 0.2.10's:
+      # scripts/intel-memory.sh), checked before signing replaces its
+      # signature.
+      - name: Check the Intel memory store
+        run: desk/scripts/intel-memory.sh check "$APP/Contents/MacOS/Desk Memory"
 
       - name: Import the Developer ID certificate
         id: cert
@@ -361,6 +364,11 @@ jobs:
 
       # Where Tauri looks for the sidecars (externalBin in
       # tauri.linux.conf.json), executable again: an artifact keeps no modes.
+      # And the ONNX Runtime the memory store links, checked against its pin,
+      # which both packages put in /usr/lib/Desk (bundle.linux there), where
+      # its memory store looks for it. The AppImage's tooling (linuxdeploy)
+      # finds it there and moves a copy to usr/lib, which it points the
+      # programs at.
       - name: The helper, hub and memory store
         working-directory: desk
         run: |
@@ -368,6 +376,8 @@ jobs:
           for name in desk-helper desk-agents desk-memory; do
             install -m 755 "$GITHUB_WORKSPACE/backend/$name" "src-tauri/binaries/$name-x86_64-unknown-linux-gnu"
           done
+          scripts/onnxruntime.sh check "$GITHUB_WORKSPACE/backend/libonnxruntime.so.1" x86_64
+          install -m 644 "$GITHUB_WORKSPACE/backend/libonnxruntime.so.1" src-tauri/binaries/libonnxruntime.so.1
           ls -la src-tauri/binaries
 
       # The AppImage is the updater's download, signed with the updater key
@@ -382,6 +392,29 @@ jobs:
         run: |
           npx tauri build --bundles appimage,deb \
             --config "{\"plugins\":{\"updater\":{\"endpoints\":[\"$ENDPOINT\"]}}}"
+
+      # Each package's memory store runs and loads the ONNX Runtime the
+      # package holds, not one of the system's: the .deb's the pinned file
+      # itself; the AppImage's the copy its tooling (linuxdeploy) moved into
+      # usr/lib and stripped.
+      - name: Check the packages' ONNX Runtime
+        working-directory: desk
+        run: |
+          check() {
+            root=$(cd "$1" && pwd) want=$2
+            found=$(env -i ldd "$root/usr/bin/desk-memory" | awk '$1 == "libonnxruntime.so.1" { print $3 }')
+            [ "$(realpath "$found")" = "$(realpath "$want")" ] ||
+              { echo "$1's desk-memory loads '$found', not $want"; exit 1; }
+            env -i "$root/usr/bin/desk-memory" --help >/dev/null
+          }
+          work=$(mktemp -d)
+          dpkg-deb -x target/release/bundle/deb/*.deb "$work/deb"
+          scripts/onnxruntime.sh check "$work/deb/usr/lib/Desk/libonnxruntime.so.1" x86_64
+          check "$work/deb" "$work/deb/usr/lib/Desk/libonnxruntime.so.1"
+          appimage=$(realpath target/release/bundle/appimage/*.AppImage)
+          (cd "$work" && "$appimage" --appimage-extract >/dev/null)
+          check "$work/squashfs-root" "$work/squashfs-root/usr/lib/libonnxruntime.so.1"
+          rm -rf "$work"
 
       - name: Collect
         working-directory: desk
@@ -474,11 +507,16 @@ jobs:
         working-directory: desk
         run: npm ci
 
-      # The Linux backend the installers carry, which Desk installs into WSL.
+      # The Linux backend the installers carry, which Desk installs into WSL,
+      # with the pinned ONNX Runtime.
       - uses: actions/download-artifact@v7
         with:
           name: backend-linux-x86_64
           path: desk/src-tauri/resources/backend/linux-x86_64
+
+      - name: Check the backend's ONNX Runtime
+        shell: bash
+        run: desk/scripts/onnxruntime.sh check desk/src-tauri/resources/backend/linux-x86_64/libonnxruntime.so.1 x86_64
 
       - name: Build Desk Helper.exe
         working-directory: desk
@@ -626,6 +664,7 @@ jobs:
           jq '.platforms | keys' out/latest.json
 
       - name: Publish the release
+        if: ${{ !inputs.dry_run }}
         env:
           VERSION: ${{ needs.version.outputs.version }}
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}

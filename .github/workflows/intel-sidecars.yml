@@ -1,6 +1,7 @@
 # The Intel Mac sidecars built the way the release builds them, without a
-# release: on pull requests that change how vellev's ONNX Runtime is built or
-# linked for x86_64-apple-darwin, and by hand:
+# release: on pull requests that change how they are built or where their
+# memory store comes from (Desk 0.2.10's, pinned: scripts/intel-memory.sh),
+# and by hand:
 #
 #   gh workflow run intel-sidecars.yml --ref <branch>
 name: Intel sidecars
@@ -8,7 +9,7 @@ name: Intel sidecars
 on:
   pull_request:
     paths:
-      - scripts/onnxruntime.sh
+      - scripts/intel-memory.sh
       - scripts/build-sidecars.sh
       - vellev.ref
       - .github/workflows/intel-sidecars.yml
@@ -56,26 +57,6 @@ jobs:
         with:
           targets: x86_64-apple-darwin
 
-      # The same cache as the release's, saved as soon as ONNX Runtime is
-      # built so a failure later still keeps it.
-      - name: Restore ONNX Runtime for Intel
-        id: ort
-        uses: actions/cache/restore@v6
-        with:
-          path: ~/Library/Caches/desk-build/onnxruntime-x86_64
-          key: onnxruntime-x86_64-${{ hashFiles('desk/scripts/onnxruntime.sh') }}
-
-      - name: Build ONNX Runtime for Intel
-        working-directory: desk
-        run: scripts/onnxruntime.sh ~/Library/Caches/desk-build/onnxruntime-x86_64
-
-      - name: Save ONNX Runtime for Intel
-        if: steps.ort.outputs.cache-hit != 'true'
-        uses: actions/cache/save@v6
-        with:
-          path: ~/Library/Caches/desk-build/onnxruntime-x86_64
-          key: onnxruntime-x86_64-${{ hashFiles('desk/scripts/onnxruntime.sh') }}
-
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
@@ -108,14 +89,19 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: scripts/build-sidecars.sh
 
-      # Nothing in ONNX Runtime may need a newer macOS than Desk's 13.0.
-      - name: Check ONNX Runtime's minimum macOS
+      # Nothing may need a newer macOS than Desk's 13.0 (an older target is
+      # fine: Rust's default writes LC_VERSION_MIN_MACOSX 10.12), and the
+      # memory store is the pinned one.
+      - name: Check the sidecars' minimum macOS
+        working-directory: desk/src-tauri/binaries
         run: |
-          versions=$(find ~/Library/Caches/desk-build/onnxruntime-x86_64/Release -name '*.a' -exec otool -l {} + |
-            awk '$1 == "minos" { print $2 }' | sort -u)
-          echo "ONNX Runtime's objects target macOS: $versions"
-          newer=$(echo "$versions" | awk -F. '$1 > 13 || ($1 == 13 && $2 > 0)')
-          [ -z "$newer" ] || { echo "::error::built for macOS $newer, newer than 13.0"; exit 1; }
+          for f in *-x86_64-apple-darwin; do
+            v=$(otool -l "$f" | awk '$1 == "minos" { print $2; exit } /LC_VERSION_MIN_MACOSX/ { m = 1 } m && $1 == "version" { print $2; exit }')
+            echo "$f targets macOS $v"
+            [ -n "$v" ] && echo "$v" | awk -F. '{ exit !($1 < 13 || ($1 == 13 && $2 + 0 == 0)) }' ||
+              { echo "::error::$f targets macOS '$v', newer than 13.0"; exit 1; }
+          done
+          ../../scripts/intel-memory.sh check "Desk Memory-x86_64-apple-darwin"
 
       - name: Run the memory store (Rosetta)
         working-directory: desk/src-tauri/binaries
