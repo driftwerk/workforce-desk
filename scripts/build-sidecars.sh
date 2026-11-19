@@ -192,7 +192,7 @@ for t in $targets; do
       export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=$ort/Release/model_package/libmodel_package.a"
     elif [ "${ORT_SHARED:-}" = 1 ]; then
       ort=${ORT_DIR:-$cache/onnxruntime-${t%%-*}}
-      "$root/scripts/onnxruntime.sh" "$ort"
+      "$root/scripts/onnxruntime.sh" "$ort" "${t%%-*}"
       export ORT_LIB_LOCATION="$ort" ORT_PREFER_DYNAMIC_LINK=1 ORT_SKIP_DOWNLOAD=1
       # Found beside the memory store, where every Linux backend puts it, or
       # in /usr/lib/Desk, where the Linux app's packages do (bundle.linux in
@@ -211,10 +211,11 @@ for t in $targets; do
   done
   if [ "${ORT_SHARED:-}" = 1 ]; then
     # The ONNX Runtime the memory store was linked with, which it needs at
-    # run time: no other.
+    # run time: no other, checked again after the builds.
     ort=${ORT_DIR:-$cache/onnxruntime-${t%%-*}}
     readelf -d "$bin/${names[2]}-$t" | grep 'NEEDED.*\[libonnxruntime\.so\.1\]' >/dev/null ||
       die "${names[2]} for $t doesn't link libonnxruntime.so.1"
+    "$root/scripts/onnxruntime.sh" check "$ort/libonnxruntime.so.1" "${t%%-*}"
     install -m 644 "$ort/libonnxruntime.so.1" "$bin/libonnxruntime.so.1-$t"
   fi
 done

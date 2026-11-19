@@ -6,7 +6,12 @@
 #   - Intel Macs: ort's cover Apple Silicon but no longer Intel.
 # build-sidecars.sh links what this leaves in DIR (ORT_LIB_LOCATION).
 #
-#   scripts/onnxruntime.sh DIR
+#   scripts/onnxruntime.sh DIR [ARCH]    provide it in DIR, for ARCH
+#                                        (x86_64 or aarch64; default this
+#                                        machine's)
+#   scripts/onnxruntime.sh check FILE ARCH
+#                                        fail unless FILE is the pinned Linux
+#                                        library for ARCH
 #
 # Nothing here comes from github.com/microsoft/onnxruntime. Microsoft took
 # that repository offline on 2026-11-18, hours after a malicious release of
@@ -18,7 +23,9 @@
 #   - nuget.org never lets a published version change.
 #   - The package carries Microsoft Corporation's author signature and
 #     nuget.org's repository countersignature. `dotnet nuget verify --all`
-#     accepted both on 2026-11-19, and the sha512 matched nuget.org's catalog.
+#     accepted both on 2026-11-19. The author certificate expired on
+#     2026-10-17, so the signature stands on its timestamp, 2026-07-25.
+#   - Its sha512 matched nuget.org's catalog.
 #   - Its .nuspec names the commit we used to build from source, COMMIT
 #     below.
 #   - It was published on 2026-07-25, four months before the incident.
@@ -27,17 +34,23 @@
 #   - It is a shared library, not the static one the source build made. The
 #     memory store links it dynamically, finds it beside itself
 #     (rpath $ORIGIN), and every Linux backend ships it as
-#     libonnxruntime.so.1, its SONAME.
+#     libonnxruntime.so.1, its SONAME. Each place that ships it checks it
+#     again (`check`).
 # DIR gets libonnxruntime.so.1, and libonnxruntime.so naming it for the
 # linker.
 #
 # macOS (x86_64): Microsoft publishes no 1.28 build for Intel Macs, so this
-# still builds from source. That source must now be a checkout of v1.28.0
-# that ORT_SOURCE names. It is used only if it is exactly COMMIT, whole
-# (git fsck) and unchanged. Where it can come from while Microsoft's
+# still builds from source. That source must now be a git repository that
+# ORT_SOURCE names, and holds COMMIT; where it comes from while Microsoft's
 # repository is offline is the release owner's decision (docs/RELEASING.md).
-# DIR/Release is what ORT_LIB_LOCATION names (about 30 to 60 minutes; CI
-# caches DIR by this file's hash).
+# Nothing is run from it or built in it:
+#   - COMMIT is cloned out of it into a fresh folder, with its replace refs,
+#     hooks, fsmonitor and configuration ignored, and every object checked
+#     on the way (fsckObjects);
+#   - the build uses that fresh checkout.
+# Its submodules then come, at the commits COMMIT's tree pins, from the URLs
+# its .gitmodules names. DIR/Release is what ORT_LIB_LOCATION names (about
+# 30 to 60 minutes; CI caches DIR by this file's hash).
 #
 # The version must be the one the locked ort-sys of vellev's Cargo.lock
 # links: build-sidecars.sh checks that, and says so if a vellev bump moved
@@ -55,24 +68,41 @@ NUGET_SHA256=769d1d3ea8ab6cd69f737c9dd4d4462aa4ad0ccfa106eaf506efc40d7bead5db
 LIB_SHA256_x86_64=1461ef7cc3d9e49982591721683cc3e3a55580aeca9a5254e7aac47b75ee4bab
 LIB_SHA256_aarch64=f1ec1a08eb99bd6e5401340f0a2b101381bf4694415480291dc13bcaa30f9ec7
 
-dir=${1:?usage: onnxruntime.sh DIR}
+# The macOS build's tools, from PyPI, pinned by hash (universal2 wheels).
+BUILD_TOOLS='cmake==3.31.6 --hash=sha256:da9d4fd9abd571fd016ddb27da0428b10277010b23bb21e3678f8b9e96e1686e
+ninja==1.11.1.4 --hash=sha256:b33923c8da88e8da20b6053e38deb433f53656441614207e01d283ad02c5e8e7'
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*" >&2; }
 die() { echo "onnxruntime.sh: $*" >&2; exit 1; }
 sha256() {
   if command -v sha256sum >/dev/null; then sha256sum "$1"; else shasum -a 256 "$1"; fi | cut -d' ' -f1
 }
+work=
+trap '[ -z "$work" ] || rm -rf "$work"' EXIT
+
+pinned_sha() {
+  case "$1" in
+    x86_64) echo "$LIB_SHA256_x86_64" ;;
+    aarch64) echo "$LIB_SHA256_aarch64" ;;
+    *) die "Microsoft's NuGet package has no Linux build for $1" ;;
+  esac
+}
+
+check() {
+  local file=$1 arch=$2 got
+  [ -f "$file" ] || die "no $file"
+  got=$(sha256 "$file")
+  [ "$got" = "$(pinned_sha "$arch")" ] ||
+    die "$file is not the pinned ONNX Runtime $VERSION for $arch (sha256 $got)"
+}
 
 linux() {
-  local arch nuget_arch want cache nupkg built tmp
-  arch=$(uname -m)
-  case "$arch" in
-    x86_64) nuget_arch=x64 want=$LIB_SHA256_x86_64 ;;
-    aarch64) nuget_arch=arm64 want=$LIB_SHA256_aarch64 ;;
-    *) die "Microsoft's NuGet package has no Linux build for $arch" ;;
-  esac
-  built="$dir/.nuget-$NUGET_SHA256"
-  if [ -f "$built" ] && [ "$(sha256 "$dir/libonnxruntime.so.1")" = "$want" ]; then
+  local arch=$1 nuget_arch want cache nupkg got
+  want=$(pinned_sha "$arch")
+  case "$arch" in x86_64) nuget_arch=x64 ;; aarch64) nuget_arch=arm64 ;; esac
+  if [ -f "$dir/.nuget-$NUGET_SHA256" ] && [ -f "$dir/libonnxruntime.so.1" ] &&
+    [ "$(sha256 "$dir/libonnxruntime.so.1")" = "$want" ] &&
+    [ "$(readlink "$dir/libonnxruntime.so")" = libonnxruntime.so.1 ]; then
     say "ONNX Runtime $VERSION for $arch already in $dir"
     return
   fi
@@ -95,19 +125,25 @@ linux() {
   fi
 
   # Only the library, by its exact name in the package.
-  tmp=$(mktemp -d)
-  trap 'rm -rf "$tmp"' RETURN
-  unzip -q -d "$tmp" "$nupkg" "runtimes/linux-$nuget_arch/native/libonnxruntime.so"
-  got=$(sha256 "$tmp/runtimes/linux-$nuget_arch/native/libonnxruntime.so")
-  [ "$got" = "$want" ] || die "the package's linux-$nuget_arch library is not the pinned one (sha256 $got)"
-  install -m 644 "$tmp/runtimes/linux-$nuget_arch/native/libonnxruntime.so" "$dir/libonnxruntime.so.1"
+  work=$(mktemp -d)
+  unzip -q -d "$work" "$nupkg" "runtimes/linux-$nuget_arch/native/libonnxruntime.so"
+  check "$work/runtimes/linux-$nuget_arch/native/libonnxruntime.so" "$arch"
+  install -m 644 "$work/runtimes/linux-$nuget_arch/native/libonnxruntime.so" "$dir/libonnxruntime.so.1"
   ln -s libonnxruntime.so.1 "$dir/libonnxruntime.so"
-  touch "$built"
+  touch "$dir/.nuget-$NUGET_SHA256"
   say "ONNX Runtime $VERSION for $arch (Microsoft's NuGet build) in $dir"
 }
 
+# git that reads no configuration but its own -c's and none of a
+# repository's replace refs.
+safe_git() {
+  GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 \
+    git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c protocol.file.allow=user \
+    -c transfer.fsckObjects=true -c fetch.fsckObjects=true "$@"
+}
+
 macos() {
-  local src built tools
+  local src built source
   # The oldest macOS Desk runs on (tauri.macos.conf.json). build.py passes
   # --apple_deploy_target to CMake only for framework builds, so CMake gets
   # it too; without it everything targets the SDK's macOS.
@@ -125,14 +161,24 @@ macos() {
   src=${ORT_SOURCE:-}
   [ -n "$src" ] || die "Microsoft publishes no ONNX Runtime $VERSION for Intel Macs, so it is built from source, \
 and github.com/microsoft/onnxruntime, where that source came from, has been offline since 2026-11-18. \
-Set ORT_SOURCE to a checkout of v$VERSION ($COMMIT) whose origin the release owner has approved; \
-it is checked against that commit (docs/RELEASING.md)."
-  [ -d "$src/.git" ] || die "ORT_SOURCE ($src) is not a git checkout"
-  [ "$(git -C "$src" rev-parse HEAD)" = "$COMMIT" ] || die "ORT_SOURCE ($src) is not v$VERSION ($COMMIT)"
-  git -C "$src" fsck --full --no-dangling --no-progress ||
-    die "ORT_SOURCE ($src) fails git fsck: its objects may not be the ones $COMMIT names"
-  [ -z "$(git -C "$src" status --porcelain --untracked-files=all --ignore-submodules=all)" ] ||
-    die "ORT_SOURCE ($src) has changes beside $COMMIT"
+Set ORT_SOURCE to a git repository holding v$VERSION ($COMMIT) whose origin the release owner has approved; \
+only that commit is taken from it, checked (docs/RELEASING.md)."
+
+  # COMMIT alone, into a folder of our own: nothing of ORT_SOURCE's but its
+  # objects, each checked as it is copied.
+  work=$(mktemp -d)
+  source="$work/onnxruntime"
+  safe_git init --quiet "$source"
+  safe_git -C "$source" fetch --quiet --no-tags --no-recurse-submodules "$src" "$COMMIT" ||
+    die "ORT_SOURCE ($src) has no commit $COMMIT, or its objects don't check"
+  safe_git -C "$source" checkout --quiet --detach "$COMMIT"
+  [ "$(safe_git -C "$source" rev-parse HEAD)" = "$COMMIT" ] || die "the checkout is not $COMMIT"
+  safe_git -C "$source" fsck --full --no-dangling --no-progress ||
+    die "ORT_SOURCE ($src)'s v$VERSION fails git fsck"
+  # Each submodule at the commit v$VERSION's tree pins, from its own project.
+  safe_git -C "$source" submodule update --quiet --init --recursive --depth 1
+  [ -z "$(safe_git -C "$source" status --porcelain --ignored --untracked-files=all)" ] ||
+    die "the checkout of $COMMIT differs from it"
 
   # A build that didn't finish names tools that are gone (its CMake cache
   # holds the throwaway venv's ninja): it starts again from nothing.
@@ -140,30 +186,33 @@ it is checked against that commit (docs/RELEASING.md)."
     say "starting again: $dir holds a build that didn't finish"
     rm -rf "$dir"
   fi
-  # Each submodule at the commit v$VERSION's tree pins, from its own project.
-  git -C "$src" submodule update --quiet --init --recursive --depth 1
 
   # ONNX Runtime wants a newer CMake than macOS runners may have, and older
-  # than 4.
-  tools=$(mktemp -d)
-  trap 'rm -rf "$tools"' RETURN
-  python3 -m venv "$tools/venv"
-  "$tools/venv/bin/pip" install --quiet "cmake>=3.28,<4" ninja
+  # than 4: the pinned one.
+  python3 -m venv "$work/venv"
+  printf '%s\n' "$BUILD_TOOLS" > "$work/tools.txt"
+  "$work/venv/bin/pip" install --quiet --only-binary :all: --require-hashes -r "$work/tools.txt"
 
   say "building ONNX Runtime $VERSION for x86_64 (static, no tests)"
-  PATH="$tools/venv/bin:$PATH" python3 "$src/tools/ci_build/build.py" \
+  PATH="$work/venv/bin:$PATH" python3 "$source/tools/ci_build/build.py" \
     --build_dir "$dir" --config Release --update --build \
     --parallel --skip_tests --skip_submodule_sync --compile_no_warning_as_error \
     "${platform[@]}" --cmake_generator Ninja \
     --cmake_extra_defines onnxruntime_BUILD_UNIT_TESTS=OFF
   # ort links re2 too, which ONNX Runtime's own targets don't always build.
-  PATH="$tools/venv/bin:$PATH" cmake --build "$dir/Release" --target re2
+  PATH="$work/venv/bin:$PATH" cmake --build "$dir/Release" --target re2
   touch "$built"
   say "ONNX Runtime $VERSION for x86_64 in $dir"
 }
 
+if [ "${1:-}" = check ]; then
+  [ $# -eq 3 ] || die "usage: onnxruntime.sh check FILE ARCH"
+  check "$2" "$3"
+  exit 0
+fi
+dir=${1:?usage: onnxruntime.sh DIR [ARCH] | check FILE ARCH}
 case "$(uname -s)" in
-  Linux) linux ;;
+  Linux) linux "${2:-$(uname -m)}" ;;
   Darwin) macos ;;
   *) die "no ONNX Runtime build for $(uname -s)" ;;
 esac

@@ -114,7 +114,9 @@ mod tests {
              install -Dm755 \"$src/desk-helper\" '/home/sarah/.local/share/Desk/bin/0.3.0'/desk-helper\n\
              install -Dm755 \"$src/desk-agents\" '/home/sarah/.local/share/Desk/bin/0.3.0'/desk-agents\n\
              install -Dm755 \"$src/desk-memory\" '/home/sarah/.local/share/Desk/bin/0.3.0'/desk-memory\n\
-             [ ! -f \"$src/libonnxruntime.so.1\" ] || install -Dm644 \"$src/libonnxruntime.so.1\" '/home/sarah/.local/share/Desk/bin/0.3.0'/libonnxruntime.so.1\n\
+             if grep -qF 'libonnxruntime.so.1' \"$src\"/desk-memory; then l=\"$src\"/libonnxruntime.so.1; \
+             [ -f \"$l\" ] || { echo \"the backend has no libonnxruntime.so.1, which desk-memory links\" >&2; exit 1; }; \
+             install -Dm644 \"$l\" '/home/sarah/.local/share/Desk/bin/0.3.0'/libonnxruntime.so.1; fi\n\
              rm -rf '/home/sarah/.local/share/Desk/bin/0.3.0'/claude-plugin\n\
              cp -R \"$src/claude-plugin\" '/home/sarah/.local/share/Desk/bin/0.3.0'/claude-plugin\n"
         );
@@ -144,9 +146,10 @@ mod tests {
         std::fs::create_dir_all(source.join("claude-plugin/hooks")).unwrap();
         std::fs::write(source.join("claude-plugin/hooks/hooks.json"), "{}").unwrap();
         for p in scripts::PROGRAMS {
-            std::fs::write(source.join(p), "#!/bin/sh\n").unwrap();
+            std::fs::write(source.join(p), "#!/bin/sh\n# libonnxruntime.so.1\n").unwrap();
         }
-        std::fs::write(source.join(scripts::LIBRARIES[0]), "a library").unwrap();
+        let (library, _) = scripts::LIBRARIES[0];
+        std::fs::write(source.join(library), "a library").unwrap();
         let sh = |script: String| {
             // `wslpath -u` stands for itself: the source is already a Linux path.
             let script = format!("wslpath() {{ echo \"$2\"; }}\n{script}");
@@ -181,7 +184,7 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o755);
-        let mode = std::fs::metadata(bin.join("current").join(scripts::LIBRARIES[0]))
+        let mode = std::fs::metadata(bin.join("current").join(library))
             .unwrap()
             .permissions()
             .mode();

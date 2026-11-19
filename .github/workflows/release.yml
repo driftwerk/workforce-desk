@@ -361,8 +361,9 @@ jobs:
 
       # Where Tauri looks for the sidecars (externalBin in
       # tauri.linux.conf.json), executable again: an artifact keeps no modes.
-      # And the ONNX Runtime the memory store links, which the packages put
-      # in /usr/lib/Desk (bundle.linux there), where it looks for it.
+      # And the ONNX Runtime the memory store links, checked against its pin:
+      # the .deb puts it in /usr/lib/Desk and the AppImage in usr/lib
+      # (bundle.linux there), where its memory store looks for it.
       - name: The helper, hub and memory store
         working-directory: desk
         run: |
@@ -370,6 +371,7 @@ jobs:
           for name in desk-helper desk-agents desk-memory; do
             install -m 755 "$GITHUB_WORKSPACE/backend/$name" "src-tauri/binaries/$name-x86_64-unknown-linux-gnu"
           done
+          scripts/onnxruntime.sh check "$GITHUB_WORKSPACE/backend/libonnxruntime.so.1" x86_64
           install -m 644 "$GITHUB_WORKSPACE/backend/libonnxruntime.so.1" src-tauri/binaries/libonnxruntime.so.1
           ls -la src-tauri/binaries
 
@@ -385,6 +387,29 @@ jobs:
         run: |
           npx tauri build --bundles appimage,deb \
             --config "{\"plugins\":{\"updater\":{\"endpoints\":[\"$ENDPOINT\"]}}}"
+
+      # Each package's memory store runs and loads the ONNX Runtime the
+      # package holds, not one of the system's: the .deb's the pinned file
+      # itself; the AppImage's the copy its tooling (linuxdeploy) moved into
+      # usr/lib and stripped.
+      - name: Check the packages' ONNX Runtime
+        working-directory: desk
+        run: |
+          check() {
+            root=$(cd "$1" && pwd) want=$2
+            found=$(env -i ldd "$root/usr/bin/desk-memory" | awk '$1 == "libonnxruntime.so.1" { print $3 }')
+            [ "$(realpath "$found")" = "$(realpath "$want")" ] ||
+              { echo "$1's desk-memory loads '$found', not $want"; exit 1; }
+            env -i "$root/usr/bin/desk-memory" --help >/dev/null
+          }
+          work=$(mktemp -d)
+          dpkg-deb -x target/release/bundle/deb/*.deb "$work/deb"
+          scripts/onnxruntime.sh check "$work/deb/usr/lib/Desk/libonnxruntime.so.1" x86_64
+          check "$work/deb" "$work/deb/usr/lib/Desk/libonnxruntime.so.1"
+          appimage=$(realpath target/release/bundle/appimage/*.AppImage)
+          (cd "$work" && "$appimage" --appimage-extract >/dev/null)
+          check "$work/squashfs-root" "$work/squashfs-root/usr/lib/libonnxruntime.so.1"
+          rm -rf "$work"
 
       - name: Collect
         working-directory: desk

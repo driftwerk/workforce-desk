@@ -70,7 +70,10 @@ hub keeps memories in SQLite; then it moves them into the store, once.
    `libonnxruntime.so.1`: every Linux backend ships it beside
    `desk-memory`, which finds it there (rpath `$ORIGIN`). That covers the
    artifact, the machines' tarball and the WSL copy. The Linux app's
-   packages put it in `/usr/lib/Desk`.
+   `.deb` puts it in `/usr/lib/Desk`, and its AppImage in `usr/lib`.
+   Every place that ships it checks it against its pin
+   (`scripts/onnxruntime.sh check`). Each Desk install refuses a backend
+   whose `desk-memory` names the library but which doesn't hold it.
    - The Postgres Desk Helper embeds is built there too, from source
      (`scripts/postgres-linux.sh`): theseus-rs' builds, which
      `postgresql_embedded` downloads otherwise, are made on Debian 12 and
@@ -217,7 +220,7 @@ On 2026-11-18, github.com/microsoft/onnxruntime went offline: git, the web
 and the API all answer 404. Microsoft took it down, along with
 microsoft/agent-framework, hours after a malicious agent-framework release
 on PyPI. Until then `scripts/onnxruntime.sh` cloned the v1.28.0 tag from
-that repository and built it. Nothing Desk builds fetches from it now:
+that repository and built it. No step of Desk's build fetches from it now:
 
 - **Linux backend.** It uses Microsoft's own build from nuget.org,
   Microsoft.ML.OnnxRuntime 1.28.0, pinned by the package's sha256 and by
@@ -225,7 +228,8 @@ that repository and built it. Nothing Desk builds fetches from it now:
   changed on nuget.org. Before it was pinned, it was checked on 2026-11-19:
   - `dotnet nuget verify --all` accepted Microsoft Corporation's author
     signature and nuget.org's repository countersignature, both
-    timestamped 2026-07-25;
+    timestamped 2026-07-25. The author certificate expired on 2026-10-17,
+    so the signature stands on its timestamp;
   - its sha512 matched nuget.org's catalog;
   - its `.nuspec` names commit `da9b5e36…`, the v1.28.0 commit Desk built
     from before;
@@ -234,22 +238,35 @@ that repository and built it. Nothing Desk builds fetches from it now:
   To check a package the same way:
 
   ```sh
-  docker run --rm -v "$PWD/x.nupkg:/p/x.nupkg:ro" mcr.microsoft.com/dotnet/sdk:8.0 \
+  docker run --rm -v "$PWD/x.nupkg:/p/x.nupkg:ro" \
+    mcr.microsoft.com/dotnet/sdk@sha256:1b955f179b02df4f0eb5fadedaa898cbe44d620a64aab52eec72c8e91d1355b5 \
     dotnet nuget verify --all -v normal /p/x.nupkg
   ```
 - **Intel Macs.** Microsoft publishes no 1.28 build for Intel Macs, on
-  NuGet or PyPI, and no build of ours survived: the CI caches had expired,
-  and none was ever a release asset. So the Intel memory store still builds
-  from source, but only from a checkout that `ORT_SOURCE` names.
-  `onnxruntime.sh` accepts that checkout only if all of these hold:
-  - its HEAD is the pinned commit;
-  - `git fsck --full` passes;
-  - it has no changes.
+  NuGet or PyPI. No ONNX Runtime library we built survived: the CI caches
+  had expired, and the library was never a release asset. Only the
+  memory-store binaries linked against it shipped, inside each Desk.app.
+  So the Intel memory store still builds from source, but only from a git
+  repository that `ORT_SOURCE` names. `onnxruntime.sh` never runs or
+  builds anything in that repository:
+  - it fetches only the pinned commit out of it, into a fresh folder of
+    its own;
+  - git runs with every object checked on the way, and with the
+    repository's replace refs, hooks, fsmonitor and configuration all
+    ignored;
+  - it builds that fresh checkout, after `git fsck --full` passes and the
+    checkout shows no changes;
+  - its cmake and ninja come from PyPI, pinned by hash.
 
-  Where that checkout comes from while Microsoft's repository is offline
-  is the release owner's decision. Until one is approved, a cold-cache
-  Intel build stops and says so. The universal macOS release job and
-  `intel-sidecars.yml` both do this build.
+  After the check, the build still fetches the submodules from the URLs in
+  `.gitmodules`, at the commits the tree pins. It also fetches ONNX
+  Runtime's own CMake dependencies, by the hashes in `cmake/deps.txt`.
+
+  Where that repository comes from while Microsoft's is offline is the
+  release owner's decision. Until one is approved, a cold-cache Intel build
+  stops and says so, and nothing in CI sets `ORT_SOURCE` yet. The universal
+  macOS release job and `intel-sidecars.yml` both do this build, so no
+  release can finish until one is approved.
 
 ## Building locally
 

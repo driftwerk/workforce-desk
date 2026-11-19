@@ -71,11 +71,23 @@ pub const PROGRAMS: [&str; 3] = [
     LINUX_MEMORY_EXECUTABLE,
 ];
 
-/// What the programs load from beside themselves, where the release's
-/// backend has it: Microsoft's ONNX Runtime, which the memory store links
-/// (`scripts/onnxruntime.sh`). A development build's memory store links
-/// its own in, so a backend without it is installed as it is.
-pub const LIBRARIES: [&str; 1] = ["libonnxruntime.so.1"];
+/// What a program loads from beside itself, with the program: Microsoft's
+/// ONNX Runtime, which a release's memory store links
+/// (`scripts/onnxruntime.sh`). A backend whose program names the library
+/// must hold it, or it would load whichever the system has; a development
+/// build's memory store links its own in and names none.
+pub const LIBRARIES: [(&str, &str); 1] = [("libonnxruntime.so.1", LINUX_MEMORY_EXECUTABLE)];
+
+/// A line for `sh` that fails unless `dir` holds `library` when `program`
+/// there names it, and then runs `then` (with `$l` the library's path).
+fn when_linked(dir: &str, library: &str, program: &str, then: &str) -> String {
+    format!(
+        "if grep -qF {lib} {dir}/{program}; then l={dir}/{library}; \
+         [ -f \"$l\" ] || {{ echo \"the backend has no {library}, which {program} links\" >&2; exit 1; }}; \
+         {then}; fi\n",
+        lib = quote(library),
+    )
+}
 
 /// Desk's Claude Code plugin, a folder beside the programs.
 pub const PLUGIN: &str = "claude-plugin";
@@ -135,7 +147,14 @@ pub fn install_from_src(bin: &str, version: &str) -> Result<String> {
         .collect();
     let libraries: String = LIBRARIES
         .iter()
-        .map(|l| format!("[ ! -f \"$src/{l}\" ] || install -Dm644 \"$src/{l}\" {dest}/{l}\n"))
+        .map(|(l, p)| {
+            when_linked(
+                "\"$src\"",
+                l,
+                p,
+                &format!("install -Dm644 \"$l\" {dest}/{l}"),
+            )
+        })
         .collect();
     Ok(format!(
         "{installs}{libraries}\
@@ -162,7 +181,10 @@ pub fn unpack_script(bin: &str, version: &str) -> Result<String> {
     let dest = version_dir(bin, version)?;
     let root = root_of(bin);
     let programs = PROGRAMS.join(" ");
-    let libraries = LIBRARIES.join(" ");
+    let libraries: String = LIBRARIES
+        .iter()
+        .map(|(l, p)| when_linked("\"$partial\"", l, p, "chmod 644 \"$l\""))
+        .collect();
     Ok(format!(
         "set -eu\n\
          umask 077\n\
@@ -181,9 +203,7 @@ pub fn unpack_script(bin: &str, version: &str) -> Result<String> {
            [ -f \"$partial/$p\" ] || {{ echo \"the backend has no $p\" >&2; exit 1; }}\n  \
            chmod 755 \"$partial/$p\"\n\
          done\n\
-         for l in {libraries}; do\n  \
-           [ ! -f \"$partial/$l\" ] || chmod 644 \"$partial/$l\"\n\
-         done\n\
+         {libraries}\
          [ -d \"$partial/{PLUGIN}\" ] || {{ echo \"the backend has no {PLUGIN}\" >&2; exit 1; }}\n\
          chmod 755 \"$partial\"\n\
          rm -rf \"$dest\"\n\
@@ -512,7 +532,9 @@ mod tests {
             "install -Dm755 \"$src/desk-helper\" '/home/dev/.local/share/Desk/bin/0.3.0'/desk-helper\n\
              install -Dm755 \"$src/desk-agents\" '/home/dev/.local/share/Desk/bin/0.3.0'/desk-agents\n\
              install -Dm755 \"$src/desk-memory\" '/home/dev/.local/share/Desk/bin/0.3.0'/desk-memory\n\
-             [ ! -f \"$src/libonnxruntime.so.1\" ] || install -Dm644 \"$src/libonnxruntime.so.1\" '/home/dev/.local/share/Desk/bin/0.3.0'/libonnxruntime.so.1\n\
+             if grep -qF 'libonnxruntime.so.1' \"$src\"/desk-memory; then l=\"$src\"/libonnxruntime.so.1; \
+             [ -f \"$l\" ] || { echo \"the backend has no libonnxruntime.so.1, which desk-memory links\" >&2; exit 1; }; \
+             install -Dm644 \"$l\" '/home/dev/.local/share/Desk/bin/0.3.0'/libonnxruntime.so.1; fi\n\
              rm -rf '/home/dev/.local/share/Desk/bin/0.3.0'/claude-plugin\n\
              cp -R \"$src/claude-plugin\" '/home/dev/.local/share/Desk/bin/0.3.0'/claude-plugin\n"
         );
@@ -672,9 +694,17 @@ mod tests {
         std::fs::create_dir_all(source.join("claude-plugin/hooks")).unwrap();
         std::fs::write(source.join("claude-plugin/hooks/hooks.json"), "{}").unwrap();
         for p in PROGRAMS.into_iter().filter(|p| Some(*p) != without) {
-            std::fs::write(source.join(p), "#!/bin/sh\necho ran\n").unwrap();
+            // The memory store names its ONNX Runtime, as a release's does.
+            std::fs::write(
+                source.join(p),
+                "#!/bin/sh\n# libonnxruntime.so.1\necho ran\n",
+            )
+            .unwrap();
         }
-        std::fs::write(source.join(LIBRARIES[0]), "a library").unwrap();
+        let (library, _) = LIBRARIES[0];
+        if without != Some(library) {
+            std::fs::write(source.join(library), "a library").unwrap();
+        }
         let out = std::process::Command::new("tar")
             .args(["-czf", "-", "-C"])
             .arg(&source)
@@ -729,7 +759,7 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o755);
-        let mode = std::fs::metadata(bin.join("current").join(LIBRARIES[0]))
+        let mode = std::fs::metadata(bin.join("current").join(LIBRARIES[0].0))
             .unwrap()
             .permissions()
             .mode();
@@ -741,6 +771,16 @@ mod tests {
         let out = sh(&unpack_script(&bin_s, "0.4.0").unwrap(), Some(&broken));
         assert!(!out.status.success());
         assert!(String::from_utf8_lossy(&out.stderr).contains("no desk-agents"));
+        assert!(!bin.join("0.4.0").exists());
+        // So does one whose memory store would load the system's ONNX
+        // Runtime, not its own.
+        let broken = tarball(dir.path(), Some(LIBRARIES[0].0));
+        let out = sh(&unpack_script(&bin_s, "0.4.0").unwrap(), Some(&broken));
+        assert!(!out.status.success());
+        assert!(
+            String::from_utf8_lossy(&out.stderr)
+                .contains("no libonnxruntime.so.1, which desk-memory links")
+        );
         assert!(!bin.join("0.4.0").exists());
         assert_eq!(
             ok(sh(&installed_script(&bin_s), None)),

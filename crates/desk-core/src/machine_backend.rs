@@ -331,9 +331,28 @@ pub fn dev_version(desk_version: &str, folder: &Path) -> Result<String> {
 fn libraries(folder: &Path) -> Vec<PathBuf> {
     LIBRARIES
         .iter()
-        .map(|l| folder.join(l))
+        .map(|(l, _)| folder.join(l))
         .filter(|l| l.is_file())
         .collect()
+}
+
+/// A library a program of the folder names that the folder doesn't hold:
+/// the program would load whichever the system has.
+fn missing_library(folder: &Path) -> Result<Option<(&'static str, &'static str)>> {
+    for (library, program) in LIBRARIES {
+        if folder.join(library).is_file() {
+            continue;
+        }
+        let path = folder.join(program);
+        let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+        if bytes
+            .windows(library.len())
+            .any(|w| w == library.as_bytes())
+        {
+            return Ok(Some((library, program)));
+        }
+    }
+    Ok(None)
 }
 
 /// Whether `program` is a Linux program for `arch`.
@@ -356,6 +375,12 @@ pub fn development(cache: &Path, folder: &Path, desk_version: &str, arch: Arch) 
     }
     if !folder.join(PLUGIN).is_dir() {
         eyre::bail!("{} has no {PLUGIN}", folder.display());
+    }
+    if let Some((library, program)) = missing_library(folder)? {
+        eyre::bail!(
+            "{} has no {library}, which {program} links",
+            folder.display()
+        );
     }
     if !built_for(&folder.join(LINUX_HELPER_EXECUTABLE), arch)? {
         eyre::bail!(
@@ -681,7 +706,7 @@ mod tests {
         for p in PROGRAMS {
             std::fs::write(f.join(p), &elf).unwrap();
         }
-        std::fs::write(f.join(LIBRARIES[0]), &elf).unwrap();
+        std::fs::write(f.join(LIBRARIES[0].0), &elf).unwrap();
         f
     }
 
@@ -702,7 +727,7 @@ mod tests {
         let v2 = dev_version("0.3.0", &f).unwrap();
         assert_ne!(v2, v);
         // So does the ONNX Runtime beside the memory store.
-        std::fs::write(f.join(LIBRARIES[0]), "another").unwrap();
+        std::fs::write(f.join(LIBRARIES[0].0), "another").unwrap();
         assert_ne!(dev_version("0.3.0", &f).unwrap(), v2);
     }
 
@@ -742,9 +767,19 @@ mod tests {
             ]
         );
         // A development build's memory store links its own: no library.
-        std::fs::remove_file(f.join(LIBRARIES[0])).unwrap();
+        std::fs::remove_file(f.join(LIBRARIES[0].0)).unwrap();
         let without = development(&cache, &f, "0.3.0", Arch::X86_64).unwrap();
         assert_ne!(without.version, got.version);
+        // One whose memory store names it can't go without it.
+        let mut linked = std::fs::read(f.join("desk-memory")).unwrap();
+        linked.extend(b"libonnxruntime.so.1\0");
+        std::fs::write(f.join("desk-memory"), linked).unwrap();
+        let e = development(&cache, &f, "0.3.0", Arch::X86_64).unwrap_err();
+        assert!(
+            format!("{e:#}").contains("no libonnxruntime.so.1, which desk-memory links"),
+            "{e:#}"
+        );
+        std::fs::write(f.join(LIBRARIES[0].0), "a library").unwrap();
         let e = development(&cache, &f, "0.3.0", Arch::Aarch64).unwrap_err();
         assert!(format!("{e:#}").contains("aarch64"), "{e:#}");
         std::fs::remove_file(f.join("desk-memory")).unwrap();

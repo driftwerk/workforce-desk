@@ -34,13 +34,13 @@ for name in desk-helper desk-agents desk-memory; do
   [ "$machine" = "$want" ] || die "$dir/$name isn't built for $arch"
   chmod 755 "$dir/$name"
 done
-# The ONNX Runtime the memory store loads from beside itself, for its
-# architecture too.
+# The ONNX Runtime the memory store loads from beside itself: the pinned
+# one for its architecture (a static build names none, as Desk's installs
+# check the same way).
 library=()
-if grep -aq 'libonnxruntime\.so\.1' "$dir/desk-memory"; then
+if grep -qF libonnxruntime.so.1 "$dir/desk-memory"; then
   [ -f "$dir/libonnxruntime.so.1" ] || die "$dir has no libonnxruntime.so.1, which its desk-memory links"
-  machine=$(od -An -tu2 -j18 -N2 "$dir/libonnxruntime.so.1" | tr -d ' ')
-  [ "$machine" = "$want" ] || die "$dir/libonnxruntime.so.1 isn't built for $arch"
+  "$root/scripts/onnxruntime.sh" check "$dir/libonnxruntime.so.1" "$arch"
   chmod 644 "$dir/libonnxruntime.so.1"
   library=(libonnxruntime.so.1)
 fi
