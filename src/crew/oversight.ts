@@ -76,10 +76,14 @@ export interface Full {
  *  every one it can. */
 export type TakeOn = "handed" | "all";
 
+/** How it does its work: only in sessions you can watch, code changes and
+ *  long tasks in sessions with quick commands of its own, or however it
+ *  sees fit (`[oversight.work] style`). */
+export type WorkStyle = "sessions_only" | "prefer_sessions" | "direct";
+
 export interface Work {
-  /** Real, visible sessions for the work; helpers only for read-only
-   *  lookups. */
-  preferSessions: boolean;
+  /** How it does its work. */
+  style: WorkStyle;
   /** How many of its sessions may be starting or working at once. */
   parallel: number;
   takeOn: TakeOn;
@@ -130,7 +134,7 @@ export const DEFAULT_OVERSIGHT: Oversight = {
     handOff: false,
     setMode: false,
   },
-  work: { preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", model: null, maxTurnsPerHour: 60, closeFinished: true },
+  work: { style: "sessions_only", parallel: 4, takeOn: "handed", engine: "claude", model: null, maxTurnsPerHour: 60, closeFinished: true },
   full: { anywhere: false, repos: [], workflows: [], budgetUsdPerDay: null, budgetClearedAt: null },
 };
 
@@ -139,6 +143,19 @@ const LEVELS: readonly OversightLevel[] = ["watch", "suggest", "act", "full"];
 type Doc = Record<string, unknown>;
 
 const table = (v: unknown): Doc => (v && typeof v === "object" && !Array.isArray(v) ? (v as Doc) : {});
+const WORK_STYLES: readonly WorkStyle[] = ["sessions_only", "prefer_sessions", "direct"];
+
+/** `style` when it is one of the three; otherwise the legacy
+ *  `prefer_sessions` (true is only in sessions, false is do it myself);
+ *  otherwise only in sessions. */
+const workStyle = (work: Record<string, unknown>): WorkStyle => {
+  const s = work.style;
+  const known = WORK_STYLES.find((w) => w === s);
+  if (known) return known;
+  if (typeof work.prefer_sessions === "boolean") return work.prefer_sessions ? "sessions_only" : "direct";
+  return "sessions_only";
+};
+
 const bool = (v: unknown, d: boolean): boolean => (typeof v === "boolean" ? v : d);
 const count = (v: unknown, d: number): number => (typeof v === "number" && Number.isInteger(v) && v >= 0 ? v : d);
 /** A whole number from `lo` to `hi`, as the hub takes it; else `d`. */
@@ -220,7 +237,7 @@ export const oversightOf = (source: string): Oversight => {
       setMode: bool(act.set_mode, d.act.setMode),
     },
     work: {
-      preferSessions: bool(work.prefer_sessions, d.work.preferSessions),
+      style: workStyle(work),
       parallel: within(work.parallel, 1, MAX_PARALLEL, d.work.parallel),
       takeOn: work.take_on === "handed" || work.take_on === "all" ? work.take_on : d.work.takeOn,
       engine: typeof work.engine === "string" && ENGINE_WORD.test(work.engine.trim()) ? work.engine.trim() : d.work.engine,
@@ -287,7 +304,10 @@ export const withOversight = (source: string, o: Oversight): string => {
     work: {
       ...withoutModel(table(was.work)),
       ...(modelOf(o.work.model) ? { model: modelOf(o.work.model) } : {}),
-      prefer_sessions: o.work.preferSessions,
+      style: o.work.style,
+      // Older hubs know only this: anything but "do it myself" is the strict
+      // line for them.
+      prefer_sessions: o.work.style !== "direct",
       parallel: Math.min(MAX_PARALLEL, Math.max(1, Math.round(o.work.parallel))),
       take_on: o.work.takeOn,
       engine: ENGINE_WORD.test(o.work.engine) ? o.work.engine : DEFAULT_OVERSIGHT.work.engine,

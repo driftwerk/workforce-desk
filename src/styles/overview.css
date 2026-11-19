@@ -832,12 +832,17 @@ button.fsec-tile-head {
   color: var(--muted);
   line-height: 1.45;
 }
+.oversee-levels-3 {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 10px;
+}
 .oversee-levels-2 {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin-top: 10px;
 }
 @media (max-width: 760px) {
-  .oversee-levels {
+  .oversee-levels,
+  .oversee-levels-3 {
     grid-template-columns: minmax(0, 1fr);
   }
 }
