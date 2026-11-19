@@ -50,6 +50,10 @@ export const useLine = create<LineState>((set) => ({
   },
   heard: (m, removed = false, machine = LOCAL) => {
     heardCount++;
+    // Why a message to a session waits, and what can be done with it, are
+    // read with its thread: read again once one waiting changes.
+    const to = m.to.kind === "session" ? keyOf(machine, m.to.id) : null;
+    if (to && !removed && waits(m) && to in useLine.getState().threads) reread(to);
     set((s) => {
       let threads = s.threads;
       for (const [key, list] of Object.entries(s.threads)) {
@@ -62,6 +66,19 @@ export const useLine = create<LineState>((set) => ({
     });
   },
 }));
+
+const waits = (m: LineMessage): boolean => m.delivery === "queued" || m.delivery === "held" || m.delivery === "handed";
+
+/** Threads to read again, once each, after what is heard now. */
+const rereads = new Set<string>();
+const reread = (key: string) => {
+  if (rereads.has(key)) return;
+  rereads.add(key);
+  queueMicrotask(() => {
+    rereads.delete(key);
+    void useLine.getState().load(key);
+  });
+};
 
 const withoutKey = <T>(r: Record<string, T>, key: string): Record<string, T> => {
   if (!(key in r)) return r;

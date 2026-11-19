@@ -66,6 +66,8 @@ export const deliveryText = (m: LineMessage, now: number): string | null => {
           return "Waiting: you're driving";
         case "mode_ending":
           return "Waiting: Desk is putting it back in its own mode";
+        case "next_call":
+          return "Sent now: it reads this with its next tool call";
         default:
           return "Waiting to go in";
       }
@@ -78,7 +80,9 @@ export const deliveryText = (m: LineMessage, now: number): string | null => {
     case "refused":
       return "Not delivered: it has ended";
     case "withdrawn":
-      return `Not delivered: ${fromLabel(m, m.to.id)} no longer runs it`;
+      // Its boss let it go, the person's own words came after it, or they
+      // took it back: the hub doesn't say which.
+      return "Not delivered: withdrawn before it went in";
     case "noted":
       return "A note here only: not typed in";
     default:
@@ -140,7 +144,12 @@ export const steerOf = (s: Session): { label: string } | null => {
 export const merged = (list: readonly LineMessage[], m: LineMessage, removed = false): LineMessage[] => {
   if (removed) return list.filter((x) => x.id !== m.id);
   const at = list.findIndex((x) => x.id === m.id);
-  if (at >= 0) return list.map((x, i) => (i === at ? { ...m, waiting: m.waiting ?? (m.delivery === x.delivery ? x.waiting : undefined) } : x));
+  if (at >= 0)
+    return list.map((x, i) => {
+      if (i !== at) return x;
+      const same = m.delivery === x.delivery;
+      return { ...m, waiting: m.waiting ?? (same ? x.waiting : undefined), actions: m.actions ?? (same ? x.actions : undefined) };
+    });
   return [...list, m].sort((a, b) => a.at.localeCompare(b.at));
 };
 

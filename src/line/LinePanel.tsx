@@ -9,6 +9,7 @@ import { anyOpen, barText, discussText, headlineOf, openOf, statusOf } from "./q
 import { QuestionDetails } from "./QuestionDetails";
 import { useLine } from "./store";
 import { Thread, useThread } from "./Thread";
+import { WaitingMessages } from "./Waiting";
 
 /** Why Discuss in terminal can't put the questions in its prompt now. */
 export const discussBlocked = (s: Session): string | null => {
@@ -28,9 +29,10 @@ export const dismissQuestions = async (ids: readonly string[], machine: MachineI
 /** What sits under a session's terminal for its line. Nothing at all while
  *  nothing on it is open; a slim bar saying what is (its questions to you,
  *  messages waiting to go in), with Show; shown, a panel you can drag
- *  taller or shorter that lists them. Messages with Desk… (its menu) shows
- *  the whole line in the same place. Desk's own view of a session keeps the
- *  thread with its composer. */
+ *  taller or shorter that shows them in full: its questions, and each
+ *  message waiting with why and what can be done with it. Messages with
+ *  Desk… (its menu) shows the whole line in the same place. Desk's own view
+ *  of a session keeps the thread with its composer. */
 export function LinePanel({ session }: { session: Session }) {
   if (session.view === "desk") return <Thread session={session} />;
   return <TerminalLine session={session} />;
@@ -54,13 +56,17 @@ function TerminalLine({ session }: { session: Session }) {
     );
   }
   if (!anyOpen(open)) return null;
-  if (!mode) return <Bar session={session} text={barText(open)} />;
+  if (!mode) return <Bar session={session} text={barText(open, session.id)} />;
   return (
-    <Panel session={session} title="Questions from this session" questions={open.questions}>
+    <Panel session={session} title={panelTitle(open.questions.length, open.waiting.length)} questions={open.questions}>
       <Questions session={session} questions={open.questions} waiting={open.waiting} />
     </Panel>
   );
 }
+
+/** What the panel shows, as its title says it. */
+export const panelTitle = (questions: number, waiting: number): string =>
+  !waiting ? "Questions from this session" : !questions ? "Waiting to go in" : "Questions and messages waiting to go in";
 
 function Bar({ session, text }: { session: Session; text: string }) {
   return (
@@ -188,27 +194,31 @@ function Panel({ session, title, questions, children }: { session: Session; titl
   );
 }
 
+/** Its questions, then what waits to go in: each under its own heading
+ *  when both are there. */
 function Questions({ session, questions, waiting }: { session: Session; questions: LineMessage[]; waiting: LineMessage[] }) {
   const now = useNow();
+  const both = questions.length > 0 && waiting.length > 0;
   return (
     <>
       {questions.length > 0 && (
-        <ol className="line-questions">
-          {questions.map((m) => (
-            <Question key={m.id} m={m} now={now} machine={machineOf(session)} />
-          ))}
-        </ol>
+        <section className="line-section" aria-label={both ? "Its questions to you" : undefined}>
+          {both && <h3 className="line-section-title small strong">Its questions to you</h3>}
+          <ol className="line-questions">
+            {questions.map((m) => (
+              <Question key={m.id} m={m} now={now} machine={machineOf(session)} />
+            ))}
+          </ol>
+          <p className="small faint line-note">
+            Discuss in terminal puts these questions, with what it chose, into the session’s prompt without sending, so you can add your own words.
+          </p>
+        </section>
       )}
       {waiting.length > 0 && (
-        <p className="small muted line-note">
-          {waiting.length === 1 ? "1 message waits" : `${waiting.length} messages wait`} to go in once {session.displayName ?? session.name} is free. Messages
-          with Desk… in its menu shows them.
-        </p>
-      )}
-      {questions.length > 0 && (
-        <p className="small faint line-note">
-          Discuss in terminal puts these questions, with what it chose, into the session’s prompt without sending, so you can add your own words.
-        </p>
+        <section className="line-section" aria-label={both ? "Waiting to go in" : undefined}>
+          {both && <h3 className="line-section-title small strong">Waiting to go in</h3>}
+          <WaitingMessages session={session} waiting={waiting} now={now} />
+        </section>
       )}
     </>
   );
