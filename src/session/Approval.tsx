@@ -5,6 +5,7 @@ import type { Choice, Decision, Denied, Session } from "../hub/types";
 import { requestFocus } from "../shell/focus";
 import { OptionChips } from "../ui/OptionChips";
 import { isQuestion, terminalAsk } from "./pending";
+import { handledText } from "../floor/background";
 
 /** "Bash(cargo test)" → "Bash". */
 export const toolName = (tool: string): string => tool.split("(")[0]?.trim() || tool;
@@ -85,10 +86,24 @@ const CODEX_LABEL: Record<Choice, string> = {
 const DEVIN_MODES = ["Accept edits mode", "Bypass mode"] as const;
 const DEVIN_MODE_TITLE = "Devin switches modes only in its own prompt: this opens it there, where you choose";
 
+/** What a session its boss has waits on, said calmly: the boss deals with
+ *  it, and what it can't it brings to the person as its own card. */
+function Handled({ session, compact }: { session: Session; compact: boolean }) {
+  return (
+    <div className={compact ? "approval approval-compact approval-handled" : "approval approval-handled"} role="status">
+      <span className="approval-text">
+        <b>{handledText(session)}</b>
+        {!compact && <span className="faint">It deals with this first; what it can’t, it brings to you.</span>}
+      </span>
+    </div>
+  );
+}
+
 export function Approval({ session, compact = false }: { session: Session; compact?: boolean }) {
   const { fail, open } = useDesk();
   const hub = useHubOf(machineOf(session));
   const pending = session.pending;
+  if (session.bossHas && (pending || session.state === "asking")) return <Handled session={session} compact={compact} />;
   if (!pending) return <Asked session={session} compact={compact} />;
   if (!pending.answerable) {
     return (

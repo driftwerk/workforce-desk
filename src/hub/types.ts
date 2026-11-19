@@ -181,6 +181,11 @@ export interface Session {
   /** Why what it waits on is the person's though a boss runs it ("Desk
    *  left this to you."); absent while the boss has it, and from older hubs. */
   waitsOnYou?: string;
+  /** The boss that has it now, by name: it runs it, has the wheel, and
+   *  nothing it waits on is the person's. While set, nothing of it calls
+   *  for the person's attention: shown calm, "Desk has it"; absent from
+   *  older hubs. */
+  bossHas?: string;
   createdAt: string;
   updatedAt: string;
 }

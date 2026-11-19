@@ -676,6 +676,11 @@ body.side-resizing * {
 .dot-done {
   border-color: var(--done);
 }
+/* What its boss deals with: calm, never the attention colour. */
+.dot-handled {
+  border-color: var(--signal);
+  background: var(--signal-soft);
+}
 
 /* ── Marks and presence rings ───────────────────────────────────────────── */
 
@@ -787,6 +792,9 @@ body.side-resizing * {
 }
 .ring-done {
   border-color: var(--done);
+}
+.ring-handled {
+  border-color: var(--signal);
 }
 /* After every size's corners: people are round at any size. */
 .mark-person,
@@ -1619,6 +1627,20 @@ body.side-resizing * {
   margin: 0;
   padding: 0;
   background: none;
+}
+.approval-handled {
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+}
+.approval-compact.approval-handled {
+  background: none;
+}
+.approval-handled .approval-text b,
+.state-handled {
+  color: var(--signal-soft-text);
+}
+.approval-handled .approval-text span {
+  font-family: var(--font-ui);
 }
 .approval-compact .btn {
   flex: 1;

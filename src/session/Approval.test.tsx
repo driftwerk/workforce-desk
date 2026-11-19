@@ -69,3 +69,18 @@ describe("a Devin session's request", () => {
     expect(buttons()).toEqual(["Deny", "Ask in terminal", "Allow once"]);
   });
 });
+
+describe("a request its boss has", () => {
+  it("says the boss has it, calmly, with nothing for the person to press", () => {
+    render(<Approval session={session({ bossHas: "Desk" })} />);
+    expect(screen.getByRole("status").textContent).toContain("Desk has it");
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    expect(screen.queryByText(/Needs you/)).toBeNull();
+  });
+
+  it("is the person's to answer with no boss on it", () => {
+    render(<Approval session={session()} />);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(buttons().length).toBeGreaterThan(0);
+  });
+});

@@ -1,5 +1,5 @@
 import { useSessionName } from "../groups/names";
-import { backgroundLine, backgroundOf, lookOf, restartedLine, shownState, waitsOnYou } from "./background";
+import { backgroundLine, backgroundOf, bossHandles, handledText, lookOf, restartedLine, shownState, waitsOnYou } from "./background";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { Approval } from "../session/Approval";
@@ -28,7 +28,8 @@ export interface Group {
 /** How sessions are grouped on the Floor, first match wins. */
 export const GROUPS: Group[] = [
   { title: "Needs you", match: waitsOnYou },
-  { title: "Working", match: (s) => ["working", "starting"].includes(shownState(s)) },
+  // What its boss deals with is shown working, calm: the boss is on it.
+  { title: "Working", match: (s) => ["working", "starting"].includes(shownState(s)) || bossHandles(s) },
   { title: "Recently done and idle", match: (s) => ["done", "idle"].includes(shownState(s)) && s.live },
   { title: "In other terminals", match: (s) => s.origin === "external" && s.live === false && s.state !== "closed" },
   { title: "Not running", match: (s) => !s.live && s.origin === "desk" },
@@ -58,8 +59,8 @@ export function Tile({ session }: { session: Session }) {
         <Mark name={name} engine={session.engine} state={lookOf(session)} size="lg" />
         <span className="tile-name">
           <span className="mono tile-title">{name}</span>
-          <span className={`tile-state state-${state}`}>
-            {LABEL[state]} · {home(session)}
+          <span className={`tile-state state-${bossHandles(session) ? "handled" : state}`}>
+            {bossHandles(session) ? handledText(session) : LABEL[state]} · {home(session)}
             {session.model ? ` · ${modelTitle(session.engine, session.model)}` : ""}
           </span>
         </span>
