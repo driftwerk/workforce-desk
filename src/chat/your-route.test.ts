@@ -53,6 +53,15 @@ describe("What an agent is said to run on for you", () => {
   });
 });
 
+describe("A route that can't run here", () => {
+  it("says so, and why, rather than claiming your plan takes the turn", () => {
+    const refused = "running your work on your ChatGPT (Codex) needs this hub's coding worker, and it has none";
+    expect(
+      describeAgent({ ...lattice, personalRoute: claude({ kind: "codex", title: "ChatGPT (Codex)", model: "gpt-5.3-codex", refused }) }, "Patchwork"),
+    ).toBe(`Patchwork · Your ChatGPT plan (Codex) (can’t run here) · gpt-5.3-codex · ${refused}`);
+  });
+});
+
 describe("The agent list", () => {
   it("reads your own route where the hub says it, and nothing where it doesn't or says it oddly", async () => {
     useChat.setState({ hubs: [patchwork], roster: [] });
@@ -65,6 +74,7 @@ describe("The agent list", () => {
           { id: "codex", provider: "bedrock", model: "m", personal_route: { kind: "codex", title: "ChatGPT (Codex)", model: "gpt-5.3-codex", fallback: "wait", connected: false } },
           { id: "odd", provider: "bedrock", model: "m", personal_route: { kind: "claude-code", fallback: "sometimes" } },
           { id: "partial", provider: "bedrock", model: "m", personal_route: { kind: "claude-code", model: "opus", fallback: "hub" } },
+          { id: "refused", provider: "bedrock", model: "m", personal_route: { kind: "codex", title: "ChatGPT (Codex)", model: "gpt-5.3-codex", fallback: "wait", connected: true, refused: "needs a worker" } },
           { id: "blank", provider: "bedrock", model: "m", personal_route: { kind: "claude-code", model: " ", fallback: "wait", connected: true } },
         ],
       }),
@@ -74,6 +84,8 @@ describe("The agent list", () => {
     expect(byId.lattice).toEqual({ kind: "claude-code", title: "Claude", model: "opus", fallback: "hub", connected: true });
     expect(byId.scout).toBeNull();
     expect(byId.codex).toEqual({ kind: "codex", title: "ChatGPT (Codex)", model: "gpt-5.3-codex", fallback: "wait", connected: false });
+    expect(byId.refused?.refused).toBe("needs a worker");
+    expect(byId.lattice?.refused).toBeUndefined();
     expect(byId.odd).toBeNull();
     expect(byId.partial).toBeNull();
     expect(byId.blank).toBeNull();

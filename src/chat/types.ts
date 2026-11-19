@@ -61,6 +61,9 @@ export interface PersonalRouteShown {
   fallback: "wait" | "hub";
   /** Whether you have a working login of your own for it now. */
   connected: boolean;
+  /** Why it can't take this agent's turns here at all (they stop and say
+   *  so); none when it can. */
+  refused?: string | null;
 }
 
 /** You, as a hub knows you: your account there, your name and picture. */
@@ -96,6 +99,7 @@ export const yourRoute = (a: Pick<Agent, "provider" | "personalRoute">): { label
   const r = a.personalRoute;
   if (!r || (!r.connected && r.fallback === "hub")) return null;
   const plan = PROVIDERS[r.kind] ?? `${r.title} plan`;
+  if (r.refused) return { label: `Your ${plan} (can’t run here)`, model: r.model, note: r.refused };
   const label = `Your ${plan}${r.connected ? "" : " (not connected)"}`;
   const note =
     r.fallback === "hub"

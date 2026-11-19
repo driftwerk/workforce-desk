@@ -406,6 +406,7 @@ const personalRouteOf = (raw: unknown): PersonalRouteShown | null => {
     model: r.model,
     fallback: r.fallback,
     connected: r.connected,
+    ...(typeof r.refused === "string" && r.refused.trim() ? { refused: r.refused } : {}),
   };
 };
 
