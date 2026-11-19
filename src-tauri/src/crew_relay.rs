@@ -37,14 +37,16 @@
 //!   outcome isn't known, and the hub finds the session there by its name.
 //!
 //! - **A boss's machine tools** (`desk.machines`, `desk.folders`,
-//!   `desk.folder_make` and `desk.repos`, queued by the hub's
-//!   `crew.machines`, `crew.machine_folders` and `crew.machine_make_folder`
-//!   after its checks), and a plan's ticket's checkout (`desk.checkout`,
-//!   queued by its plan runner), each go to one route there, with its own
-//!   fields and no others: `GET`/`POST /api/desk/folders`,
-//!   `GET /api/desk/repos` and `POST /api/desk/repos/checkout`. The list
-//!   of machines is answered here, from Desk's own. A folder made, and a
-//!   checkout (which may begin a clone), are sent once.
+//!   `desk.folder_make`, `desk.repos` and `desk.run`, queued by the hub's
+//!   `crew.machines`, `crew.machine_folders`, `crew.machine_make_folder`
+//!   and `crew.machine_run` after its checks), and a plan's ticket's
+//!   checkout (`desk.checkout`, queued by its plan runner), each go to one
+//!   route there, with its own fields and no others: `GET`/`POST
+//!   /api/desk/folders`, `GET /api/desk/repos`, `POST
+//!   /api/desk/repos/checkout` and `POST /api/desk/run`. The list of
+//!   machines is answered here, from Desk's own. A folder made, a checkout
+//!   (which may begin a clone) and a check are sent once, a check only with
+//!   the time left to run it.
 //!
 //! These routes are on none of the lists the page's requests are checked
 //! against (see [`crate::broker::routes::relay_local`]).
@@ -106,6 +108,11 @@ const RUN: &str = "desk.run";
 const MOST_COMMAND: usize = 8 * 1024;
 /// The longest a check runs, in seconds: well within a call's carrying.
 const MOST_RUN_SECS: u64 = 15;
+/// How long a check runs when its call doesn't say: the machine's own.
+const RUN_SECS: u64 = 10;
+/// What a check needs beyond its own time: its machine's login shell,
+/// its output read, and its answer carried back.
+const RUN_SLACK: Duration = Duration::from_secs(4);
 /// The longest path, or repository, a machine call says.
 const MOST_SAID: usize = 1024;
 /// The most of a machine's answer to one of these read: what still fits
@@ -537,8 +544,8 @@ fn said<'a>(call: &'a Call, key: &str, required: bool) -> Result<Option<&'a str>
 }
 
 /// A check's body as the machine takes it: its command (at most
-/// [`MOST_COMMAND`], no NUL), where it runs, how long, and whether it is
-/// judged there; nothing else.
+/// [`MOST_COMMAND`], no NUL), where it runs, how long (at most
+/// [`MOST_RUN_SECS`]), and whether it is judged there; nothing else.
 fn run_body(call: &Call) -> Result<Vec<u8>, Outcome> {
     let bad = |key: &str| refused(format!("That call's {key} couldn't be read."));
     let command = match call.input.get("command") {
@@ -563,6 +570,11 @@ fn run_body(call: &Call) -> Result<Vec<u8>, Outcome> {
         _ => Err(bad(key)),
     };
     let (judged, by_person) = (flag("judged", true)?, flag("by_person", false)?);
+    // The person's word is never also judged: a call that says both is
+    // not one the hub sends.
+    if by_person && judged {
+        return Err(bad("by_person"));
+    }
     // Unjudged only for the person's own yes, or a boss acting fully.
     if !judged && !by_person && call.level.as_str() != Some("full") {
         return Err(refused(
@@ -585,10 +597,17 @@ fn query_word(v: &str) -> String {
 }
 
 /// A boss's machine tool's call, or a plan's checkout (`tool`, one of
-/// [`FOLDERS`], [`FOLDER_MAKE`], [`REPOS`] and [`CHECKOUT`]), sent to its
-/// own route on `machine` with its own fields alone. What makes something
-/// there is sent once.
-async fn carry_machine<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &str) -> Outcome {
+/// [`FOLDERS`], [`FOLDER_MAKE`], [`REPOS`], [`RUN`] and [`CHECKOUT`]), sent
+/// to its own route on `machine` with its own fields alone, by `until`.
+/// What makes something there is sent once; a check, only with the time
+/// left to run it.
+async fn carry_machine<E: Ends>(
+    ends: &E,
+    call: &Call,
+    machine: &MachineId,
+    tool: &str,
+    until: Instant,
+) -> Outcome {
     let name = call.machine.as_str();
     // Each tool's own fields, and no others.
     let fields: &[&str] = match tool {
@@ -603,11 +622,13 @@ async fn carry_machine<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool
     if let Some(extra) = input.keys().find(|k| !fields.contains(&k.as_str())) {
         return refused(format!("That call's {extra} isn't one Desk sends."));
     }
-    // A boss that only watches makes nothing, whatever its hub says.
-    if tool == FOLDER_MAKE && call.level.as_str() == Some("watch") {
+    // A boss that only watches makes nothing, whatever its hub says: what
+    // makes or runs something goes for a level that acts or suggests alone.
+    let acts = matches!(call.level.as_str(), Some("suggest" | "act" | "full"));
+    if tool == FOLDER_MAKE && !acts {
         return refused("A boss that only watches makes no folders.".into());
     }
-    if tool == RUN && call.level.as_str() == Some("watch") {
+    if tool == RUN && !acts {
         return refused("A boss that only watches runs nothing.".into());
     }
     // A read sent again changes nothing: one cut off is said, not left
@@ -634,7 +655,23 @@ async fn carry_machine<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool
             );
             ("GET", target, None)
         }),
-        RUN => run_body(call).map(|b| ("POST", "/api/desk/run".to_string(), Some(b))),
+        RUN => run_body(call).and_then(|b| {
+            // Sent only with the time to run it and bring its answer back:
+            // one cut off while it runs there may have done what it does.
+            let secs = call
+                .input
+                .get("timeout_secs")
+                .and_then(Value::as_u64)
+                .unwrap_or(RUN_SECS);
+            if until.saturating_duration_since(Instant::now())
+                < Duration::from_secs(secs) + RUN_SLACK
+            {
+                return Err(refused(format!(
+                    "There isn't time left to run that on {name} now; try again in a moment."
+                )));
+            }
+            Ok(("POST", "/api/desk/run".to_string(), Some(b)))
+        }),
         _ => said(call, "remote", true).and_then(|r| {
             let folder = said(call, "folder", false)?;
             let body = json!({ "remote": r.unwrap_or_default(), "folder": folder })
@@ -766,7 +803,7 @@ async fn carry_in_turn<E: Ends>(
         match call.tool.as_str() {
             Some(t @ (SESSIONS | SESSION_START)) => carry_desk(ends, call, &machine, t).await,
             Some(t @ (FOLDERS | FOLDER_MAKE | REPOS | CHECKOUT | RUN)) => {
-                carry_machine(ends, call, &machine, t).await
+                carry_machine(ends, call, &machine, t, until).await
             }
             _ => carry(ends, call, &machine, timing).await,
         }
@@ -1457,12 +1494,21 @@ mod tests {
             Does::Says(200, json!({"outcome": "ran", "exit": 0, "stdout": "ok\n"})),
             Does::Fails(Unanswered::MaybeSent("cut off".into())),
             Does::Says(200, json!({"outcome": "ran", "exit": 0, "stdout": ""})),
+            Does::Says(200, json!({"outcome": "ran", "exit": 0, "stdout": ""})),
         ]);
-        let stop = start(&fake.polled(vec![desk_call(
-            A,
-            "desk.run",
-            json!({"command": "git status\ngit log -1", "cwd": "~/app", "timeout_secs": 5, "judged": true, "by_person": false}),
-        )]));
+        // A call's whole time, as a check is carried in.
+        let roomy = Timing {
+            carry_for: Duration::from_secs(25),
+            ..quick()
+        };
+        let stop = start_with(
+            &fake.polled(vec![desk_call(
+                A,
+                "desk.run",
+                json!({"command": "git status\ngit log -1", "cwd": "~/app", "timeout_secs": 5, "judged": true, "by_person": false}),
+            )]),
+            roomy,
+        );
         let (_, answer) = next(&mut rx).await;
         assert_eq!(answer["body"]["outcome"], "ran", "{answer}");
         let _ = stop.send(true);
@@ -1476,70 +1522,194 @@ mod tests {
             )
         );
         // Not said: judged, not the person's word.
-        let stop = start(&fake.polled(vec![desk_call(B, "desk.run", json!({"command": "ls"}))]));
+        let stop = start_with(
+            &fake.polled(vec![desk_call(B, "desk.run", json!({"command": "ls"}))]),
+            roomy,
+        );
         none_in(&mut rx, 300).await;
         let _ = stop.send(true);
         let sent = fake.routes_sent.lock().unwrap().clone();
         assert_eq!(sent.len(), 2, "a check cut off isn't sent again");
         assert_eq!(sent[1].3.as_ref().unwrap()["judged"], true);
         assert_eq!(sent[1].3.as_ref().unwrap()["by_person"], false);
-        // Odd fields, a watching boss, too long, no command: nothing sent.
-        let mut watching = desk_call(
-            "0f0e0d0c-0b0a-4909-8807-0605040302cc",
-            "desk.run",
-            json!({"command": "ls"}),
-        );
-        watching["level"] = json!("watch");
-        let stop = start(&fake.polled(vec![
-            desk_call(A, "desk.run", json!({"command": "ls", "env": {"X": "1"}})),
-            desk_call(B, "desk.run", json!({"command": "ls", "timeout_secs": 60})),
-            watching,
-            desk_call(
-                "0f0e0d0c-0b0a-4909-8807-0605040302dd",
-                "desk.run",
-                json!({"command": "x".repeat(9000)}),
+        // Each refused for its own reason, and nothing sent.
+        let at = |id: &str, level: Value, input: Value| {
+            let mut c = desk_call(id, "desk.run", input);
+            c["level"] = level;
+            c
+        };
+        let refusals: Vec<(&str, Value, Value, &str)> = vec![
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302c1",
+                json!("act"),
+                json!({"command": "ls", "env": {"X": "1"}}),
+                "isn't one Desk sends",
             ),
-            desk_call(
-                "0f0e0d0c-0b0a-4909-8807-0605040302ee",
-                "desk.run",
-                json!({"command": "ls", "judged": "no"}),
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302c2",
+                json!("act"),
+                json!({"command": "ls", "timeout_secs": 60}),
+                "timeout_secs",
             ),
-            desk_call(
-                "0f0e0d0c-0b0a-4909-8807-0605040302ef",
-                "desk.run",
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302c3",
+                json!("act"),
                 json!({"command": "ls", "timeout_secs": 16}),
+                "timeout_secs",
+            ),
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302c4",
+                json!("act"),
+                json!({"command": "ls", "timeout_secs": 0}),
+                "timeout_secs",
+            ),
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302c5",
+                json!("act"),
+                json!({"command": "ls", "timeout_secs": 5.5}),
+                "timeout_secs",
+            ),
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302c6",
+                json!("act"),
+                json!({"command": "x".repeat(9000)}),
+                "command",
+            ),
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302c7",
+                json!("act"),
+                json!({"command": "   "}),
+                "command",
+            ),
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302c8",
+                json!("act"),
+                json!({"command": "ls\u{0}x"}),
+                "command",
+            ),
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302c9",
+                json!("act"),
+                json!({"command": "ls", "cwd": "~/a\u{7}"}),
+                "cwd",
+            ),
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302ca",
+                json!("act"),
+                json!({"command": "ls", "judged": "no"}),
+                "judged",
             ),
             // Unjudged for a boss acting within Desk: never.
-            desk_call(
-                "0f0e0d0c-0b0a-4909-8807-0605040302f0",
-                "desk.run",
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302cb",
+                json!("act"),
                 json!({"command": "ls", "judged": false}),
+                "acting fully",
             ),
-        ]));
-        for _ in 0..7 {
-            let (_, answer) = next(&mut rx).await;
-            assert!(answer["body"]["error"].is_string(), "{answer}");
+            // The person's word is never also judged.
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302cc",
+                json!("act"),
+                json!({"command": "ls", "by_person": true}),
+                "by_person",
+            ),
+            // A boss that watches, or whose level isn't one Desk knows.
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302cd",
+                json!("watch"),
+                json!({"command": "ls"}),
+                "only watches",
+            ),
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302ce",
+                json!("watch"),
+                json!({"command": "ls", "judged": false, "by_person": true}),
+                "only watches",
+            ),
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302cf",
+                Value::Null,
+                json!({"command": "ls"}),
+                "only watches",
+            ),
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302d0",
+                json!("Full"),
+                json!({"command": "ls"}),
+                "only watches",
+            ),
+        ];
+        let stop = start_with(
+            &fake.polled(
+                refusals
+                    .iter()
+                    .map(|(id, level, input, _)| at(id, level.clone(), input.clone()))
+                    .collect(),
+            ),
+            roomy,
+        );
+        let mut got = std::collections::HashMap::new();
+        for _ in 0..refusals.len() {
+            let (id, answer) = next(&mut rx).await;
+            got.insert(id, answer);
         }
         let _ = stop.send(true);
+        for (id, _, input, says) in &refusals {
+            let error = got[*id]["body"]["error"]
+                .as_str()
+                .unwrap_or_default()
+                .to_string();
+            assert!(error.contains(says), "{input}: {error}");
+        }
         assert_eq!(
             fake.routes_sent.lock().unwrap().len(),
             2,
             "nothing more sent"
         );
         // Acting fully, or the person's yes: sent unjudged.
-        let mut full = desk_call(
-            "0f0e0d0c-0b0a-4909-8807-0605040302f1",
-            "desk.run",
-            json!({"command": "ls", "judged": false}),
+        let stop = start_with(
+            &fake.polled(vec![
+                at(
+                    "0f0e0d0c-0b0a-4909-8807-0605040302f1",
+                    json!("full"),
+                    json!({"command": "ls", "judged": false}),
+                ),
+                at(
+                    "0f0e0d0c-0b0a-4909-8807-0605040302f2",
+                    json!("act"),
+                    json!({"command": "ls", "judged": false, "by_person": true}),
+                ),
+            ]),
+            roomy,
         );
-        full["level"] = json!("full");
-        let stop = start(&fake.polled(vec![full]));
-        let (_, answer) = next(&mut rx).await;
-        assert_eq!(answer["body"]["outcome"], "ran", "{answer}");
+        for _ in 0..2 {
+            let (_, answer) = next(&mut rx).await;
+            assert_eq!(answer["body"]["outcome"], "ran", "{answer}");
+        }
         let _ = stop.send(true);
         let sent = fake.routes_sent.lock().unwrap().clone();
-        assert_eq!(sent.len(), 3);
-        assert_eq!(sent[2].3.as_ref().unwrap()["judged"], false);
+        assert_eq!(sent.len(), 4);
+        assert!(
+            sent[2..]
+                .iter()
+                .all(|s| s.3.as_ref().unwrap()["judged"] == false)
+        );
+        // Not the time left to run it and bring it back: never sent.
+        let stop = start(&fake.polled(vec![desk_call(
+            "0f0e0d0c-0b0a-4909-8807-0605040302f3",
+            "desk.run",
+            json!({"command": "ls"}),
+        )]));
+        let (_, answer) = next(&mut rx).await;
+        let _ = stop.send(true);
+        assert!(
+            answer["body"]["error"]
+                .as_str()
+                .unwrap_or_default()
+                .contains("isn't time left"),
+            "{answer}"
+        );
+        assert_eq!(fake.routes_sent.lock().unwrap().len(), 4, "nothing sent");
     }
 
     fn desk_call(id: &str, tool: &str, input: Value) -> Value {
