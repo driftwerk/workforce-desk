@@ -1,5 +1,5 @@
 import { useSessionName } from "../groups/names";
-import { backgroundLine, backgroundOf, lookOf, shownState, waitsOnYou } from "./background";
+import { backgroundLine, backgroundOf, lookOf, restartedLine, shownState, waitsOnYou } from "./background";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { Approval } from "../session/Approval";
@@ -39,6 +39,8 @@ const home = (s: Session): string => (s.origin === "external" ? "other terminal"
 const task = (s: Session): string => s.goal || (s.lastPrompt && plain(s.lastPrompt)) || "No goal yet";
 
 const log = (s: Session): string | null => {
+  const restarted = restartedLine(s);
+  if (restarted) return restarted;
   const background = backgroundOf(s);
   if (background) return backgroundLine(background);
   return s.currentTool ? `● ${s.currentTool}` : s.lastReply ? plain(s.lastReply).split("\n").slice(0, 3).join("\n") : null;

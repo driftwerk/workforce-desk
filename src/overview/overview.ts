@@ -1,5 +1,5 @@
 import type { OverviewItem, OverviewState, Session, SessionState } from "../hub/types";
-import { backgroundOf, shownState } from "../floor/background";
+import { backgroundOf, restartedLine, shownState } from "../floor/background";
 import { plain } from "../ui/plain";
 
 /** What a session's live state says, in the overview's words. */
@@ -38,7 +38,7 @@ export const itemOf = (s: Session): OverviewItem => ({
   origin: s.origin,
   state: FROM_LIVE[shownState(s)],
   task: s.goal || (s.lastPrompt ? plain(s.lastPrompt) : null),
-  detail: s.currentTool ? `● ${s.currentTool}` : null,
+  detail: restartedLine(s) ?? (s.currentTool ? `● ${s.currentTool}` : null),
   since: s.pending?.since ?? s.updatedAt,
   lastActivity: s.updatedAt,
   approval: s.pending ? { id: s.pending.id, summary: [s.pending.tool, s.pending.detail].filter(Boolean).join(" ") } : null,
