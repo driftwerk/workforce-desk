@@ -128,7 +128,11 @@ jobs:
         id: hub
         env:
           HUB_OVERRIDE: ${{ inputs.hub_ref }}
-        run: echo "ref=${HUB_OVERRIDE:-$(tr -d '[:space:]' < desk/hub.ref)}" >> "$GITHUB_OUTPUT"
+        # A dry run's hub bump is written into the checkout's hub.ref, as the
+        # commit it would make has it (build-sidecars.sh checks the two agree).
+        run: |
+          [ -z "$HUB_OVERRIDE" ] || echo "$HUB_OVERRIDE" > desk/hub.ref
+          echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
 
       - name: Read the vellev ref
         id: vellev
@@ -356,7 +360,11 @@ jobs:
         id: hub
         env:
           HUB_OVERRIDE: ${{ inputs.hub_ref }}
-        run: echo "ref=${HUB_OVERRIDE:-$(tr -d '[:space:]' < desk/hub.ref)}" >> "$GITHUB_OUTPUT"
+        # A dry run's hub bump is written into the checkout's hub.ref, as the
+        # commit it would make has it (build-sidecars.sh checks the two agree).
+        run: |
+          [ -z "$HUB_OVERRIDE" ] || echo "$HUB_OVERRIDE" > desk/hub.ref
+          echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
 
       # For the rich renderers.
       - name: Check out the hub at hub.ref
@@ -493,7 +501,11 @@ jobs:
         id: hub
         env:
           HUB_OVERRIDE: ${{ inputs.hub_ref }}
-        run: echo "ref=${HUB_OVERRIDE:-$(tr -d '[:space:]' < desk/hub.ref)}" >> "$GITHUB_OUTPUT"
+        # A dry run's hub bump is written into the checkout's hub.ref, as the
+        # commit it would make has it (build-sidecars.sh checks the two agree).
+        run: |
+          [ -z "$HUB_OVERRIDE" ] || echo "$HUB_OVERRIDE" > desk/hub.ref
+          echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
 
       - name: Check out the hub at hub.ref
         uses: actions/checkout@v7
@@ -636,7 +648,11 @@ jobs:
         id: hub
         env:
           HUB_OVERRIDE: ${{ inputs.hub_ref }}
-        run: echo "ref=${HUB_OVERRIDE:-$(tr -d '[:space:]' < desk/hub.ref)}" >> "$GITHUB_OUTPUT"
+        # A dry run's hub bump is written into the checkout's hub.ref, as the
+        # commit it would make has it (build-sidecars.sh checks the two agree).
+        run: |
+          [ -z "$HUB_OVERRIDE" ] || echo "$HUB_OVERRIDE" > desk/hub.ref
+          echo "ref=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
 
       - name: Check out the hub at hub.ref
         uses: actions/checkout@v7

@@ -98,8 +98,11 @@ jobs:
         id: refs
         env:
           HUB_OVERRIDE: ${{ inputs.hub_ref }}
+        # A dry run's hub bump, written into the checkout's hub.ref as its
+        # commit would have it (build-sidecars.sh checks the two agree).
         run: |
-          echo "hub=${HUB_OVERRIDE:-$(tr -d '[:space:]' < desk/hub.ref)}" >> "$GITHUB_OUTPUT"
+          [ -z "$HUB_OVERRIDE" ] || echo "$HUB_OVERRIDE" > desk/hub.ref
+          echo "hub=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
           echo "vellev=$(tr -d '[:space:]' < desk/vellev.ref)" >> "$GITHUB_OUTPUT"
 
       - name: Check out vellev at vellev.ref
