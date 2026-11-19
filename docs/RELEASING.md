@@ -37,7 +37,10 @@ hub keeps memories in SQLite; then it moves them into the store, once.
    You can also run **Release** from the Actions tab with a version
    (`workflow_dispatch`). The workflow writes that version into
    `tauri.conf.json`, `package.json` and the workspace `Cargo.toml`. You don't
-   bump them by hand.
+   bump them by hand. A stable version is `major.minor.patch` only: a tag
+   with a pre-release part (`v0.3.0-rc.1`, a nightly's `v0.2.11-nightly.…`)
+   starts no release, and the Release form refuses one, since no Desk on
+   Stable would ever take it.
 3. `.github/workflows/release.yml` then:
    - builds the three sidecars for both architectures and joins each pair
      with `lipo` (`scripts/build-sidecars.sh`). vellev embeds with ONNX
@@ -116,6 +119,13 @@ Nothing unsigned leaves the Mac, apart from a development build's
 installed as `<version>+dev.<hash of the folder>` and said aloud. Release
 builds ignore that variable.
 
+Every updater download (the Mac's `Desk.app.tar.gz`, the AppImage, the NSIS
+installer) is signed for its version (`tauri signer sign --app-version`, which
+`tauri build` does by itself), and the app refuses a feed whose version isn't
+the one its download was signed for (`requireSignedVersion` in
+`tauri.conf.json`). The `publish` job checks each signature against the key
+in `tauri.conf.json`, and the version in it, before anything is published.
+
 Installed copies check `latest.json` on launch and every four hours. They
 download the update in the background and offer **Restart to update**. A
 `.deb` is updated by the system's package manager instead: Desk says a new
@@ -126,6 +136,89 @@ Intel ONNX Runtime build adds 30 to 60 minutes. Later builds reuse the cargo
 cache, keyed by the hub and vellev refs, and the ONNX Runtime build, keyed by
 its pin. If the runner runs out of disk, move the
 job to a larger macOS runner.
+
+## Nightly
+
+`.github/workflows/nightly.yml` builds `main` every night at about 01:30 UTC
+for the Desks set to **Updates: Nightly** (Settings → Help). Everyone else
+stays on Stable and never sees a nightly.
+
+**Switching a Desk to Nightly.** Settings → Help → Updates → **Nightly**. Desk
+checks at once and installs the newest nightly the way it installs any update,
+once your sessions finish and you've stepped away. On Nightly it reads both
+feeds and takes the newer, so a stable release newer than the last nightly
+reaches it too. **Stable** switches back: a nightly found but not installed is
+let go, and Desk never goes back to an older version, so a nightly build waits
+until a stable newer than it is out (`0.2.11` or later for
+`0.2.11-nightly.20261120.42`). Help says so. The setting is `updateChannel` in
+`settings.json`; anything but `nightly` means Stable.
+
+**Versions.** A nightly is the next patch after the latest stable release, as
+a pre-release: `0.2.11-nightly.<UTC date>.<run number>`, after `0.2.10` and
+before `0.2.11` as semver (and the updater) orders them, and each night's
+after the one before.
+
+**Feeds.** Stable's is `latest.json` on the latest release, as before. The
+nightly's is `latest-nightly.json` on the `nightly` release:
+
+```
+https://github.com/<RELEASES_REPO>/releases/download/nightly/latest-nightly.json
+```
+
+Desk derives that address from its built-in stable endpoint; it is never in
+`plugins.updater.endpoints`, which the updater falls back along. Each nightly
+is its own pre-release, `v<version>`, carrying its downloads and the
+machines' backends (Desk on a nightly sets machines up from its own
+version's release), never marked latest; the `nightly` release holds only
+the feed. The last 14 nightlies are kept and older ones deleted with their
+tags.
+
+**Why no Desk on Stable can get a nightly.**
+- Stable reads `latest.json` only. Nothing on the nightly path writes a
+  `latest.json` or marks a release latest; `publish` fails if a nightly
+  would carry one, and afterwards checks that the latest release is still a
+  stable one.
+- On Stable the app takes a version with no pre-release part only, and
+  only a newer one; from the nightly feed, a nightly only. It checks again
+  before it downloads and before it installs, in case the channel changed.
+- Downloads are signed for their versions and the app refuses a mismatch,
+  so a feed can't pass a nightly off under a stable's version.
+- `release.yml` refuses a stable version with a pre-release part and a
+  nightly version that isn't one, and a nightly tag starts no release.
+
+**Each night**, `nightly.yml` (its planning is `.github/scripts/nightly.py`,
+tested by `test_nightly.py`):
+
+1. Skips while a **Release** run is going.
+2. Reads the last nightly's feed: its version and the Desk commit and hub
+   ref it was built from (`desk_commit`, `hub_ref` in the feed).
+3. Finds the newest commit on the hub's main whose **PR Check** passed. If
+   it is ahead of `hub.ref`, it commits the bump (`Desk ships hub <sha>:
+   …`, the hub commits listed) on a branch `nightly/hub-…`, runs Desk's CI
+   there (`workflow_dispatch`: a push with the job's token starts none), and
+   fast-forwards `main` to it once CI passes. `main`'s ruleset only forbids
+   force-pushes and deletion, so the bot can push; if it ever requires pull
+   requests, this step fails and the night's issue says so. A bump whose CI
+   fails is left out (that night's nightly is built without it, if Desk
+   changed) and reported. `vellev.ref` is left as it is.
+4. Skips when there are no new commits on `main` and no hub bump.
+5. Builds only a commit whose Desk CI passed, at that exact commit; else it
+   skips and says why in the run's summary.
+6. Calls `release.yml` with `channel: nightly`: the same builds, signing and
+   notarizing (Windows: the NSIS installer only, since the MSI takes no
+   pre-release version), published as above. The release notes list the
+   pull requests merged since the last nightly (before the first, since the
+   latest stable) and the hub commits brought in.
+
+A night that fails, or leaves a hub bump out, opens an issue labelled
+`nightly` (or comments on the open one); the next good night closes it.
+
+**Dry run.** Run **Nightly** from the Actions tab with **dry_run**: it plans,
+gates and builds, signs and notarizes everything as a real night does, and
+publishes nothing. It commits nothing to `main` either: a hub bump it would
+make is built from the hub commit as it is (`hub_ref`), and printed. What it
+would have published, `latest-nightly.json` and the notes, is the run's
+`nightly-dry-run` artifact. A run that isn't on `main` must be a dry run.
 
 ## Secrets and variables
 
