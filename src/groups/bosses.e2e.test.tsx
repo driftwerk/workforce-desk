@@ -133,6 +133,8 @@ const connect = async () => {
 };
 
 const row = (name: string) => screen.getAllByRole("button").find((b) => b.dataset.item && b.querySelector(".gi-name")?.textContent === name)!;
+/** What the boss crown on `name`'s row says, when it wears one. */
+const bossTag = (name: string) => row(name).querySelector(".gi-boss")?.getAttribute("title") ?? null;
 
 beforeEach(() => {
   hub = new FakeHub();
@@ -161,11 +163,11 @@ describe("a group's boss, against the hub", () => {
     fireEvent.click(screen.getByRole("menuitem", { name: "Oversee this group" }));
     // Acme had a boss: it only changes boss, unasked.
     expect(screen.queryByRole("dialog")).toBeNull();
-    await waitFor(() => expect(within(row("Mia")).getByText("boss")).toBeTruthy());
+    await waitFor(() => expect(bossTag("Mia")).toBeTruthy());
     expect((parse(hub.configs.sarah!) as { oversight: object }).oversight).not.toHaveProperty("group");
     fireEvent.contextMenu(row("Mia"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Stop overseeing" }));
-    await waitFor(() => expect(within(row("Mia")).queryByText("boss")).toBeNull());
+    await waitFor(() => expect(bossTag("Mia")).toBeNull());
     expect(hub.manager()).toEqual({ agentId: "desk", level: "act", bosses: [], sealed: [] });
     expect(within(screen.getByRole("group", { name: "Acme" })).queryByText(/oversees/)).toBeNull();
   });
@@ -173,14 +175,14 @@ describe("a group's boss, against the hub", () => {
   it("is made from its row once asked, shows on its row and group, and is taken off before its group is deleted", async () => {
     await connect();
     render(<SidebarGroups />);
-    expect(within(row("Sarah")).getByText("boss")).toBeTruthy();
+    expect(bossTag("Sarah")).toBeTruthy();
     expect(within(screen.getByRole("group", { name: "Acme" })).getByRole("button", { name: "Sarah oversees" })).toBeTruthy();
 
     // Mia oversees Globex, which the main overseer saw: asked first.
     fireEvent.contextMenu(row("Mia"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Oversee this group" }));
     fireEvent.click(within(screen.getByRole("dialog", { name: "Oversee Globex with Mia?" })).getByRole("button", { name: "Oversee Globex" }));
-    await waitFor(() => expect(within(row("Mia")).getByText("boss")).toBeTruthy());
+    await waitFor(() => expect(bossTag("Mia")).toBeTruthy());
     expect(parse(hub.configs.mia!)).toEqual({ llm: { provider: "claude-code" }, oversight: expect.objectContaining({ enabled: true, group: "globex" }) });
     expect(within(screen.getByRole("group", { name: "Globex" })).getByRole("button", { name: "Mia oversees" })).toBeTruthy();
     // The main overseer is untouched.
@@ -199,7 +201,7 @@ describe("a group's boss, against the hub", () => {
     const o = (parse(hub.configs.mia!) as { oversight: Record<string, unknown> }).oversight;
     expect(o.enabled).toBe(false);
     expect("group" in o).toBe(false);
-    await waitFor(() => expect(within(row("Mia")).queryByText("boss")).toBeNull());
+    await waitFor(() => expect(bossTag("Mia")).toBeNull());
     expect(hub.layout.groups.map((g) => g.id)).toEqual(["acme"]);
   });
 });

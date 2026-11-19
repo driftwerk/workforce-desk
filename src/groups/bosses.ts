@@ -25,6 +25,49 @@ export const bossOfGroup = (manager: Manager | null, group: string): GroupBoss |
 export const groupOfBoss = (manager: Manager | null, agentId: string): string | null =>
   manager?.bosses?.find((b) => b.agentId === agentId)?.group ?? null;
 
+/** The agent a group's grant names as its boss on another hub: by its
+ *  hub's id and its own, never its name. */
+export interface GrantNamed {
+  hub: string;
+  agent: string;
+}
+
+/** What an agent's row says it is the boss of: the main boss, or the boss
+ *  of the group it sits in (one of this computer's, or one on another hub
+ *  that a group's grant names). A group's boss sitting in another group is
+ *  tagged there no more than any other agent. */
+export type BossTag = { kind: "main" } | { kind: "group"; group: string; remote: boolean } | null;
+
+export const bossTagOf = (
+  agent: { hubId: string; id: string },
+  local: boolean,
+  /** The group its row sits in. */
+  sitsIn: string,
+  manager: Manager | null,
+  /** Each group's grant-named boss on another hub. */
+  named: Record<string, GrantNamed | null>,
+): BossTag => {
+  if (local) {
+    if (manager?.agentId === agent.id) return { kind: "main" };
+    const g = groupOfBoss(manager, agent.id);
+    return g && g === sitsIn ? { kind: "group", group: g, remote: false } : null;
+  }
+  if (sitsIn === UNGROUPED) return null;
+  const n = named[sitsIn];
+  return n && n.hub === agent.hubId && n.agent === agent.id ? { kind: "group", group: sitsIn, remote: true } : null;
+};
+
+/** The groups an agent on another hub is the grant-named boss of. */
+export const grantGroupsOf = (agent: { hubId: string; id: string }, named: Record<string, GrantNamed | null>): string[] =>
+  Object.entries(named)
+    .filter(([g, n]) => g !== UNGROUPED && n?.hub === agent.hubId && n.agent === agent.id)
+    .map(([g]) => g);
+
+/** The words a boss tag carries, as its tooltip and the row's description:
+ *  "Main boss", "Boss of Acme", "Boss of Patchwork (on Patchwork hub)". */
+export const bossTagSays = (tag: BossTag, groupName: (id: string) => string, hubLabel: string): string | null =>
+  !tag ? null : tag.kind === "main" ? "Main boss" : `Boss of ${groupName(tag.group)}` + (tag.remote ? ` (on ${hubLabel} hub)` : "");
+
 /** What an agent's row offers about overseeing, in the group `group` it sits
  *  in: to oversee that group, and to stop overseeing the one it oversees.
  *  Only this computer's agents can be bosses; the main overseer stays the

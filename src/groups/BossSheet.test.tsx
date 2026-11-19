@@ -245,7 +245,7 @@ describe("what the sheet offers as the boss stands", () => {
 });
 
 describe("making an agent on a paired hub a group's boss from their settings", () => {
-  beforeEach(() => useGrantBosses.setState({ byGroup: {}, bossed: {}, readAt: {} }));
+  beforeEach(() => useGrantBosses.setState({ byGroup: {}, bossed: {}, named: {}, readAt: {} }));
 
   it("picks the group, then opens its Boss sheet with them picked, to make them its boss there", async () => {
     render(<BossOfAGroup agent={ROSTER[2]!} hub={HUBS[1]!} />);

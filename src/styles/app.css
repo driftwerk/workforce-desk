@@ -2431,20 +2431,19 @@ button.thread-bar:hover {
   padding: 4px;
   cursor: default;
 }
-/* A boss's row: "boss" after its name, in the signal's soft colour, as a
-   session a boss runs says so. */
+/* A boss's row: a crown where its meta sits, in the signal's soft colour,
+   as a session a boss runs says so. It stays when a narrow sidebar hides
+   the meta. */
 .gi-boss {
   flex: none;
-  display: inline-block;
-  padding: 1px 7px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 18px;
   border-radius: 999px;
   background: var(--signal-soft);
   color: var(--signal-soft-text);
-  font-family: var(--font-ui);
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  white-space: nowrap;
 }
 /* "● Acme" beside a session's or an agent's name. */
 .chip-group {

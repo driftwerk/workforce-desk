@@ -230,7 +230,7 @@ beforeEach(() => {
   startGrids(memory(), { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
   useTerminals.setState({ byId: {}, known: true, programs: {}, problems: {} });
   useCharges.setState({ bySession: {}, released: {}, supported: null });
-  useGrantBosses.setState({ byGroup: {}, bossed: {}, readAt: {} });
+  useGrantBosses.setState({ byGroup: {}, bossed: {}, named: {}, readAt: {} });
   useHubLayout.setState({ layout: null, kept: false });
   useLine.setState({ threads: {}, problems: {} });
   useChat.setState({

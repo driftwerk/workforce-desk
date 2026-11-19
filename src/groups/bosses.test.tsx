@@ -9,7 +9,8 @@ import type { Manager } from "../hub/types";
 import { useOverview } from "../overview/store";
 import { useSettings } from "../settings/store";
 import { openTarget } from "../shell/navigate";
-import { asksBeforeOverseeing, bossOfGroup, deleteAsk, groupDot, groupOfBoss, isSealed, overseeAsk, overseeChoices, overseeGroup, overseeSaid, stopOverseeing } from "./bosses";
+import { useGrantBosses } from "../crew/grantBoss";
+import { asksBeforeOverseeing, bossOfGroup, bossTagOf, bossTagSays, deleteAsk, grantGroupsOf, groupDot, groupOfBoss, isSealed, overseeAsk, overseeChoices, overseeGroup, overseeSaid, stopOverseeing } from "./bosses";
 import { oversightHub } from "./testing";
 import { GroupChip } from "./GroupChip";
 import { EMPTY_LAYOUT, type DeskGroup } from "./model";
@@ -33,6 +34,39 @@ describe("who oversees a group", () => {
     expect(groupOfBoss(MAIN, "desk")).toBeNull();
     expect(bossOfGroup({ agentId: "desk", level: "act" }, "acme")).toBeNull();
     expect(bossOfGroup(null, "acme")).toBeNull();
+  });
+
+  it("says which rows are bosses: the main one, a group's here, and one a group's grant names on another hub", () => {
+    const at = (hubId: string, id: string) => ({ hubId, id });
+    const named = { patchwork: { hub: "pw", agent: "lattice" } };
+    // The main boss, wherever it sits.
+    expect(bossTagOf(at("local", "desk"), true, "ungrouped", MAIN, named)).toEqual({ kind: "main" });
+    expect(bossTagOf(at("local", "desk"), true, "acme", MAIN, named)).toEqual({ kind: "main" });
+    // This computer's group boss, in the group it oversees.
+    expect(bossTagOf(at("local", "sarah"), true, "acme", MAIN, named)).toEqual({ kind: "group", group: "acme", remote: false });
+    expect(bossTagOf(at("local", "sarah"), true, "globex", MAIN, named)).toBeNull();
+    // An agent on another hub that a group's grant names, in that group.
+    expect(bossTagOf(at("pw", "lattice"), false, "patchwork", MAIN, named)).toEqual({ kind: "group", group: "patchwork", remote: true });
+    expect(bossTagOf(at("pw", "lattice"), false, "acme", MAIN, named)).toBeNull();
+    expect(grantGroupsOf(at("pw", "lattice"), named)).toEqual(["patchwork"]);
+    // Matched by hub and id: the same id on another hub, or another id, isn't it.
+    expect(bossTagOf(at("office", "lattice"), false, "patchwork", MAIN, named)).toBeNull();
+    expect(bossTagOf(at("pw", "lattice-2"), false, "patchwork", MAIN, named)).toBeNull();
+    expect(grantGroupsOf(at("office", "lattice"), named)).toEqual([]);
+    // An agent on another hub that shares the main boss's id isn't the main boss.
+    expect(bossTagOf(at("pw", "desk"), false, "patchwork", MAIN, named)).toBeNull();
+    // Nobody's boss, and a group with no grant.
+    expect(bossTagOf(at("local", "mia"), true, "globex", MAIN, named)).toBeNull();
+    expect(bossTagOf(at("pw", "lattice"), false, "patchwork", MAIN, { patchwork: null })).toBeNull();
+    expect(bossTagOf(at("local", "sarah"), true, "acme", null, {})).toBeNull();
+  });
+
+  it("words each boss tag", () => {
+    const name = (id: string) => ({ acme: "Acme", patchwork: "Patchwork" })[id] ?? id;
+    expect(bossTagSays({ kind: "main" }, name, "This computer")).toBe("Main boss");
+    expect(bossTagSays({ kind: "group", group: "acme", remote: false }, name, "This computer")).toBe("Boss of Acme");
+    expect(bossTagSays({ kind: "group", group: "patchwork", remote: true }, name, "Patchwork")).toBe("Boss of Patchwork (on Patchwork hub)");
+    expect(bossTagSays(null, name, "Patchwork")).toBeNull();
   });
 
   it("is offered only to this computer's agents in a group, never to the main overseer or on an older hub", () => {
@@ -119,6 +153,8 @@ const fakeHub = (configs: Record<string, string>) => {
 };
 
 const row = (name: string) => screen.getAllByRole("button").find((b) => b.dataset.item && b.querySelector(".gi-name")?.textContent === name)!;
+/** What the boss crown on `name`'s row says, when it wears one. */
+const bossTag = (name: string) => row(name).querySelector(".gi-boss")?.getAttribute("title") ?? null;
 const menuOf = (name: string) => {
   fireEvent.contextMenu(row(name));
   return within(screen.getByRole("menu", { name: `${name} options` }))
@@ -140,6 +176,7 @@ beforeEach(() => {
   });
   useDesk.setState({ sessions: {}, openId: null, hub: world.hub as unknown as DeskHub });
   useOverview.setState({ manager: MAIN, managerSupport: "yes" });
+  useGrantBosses.setState({ byGroup: {}, bossed: {}, named: {}, readAt: {} });
   useSettings.setState({ loaded: true, groups: [ACME, GLOBEX], ungrouped: EMPTY_LAYOUT.ungrouped, sessionNames: {} });
 });
 afterEach(cleanup);
@@ -147,17 +184,38 @@ afterEach(cleanup);
 describe("a group's boss in the sidebar", () => {
   it("tags the boss's row and names it on its group's header, which opens its messages", () => {
     render(<SidebarGroups />);
-    expect(within(row("Sarah")).getByText("boss")).toBeTruthy();
+    expect(bossTag("Sarah")).toBe("Boss of Acme");
     expect(row("Sarah").title).toContain("oversees Acme");
-    expect(within(row("Mia")).queryByText("boss")).toBeNull();
-    // The main overseer is still said as before.
-    expect(row("Desk").textContent).toContain("overseer");
+    expect(bossTag("Mia")).toBeNull();
+    // The main overseer wears the crown too, in place of the word.
+    expect(bossTag("Desk")).toBe("Main boss");
+    expect(row("Desk").textContent).not.toContain("overseer");
     const acme = screen.getByRole("group", { name: "Acme" });
     fireEvent.click(within(acme).getByRole("button", { name: "Sarah oversees" }));
     expect(openTarget).toHaveBeenCalledWith({ kind: "agent", key: "local/sarah" });
     expect(within(screen.getByRole("group", { name: "Globex" })).queryByText(/oversees/)).toBeNull();
     // The group's count still shows on a header with a boss.
     expect(acme.querySelector(".grp-count")?.textContent).toBe("2");
+  });
+
+  it("crowns a boss on another hub that its group's grant names, keeping its hub's name beside it", () => {
+    useGrantBosses.setState({ named: { globex: { hub: "remote", agent: "ada" } }, readAt: { globex: Date.now() } });
+    render(<SidebarGroups />);
+    expect(bossTag("Ada")).toBe("Boss of Globex (on Office hub)");
+    expect(row("Ada").querySelector(".gi-meta")?.textContent).toBe("Office");
+    expect(row("Ada").title).toContain("oversees Globex");
+    // Its words are the row's description, as a screen reader hears it.
+    const said = row("Ada")
+      .getAttribute("aria-describedby")!
+      .split(" ")
+      .map((id) => document.getElementById(id)?.textContent);
+    expect(said).toContain("Boss of Globex (on Office hub)");
+    // This computer's boss wears the crown alone.
+    expect(row("Sarah").querySelector(".gi-meta")).toBeNull();
+    // Mia, beside it, is no one's boss.
+    expect(bossTag("Mia")).toBeNull();
+    act(() => useGrantBosses.getState().heard("globex", null));
+    expect(bossTag("Ada")).toBeNull();
   });
 
   it("offers Oversee this group after Remove from group, and Stop overseeing to a boss", () => {
@@ -186,7 +244,7 @@ describe("a group's boss in the sidebar", () => {
     const written = parse(world.configs.mia!) as { llm: unknown; oversight: { enabled: boolean; group: string } };
     expect(written.oversight).toMatchObject({ enabled: true, group: "globex" });
     expect(written.llm).toEqual({ provider: "claude-code" });
-    await waitFor(() => expect(within(row("Mia")).getByText("boss")).toBeTruthy());
+    await waitFor(() => expect(bossTag("Mia")).toBeTruthy());
     expect(within(screen.getByRole("group", { name: "Globex" })).getByRole("button", { name: "Mia oversees" })).toBeTruthy();
   });
 
@@ -224,7 +282,7 @@ describe("a group's boss in the sidebar", () => {
     fireEvent.contextMenu(row("Sarah"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Stop overseeing" }));
     expect(screen.queryByRole("dialog")).toBeNull();
-    await waitFor(() => expect(within(row("Sarah")).queryByText("boss")).toBeNull());
+    await waitFor(() => expect(bossTag("Sarah")).toBeNull());
     const o = (parse(world.configs.sarah!) as { oversight: Record<string, unknown> }).oversight;
     expect(o.enabled).toBe(false);
     expect("group" in o).toBe(false);
@@ -269,7 +327,7 @@ describe("a group's boss in the sidebar", () => {
     useOverview.setState({ manager: { agentId: "desk", level: "act" } });
     render(<SidebarGroups />);
     expect(menuOf("Mia")).not.toContain("Oversee this group");
-    expect(within(row("Sarah")).queryByText("boss")).toBeNull();
+    expect(bossTag("Sarah")).toBeNull();
   });
 });
 
@@ -280,12 +338,12 @@ describe("the fix round", () => {
     fireEvent.contextMenu(row("Mia"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Oversee this group" }));
     expect(screen.queryByRole("dialog")).toBeNull();
-    await waitFor(() => expect(within(row("Mia")).getByText("boss")).toBeTruthy());
+    await waitFor(() => expect(bossTag("Mia")).toBeTruthy());
     // Sarah, replaced, names Acme no more.
     expect((parse(world.configs.sarah!) as { oversight: object }).oversight).not.toHaveProperty("group");
     fireEvent.contextMenu(row("Mia"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Stop overseeing" }));
-    await waitFor(() => expect(within(row("Mia")).queryByText("boss")).toBeNull());
+    await waitFor(() => expect(bossTag("Mia")).toBeNull());
     expect(useOverview.getState().manager?.sealed).toEqual([]);
     expect(within(screen.getByRole("group", { name: "Acme" })).queryByText(/oversees/)).toBeNull();
   });
@@ -313,7 +371,7 @@ describe("the fix round", () => {
     useSettings.setState({ groups: [{ ...ACME, items: ["agent:local/desk"] }, { ...GLOBEX, items: [...GLOBEX.items, "agent:local/sarah"] }] });
     render(<SidebarGroups />);
     // Sarah sits in Globex but oversees Acme: no tag there.
-    expect(within(row("Sarah")).queryByText("boss")).toBeNull();
+    expect(bossTag("Sarah")).toBeNull();
     fireEvent.contextMenu(row("Sarah"));
     fireEvent.click(screen.getByRole("menuitem", { name: "Oversee this group" }));
     // Globex had no boss and the main overseer saw it: the one question.

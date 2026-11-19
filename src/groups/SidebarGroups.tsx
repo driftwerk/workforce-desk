@@ -79,7 +79,10 @@ import type { GroupBoss } from "../hub/types";
 import {
   asksBeforeOverseeing,
   bossOfGroup,
+  bossTagOf,
+  bossTagSays,
   deleteAsk,
+  grantGroupsOf,
   groupOfBoss,
   isSealed,
   overseeAsk,
@@ -185,6 +188,9 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   const badges = useBadgeData();
   const manager = useOverview((s) => s.manager);
   const managerId = manager?.agentId ?? null;
+  // Who each group's grant names as its boss on another hub, so the rows
+  // tag it once it is read.
+  const grantNamed = useGrantBosses((s) => s.named);
   const [asking, setAsking] = useState<Asking>(null);
   const boss = useBoss();
   const gridOrder = useGrids((s) => s.order);
@@ -237,6 +243,9 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   }
   const present = [...items.keys()];
   const shown = resolve(layout, present);
+  /** The group each item sits in, as shown. */
+  const groupOfItem = new Map<ItemKey, string>();
+  for (const g of shown) for (const key of g.items) groupOfItem.set(key, g.id);
 
   // The item the focused pane of the grid the Grids view shows is (see
   // `itemOf`), while that pane is laid out; none in any other view.
@@ -479,18 +488,30 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     return (m && offlineWord(m.state)) ?? (engines[machine]?.loaded ? null : "connecting");
   };
 
-  /** The group the agent's row is the boss of, when it is one of this
-   *  computer's. */
-  const bossGroupOf = (item: Item): string | null => (item.kind === "agent" && isLocal(item.agent) ? groupOfBoss(manager, item.agent.id) : null);
-  /** Its row wears the boss tag: in the group it oversees. */
-  const tagged = (item: Item): boolean => {
-    const g = bossGroupOf(item);
-    return !!g && shown.find((x) => x.id === g)?.items.includes(item.key) === true;
+  /** The groups the agent's row is the boss of: as this computer's hub says,
+   *  or, for one on another hub, as the groups' grants name it. */
+  const bossGroupsOf = (item: Item): string[] => {
+    if (item.kind !== "agent") return [];
+    if (!isLocal(item.agent)) return grantGroupsOf(item.agent, grantNamed);
+    const g = groupOfBoss(manager, item.agent.id);
+    return g ? [g] : [];
   };
+  /** The boss tag its row wears: the main boss's anywhere, a group's boss's
+   *  in the group it oversees. */
+  const tagOf = (item: Item) => {
+    if (item.kind !== "agent") return null;
+    const sitsIn = groupOfItem.get(item.key) ?? UNGROUPED;
+    return bossTagOf(item.agent, isLocal(item.agent), sitsIn, manager, grantNamed);
+  };
+  const bossOf = (item: Item): string | null => (item.kind === "agent" ? bossTagSays(tagOf(item), groupName, hubLabel(item.agent.hubId)) : null);
 
   const metaOf = (item: Item): string => {
-    if (item.kind === "agent")
-      return item.agent.id === managerId && isLocal(item.agent) ? "overseer" : tagged(item) ? "" : hubLabel(item.agent.hubId);
+    if (item.kind === "agent") {
+      // This computer's bosses wear the tag alone; one on another hub keeps
+      // its hub's name beside it.
+      const tag = tagOf(item);
+      return tag && !(tag.kind === "group" && tag.remote) ? "" : hubLabel(item.agent.hubId);
+    }
     const away = awayWord(machineOfRow(item));
     if (away) return away;
     if (item.kind === "away") return ENGINE[item.seen.engine];
@@ -499,9 +520,10 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
 
   const titleOf = (item: Item): string => {
     if (item.kind === "agent") {
-      const bossOf = bossGroupOf(item);
       const about = describeAgent(item.agent, hubLabel(item.agent.hubId));
-      return bossOf ? `${about} · oversees ${groupName(bossOf)}` : about;
+      if (tagOf(item)?.kind === "main") return `${about} · main boss`;
+      const oversees = bossGroupsOf(item).map(groupName).filter(Boolean);
+      return oversees.length ? `${about} · oversees ${oversees.join(", ")}` : about;
     }
     const on = item.kind === "away" ? item.machine : machineOf(item.session);
     const away = awayWord(on);
@@ -822,7 +844,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
                           : view === "floor" && panelAgent === agentKey(item.agent)
                   }
                   meta={metaOf(item)}
-                  boss={tagged(item)}
+                  boss={bossOf(item)}
                   title={item.kind === "agent" ? titleOf(item) : `${nameOf(item)} · ${titleOf(item)}`}
                   editing={editing?.kind === "session" && editing.key === key}
                   register={register}
@@ -1123,9 +1145,9 @@ function ItemRowOf({
   away: boolean;
   on: boolean;
   meta: string;
-  /** It oversees a group: the boss tag, which opens its messages as the
-   *  row does. */
-  boss: boolean;
+  /** It is a boss: the words of its boss tag ("Main boss", "Boss of
+   *  Acme"), which opens its messages as the row does. */
+  boss: string | null;
   title: string;
   editing: boolean;
   register: (id: string, el: HTMLElement | null) => void;
@@ -1141,7 +1163,9 @@ function ItemRowOf({
   const charge = useCharge(local ? session.id : undefined);
   const inGrids = useGridNames(item.key);
   const says = inGrids.length ? inGridSays(inGrids) : null;
-  const markId = `${useId()}-grid`;
+  const rowId = useId();
+  const markId = `${rowId}-grid`;
+  const bossId = `${rowId}-boss`;
   return (
     <SortRow
       id={item.key}
@@ -1158,11 +1182,11 @@ function ItemRowOf({
         <>
           {item.kind !== "agent" && <MachineTag machine={machineOfRow(item)} />}
           {meta && <span className={`gi-meta small ${session && !away && waitsOnYou(session) ? "state-blocked" : "faint"}`}>{meta}</span>}
-          {boss && <span className="gi-boss">boss</span>}
+          {boss && <BossTag id={bossId} says={boss} />}
         </>
       }
       title={title}
-      describedBy={says ? `${hint} ${markId}` : hint}
+      describedBy={[hint, boss && bossId, says && markId].filter(Boolean).join(" ")}
       data={{ "data-item": item.key }}
       register={(el) => register(item.key, el)}
       onOpen={() => actions.open(key)}
@@ -1180,5 +1204,24 @@ function ItemRowOf({
         <Marks badge={badge} />
       </span>
     </SortRow>
+  );
+}
+
+/** A boss's crown, in the signal's soft colour, where its row's meta sits.
+ *  Like the grid glyph, it carries the tooltip and is hidden from screen
+ *  readers; its words (`says`) are the row's description. */
+function BossTag({ id, says }: { id: string; says: string }) {
+  return (
+    <>
+      <span className="gi-boss" title={says} aria-hidden="true">
+        <svg width="12" height="12" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" strokeLinecap="round">
+          <path d="M2.2 10L1.4 4.2l3.3 2.6L7 2.6l2.3 4.2 3.3-2.6-.8 5.8z" />
+          <path d="M2.6 12.2h8.8" />
+        </svg>
+      </span>
+      <span id={id} hidden>
+        {says}
+      </span>
+    </>
   );
 }
