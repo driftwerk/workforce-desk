@@ -37,13 +37,18 @@ hub keeps memories in SQLite; then it moves them into the store, once.
    You can also run **Release** from the Actions tab with a version
    (`workflow_dispatch`). The workflow writes that version into
    `tauri.conf.json`, `package.json` and the workspace `Cargo.toml`. You don't
-   bump them by hand.
+   bump them by hand. A stable version is `major.minor.patch` only: a tag
+   with a pre-release part (`v0.3.0-rc.1`, a nightly's `v0.2.11-nightly.…`)
+   starts no release, and the Release form refuses one, since no Desk on
+   Stable would ever take it. Its **dry_run** builds, signs and checks
+   everything and publishes nothing; its run's title says "(dry run)", and
+   neither waits for nor holds up a real release (nor the nightly).
 3. `.github/workflows/release.yml` then:
    - builds the three sidecars for both architectures and joins each pair
      with `lipo` (`scripts/build-sidecars.sh`). vellev embeds with ONNX
-     Runtime, which `ort` ships prebuilt for Apple Silicon only: for Intel
-     the job builds ONNX Runtime 1.28 from source
-     (`scripts/onnxruntime.sh`, cached by its pin)
+     Runtime, which `ort` ships prebuilt for Apple Silicon only. Intel's
+     memory store isn't built: it is Desk 0.2.10's, pinned
+     (`scripts/intel-memory.sh`; see [ONNX Runtime](#onnx-runtime))
    - builds the app with `tauri build --target universal-apple-darwin`
    - signs inside out with the Developer ID, using the hardened runtime and
      the entitlements in `src-tauri/entitlements/`
@@ -61,9 +66,18 @@ hub keeps memories in SQLite; then it moves them into the store, once.
 5. The `backend` job (`backend-build.yml`) builds the Linux backend alone,
    for x86_64 (on `ubuntu-24.04`) and aarch64 (on `ubuntu-24.04-arm`), each
    inside manylinux_2_28 (AlmaLinux 8, glibc 2.28), with OpenSSL linked in
-   (`scripts/openssl-static.sh`) and ONNX Runtime built there
+   (`scripts/openssl-static.sh`) and Microsoft's ONNX Runtime from NuGet
    (`scripts/onnxruntime.sh`; ort's own needs glibc 2.38), so Desk's own
-   programs need only glibc 2.28.
+   programs need only glibc 2.28. That ONNX Runtime is a shared library,
+   `libonnxruntime.so.1`: every Linux backend ships it beside
+   `desk-memory`, which finds it there (rpath `$ORIGIN`). That covers the
+   artifact, the machines' tarball and the WSL copy. The Linux app's
+   packages put it in `/usr/lib/Desk`. The AppImage's tooling then moves a
+   copy into `usr/lib`, and the release checks that both packages load
+   their own copy.
+   Every place that ships it checks it against its pin
+   (`scripts/onnxruntime.sh check`). Each Desk install refuses a backend
+   whose `desk-memory` names the library but which doesn't hold it.
    - The Postgres Desk Helper embeds is built there too, from source
      (`scripts/postgres-linux.sh`): theseus-rs' builds, which
      `postgresql_embedded` downloads otherwise, are made on Debian 12 and
@@ -116,16 +130,115 @@ Nothing unsigned leaves the Mac, apart from a development build's
 installed as `<version>+dev.<hash of the folder>` and said aloud. Release
 builds ignore that variable.
 
+Every updater download (the Mac's `Desk.app.tar.gz`, the AppImage, the NSIS
+installer) is signed for its version (`tauri signer sign --app-version`, which
+`tauri build` does by itself), and the app refuses a feed whose version isn't
+the one its download was signed for (`requireSignedVersion` in
+`tauri.conf.json`). The `publish` job checks each signature against the key
+in `tauri.conf.json`, and the version in it, before anything is published.
+
 Installed copies check `latest.json` on launch and every four hours. They
 download the update in the background and offer **Restart to update**. A
 `.deb` is updated by the system's package manager instead: Desk says a new
 version is out and links to the release.
 
-The first build of a new hub ref takes well over an hour, and the first
-Intel ONNX Runtime build adds 30 to 60 minutes. Later builds reuse the cargo
-cache, keyed by the hub and vellev refs, and the ONNX Runtime build, keyed by
-its pin. If the runner runs out of disk, move the
-job to a larger macOS runner.
+The first build of a new hub ref takes well over an hour. Later builds
+reuse the cargo cache, keyed by the hub and vellev refs. If the runner runs
+out of disk, move the job to a larger macOS runner.
+
+## Nightly
+
+`.github/workflows/nightly.yml` builds `main` every night at about 01:30 UTC
+for the Desks set to **Updates: Nightly** (Settings → Help). Everyone else
+stays on Stable and never sees a nightly.
+
+**Switching a Desk to Nightly.** Settings → Help → Updates → **Nightly**. Desk
+checks at once and installs the newest nightly the way it installs any update,
+once your sessions finish and you've stepped away. On Nightly it reads both
+feeds and takes the newer, so a stable release newer than the last nightly
+reaches it too. **Stable** switches back: a nightly found but not installed is
+let go, and Desk never goes back to an older version, so a nightly build waits
+until a stable newer than it is out (`0.2.11` or later for
+`0.2.11-nightly.20261120.42`). Help says so. The setting is `updateChannel` in
+`settings.json`; anything but `nightly` means Stable. A `.deb` install follows
+Stable whatever it says (Help shows Nightly off there): nightlies come as the
+AppImage, the NSIS installer and the Mac app only.
+
+**Versions.** A nightly is the next patch after the latest stable release, as
+a pre-release: `0.2.11-nightly.<UTC date>.<run number>`, after `0.2.10` and
+before `0.2.11` as semver (and the updater) orders them, and each night's
+after the one before.
+
+**Feeds.** Stable's is `latest.json` on the latest release, as before. The
+nightly's is `latest-nightly.json` on the `nightly` release:
+
+```
+https://github.com/<RELEASES_REPO>/releases/download/nightly/latest-nightly.json
+```
+
+Desk derives that address from its built-in stable endpoint; it is never in
+`plugins.updater.endpoints`, which the updater falls back along. Each nightly
+is its own pre-release, `v<version>`, carrying its downloads and the
+machines' backends (Desk on a nightly sets machines up from its own
+version's release), never marked latest; the `nightly` release holds only
+the feed. A nightly is deleted, with its tag, once a stable as new as it is
+out (every Desk on it moves to that stable) and 14 newer nightlies have
+followed it; until then it stays, for a Desk still on it.
+
+**Why no Desk on Stable can get a nightly.**
+- Stable reads `latest.json` only. Nothing on the nightly path writes a
+  `latest.json` or marks a release latest; `publish` fails if a nightly
+  would carry one, and afterwards checks that the latest release is still a
+  stable one.
+- On Stable the app takes a version with no pre-release part only, and
+  only a newer one; from the nightly feed, a nightly only. It checks again
+  before it downloads and before it installs, in case the channel changed.
+- Downloads are signed for their versions and the app refuses a mismatch,
+  so a feed can't pass a nightly off under a stable's version.
+- `release.yml` refuses a stable version with a pre-release part and a
+  nightly version that isn't one, and a nightly tag starts no release.
+
+**Each night**, `nightly.yml` (its planning is `.github/scripts/nightly.py`,
+tested by `test_nightly.py`):
+
+1. Skips while a **Release** run is going.
+2. Reads the last nightly's feed: its version and the Desk commit and hub
+   ref it was built from (`desk_commit`, `hub_ref` in the feed).
+3. Finds the newest commit on the hub's main whose **PR Check** passed. If
+   it is ahead of `hub.ref`, it commits the bump (`Desk ships hub <sha>:
+   …`, the hub commits listed) on a branch `nightly/hub-…`, runs Desk's CI
+   there, and the Linux backend's smoke test (`backend.yml`), as a person's
+   `hub.ref` pull request would (`workflow_dispatch`: a push with the job's
+   token starts none), and fast-forwards `main` to it once both pass. `main`'s ruleset only forbids
+   force-pushes and deletion, so the bot can push; if it ever requires pull
+   requests, this step fails and the night's issue says so. A bump whose CI
+   fails is left out (that night's nightly is built without it, if Desk
+   changed) and reported. `vellev.ref` is never touched: the bump's commit is
+   refused unless `hub.ref` is all it changes (so the vellev hold below
+   stands).
+4. Skips when there are no new commits on `main` and no hub bump.
+5. Builds only a commit whose Desk CI passed, at that exact commit; else it
+   skips and says why in the run's summary and the night's issue.
+6. Calls `release.yml` with `channel: nightly`: the same builds, signing and
+   notarizing, published as above. Windows gets the NSIS installer only,
+   since the MSI takes no pre-release version, and Linux the AppImage only:
+   dpkg would order `0.2.11-nightly.…` after `0.2.11`, so the stable after a
+   nightly `.deb` would look like a downgrade. The release notes list the
+   pull requests merged since the last nightly (before the first, since the
+   latest stable) and the hub commits brought in.
+
+A night that fails, skips because Desk's CI is red, cancelled or stuck, or
+leaves a hub bump out, opens an issue labelled `nightly` (or comments on the
+open one), saying which platforms were published when only part of the build
+failed; the next good night closes it. "Nothing changed" and "a release is
+running" are quiet skips.
+
+**Dry run.** Run **Nightly** from the Actions tab with **dry_run**: it plans,
+gates and builds, signs and notarizes everything as a real night does, and
+publishes nothing. It commits nothing to `main` either: a hub bump it would
+make is built from the hub commit as it is (`hub_ref`), and printed. What it
+would have published, `latest-nightly.json` and the notes, is the run's
+`nightly-dry-run` artifact. A run that isn't on `main` must be a dry run.
 
 ## Secrets and variables
 
@@ -195,10 +308,80 @@ echo <sha> > vellev.ref
 git commit -m "Desk ships vellev <short sha>: <why>" vellev.ref
 ```
 
-When it builds for Intel Macs, `build-sidecars.sh` refuses a vellev whose
-locked `ort-sys` is not the one `scripts/onnxruntime.sh` builds ONNX
-Runtime for; move that script's pin (version and commit) to the ONNX Runtime
-the new `ort-sys` links.
+While Intel Macs ship Desk 0.2.10's memory store, `build-sidecars.sh`
+refuses to change vellev at all for them (see [ONNX Runtime](#onnx-runtime)).
+When it builds the Linux backend, it refuses a vellev whose locked `ort-sys`
+is not the one `scripts/onnxruntime.sh` provides ONNX Runtime for. Move that script's pins
+to the ONNX Runtime the new `ort-sys` links:
+- its version and commit;
+- the NuGet package's sha256, and each Linux library's.
+
+Check a new package before pinning it (see below).
+
+## ONNX Runtime
+
+On 2026-11-18, github.com/microsoft/onnxruntime went offline: git, the web
+and the API all answer 404. Microsoft took it down, along with
+microsoft/agent-framework, hours after a malicious agent-framework release
+on PyPI. Until then `scripts/onnxruntime.sh` cloned the v1.28.0 tag from
+that repository and built it. No step of Desk's build fetches from it now:
+
+- **Linux backend.** It uses Microsoft's own build from nuget.org,
+  Microsoft.ML.OnnxRuntime 1.28.0, pinned by the package's sha256 and by
+  each library's. That version was published on 2026-07-25 and can't be
+  changed on nuget.org. Before it was pinned, it was checked on 2026-11-19:
+  - `dotnet nuget verify --all` accepted Microsoft Corporation's author
+    signature and nuget.org's repository countersignature, both
+    timestamped 2026-07-25. The author certificate expired on 2026-10-17,
+    so the signature stands on its timestamp;
+  - its sha512 matched nuget.org's catalog;
+  - its `.nuspec` names commit `da9b5e36…`, the v1.28.0 commit Desk built
+    from before;
+  - its libraries need glibc 2.27 at most.
+
+  To check a package the same way:
+
+  ```sh
+  docker run --rm -v "$PWD/x.nupkg:/p/x.nupkg:ro" \
+    mcr.microsoft.com/dotnet/sdk@sha256:1b955f179b02df4f0eb5fadedaa898cbe44d620a64aab52eec72c8e91d1355b5 \
+    dotnet nuget verify --all -v normal /p/x.nupkg
+  ```
+- **Intel Macs.** Microsoft publishes no 1.28 build for Intel Macs, on
+  NuGet or PyPI, and its source is the repository that is offline. No ONNX
+  Runtime library we built survived: the CI caches had expired, and the
+  library was never a release asset. But the memory store linked against
+  it did, inside Desk 0.2.10's signed, notarized Desk.app. Until the source
+  is back, Intel's memory store is that binary's x86_64 slice, taken with
+  `lipo -thin x86_64`.
+  - The asset was `v0.2.10/Desk.app.tar.gz`, sha256 `16e92f85…3c14`. GitHub's
+    digest agrees, and its minisign signature verified with the updater
+    key.
+  - The app passes `codesign --verify --strict --deep`, and `spctl`
+    accepted it as notarized.
+  - The slice keeps its own Developer ID signature, team `CHA3FP8ENJ`.
+  - It was built by Release run 44073317561 (tag v0.2.10, `64a7e561`) on
+    2026-11-17, before the takedown. That run built vellev `c68c9736` with
+    ONNX Runtime cloned that day and checked against commit `da9b5e36…`.
+  - It is hosted as an asset of the pre-release
+    `deps-intel-memory-vellev-c68c9736` on this repository, beside its
+    `PROVENANCE.txt`. That pre-release is not a Desk release, is never the
+    latest, and its tag doesn't start with `v`, so neither release.yml nor
+    the updater looks at it.
+  - `scripts/intel-memory.sh` pins it by sha256. It checks a private copy
+    again (a single x86_64 program, signed with that team's Developer ID,
+    for macOS 13.0) before moving it into place. `build-sidecars.sh` ships it
+    as it is and checks it again where it lands. The release checks the
+    app's Desk Memory once more before signing it.
+
+  **vellev.ref is held at `c68c9736` while this lasts**, for every platform,
+  since one vellev.ref serves them all. Both
+  `intel-memory.sh` and therefore `build-sidecars.sh` refuse any other
+  vellev before building, and `intel-sidecars.yml` runs whenever
+  `vellev.ref` changes. A vellev bump has to wait until ONNX Runtime's
+  source is settled: Microsoft's repository is back, or the release owner
+  approves another source (not a third-party mirror by default). After
+  that, the source build of Intel's ONNX Runtime comes back (see
+  `scripts/onnxruntime.sh` before this change, in git).
 
 ## Building locally
 

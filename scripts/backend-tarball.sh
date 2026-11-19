@@ -4,10 +4,12 @@
 #
 #   scripts/backend-tarball.sh DIR ARCH VERSION OUT
 #
-# DIR holds desk-helper, desk-agents, desk-memory and claude-plugin/ (a
-# backend-linux-ARCH artifact). Writes OUT/desk-backend-linux-ARCH-VERSION.tar.gz
-# with those four at its top and no folder around them, which is how a
-# machine unpacks it, and, when TAURI_SIGNING_PRIVATE_KEY is set, its .sig
+# DIR holds desk-helper, desk-agents, desk-memory, the libonnxruntime.so.1
+# the memory store links (Microsoft's ONNX Runtime: scripts/onnxruntime.sh)
+# and claude-plugin/ (a backend-linux-ARCH artifact). Writes
+# OUT/desk-backend-linux-ARCH-VERSION.tar.gz with those at its top and no
+# folder around them, which is how a machine unpacks it, and, when
+# TAURI_SIGNING_PRIVATE_KEY is set, its .sig
 # from `tauri signer sign` (TAURI_SIGNING_PRIVATE_KEY_PASSWORD too), which
 # Desk checks against plugins.updater.pubkey before anything leaves the Mac.
 # TAURI names the Tauri CLI to sign with (default: the one `npm ci`
@@ -32,6 +34,16 @@ for name in desk-helper desk-agents desk-memory; do
   [ "$machine" = "$want" ] || die "$dir/$name isn't built for $arch"
   chmod 755 "$dir/$name"
 done
+# The ONNX Runtime the memory store loads from beside itself: the pinned
+# one for its architecture (a static build names none, as Desk's installs
+# check the same way).
+library=()
+if grep -qF libonnxruntime.so.1 "$dir/desk-memory"; then
+  [ -f "$dir/libonnxruntime.so.1" ] || die "$dir has no libonnxruntime.so.1, which its desk-memory links"
+  "$root/scripts/onnxruntime.sh" check "$dir/libonnxruntime.so.1" "$arch"
+  chmod 644 "$dir/libonnxruntime.so.1"
+  library=(libonnxruntime.so.1)
+fi
 [ -d "$dir/claude-plugin" ] || die "$dir has no claude-plugin"
 # Claude Code loads no plugin without its manifest.
 [ -f "$dir/claude-plugin/.claude-plugin/plugin.json" ] ||
@@ -40,7 +52,7 @@ done
 mkdir -p "$out"
 tarball="$out/desk-backend-linux-$arch-$version.tar.gz"
 tar -czf "$tarball" --owner=0 --group=0 --numeric-owner -C "$dir" \
-  desk-helper desk-agents desk-memory claude-plugin
+  desk-helper desk-agents desk-memory ${library[@]+"${library[@]}"} claude-plugin
 echo "$tarball"
 
 if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then

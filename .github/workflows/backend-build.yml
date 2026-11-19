@@ -9,7 +9,10 @@ name: Linux backend build
 #   - inside manylinux_2_28 (AlmaLinux 8), so Desk's own programs need only
 #     glibc 2.28;
 #   - with OpenSSL linked in, so they need no libssl of the distribution's;
-#   - with ONNX Runtime built here, since ort's own needs glibc 2.38;
+#   - with Microsoft's ONNX Runtime from its NuGet package (glibc 2.27,
+#     scripts/onnxruntime.sh), since ort's own needs glibc 2.38. It is a
+#     shared library, shipped beside the memory store as
+#     libonnxruntime.so.1;
 #   - with the Postgres the helper embeds built here too
 #     (scripts/postgres-linux.sh), since theseus-rs' builds, which
 #     postgresql_embedded downloads otherwise, need glibc 2.36.
@@ -18,14 +21,23 @@ name: Linux backend build
 # 9, Amazon Linux 2023, Fedora. Each build then runs scripts/backend-smoke.sh
 # on those, starting Postgres and the hub.
 #
-# The release calls it (release.yml, with the version to stamp); a pull
-# request runs it when what it is built with changes. It publishes nothing.
+# The release calls it (release.yml, with the version to stamp, and for a
+# nightly the Desk commit to build); a pull request runs it when what it is
+# built with changes. It publishes nothing.
 
 on:
   workflow_call:
     inputs:
       version:
         description: "The version to stamp into the build; empty leaves the repo's"
+        type: string
+        default: ""
+      ref:
+        description: "The Desk commit to build; empty is the one that started the run"
+        type: string
+        default: ""
+      hub_ref:
+        description: "A dry run's hub commit in place of hub.ref's; empty is hub.ref's"
         type: string
         default: ""
     secrets:
@@ -37,6 +49,7 @@ on:
     paths:
       - scripts/build-sidecars.sh
       - scripts/onnxruntime.sh
+      - scripts/onnxruntime.pin
       - scripts/openssl-static.sh
       - scripts/postgres-linux.sh
       - scripts/backend-tarball.sh
@@ -47,8 +60,10 @@ on:
 permissions:
   contents: read
 
+# A pull request's builds replace each other; a release's (its run, a dry
+# run's or a nightly's) never wait on another's.
 concurrency:
-  group: backend-build-${{ github.ref }}-${{ github.event_name }}
+  group: backend-build-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
@@ -83,10 +98,16 @@ jobs:
         uses: actions/checkout@v7
         with:
           path: desk
+          ref: ${{ inputs.ref }}
 
       - name: Read the hub and vellev refs
         id: refs
+        env:
+          HUB_OVERRIDE: ${{ inputs.hub_ref }}
+        # A dry run's hub bump, written into the checkout's hub.ref as its
+        # commit would have it (build-sidecars.sh checks the two agree).
         run: |
+          [ -z "$HUB_OVERRIDE" ] || echo "$HUB_OVERRIDE" > desk/hub.ref
           echo "hub=$(tr -d '[:space:]' < desk/hub.ref)" >> "$GITHUB_OUTPUT"
           echo "vellev=$(tr -d '[:space:]' < desk/vellev.ref)" >> "$GITHUB_OUTPUT"
 
@@ -126,26 +147,9 @@ jobs:
           key: backend-${{ matrix.arch }}-hub-${{ steps.refs.outputs.hub }}-vellev-${{ steps.refs.outputs.vellev }}
           cache-on-failure: true
 
-      # The slowest step on a cold cache, keyed by its pin, and kept as soon
-      # as it is built, whatever the build after it does.
-      - name: Restore ONNX Runtime
-        id: ort
-        uses: actions/cache/restore@v6
-        with:
-          path: ${{ github.workspace }}/onnxruntime
-          key: onnxruntime-linux-${{ matrix.arch }}-${{ hashFiles('desk/scripts/onnxruntime.sh') }}
-
+      # Microsoft's build, from nuget.org, checked against its pins.
       - name: ONNX Runtime
-        id: ort-build
-        run: desk/scripts/onnxruntime.sh "$GITHUB_WORKSPACE/onnxruntime"
-
-      # Only a finished build: one cut short would be restored as if it were.
-      - name: Keep ONNX Runtime
-        if: always() && steps.ort.outputs.cache-hit != 'true' && steps.ort-build.outcome == 'success'
-        uses: actions/cache/save@v6
-        with:
-          path: ${{ github.workspace }}/onnxruntime
-          key: onnxruntime-linux-${{ matrix.arch }}-${{ hashFiles('desk/scripts/onnxruntime.sh') }}
+        run: desk/scripts/onnxruntime.sh "$GITHUB_WORKSPACE/onnxruntime" ${{ matrix.arch }}
 
       - name: OpenSSL (static)
         run: desk/scripts/openssl-static.sh "$RUNNER_TEMP/openssl"
@@ -196,7 +200,7 @@ jobs:
           MIN_FREE_GB: "12"
           GITHUB_TOKEN: ${{ github.token }}
           OPENSSL_STATIC: "1"
-          ORT_FROM_SOURCE: "1"
+          ORT_SHARED: "1"
           ORT_DIR: ${{ github.workspace }}/onnxruntime
           POSTGRES_ARCHIVE: ${{ steps.pg-build.outputs.archive }}
         run: OPENSSL_DIR="$RUNNER_TEMP/openssl" scripts/build-sidecars.sh
@@ -208,12 +212,18 @@ jobs:
         run: |
           dir="backend-linux-$ARCH"
           mkdir -p "$dir"
-          for name in desk-helper desk-agents desk-memory; do
+          for name in desk-helper desk-agents desk-memory libonnxruntime.so.1; do
             cp "src-tauri/binaries/$name-$ARCH-unknown-linux-gnu" "$dir/$name"
           done
           cp -R src-tauri/resources/claude-plugin "$dir/claude-plugin"
+          # The memory store loads the ONNX Runtime beside it, the pinned
+          # one, and only that.
+          scripts/onnxruntime.sh check "$dir/libonnxruntime.so.1" "$ARCH"
+          found=$(ldd "$dir/desk-memory" | awk '$1 == "libonnxruntime.so.1" { print $3 }')
+          [ "$found" = "$(cd "$dir" && pwd)/libonnxruntime.so.1" ] ||
+            { echo "desk-memory finds libonnxruntime.so.1 at '$found', not beside it"; exit 1; }
           # Nothing newer than the image's glibc, and no libssl.
-          for name in desk-helper desk-agents desk-memory; do
+          for name in desk-helper desk-agents desk-memory libonnxruntime.so.1; do
             newest=$(objdump -T "$dir/$name" | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1)
             echo "$name needs $newest"
             [ "$(printf '%s\n' "$newest" GLIBC_2.28 | sort -V | tail -1)" = GLIBC_2.28 ] ||
@@ -271,6 +281,7 @@ jobs:
       - uses: actions/checkout@v7
         with:
           path: desk
+          ref: ${{ inputs.ref }}
 
       - uses: actions/download-artifact@v7
         with:

@@ -20,6 +20,8 @@ import { problemText } from "../setup/wsl";
 import { useHost, type BackendHost, type Platform } from "../shell/host";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { useUpdates, type UpdatePhase } from "../updates/store";
+import { CHANNELS, channelLine, channelOf } from "../updates/channel";
+import { useSettings } from "./store";
 import { plainError } from "../ui/plainError";
 
 /** Where each system lists what starts at login. */
@@ -131,7 +133,11 @@ export function Help() {
   const check = useUpdates((s) => s.check);
   const never = useUpdates((s) => s.never);
   const waiting = useUpdates((s) => s.waiting);
+  const switchChannel = useUpdates((s) => s.switchChannel);
+  const packaged = useUpdates((s) => s.packaged);
+  const channel = channelOf(useSettings((s) => s.updateChannel));
   const [checked, setChecked] = useState<string | null>(null);
+  const [switching, setSwitching] = useState(false);
 
   useEffect(() => {
     if (!inApp) return;
@@ -160,6 +166,21 @@ export function Help() {
       setChecked(s.phase === "idle" ? "Desk is up to date." : null);
     } catch (e) {
       setChecked(`Couldn’t check for updates. ${plainError(e)}`);
+    }
+  };
+
+  const pickChannel = async (to: typeof channel) => {
+    if (to === channel || switching) return;
+    setSwitching(true);
+    setChecked("Checking…");
+    try {
+      await switchChannel(to);
+      const s = useUpdates.getState().state;
+      setChecked(s.phase === "idle" ? "Desk is up to date." : null);
+    } catch (e) {
+      setChecked(`Couldn’t check for updates. ${plainError(e)}`);
+    } finally {
+      setSwitching(false);
     }
   };
 
@@ -207,6 +228,27 @@ export function Help() {
               Check for updates
             </button>
           )}
+        </div>
+
+        <div className="setting-card">
+          <span className="card-text">
+            <b>Updates</b>
+            <span>{channelLine(channel, version, packaged)}</span>
+          </span>
+          <div className="seg update-channel" role="radiogroup" aria-label="Updates">
+            {CHANNELS.map(([id, label]) => (
+              <button
+                key={id}
+                type="button"
+                role="radio"
+                aria-checked={packaged ? id === "stable" : channel === id}
+                disabled={!inApp || switching || packaged}
+                onClick={() => void pickChannel(id)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
         </div>
 
         <div className="setting-card">

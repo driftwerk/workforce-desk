@@ -34,6 +34,7 @@ import {
   usd,
   type Oversight,
   type TakeOn,
+  type WorkStyle,
 } from "./oversight";
 import { ENGINE_TITLE } from "../engines/engines";
 
@@ -43,6 +44,24 @@ const TAKE_ON = (name: string): { id: TakeOn; name: string; desc: string }[] => 
   { id: "all", name: "Every session it can", desc: `Each session on Desk’s line, as it starts. One you release stays yours.` },
 ];
 
+/** How it does its work, as the person picks it. */
+const WORK_STYLE = (name: string): { id: WorkStyle; name: string; desc: string }[] => [
+  {
+    id: "sessions_only",
+    name: "Only in sessions",
+    desc: `All of ${name}’s work happens in sessions you can watch, type into and take over; it only reads, searches and keeps notes itself.`,
+  },
+  {
+    id: "prefer_sessions",
+    name: "Prefer sessions",
+    desc: `Code changes and long tasks go to sessions, while ${name} runs quick checks, lookups and ops itself, such as ssh, gh, files and logs.`,
+  },
+  {
+    id: "direct",
+    name: "Do it myself",
+    desc: `No preference for sessions: ${name} does work itself or in sessions, as it sees fit.`,
+  },
+];
 
 /** What stays with you at Act fully, where the boss decides everything
  *  else its sessions ask. */
@@ -261,6 +280,8 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
   const fullBudget = o?.level === "full" ? (live?.actFully ?? null) : null;
   const acts = o?.level === "act" || o?.level === "full";
   const takeOn = TAKE_ON(name);
+  const workStyles = WORK_STYLE(name);
+  const workStyleAt = o ? workStyles.findIndex((w) => w.id === o.work.style) : -1;
   const takeOnAt = o ? takeOn.findIndex((t) => t.id === o.work.takeOn) : -1;
 
   return (
@@ -495,7 +516,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
           </div>
 
           <div className="oversee-part">
-            <h3>How {name} works</h3>
+            <h3 id={`${ids}-work`}>How {name} works</h3>
             <span className="oversee-sub">
               {o.level === "watch"
                 ? `At Watch, ${name} runs no sessions. Set it to Suggest or Act to hand it work.`
@@ -503,13 +524,26 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                   ? `At Suggest, each session ${name} would start or answer for comes to you to say yes to first.`
                   : `${name} runs the sessions it takes on with you: it hears when each turn ends, tells it the next step and answers what it can. Type in one and you’re driving for ${o.wake.holdMinutes === 1 ? "a minute" : `${o.wake.holdMinutes} minutes`} after your last keystroke.${o.act.handOutWork ? "" : " With “Hand out work” off, each session it would start comes to you to say yes to first."}`}
             </span>
+            <div className="oversee-levels oversee-levels-3" role="radiogroup" aria-labelledby={`${ids}-work`}>
+              {workStyles.map((w, i) => (
+                <button
+                  key={w.id}
+                  type="button"
+                  role="radio"
+                  className="oversee-level"
+                  aria-checked={o.work.style === w.id}
+                  tabIndex={i === workStyleAt ? 0 : -1}
+                  onClick={() => o.work.style !== w.id && update((x) => ({ ...x, work: { ...x.work, style: w.id } }))}
+                  onKeyDown={(e) =>
+                    radioKeys(e, workStyles, workStyleAt, (next) => next.id !== o.work.style && update((x) => ({ ...x, work: { ...x.work, style: next.id } })))
+                  }
+                >
+                  <b>{w.name}</b>
+                  <span>{w.desc}</span>
+                </button>
+              ))}
+            </div>
             <div className="oversee-card">
-              <Check
-                label="Always work in real sessions"
-                sub={`${name} does all coding in sessions you can watch, type into and take over: no edits to code, builds or shell commands of its own. It still reads, searches and keeps its own notes, and helpers only look things up. Workflow coding steps and pilot rounds still run as before`}
-                checked={o.work.preferSessions}
-                onChange={(v) => update((x) => ({ ...x, work: { ...x.work, preferSessions: v } }))}
-              />
               <Check
                 label="Close sessions I started when their work is done"
                 sub={`When its PR merges, its ticket is done, it says it’s finished, or it sits a day with nothing open, ${name} closes it: off the grid, its conversation kept to resume. At Act fully, also the ones you handed it. Never one you’ve typed in lately or with work not committed or pushed; below Act it suggests it instead`}

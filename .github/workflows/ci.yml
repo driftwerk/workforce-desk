@@ -3,12 +3,14 @@ name: CI
 # Every pull request and push to main: secrets, dependency licences, and the
 # app's format, lint, type and test checks on macOS, Linux and Windows. Desk
 # builds against the hub commit in hub.ref (its rich renderers come from the
-# hub's packages/rich).
+# hub's packages/rich). Nightly (nightly.yml) runs it by hand on its
+# hub.ref bump, which a push with the job's own token wouldn't start.
 
 on:
   pull_request:
   push:
     branches: [main]
+  workflow_dispatch:
 
 permissions: {}
 
@@ -31,7 +33,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - env:
-          RANGE: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || format('{0}..{1}', github.event.before, github.sha) }}
+          RANGE: ${{ github.event_name == 'pull_request' && format('{0}..{1}', github.event.pull_request.base.sha, github.event.pull_request.head.sha) || github.event_name == 'workflow_dispatch' && format('{0}~1..{0}', github.sha) || format('{0}..{1}', github.event.before, github.sha) }}
         run: |
           set -euo pipefail
           archive="$RUNNER_TEMP/gitleaks.tar.gz"

@@ -6,9 +6,10 @@
 //! named by `DESK_MACHINE_BACKEND` (a CI `backend-linux-<arch>` artifact),
 //! which nobody signed.
 //!
-//! The tarball holds `desk-helper`, `desk-agents`, `desk-memory` and
-//! `claude-plugin/` at its top, with no folder around them: the machine's
-//! install unpacks it as it is.
+//! The tarball holds `desk-helper`, `desk-agents`, `desk-memory`, the
+//! `libonnxruntime.so.1` the memory store links, and `claude-plugin/` at
+//! its top, with no folder around them: the machine's install unpacks it as
+//! it is.
 
 use std::collections::BTreeMap;
 use std::io::Read;
@@ -29,9 +30,9 @@ pub const DEV_OVERRIDE_ENV: &str = "DESK_MACHINE_BACKEND";
 /// Whether this is a release build, which never reads [`DEV_OVERRIDE_ENV`].
 pub const RELEASE_BUILD: bool = !cfg!(debug_assertions);
 
-/// What a backend holds at its top: the programs and the plugin, as the
-/// install scripts name them.
-use crate::backend_install::{PLUGIN, PROGRAMS};
+/// What a backend holds at its top: the programs, their libraries and the
+/// plugin, as the install scripts name them.
+use crate::backend_install::{LIBRARIES, PLUGIN, PROGRAMS};
 
 /// A machine's processor, as the release builds a backend for each.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -266,8 +267,9 @@ pub fn release(
     Ok(backend(data))
 }
 
-/// What the files of a backend folder hash to: its programs and plugin,
-/// each file's path (from the folder) and contents, in path order.
+/// What the files of a backend folder hash to: its programs, the libraries
+/// it has and its plugin, each file's path (from the folder) and contents,
+/// in path order.
 fn folder_hash(folder: &Path) -> Result<String> {
     fn files(dir: &Path, into: &mut Vec<PathBuf>) -> Result<()> {
         for entry in std::fs::read_dir(dir).with_context(|| format!("reading {}", dir.display()))? {
@@ -281,6 +283,7 @@ fn folder_hash(folder: &Path) -> Result<String> {
         Ok(())
     }
     let mut all: Vec<PathBuf> = PROGRAMS.iter().map(|p| folder.join(p)).collect();
+    all.extend(libraries(folder));
     files(&folder.join(PLUGIN), &mut all)?;
     let mut named: Vec<(String, PathBuf)> = all
         .into_iter()
@@ -324,6 +327,34 @@ pub fn dev_version(desk_version: &str, folder: &Path) -> Result<String> {
     Ok(version)
 }
 
+/// The libraries a backend folder has.
+fn libraries(folder: &Path) -> Vec<PathBuf> {
+    LIBRARIES
+        .iter()
+        .map(|(l, _)| folder.join(l))
+        .filter(|l| l.is_file())
+        .collect()
+}
+
+/// A library a program of the folder names that the folder doesn't hold:
+/// the program would load whichever the system has.
+fn missing_library(folder: &Path) -> Result<Option<(&'static str, &'static str)>> {
+    for (library, program) in LIBRARIES {
+        if folder.join(library).is_file() {
+            continue;
+        }
+        let path = folder.join(program);
+        let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+        if bytes
+            .windows(library.len())
+            .any(|w| w == library.as_bytes())
+        {
+            return Ok(Some((library, program)));
+        }
+    }
+    Ok(None)
+}
+
 /// Whether `program` is a Linux program for `arch`.
 fn built_for(program: &Path, arch: Arch) -> Result<bool> {
     let mut head = [0u8; 20];
@@ -344,6 +375,12 @@ pub fn development(cache: &Path, folder: &Path, desk_version: &str, arch: Arch) 
     }
     if !folder.join(PLUGIN).is_dir() {
         eyre::bail!("{} has no {PLUGIN}", folder.display());
+    }
+    if let Some((library, program)) = missing_library(folder)? {
+        eyre::bail!(
+            "{} has no {library}, which {program} links",
+            folder.display()
+        );
     }
     if !built_for(&folder.join(LINUX_HELPER_EXECUTABLE), arch)? {
         eyre::bail!(
@@ -372,6 +409,7 @@ pub fn development(cache: &Path, folder: &Path, desk_version: &str, arch: Arch) 
             .arg("-C")
             .arg(folder)
             .args(PROGRAMS)
+            .args(libraries(folder).iter().filter_map(|l| l.file_name()))
             .arg(PLUGIN)
             .output()
             .context("running tar")?;
@@ -668,6 +706,7 @@ mod tests {
         for p in PROGRAMS {
             std::fs::write(f.join(p), &elf).unwrap();
         }
+        std::fs::write(f.join(LIBRARIES[0].0), &elf).unwrap();
         f
     }
 
@@ -685,7 +724,11 @@ mod tests {
         std::fs::write(f.join(".DS_Store"), "x").unwrap();
         assert_eq!(dev_version("0.3.0", &f).unwrap(), v);
         std::fs::write(f.join("claude-plugin/hooks/hooks.json"), "{\"a\":1}").unwrap();
-        assert_ne!(dev_version("0.3.0", &f).unwrap(), v);
+        let v2 = dev_version("0.3.0", &f).unwrap();
+        assert_ne!(v2, v);
+        // So does the ONNX Runtime beside the memory store.
+        std::fs::write(f.join(LIBRARIES[0].0), "another").unwrap();
+        assert_ne!(dev_version("0.3.0", &f).unwrap(), v2);
     }
 
     #[test]
@@ -719,9 +762,24 @@ mod tests {
                 "claude-plugin/hooks/hooks.json",
                 "desk-agents",
                 "desk-helper",
-                "desk-memory"
+                "desk-memory",
+                "libonnxruntime.so.1"
             ]
         );
+        // A development build's memory store links its own: no library.
+        std::fs::remove_file(f.join(LIBRARIES[0].0)).unwrap();
+        let without = development(&cache, &f, "0.3.0", Arch::X86_64).unwrap();
+        assert_ne!(without.version, got.version);
+        // One whose memory store names it can't go without it.
+        let mut linked = std::fs::read(f.join("desk-memory")).unwrap();
+        linked.extend(b"libonnxruntime.so.1\0");
+        std::fs::write(f.join("desk-memory"), linked).unwrap();
+        let e = development(&cache, &f, "0.3.0", Arch::X86_64).unwrap_err();
+        assert!(
+            format!("{e:#}").contains("no libonnxruntime.so.1, which desk-memory links"),
+            "{e:#}"
+        );
+        std::fs::write(f.join(LIBRARIES[0].0), "a library").unwrap();
         let e = development(&cache, &f, "0.3.0", Arch::Aarch64).unwrap_err();
         assert!(format!("{e:#}").contains("aarch64"), "{e:#}");
         std::fs::remove_file(f.join("desk-memory")).unwrap();

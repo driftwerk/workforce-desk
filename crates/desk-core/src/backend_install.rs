@@ -71,6 +71,24 @@ pub const PROGRAMS: [&str; 3] = [
     LINUX_MEMORY_EXECUTABLE,
 ];
 
+/// What a program loads from beside itself, with the program: Microsoft's
+/// ONNX Runtime, which a release's memory store links
+/// (`scripts/onnxruntime.sh`). A backend whose program names the library
+/// must hold it, or it would load whichever the system has; a development
+/// build's memory store links its own in and names none.
+pub const LIBRARIES: [(&str, &str); 1] = [("libonnxruntime.so.1", LINUX_MEMORY_EXECUTABLE)];
+
+/// A line for `sh` that fails unless `dir` holds `library` when `program`
+/// there names it, and then runs `then` (with `$l` the library's path).
+fn when_linked(dir: &str, library: &str, program: &str, then: &str) -> String {
+    format!(
+        "if grep -qF {lib} {dir}/{program}; then l={dir}/{library}; \
+         [ -f \"$l\" ] || {{ echo \"the backend has no {library}, which {program} links\" >&2; exit 1; }}; \
+         {then}; fi\n",
+        lib = quote(library),
+    )
+}
+
 /// Desk's Claude Code plugin, a folder beside the programs.
 pub const PLUGIN: &str = "claude-plugin";
 
@@ -119,16 +137,27 @@ pub fn current_plugin(bin: &str) -> String {
     format!("{bin}/current/{PLUGIN}")
 }
 
-/// Installs the programs and the plugin from the folder in `$src` into
-/// `bin/<version>`: what follows a line that sets `src`.
+/// Installs the programs, their libraries and the plugin from the folder
+/// in `$src` into `bin/<version>`: what follows a line that sets `src`.
 pub fn install_from_src(bin: &str, version: &str) -> Result<String> {
     let dest = quote(&version_dir(bin, version)?);
     let installs: String = PROGRAMS
         .iter()
         .map(|p| format!("install -Dm755 \"$src/{p}\" {dest}/{p}\n"))
         .collect();
+    let libraries: String = LIBRARIES
+        .iter()
+        .map(|(l, p)| {
+            when_linked(
+                "\"$src\"",
+                l,
+                p,
+                &format!("install -Dm644 \"$l\" {dest}/{l}"),
+            )
+        })
+        .collect();
     Ok(format!(
-        "{installs}\
+        "{installs}{libraries}\
          rm -rf {dest}/{PLUGIN}\n\
          cp -R \"$src/{PLUGIN}\" {dest}/{PLUGIN}\n"
     ))
@@ -139,8 +168,9 @@ fn root_of(bin: &str) -> &str {
     bin.rsplit_once('/').map_or(".", |(root, _)| root)
 }
 
-/// Unpacks a backend tarball given on standard input (the programs and the
-/// plugin at its top, no folder around them) into `bin/<version>`: into a
+/// Unpacks a backend tarball given on standard input (the programs, their
+/// libraries and the plugin at its top, no folder around them) into
+/// `bin/<version>`: into a
 /// private folder beside it first, which only becomes that version once it
 /// holds everything, executable (an archive may have lost the modes). It
 /// also makes Desk's folder and its `hub` private (0700), and marks the
@@ -151,6 +181,10 @@ pub fn unpack_script(bin: &str, version: &str) -> Result<String> {
     let dest = version_dir(bin, version)?;
     let root = root_of(bin);
     let programs = PROGRAMS.join(" ");
+    let libraries: String = LIBRARIES
+        .iter()
+        .map(|(l, p)| when_linked("\"$partial\"", l, p, "chmod 644 \"$l\""))
+        .collect();
     Ok(format!(
         "set -eu\n\
          umask 077\n\
@@ -169,6 +203,7 @@ pub fn unpack_script(bin: &str, version: &str) -> Result<String> {
            [ -f \"$partial/$p\" ] || {{ echo \"the backend has no $p\" >&2; exit 1; }}\n  \
            chmod 755 \"$partial/$p\"\n\
          done\n\
+         {libraries}\
          [ -d \"$partial/{PLUGIN}\" ] || {{ echo \"the backend has no {PLUGIN}\" >&2; exit 1; }}\n\
          chmod 755 \"$partial\"\n\
          rm -rf \"$dest\"\n\
@@ -497,6 +532,9 @@ mod tests {
             "install -Dm755 \"$src/desk-helper\" '/home/dev/.local/share/Desk/bin/0.3.0'/desk-helper\n\
              install -Dm755 \"$src/desk-agents\" '/home/dev/.local/share/Desk/bin/0.3.0'/desk-agents\n\
              install -Dm755 \"$src/desk-memory\" '/home/dev/.local/share/Desk/bin/0.3.0'/desk-memory\n\
+             if grep -qF 'libonnxruntime.so.1' \"$src\"/desk-memory; then l=\"$src\"/libonnxruntime.so.1; \
+             [ -f \"$l\" ] || { echo \"the backend has no libonnxruntime.so.1, which desk-memory links\" >&2; exit 1; }; \
+             install -Dm644 \"$l\" '/home/dev/.local/share/Desk/bin/0.3.0'/libonnxruntime.so.1; fi\n\
              rm -rf '/home/dev/.local/share/Desk/bin/0.3.0'/claude-plugin\n\
              cp -R \"$src/claude-plugin\" '/home/dev/.local/share/Desk/bin/0.3.0'/claude-plugin\n"
         );
@@ -649,14 +687,23 @@ mod tests {
 
     #[cfg(target_os = "linux")]
     /// A backend tarball as the release makes it: the programs (without
-    /// their modes, as a downloaded artifact has them) and the plugin, at
-    /// its top; `without` left out.
+    /// their modes, as a downloaded artifact has them), the ONNX Runtime
+    /// beside them and the plugin, at its top; `without` left out.
     fn tarball(dir: &std::path::Path, without: Option<&str>) -> Vec<u8> {
         let source = dir.join(format!("backend-{}", without.unwrap_or("whole")));
         std::fs::create_dir_all(source.join("claude-plugin/hooks")).unwrap();
         std::fs::write(source.join("claude-plugin/hooks/hooks.json"), "{}").unwrap();
         for p in PROGRAMS.into_iter().filter(|p| Some(*p) != without) {
-            std::fs::write(source.join(p), "#!/bin/sh\necho ran\n").unwrap();
+            // The memory store names its ONNX Runtime, as a release's does.
+            std::fs::write(
+                source.join(p),
+                "#!/bin/sh\n# libonnxruntime.so.1\necho ran\n",
+            )
+            .unwrap();
+        }
+        let (library, _) = LIBRARIES[0];
+        if without != Some(library) {
+            std::fs::write(source.join(library), "a library").unwrap();
         }
         let out = std::process::Command::new("tar")
             .args(["-czf", "-", "-C"])
@@ -712,6 +759,11 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o755);
+        let mode = std::fs::metadata(bin.join("current").join(LIBRARIES[0].0))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o644);
 
         // A tarball missing a program never becomes a version, and leaves
         // the one that runs as it was.
@@ -719,6 +771,16 @@ mod tests {
         let out = sh(&unpack_script(&bin_s, "0.4.0").unwrap(), Some(&broken));
         assert!(!out.status.success());
         assert!(String::from_utf8_lossy(&out.stderr).contains("no desk-agents"));
+        assert!(!bin.join("0.4.0").exists());
+        // So does one whose memory store would load the system's ONNX
+        // Runtime, not its own.
+        let broken = tarball(dir.path(), Some(LIBRARIES[0].0));
+        let out = sh(&unpack_script(&bin_s, "0.4.0").unwrap(), Some(&broken));
+        assert!(!out.status.success());
+        assert!(
+            String::from_utf8_lossy(&out.stderr)
+                .contains("no libonnxruntime.so.1, which desk-memory links")
+        );
         assert!(!bin.join("0.4.0").exists());
         assert_eq!(
             ok(sh(&installed_script(&bin_s), None)),

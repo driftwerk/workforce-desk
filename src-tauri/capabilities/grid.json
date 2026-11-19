@@ -60,6 +60,7 @@
     "allow-cli-install",
     "allow-updating",
     "allow-update-check",
+    "allow-update-channel-set",
     "allow-update-download",
     "allow-update-install",
     "allow-resume-later",
