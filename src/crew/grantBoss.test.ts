@@ -58,7 +58,7 @@ describe("the boss a group's grant names", () => {
 });
 
 describe("the groups' bosses, read", () => {
-  beforeEach(() => useGrantBosses.setState({ byGroup: {}, bossed: {}, readAt: {} }));
+  beforeEach(() => useGrantBosses.setState({ byGroup: {}, bossed: {}, named: {}, readAt: {} }));
   afterEach(() => vi.restoreAllMocks());
 
   it("are read once at a time, and not again while fresh", async () => {
@@ -89,6 +89,14 @@ describe("the groups' bosses, read", () => {
     await new Promise((r) => setTimeout(r, 0));
     expect(useGrantBosses.getState().byGroup.acme).toBeNull();
     expect(useGrantBosses.getState().bossed.acme).toBe(true);
+  });
+
+  it("keep who each grant names by hub and id, paused or not, until none is linked", () => {
+    useGrantBosses.getState().heard("acme", allan({ paused: true }));
+    expect(useGrantBosses.getState().named.acme).toEqual({ hub: "driftwerk", agent: "allan" });
+    useGrantBosses.getState().heard("acme", null);
+    expect(useGrantBosses.getState().named.acme).toBeNull();
+    expect(useGrantBosses.getState().bossed.acme).toBe(false);
   });
 
   it("never read the ungrouped", () => {

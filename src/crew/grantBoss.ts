@@ -14,6 +14,7 @@ import type { RemoteBoss } from "../groups/remoteBoss";
 import { useLayout } from "../groups/store";
 import { sessionKey, type MachineId } from "../hub/machines";
 import type { Boss } from "./charge";
+import type { GrantNamed } from "../groups/bosses";
 
 /** How long a group's boss, as read, is taken as still so: under the
  *  re-read interval, so each tick reads it again. */
@@ -26,6 +27,9 @@ interface GrantBossState {
   /** Groups a boss on another hub is linked to, offered or not: never
    *  handed to this computer's own boss meanwhile (it doesn't run them). */
   bossed: Record<string, boolean>;
+  /** The agent each group's grant names, by its hub and id, paused or
+   *  not: the sidebar tags its row. Null where none is linked. */
+  named: Record<string, GrantNamed | null>;
   /** When each was read. */
   readAt: Record<string, number>;
   /** What `boss_status` said of `group` (the Boss sheet reads it too). */
@@ -52,13 +56,17 @@ const reading = new Set<string>();
 export const useGrantBosses = create<GrantBossState>((set, get) => ({
   byGroup: {},
   bossed: {},
+  named: {},
   readAt: {},
-  heard: (group, status) =>
+  heard: (group, said) => {
+    const status = said ?? null;
     set((s) => ({
       byGroup: { ...s.byGroup, [group]: bossOfStatus(status, nameOf(status)) },
       bossed: { ...s.bossed, [group]: status !== null },
+      named: { ...s.named, [group]: status && { hub: status.hub, agent: status.agent } },
       readAt: { ...s.readAt, [group]: Date.now() },
-    })),
+    }));
+  },
   ensure: (group) => {
     if (group === UNGROUPED || reading.has(group)) return;
     const asked = Date.now();
