@@ -215,7 +215,7 @@ def wait_for_ci(repo, sha, appear_minutes=15):
 
 def gate(repo, sha):
     """Desk's CI passed at `sha`, or Skip saying why not."""
-    latest = wait_for_ci(repo, sha, appear_minutes=0)
+    latest = wait_for_ci(repo, sha, appear_minutes=5)
     if not latest:
         raise Skip(f"Desk's CI never ran at {short(sha)}, so it isn't built")
     if latest["conclusion"] != "success":

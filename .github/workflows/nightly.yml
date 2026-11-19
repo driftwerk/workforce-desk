@@ -21,6 +21,10 @@ on:
         description: "Do everything but publish: no commit to main, no release, no feed"
         type: boolean
         default: false
+  # TEMPORARY, for PR #355 only: a dry run of this branch, since a workflow
+  # can't be dispatched before it is on main. Removed before merging.
+  push:
+    branches: [nightly-channel]
 
 permissions: {}
 
@@ -61,7 +65,7 @@ jobs:
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-          DRY_RUN: ${{ inputs.dry_run || false }}
+          DRY_RUN: ${{ inputs.dry_run || github.event_name == 'push' }}
           DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
         run: python3 .github/scripts/nightly.py
 
@@ -83,7 +87,7 @@ jobs:
       version: ${{ needs.plan.outputs.version }}
       channel: nightly
       ref: ${{ needs.plan.outputs.ref }}
-      dry_run: ${{ inputs.dry_run || false }}
+      dry_run: ${{ inputs.dry_run || github.event_name == 'push' }}
       hub_ref: ${{ needs.plan.outputs.hub_ref }}
     secrets: inherit
 
@@ -92,7 +96,7 @@ jobs:
   report:
     name: Report
     needs: [plan, build]
-    if: always() && !inputs.dry_run
+    if: always() && !(inputs.dry_run || github.event_name == 'push')
     runs-on: ubuntu-latest
     permissions:
       issues: write
