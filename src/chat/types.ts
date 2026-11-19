@@ -42,6 +42,28 @@ export interface Agent {
   isDefault: boolean;
   /** Its picture, where its hub keeps one. */
   picture?: Picture | null;
+  /** What your own conversations with it run on, when that is your own
+   *  subscription rather than the hub's (`provider`, `model`). Absent: the
+   *  hub's, or a hub from before it said. */
+  personalRoute?: PersonalRouteShown | null;
+}
+
+/** Your own route on an agent, as its hub lists it to you. */
+export interface PersonalRouteShown {
+  /** `claude-code` or `codex`. */
+  kind: string;
+  /** How the subscription reads: "Claude". */
+  title: string;
+  /** The model your conversation turns run on. */
+  model: string;
+  /** `wait`: a turn your login can't take stops and says why. `hub`: it
+   *  runs on the hub's models instead. */
+  fallback: "wait" | "hub";
+  /** Whether you have a working login of your own for it now. */
+  connected: boolean;
+  /** Why it can't take this agent's turns here at all (they stop and say
+   *  so); none when it can. */
+  refused?: string | null;
 }
 
 /** You, as a hub knows you: your account there, your name and picture. */
@@ -69,9 +91,34 @@ const PROVIDERS: Record<string, string> = {
 
 export const providerLabel = (p: string | null): string | null => (p ? (PROVIDERS[p] ?? p) : null);
 
-/** "Local · Claude plan · claude-sonnet-5-5" */
-export const describeAgent = (a: Agent, hubLabel: string): string =>
-  [hubLabel, providerLabel(a.provider), a.model].filter(Boolean).join(" · ");
+/** What your own turns with `a` run on, when that is your own route: its
+ *  label, the model, and what it says beside them. `null` when they run on
+ *  the hub's models, as a route whose login is missing and that falls back
+ *  to the hub's does. */
+export const yourRoute = (a: Pick<Agent, "provider" | "personalRoute">): { label: string; model: string; note: string | null } | null => {
+  const r = a.personalRoute;
+  if (!r || (!r.connected && r.fallback === "hub")) return null;
+  const plan = PROVIDERS[r.kind] ?? `${r.title} plan`;
+  // Nothing runs on its model here, so none is named.
+  if (r.refused) return { label: `Your ${plan}, which can’t run here`, model: "", note: r.refused };
+  const label = `Your ${plan}${r.connected ? "" : " (not connected)"}`;
+  const note =
+    r.fallback === "hub"
+      ? `falls back to ${providerLabel(a.provider) ?? "the hub’s models"}`
+      : r.connected
+        ? "stops if your plan can’t take a turn"
+        : "waits until you connect it";
+  return { label, model: r.model, note };
+};
+
+/** "Local · Claude plan · claude-sonnet-5-5", or what your own route runs:
+ *  "Patchwork · Your Claude plan · opus · falls back to AWS Bedrock". */
+export const describeAgent = (a: Agent, hubLabel: string): string => {
+  const mine = yourRoute(a);
+  return mine
+    ? [hubLabel, mine.label, mine.model, mine.note].filter(Boolean).join(" · ")
+    : [hubLabel, providerLabel(a.provider), a.model].filter(Boolean).join(" · ");
+};
 
 export const agentKey = (a: Pick<Agent, "hubId" | "id">): string => `${a.hubId}/${a.id}`;
 

@@ -361,6 +361,30 @@ describe("A picture in About", () => {
   });
 });
 
+describe("How an agent on another workspace thinks", () => {
+  const remote = { id: "pw", label: "Patchwork", url: "https://pw.example", local: false, revision: "t" };
+  const lattice: Agent = { hubId: "pw", id: "lattice", name: "Lattice", model: "us.anthropic.claude-opus-4-8", provider: "bedrock", isDefault: false };
+
+  it("says what your own conversations run on when they take your own plan", () => {
+    const agent: Agent = {
+      ...lattice,
+      personalRoute: { kind: "claude-code", title: "Claude", model: "opus", fallback: "hub", connected: true },
+    };
+    useChat.setState({ hubs: [remote], roster: [agent] });
+    render(<AgentSettings agent={agent} hub={remote} onOpenFiles={() => {}} />);
+    const row = screen.getByText("Your conversations").parentElement!;
+    expect(row.textContent).toContain("Your Claude plan");
+    expect(row.textContent).toContain("opus · falls back to AWS Bedrock");
+    expect(screen.getByText("AWS Bedrock")).toBeTruthy();
+  });
+
+  it("has no such row while they run on the workspace's models", () => {
+    useChat.setState({ hubs: [remote], roster: [lattice] });
+    render(<AgentSettings agent={lattice} hub={remote} onOpenFiles={() => {}} />);
+    expect(screen.queryByText("Your conversations")).toBeNull();
+  });
+});
+
 describe("Background work in Settings", () => {
   const agent: Agent = { hubId: "local", id: "ledger", name: "Ledger", model: null, provider: null, isDefault: false };
   const local = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" };
