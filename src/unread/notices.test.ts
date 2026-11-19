@@ -42,6 +42,15 @@ describe("what interrupts you", () => {
   });
 });
 
+describe("a monitor's delivery", () => {
+  it("is called a monitor's and interrupts at Only things for me, as a reminder does", async () => {
+    const { DELIVERY_LABEL, QUIET } = await import("./notices");
+    expect(DELIVERY_LABEL.monitor).toBe("Monitor");
+    expect(QUIET.has("monitor")).toBe(false);
+    expect(interrupts(n({ urgency: "forYou", quiet: QUIET.has("monitor") }), "mine")).toBe(true);
+  });
+});
+
 describe("sending a notification", () => {
   it("sends each once, at the place's level, and none from a detached window", () => {
     notifyPlace(n({ id: "a" }));
