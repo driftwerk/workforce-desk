@@ -15,6 +15,9 @@ const hub = {
   lineThread: vi.fn(() => Promise.resolve(thread)),
   dismissLine: vi.fn((id: string) => Promise.resolve({ ...thread.find((m) => m.id === id)!, asked: "dismissed" as const })),
   draftLine: vi.fn(() => Promise.resolve(lined())),
+  sendLineNow: vi.fn((id: string) => Promise.resolve({ ...thread.find((m) => m.id === id)!, waiting: "next_call" as const, actions: ["withdraw" as const] })),
+  takeBackLine: vi.fn(() => Promise.resolve()),
+  editLine: vi.fn(() => Promise.resolve()),
 };
 
 const went = (id: string, text: string, chose: string | null = null) =>
@@ -215,6 +218,109 @@ describe("under a terminal session", () => {
     expect(screen.queryByRole("textbox")).toBeNull();
     fireEvent.click(within(panel).getByRole("button", { name: "Hide" }));
     expect(screen.queryByRole("region", { name: "Messages with Desk" })).toBeNull();
+  });
+});
+
+describe("what waits to go in, under a terminal session", () => {
+  const BOSS = { kind: "manager" as const, id: "boss", name: "Desk" };
+  const LONG = "Check the ledger totals before the cut-over.\n\nThen tell me which accounts moved, and hold the migration if any of them is off by more than a cent.";
+  /** Desk's message, held for the turn running, as a newer hub reads it. */
+  const held = (more: Partial<LineMessage> = {}) =>
+    msg({
+      id: "t1",
+      at: new Date(Date.now() - 12 * 60_000).toISOString(),
+      from: BOSS,
+      to: S1,
+      kind: "tell",
+      asked: null,
+      delivery: "queued",
+      deliveredAt: null,
+      waiting: "working",
+      text: LONG,
+      actions: ["send_now", "withdraw"],
+      ...more,
+    });
+
+  it("is a bar saying who it is from, why it waits and its first line; Show has the message itself", async () => {
+    thread = [held()];
+    await show({ state: "working", displayName: "Cufflink Migration" });
+    const bar = screen.getByRole("status");
+    expect(bar.textContent).toContain("1 message from Desk waits for this turn to end · “Check the ledger totals before the cut-over.”");
+    fireEvent.click(within(bar).getByRole("button", { name: /^Show/ }));
+    const panel = screen.getByRole("region", { name: "Waiting to go in" });
+    expect(screen.queryByRole("region", { name: "Questions from this session" })).toBeNull();
+    // Who, when, all of it, and why, in its words.
+    const card = panel.querySelector(".line-row-waiting") as HTMLElement;
+    expect(card.querySelector(".line-row-head")!.textContent).toMatch(/^Desk says · \S/);
+    expect(card.querySelector(".line-waiting-text")!.textContent).toBe(LONG);
+    expect(within(card).getByText("Cufflink Migration is in the middle of a turn: this goes in when that turn ends. It has waited 12 min.")).toBeTruthy();
+    expect(within(panel).queryByText(/in its menu shows them/)).toBeNull();
+    // Only what the hub can do: a boss's words aren't yours to change.
+    expect(within(card).getByRole("button", { name: "Send now" })).toBeTruthy();
+    expect(within(card).getByRole("button", { name: "Withdraw" })).toBeTruthy();
+    expect(within(card).queryByRole("button", { name: "Edit" })).toBeNull();
+    // Questions' actions are the questions' alone.
+    expect(within(panel).queryByRole("button", { name: "Discuss in terminal" })).toBeNull();
+  });
+
+  it("sends it into the running turn now, and then says it goes in with the next tool call", async () => {
+    thread = [held()];
+    useLinePanel.setState({ shown: { s1: "questions" } });
+    await show({ state: "working" });
+    const panel = screen.getByRole("region", { name: "Waiting to go in" });
+    await act(async () => fireEvent.click(within(panel).getByRole("button", { name: "Send now" })));
+    expect(hub.sendLineNow).toHaveBeenCalledWith("t1");
+    expect(within(panel).getByText(/^Sent now: acme-web reads this with its next tool call's result/)).toBeTruthy();
+    expect(within(panel).queryByRole("button", { name: "Send now" })).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("withdraws it, and says why when the hub can't", async () => {
+    thread = [held()];
+    useLinePanel.setState({ shown: { s1: "questions" } });
+    await show({ state: "working" });
+    const panel = screen.getByRole("region", { name: "Waiting to go in" });
+    await act(async () => fireEvent.click(within(panel).getByRole("button", { name: "Withdraw" })));
+    expect(hub.takeBackLine).toHaveBeenCalledWith("t1");
+    hub.takeBackLine.mockImplementationOnce(() => Promise.reject(new Error("It's already on its way.")));
+    await act(async () => fireEvent.click(within(panel).getByRole("button", { name: "Withdraw" })));
+    expect(within(panel).getByRole("alert").textContent).toContain("already on its way");
+  });
+
+  it("edits your own words in place, and offers no Send now from an older hub that doesn't say it can", async () => {
+    thread = [held({ from: YOU, text: "and the refunds", actions: undefined })];
+    useLinePanel.setState({ shown: { s1: "questions" } });
+    await show({ state: "working" });
+    const panel = screen.getByRole("region", { name: "Waiting to go in" });
+    expect(within(panel).queryByRole("button", { name: "Send now" })).toBeNull();
+    fireEvent.click(within(panel).getByRole("button", { name: "Edit" }));
+    const box = within(panel).getByRole("textbox", { name: "Edit your message" });
+    fireEvent.change(box, { target: { value: "and the refunds, both months" } });
+    await act(async () => fireEvent.click(within(panel).getByRole("button", { name: "Save" })));
+    expect(hub.editLine).toHaveBeenCalledWith("t1", "and the refunds, both months");
+    expect(within(panel).queryByRole("textbox")).toBeNull();
+    expect(within(panel).getByRole("button", { name: "Withdraw" })).toBeTruthy();
+  });
+
+  it("says a hand-off is in its terminal's hands, with nothing to do here", async () => {
+    thread = [held({ delivery: "handed", waiting: undefined, actions: undefined })];
+    useLinePanel.setState({ shown: { s1: "questions" } });
+    await show({ state: "working" });
+    const panel = screen.getByRole("region", { name: "Waiting to go in" });
+    expect(within(panel).getByText(/^Handed to its terminal: it goes in as soon as acme-web takes it\./)).toBeTruthy();
+    expect(within(panel).queryAllByRole("button").map((b) => b.textContent)).toEqual(["Hide"]);
+  });
+
+  it("gives questions and what waits each a section, under a title for both", async () => {
+    thread = [went("q1", "Retire the two legacy routes?", "keep both"), held()];
+    useLinePanel.setState({ shown: { s1: "questions" } });
+    await show({ state: "working" });
+    const panel = screen.getByRole("region", { name: "Questions and messages waiting to go in" });
+    const questions = within(panel).getByRole("region", { name: "Its questions to you" });
+    const waiting = within(panel).getByRole("region", { name: "Waiting to go in" });
+    expect(within(questions).getByText("Retire the two legacy routes?")).toBeTruthy();
+    expect(waiting.querySelector(".line-waiting-text")!.textContent).toBe(LONG);
+    expect(within(waiting).queryByText("Retire the two legacy routes?")).toBeNull();
   });
 });
 

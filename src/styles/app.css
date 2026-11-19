@@ -4324,6 +4324,43 @@ body.line-resizing * {
 .line-question-chose {
   overflow-wrap: anywhere;
 }
+/* Its questions, and what waits to go in: each its own section, headed
+   when both are there. */
+.line-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+.line-section-title {
+  margin: 0;
+  color: var(--muted);
+}
+/* A message waiting to go in, in full: a long one scrolls in its card, so
+   why it waits and what to do stay in sight. */
+.line-waiting-text {
+  max-height: 14em;
+  overflow-y: auto;
+}
+.line-waiting-edit {
+  width: 100%;
+  min-height: 4.5em;
+  max-height: 14em;
+  font-size: 13.5px;
+}
+.line-waiting-why {
+  overflow-wrap: anywhere;
+}
+.line-waiting-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 3px;
+}
+.line-waiting-actions:empty {
+  display: none;
+}
 
 /* ── Machines: a session row's machine tag, "on devbox" chips ────────────── */
 

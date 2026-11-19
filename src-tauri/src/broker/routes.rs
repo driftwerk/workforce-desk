@@ -63,13 +63,15 @@ const HTTP: &[Route] = &[
     // The colours its terminals are drawn in.
     route("PUT", "/api/desk/terminal/colors"),
     // Desk's line: a session's thread, your messages and answers, setting
-    // a question aside, and putting your words in its prompt unsent.
+    // a question aside, sending one waiting for a turn's end into it now,
+    // and putting your words in its prompt unsent.
     with_query("GET", "/api/desk/sessions/{}/line", &["before"]),
     route("POST", "/api/desk/sessions/{}/line"),
     route("PATCH", "/api/desk/line/{}"),
     route("DELETE", "/api/desk/line/{}"),
     route("POST", "/api/desk/line/{}/answer"),
     route("POST", "/api/desk/line/{}/dismiss"),
+    route("POST", "/api/desk/line/{}/now"),
     route("POST", "/api/desk/sessions/{}/draft"),
     // Charges: which boss runs which session; Hand to, Release, the wheel.
     with_query("GET", "/api/desk/charges", &["released"]),

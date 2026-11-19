@@ -1381,7 +1381,14 @@ export type LineWait =
   | "person_driving"
   /** It still runs in auto or bypass mode from a boss no longer unbound
    *  over it: Desk starts it again in its own mode first. */
-  | "mode_ending";
+  | "mode_ending"
+  /** Sent now into its running turn: it reads it with its next tool
+   *  call's result (or at the turn's end, if no call comes first). */
+  | "next_call";
+/** What you can do with a message waiting to go into a session, as the
+ *  hub says per row (absent from older hubs): Send now into its running
+ *  turn, Edit (your own words), Withdraw (yours, or a boss's). */
+export type LineAction = "send_now" | "edit" | "withdraw";
 
 /** One message on a session's line. */
 /** An ask's headline, and its details when it has any. */
@@ -1419,6 +1426,8 @@ export interface LineMessage {
   deliveredAt: string | null;
   updatedAt: string;
   waiting?: LineWait;
+  /** What you can do with it now, while it waits (a newer hub). */
+  actions?: LineAction[];
 }
 
 // ── Charges: which boss runs which session, and who drives it ─────────

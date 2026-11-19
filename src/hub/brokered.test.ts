@@ -130,6 +130,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   takeBackLine: (h) => h.takeBackLine("m1"),
   answerLine: (h) => h.answerLine("m1", "yes"),
   dismissLine: (h) => h.dismissLine("m1"),
+  sendLineNow: (h) => h.sendLineNow("m1"),
   draftLine: (h) => h.draftLine("s1", "About your questions:"),
   charges: (h) => h.charges(),
   handTo: (h) => Promise.all([h.handTo("s1"), h.handTo("s1", "sarah")]),
