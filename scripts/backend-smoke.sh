@@ -5,8 +5,11 @@
 #   scripts/backend-smoke.sh [--machine] BIN_DIR
 #
 # BIN_DIR holds desk-helper, desk-agents and desk-memory (desk-hubd, the hub
-# at hub.ref and vellev at vellev.ref, under their Linux names), and with
-# --machine Desk's claude-plugin folder. Needs curl and jq. Checks that:
+# at hub.ref and vellev at vellev.ref, under their Linux names), the
+# libonnxruntime.so.1 a release's memory store links (a debug build's links
+# none), and with --machine Desk's claude-plugin folder. Needs curl and jq.
+# Checks that:
+#   - the memory store runs as installed (it finds its ONNX Runtime);
 #   - the helper says it can run here (--check);
 #   - it starts Postgres, the hub and the PTY holder, and pairs Desk with the
 #     hub (connection --json has a device token the hub knows);
@@ -68,6 +71,9 @@ pid=
 if [ -n "$machine" ]; then version=0.0.0-smoke+dev.machine; else version=0.0.0-smoke+dev.desktop; fi
 mkdir -p "$DESK_HOME/bin/$version"
 cp "$bin/desk-helper" "$bin/desk-agents" "$bin/desk-memory" "$DESK_HOME/bin/$version/"
+[ ! -f "$bin/libonnxruntime.so.1" ] || cp "$bin/libonnxruntime.so.1" "$DESK_HOME/bin/$version/"
+"$DESK_HOME/bin/$version/desk-memory" --help >/dev/null ||
+  { echo "backend-smoke: the memory store doesn't run as installed" >&2; exit 1; }
 ln -s "$version" "$DESK_HOME/bin/current"
 helper="$DESK_HOME/bin/current/desk-helper"
 start=("$helper")

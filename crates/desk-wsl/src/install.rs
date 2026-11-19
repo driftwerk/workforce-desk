@@ -114,6 +114,7 @@ mod tests {
              install -Dm755 \"$src/desk-helper\" '/home/sarah/.local/share/Desk/bin/0.3.0'/desk-helper\n\
              install -Dm755 \"$src/desk-agents\" '/home/sarah/.local/share/Desk/bin/0.3.0'/desk-agents\n\
              install -Dm755 \"$src/desk-memory\" '/home/sarah/.local/share/Desk/bin/0.3.0'/desk-memory\n\
+             [ ! -f \"$src/libonnxruntime.so.1\" ] || install -Dm644 \"$src/libonnxruntime.so.1\" '/home/sarah/.local/share/Desk/bin/0.3.0'/libonnxruntime.so.1\n\
              rm -rf '/home/sarah/.local/share/Desk/bin/0.3.0'/claude-plugin\n\
              cp -R \"$src/claude-plugin\" '/home/sarah/.local/share/Desk/bin/0.3.0'/claude-plugin\n"
         );
@@ -145,6 +146,7 @@ mod tests {
         for p in scripts::PROGRAMS {
             std::fs::write(source.join(p), "#!/bin/sh\n").unwrap();
         }
+        std::fs::write(source.join(scripts::LIBRARIES[0]), "a library").unwrap();
         let sh = |script: String| {
             // `wslpath -u` stands for itself: the source is already a Linux path.
             let script = format!("wslpath() {{ echo \"$2\"; }}\n{script}");
@@ -179,5 +181,10 @@ mod tests {
             .permissions()
             .mode();
         assert_eq!(mode & 0o777, 0o755);
+        let mode = std::fs::metadata(bin.join("current").join(scripts::LIBRARIES[0]))
+            .unwrap()
+            .permissions()
+            .mode();
+        assert_eq!(mode & 0o777, 0o644);
     }
 }

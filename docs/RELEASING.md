@@ -43,7 +43,10 @@ hub keeps memories in SQLite; then it moves them into the store, once.
      with `lipo` (`scripts/build-sidecars.sh`). vellev embeds with ONNX
      Runtime, which `ort` ships prebuilt for Apple Silicon only: for Intel
      the job builds ONNX Runtime 1.28 from source
-     (`scripts/onnxruntime.sh`, cached by its pin)
+     (`scripts/onnxruntime.sh`, cached by its pin). That source came from
+     github.com/microsoft/onnxruntime, which has been offline since
+     2026-11-18 (see [ONNX Runtime](#onnx-runtime)), so on a cold cache the
+     build stops until `ORT_SOURCE` names an approved checkout
    - builds the app with `tauri build --target universal-apple-darwin`
    - signs inside out with the Developer ID, using the hardened runtime and
      the entitlements in `src-tauri/entitlements/`
@@ -61,9 +64,13 @@ hub keeps memories in SQLite; then it moves them into the store, once.
 5. The `backend` job (`backend-build.yml`) builds the Linux backend alone,
    for x86_64 (on `ubuntu-24.04`) and aarch64 (on `ubuntu-24.04-arm`), each
    inside manylinux_2_28 (AlmaLinux 8, glibc 2.28), with OpenSSL linked in
-   (`scripts/openssl-static.sh`) and ONNX Runtime built there
+   (`scripts/openssl-static.sh`) and Microsoft's ONNX Runtime from NuGet
    (`scripts/onnxruntime.sh`; ort's own needs glibc 2.38), so Desk's own
-   programs need only glibc 2.28.
+   programs need only glibc 2.28. That ONNX Runtime is a shared library,
+   `libonnxruntime.so.1`: every Linux backend ships it beside
+   `desk-memory`, which finds it there (rpath `$ORIGIN`). That covers the
+   artifact, the machines' tarball and the WSL copy. The Linux app's
+   packages put it in `/usr/lib/Desk`.
    - The Postgres Desk Helper embeds is built there too, from source
      (`scripts/postgres-linux.sh`): theseus-rs' builds, which
      `postgresql_embedded` downloads otherwise, are made on Debian 12 and
@@ -195,10 +202,54 @@ echo <sha> > vellev.ref
 git commit -m "Desk ships vellev <short sha>: <why>" vellev.ref
 ```
 
-When it builds for Intel Macs, `build-sidecars.sh` refuses a vellev whose
-locked `ort-sys` is not the one `scripts/onnxruntime.sh` builds ONNX
-Runtime for; move that script's pin (version and commit) to the ONNX Runtime
-the new `ort-sys` links.
+When it builds for Intel Macs or the Linux backend, `build-sidecars.sh`
+refuses a vellev whose locked `ort-sys` is not the one
+`scripts/onnxruntime.sh` provides ONNX Runtime for. Move that script's pins
+to the ONNX Runtime the new `ort-sys` links:
+- its version and commit;
+- the NuGet package's sha256, and each Linux library's.
+
+Check a new package before pinning it (see below).
+
+## ONNX Runtime
+
+On 2026-11-18, github.com/microsoft/onnxruntime went offline: git, the web
+and the API all answer 404. Microsoft took it down, along with
+microsoft/agent-framework, hours after a malicious agent-framework release
+on PyPI. Until then `scripts/onnxruntime.sh` cloned the v1.28.0 tag from
+that repository and built it. Nothing Desk builds fetches from it now:
+
+- **Linux backend.** It uses Microsoft's own build from nuget.org,
+  Microsoft.ML.OnnxRuntime 1.28.0, pinned by the package's sha256 and by
+  each library's. That version was published on 2026-07-25 and can't be
+  changed on nuget.org. Before it was pinned, it was checked on 2026-11-19:
+  - `dotnet nuget verify --all` accepted Microsoft Corporation's author
+    signature and nuget.org's repository countersignature, both
+    timestamped 2026-07-25;
+  - its sha512 matched nuget.org's catalog;
+  - its `.nuspec` names commit `da9b5e36…`, the v1.28.0 commit Desk built
+    from before;
+  - its libraries need glibc 2.27 at most.
+
+  To check a package the same way:
+
+  ```sh
+  docker run --rm -v "$PWD/x.nupkg:/p/x.nupkg:ro" mcr.microsoft.com/dotnet/sdk:8.0 \
+    dotnet nuget verify --all -v normal /p/x.nupkg
+  ```
+- **Intel Macs.** Microsoft publishes no 1.28 build for Intel Macs, on
+  NuGet or PyPI, and no build of ours survived: the CI caches had expired,
+  and none was ever a release asset. So the Intel memory store still builds
+  from source, but only from a checkout that `ORT_SOURCE` names.
+  `onnxruntime.sh` accepts that checkout only if all of these hold:
+  - its HEAD is the pinned commit;
+  - `git fsck --full` passes;
+  - it has no changes.
+
+  Where that checkout comes from while Microsoft's repository is offline
+  is the release owner's decision. Until one is approved, a cold-cache
+  Intel build stops and says so. The universal macOS release job and
+  `intel-sidecars.yml` both do this build.
 
 ## Building locally
 

@@ -30,11 +30,15 @@
 #                   to https://github.com/driftwerk/vellev.git)
 #   ORT_X86_64      ONNX Runtime built for Intel Macs by
 #                   scripts/onnxruntime.sh (its DIR), which vellev links for
-#                   x86_64-apple-darwin; built there when unset
-#   ORT_FROM_SOURCE on Linux, 1 links ONNX Runtime built here by
-#                   scripts/onnxruntime.sh (in ORT_DIR, default
-#                   <cache>/onnxruntime-<arch>) instead of ort's own, which
-#                   needs glibc 2.38: the backend for machines and WSL
+#                   x86_64-apple-darwin; built there when unset (which needs
+#                   ORT_SOURCE: see that script)
+#   ORT_SHARED      on Linux, 1 links Microsoft's ONNX Runtime from its
+#                   NuGet package (scripts/onnxruntime.sh, in ORT_DIR,
+#                   default <cache>/onnxruntime-<arch>) instead of ort's own,
+#                   which needs glibc 2.38: the backend for machines and WSL.
+#                   It is a shared library, which the memory store finds
+#                   beside itself, so it is put beside the programs too:
+#                   src-tauri/binaries/libonnxruntime.so.1-<target>
 #   POSTGRES_ARCHIVE on Linux, the Postgres scripts/postgres-linux.sh built
 #                   (its .tar.gz), for desk-hubd to embed instead of
 #                   theseus-rs' build, which needs glibc 2.36: the backend
@@ -108,12 +112,12 @@ vellev=$(checkout vellev "$vellev_ref" "${VELLEV_SOURCE:-}" "${VELLEV_ANY_REF:-}
 hub_target=${HUB_TARGET_DIR:-$hub/target}
 vellev_target=${VELLEV_TARGET_DIR:-$vellev/target}
 
-# vellev's ort links ONNX Runtime 1.28's static library: ort's own build
-# for Apple Silicon, and ours for Intel (it has none) and, with
-# ORT_FROM_SOURCE, for Linux. A vellev.ref whose ort wants another version
-# needs onnxruntime.sh's pin moved too.
-case " $targets ${ORT_FROM_SOURCE:+from-source} " in
-  *" x86_64-apple-darwin "* | *" from-source "*)
+# vellev's ort links ONNX Runtime 1.28: ort's own static build for Apple
+# Silicon, ours for Intel (it has none) and, with ORT_SHARED, Microsoft's
+# shared one for Linux. A vellev.ref whose ort wants another version needs
+# onnxruntime.sh's pin moved too.
+case " $targets ${ORT_SHARED:+shared} " in
+  *" x86_64-apple-darwin "* | *" shared "*)
     ort_sys=$(awk '/^name = "ort-sys"$/ { getline; print $3 }' "$vellev/Cargo.lock" | tr -d '"')
     [ "$ort_sys" = "2.0.0-rc.13" ] ||
       die "vellev.ref locks ort-sys $ort_sys; onnxruntime.sh builds the ONNX Runtime 2.0.0-rc.13 links (1.28.0): move its pin"
@@ -177,20 +181,23 @@ for t in $targets; do
   (
     cd "$vellev"
     rustup target add "$t" >/dev/null
-    ort=
     if [ "$t" = x86_64-apple-darwin ]; then
       ort=${ORT_X86_64:-$cache/onnxruntime-x86_64}
       # As old a macOS as its ONNX Runtime (onnxruntime.sh) and Desk.
       export MACOSX_DEPLOYMENT_TARGET=13.0
-    elif [ "${ORT_FROM_SOURCE:-}" = 1 ]; then
-      ort=${ORT_DIR:-$cache/onnxruntime-${t%%-*}}
-    fi
-    if [ -n "$ort" ]; then
       "$root/scripts/onnxruntime.sh" "$ort"
       export ORT_LIB_LOCATION="$ort/Release" ORT_SKIP_DOWNLOAD=1
       # ONNX Runtime 1.28's model packages are a library of their own, which
       # this ort doesn't link (its list of ONNX Runtime's libraries is fixed).
       export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=$ort/Release/model_package/libmodel_package.a"
+    elif [ "${ORT_SHARED:-}" = 1 ]; then
+      ort=${ORT_DIR:-$cache/onnxruntime-${t%%-*}}
+      "$root/scripts/onnxruntime.sh" "$ort"
+      export ORT_LIB_LOCATION="$ort" ORT_PREFER_DYNAMIC_LINK=1 ORT_SKIP_DOWNLOAD=1
+      # Found beside the memory store, where every Linux backend puts it, or
+      # in /usr/lib/Desk, where the Linux app's packages do (bundle.linux in
+      # tauri.linux.conf.json). Single quotes: $ORIGIN is the loader's.
+      export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-Wl,-rpath,"'$ORIGIN:$ORIGIN/../lib/Desk'
     fi
     CARGO_TARGET_DIR="$vellev_target" cargo build --release --locked -p vellev --target "$t"
   )
@@ -202,6 +209,14 @@ for t in $targets; do
     cp "$dir/$t/release/$name" "$out"
     strip "$out"
   done
+  if [ "${ORT_SHARED:-}" = 1 ]; then
+    # The ONNX Runtime the memory store was linked with, which it needs at
+    # run time: no other.
+    ort=${ORT_DIR:-$cache/onnxruntime-${t%%-*}}
+    readelf -d "$bin/${names[2]}-$t" | grep 'NEEDED.*\[libonnxruntime\.so\.1\]' >/dev/null ||
+      die "${names[2]} for $t doesn't link libonnxruntime.so.1"
+    install -m 644 "$ort/libonnxruntime.so.1" "$bin/libonnxruntime.so.1-$t"
+  fi
 done
 
 # ── Universal (macOS) ────────────────────────────────────────────────────
