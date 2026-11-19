@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from "react";
+import { useChat } from "../chat/store";
 import type { HubRef } from "../hub/net";
 import { plainError } from "../ui/plainError";
 import {
@@ -240,6 +241,8 @@ function useRoute<V>(load: () => Promise<V>, deps: unknown[]) {
     try {
       const next = await send();
       if (at === current.current) setView(next);
+      // What each agent is shown to run on for you follows the choice.
+      void useChat.getState().refreshRoster();
     } catch (e) {
       if (at === current.current) setProblem(plainError(e));
     } finally {

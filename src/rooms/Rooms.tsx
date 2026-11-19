@@ -17,7 +17,7 @@ import { useDesk, localSessions } from "../hub/store";
 import { DM_TYPING_EVERY_MS, typingPinger } from "../line/typing";
 import { RoomView } from "./RoomView";
 import { Unread as UnreadPage } from "../unread/Unread";
-import { agentKey, describeAgent, DESK_DM, FEATURES } from "../chat/types";
+import { agentKey, describeAgent, DESK_DM, FEATURES, yourRoute } from "../chat/types";
 import { useAgentBrain } from "../crew/agentBrain";
 import { AgentConnectors } from "../crew/AgentConnectors";
 import { AgentFiles, discardDrafts, saveDraft } from "../crew/AgentFiles";
@@ -310,9 +310,10 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
   const go = (next: Tab) => setAgentTab(activeAgent, next);
   const choose = (next: Tab) => (tab === "files" && next !== "files" && unsaved.length > 0 ? setLeaving(next) : go(next));
   const shownTabs = local ? TABS : TABS.filter((t) => t.id !== "files" && t.id !== "access" && t.id !== "connectors");
-  // What the hub reports stands in until the providers list says more.
+  // What the hub reports stands in until the providers list says more; your
+  // own route, where your turns take it, is what they run on.
   const brainSubtitle =
-    local && brain && provider && !fallback
+    local && brain && provider && !fallback && !yourRoute(agent)
       ? [hub?.label ?? "This computer", brainLine(brain, provider)].join(" · ")
       : describeAgent(agent, hub?.label ?? agent.hubId);
   const overseeing = local && manager?.agentId === agent.id && manager.level ? manager.level : null;

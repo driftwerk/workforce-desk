@@ -14,6 +14,7 @@ import {
   type HubAccount,
   type Me,
   type PermissionChoice,
+  type PersonalRouteShown,
 } from "./types";
 import { pairedHub } from "../hub/net";
 import { HubError } from "../hub/client";
@@ -375,8 +376,31 @@ const adopt = (key: string, value: unknown) => {
 const hubOf = (key: string): string => key.slice(0, key.indexOf("/"));
 
 interface AgentsResponse {
-  agents: { id: string; name?: string | null; model?: string | null; provider?: string | null; default?: boolean; picture?: unknown }[];
+  agents: {
+    id: string;
+    name?: string | null;
+    model?: string | null;
+    provider?: string | null;
+    default?: boolean;
+    picture?: unknown;
+    personal_route?: unknown;
+  }[];
 }
+
+/** Your own route on an agent as its hub lists it; `null` for anything
+ *  else, read as the hub's models. */
+const personalRouteOf = (raw: unknown): PersonalRouteShown | null => {
+  if (!raw || typeof raw !== "object") return null;
+  const r = raw as Record<string, unknown>;
+  if (typeof r.kind !== "string" || typeof r.model !== "string" || (r.fallback !== "wait" && r.fallback !== "hub")) return null;
+  return {
+    kind: r.kind,
+    title: typeof r.title === "string" ? r.title : r.kind,
+    model: r.model,
+    fallback: r.fallback,
+    connected: r.connected === true,
+  };
+};
 
 const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
   const res = await pairedHub(hub).fetch("GET", "/api/agents");
@@ -390,6 +414,7 @@ const fetchAgents = async (hub: HubAccount): Promise<Agent[]> => {
     provider: a.provider ?? null,
     isDefault: a.default ?? false,
     picture: pictureOf(a.picture),
+    personalRoute: personalRouteOf(a.personal_route),
   }));
 };
 

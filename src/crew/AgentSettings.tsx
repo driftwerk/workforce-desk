@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ComponentType } from "react";
 import { agentIdsOn, useChat } from "../chat/store";
-import { agentKey, providerLabel, type Agent, type HubAccount } from "../chat/types";
+import { agentKey, providerLabel, yourRoute, type Agent, type HubAccount } from "../chat/types";
 import { effortName } from "../hub/providers";
 import { useDesk } from "../hub/store";
 import type { VoiceSpec } from "../platform";
@@ -350,6 +350,7 @@ function Thinking({ agent }: { agent: Agent }) {
             <BackgroundRow agent={agent} work="heavy" config={config} provider={provider} chat={chatName} />
           </>
         )}
+        <YourConversations agent={agent} />
         <Failover agent={agent} />
       </div>
       <div>
@@ -532,6 +533,26 @@ function ChangedElsewhere({ agent }: { agent: Agent }) {
   );
 }
 
+/** What your own conversations with `agent` run on, where that is your own
+ *  route rather than the provider and model above. */
+function YourConversations({ agent }: { agent: Agent }) {
+  const mine = yourRoute(agent);
+  if (!mine) return null;
+  return (
+    <div className="think-row">
+      <span>Your conversations</span>
+      <b>
+        {mine.label}{" "}
+        <span>
+          · {mine.model}
+          {mine.note && ` · ${mine.note}`}
+        </span>
+      </b>
+      <span />
+    </div>
+  );
+}
+
 function ThinkingElsewhere({ agent, hub }: { agent: Agent; hub: HubAccount | undefined }) {
   return (
     <section className="agent-section" aria-labelledby="think-head">
@@ -547,6 +568,7 @@ function ThinkingElsewhere({ agent, hub }: { agent: Agent; hub: HubAccount | und
           <b className="mono">{agent.model ?? "Unknown"}</b>
           <span />
         </div>
+        <YourConversations agent={agent} />
       </div>
       <p className="small faint">Set by {hub?.label ?? "their workspace"}, where {agent.name} lives.</p>
       {hub && !hub.machine && <AgentRoute hub={hub} workspace={hub.label} agentId={agent.id} />}
