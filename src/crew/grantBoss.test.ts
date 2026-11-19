@@ -94,6 +94,10 @@ describe("the groups' bosses, read", () => {
   it("keep who each grant names by hub and id, paused or not, until none is linked", () => {
     useGrantBosses.getState().heard("acme", allan({ paused: true }));
     expect(useGrantBosses.getState().named.acme).toEqual({ hub: "driftwerk", agent: "allan" });
+    // Named again as before: the same object, so nothing following it is drawn again.
+    const named = useGrantBosses.getState().named;
+    useGrantBosses.getState().heard("acme", allan());
+    expect(useGrantBosses.getState().named).toBe(named);
     useGrantBosses.getState().heard("acme", null);
     expect(useGrantBosses.getState().named.acme).toBeNull();
     expect(useGrantBosses.getState().bossed.acme).toBe(false);

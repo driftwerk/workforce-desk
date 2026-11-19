@@ -60,12 +60,18 @@ export const useGrantBosses = create<GrantBossState>((set, get) => ({
   readAt: {},
   heard: (group, said) => {
     const status = said ?? null;
-    set((s) => ({
-      byGroup: { ...s.byGroup, [group]: bossOfStatus(status, nameOf(status)) },
-      bossed: { ...s.bossed, [group]: status !== null },
-      named: { ...s.named, [group]: status && { hub: status.hub, agent: status.agent } },
-      readAt: { ...s.readAt, [group]: Date.now() },
-    }));
+    set((s) => {
+      // Kept as it was when the same agent is named again, so the sidebar,
+      // which follows who is named, isn't drawn again for each re-read.
+      const was = s.named[group];
+      const same = was === null ? status === null : !!was && !!status && was.hub === status.hub && was.agent === status.agent;
+      return {
+        byGroup: { ...s.byGroup, [group]: bossOfStatus(status, nameOf(status)) },
+        bossed: { ...s.bossed, [group]: status !== null },
+        named: same ? s.named : { ...s.named, [group]: status && { hub: status.hub, agent: status.agent } },
+        readAt: { ...s.readAt, [group]: Date.now() },
+      };
+    });
   },
   ensure: (group) => {
     if (group === UNGROUPED || reading.has(group)) return;
