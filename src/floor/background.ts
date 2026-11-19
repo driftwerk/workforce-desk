@@ -1,5 +1,5 @@
 import type { Background, Session, SessionState } from "../hub/types";
-import { durationOf } from "./time";
+import { clock, durationOf } from "./time";
 
 /** "2 background tasks". */
 export const backgroundTasks = (b: Background): string => `${b.count} background ${b.count === 1 ? "task" : "tasks"}`;
@@ -12,9 +12,23 @@ export const backgroundLine = (b: Background, now = Date.now()): string => `Wait
 export const backgroundOf = (s: Pick<Session, "state" | "background">): Background | null =>
   s.state === "done" && s.background ? s.background : null;
 
-/** A session's status in words: "Waiting on 2 background tasks · 6m" while
- *  its background work runs, else `labels`' word for its state. */
-export const statusOf = (s: Pick<Session, "state" | "background">, labels: Readonly<Record<SessionState, string>>, now = Date.now()): string => {
+/** "Restarted 18:32, re-checking its work": while a session restarted over
+ *  work it had running is on its first turn since, that is what it does. */
+export const restartedLine = (s: Pick<Session, "state" | "restarted">): string | null =>
+  s.restarted && (s.state === "starting" || s.state === "working" || s.state === "blocked")
+    ? `Restarted ${clock(s.restarted.at)}, re-checking its work`
+    : null;
+
+/** A session's status in words: "Restarted 18:32, re-checking its work"
+ *  after a restart stopped its work, "Waiting on 2 background tasks · 6m"
+ *  while its background work runs, else `labels`' word for its state. */
+export const statusOf = (
+  s: Pick<Session, "state" | "background" | "restarted">,
+  labels: Readonly<Record<SessionState, string>>,
+  now = Date.now(),
+): string => {
+  const restarted = restartedLine(s);
+  if (restarted) return restarted;
   const background = backgroundOf(s);
   return background ? backgroundLine(background, now) : labels[s.state];
 };
