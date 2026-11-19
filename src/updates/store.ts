@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import type { DeskEvent, Session } from "../hub/types";
 import { deskListeners, useDesk, localSessions } from "../hub/store";
-import { resumeLater, takeResume, updateCheck, updateDownload, updateInstall, updating } from "../platform";
+import { resumeLater, setUpdateChannel, takeResume, updateCheck, updateDownload, updateInstall, updating } from "../platform";
+import { useSettings } from "../settings/store";
+import { downloadFor, type Channel } from "./channel";
 import { flushEverywhere } from "./away";
 
 /** How often Desk looks for a new version while it runs. */
@@ -51,6 +53,9 @@ interface Updates {
   sessionsKept: boolean;
   /** Why this install never updates (a development build), once checked. */
   never: string | null;
+  /** Its package manager updates this install (a .deb): it follows Stable,
+   *  since nightlies never come as a package. */
+  packaged: boolean;
   later: Later | null;
   /** Looks for a new version, also while one is ready or out (a newer one
    *  replaces it, and is downloaded), and downloads it. `asked`: the
@@ -63,6 +68,10 @@ interface Updates {
   probe: () => Promise<boolean>;
   /** Keeps `resume` to pick up after the restart, installs and restarts. */
   restart: (resume: string[]) => Promise<void>;
+  /** Moves Desk to `channel`: what was found on the other one is let go
+   *  (a download under way is dropped when it ends), then Desk checks
+   *  again. */
+  switchChannel: (channel: Channel) => Promise<void>;
 }
 
 /** A session whose CLI is running. */
@@ -116,11 +125,16 @@ const shown = (state: UpdatePhase): string | null =>
 /** A restart is being started (between its probe and installing). */
 let restarting = false;
 
+/** Counts channel switches: a check begun before the latest one leaves
+ *  the state to the check after it. */
+let epoch = 0;
+
 export const useUpdates = create<Updates>((set, get) => ({
   state: { phase: "idle" },
   waiting: false,
   sessionsKept: false,
   never: null,
+  packaged: false,
   later: readLater(),
   check: async (opts) => {
     if (opts?.asked && get().later) {
@@ -130,11 +144,18 @@ export const useUpdates = create<Updates>((set, get) => ({
     }
     const phase = get().state.phase;
     if (phase === "downloading" || phase === "installing") return;
+    const mine = epoch;
     // Asked first: a development build never looks.
     const how = await updating();
-    set({ sessionsKept: how.sessionsKept, never: how.how === "never" ? (how.neverBecause ?? "") : null });
+    set({
+      sessionsKept: how.sessionsKept,
+      never: how.how === "never" ? (how.neverBecause ?? "") : null,
+      packaged: how.how === "package",
+    });
     if (how.how === "never") return;
     const version = await updateCheck();
+    // The channel changed meanwhile: the check after the switch says.
+    if (mine !== epoch) return;
     // Something else began meanwhile (a restart, another check).
     const now = get().state;
     if (now.phase === "downloading" || now.phase === "installing") return;
@@ -152,12 +173,18 @@ export const useUpdates = create<Updates>((set, get) => ({
       set({ later: null });
     }
     if (how.how === "package") {
-      set({ state: { phase: "available", version, download: how.download } });
+      set({ state: { phase: "available", version, download: downloadFor(version, how) } });
       return;
     }
     set({ state: { phase: "downloading", version } });
     try {
       await updateDownload();
+      if (mine !== epoch) {
+        // Found on the channel left: dropped, and the new one looked at.
+        set({ state: { phase: "idle" }, waiting: false });
+        void get().check({ asked: true }).catch(() => {});
+        return;
+      }
       // It installs by itself once nothing is working and the person has
       // stepped away (`useRestartWhenIdle`), unless they put it off.
       set({ state: { phase: "ready", version }, waiting: !isPostponed(get().later, version) });
@@ -165,6 +192,16 @@ export const useUpdates = create<Updates>((set, get) => ({
       set({ state: { phase: "idle" }, waiting: false });
       throw e;
     }
+  },
+  switchChannel: async (channel) => {
+    await setUpdateChannel(channel);
+    useSettings.setState({ updateChannel: channel });
+    epoch++;
+    const phase = get().state.phase;
+    // A download under way ends first (its check drops it and looks again).
+    if (phase === "downloading" || phase === "installing") return;
+    set({ state: { phase: "idle" }, waiting: false });
+    await get().check({ asked: true });
   },
   wait: (waiting) => set({ waiting }),
   postpone: () => {

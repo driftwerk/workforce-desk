@@ -94,6 +94,7 @@ pub const COMMANDS: &[&str] = &[
     "data_remove",
     "updating",
     "update_check",
+    "update_channel_set",
     "update_download",
     "update_install",
     "resume_later",
