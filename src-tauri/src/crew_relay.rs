@@ -101,8 +101,9 @@ const REPOS: &str = "desk.repos";
 const CHECKOUT: &str = "desk.checkout";
 /// The longest path, or repository, a machine call says.
 const MOST_SAID: usize = 1024;
-/// The most of a machine's answer to one of these read.
-const MOST_MACHINE_ANSWER: usize = 128 * 1024;
+/// The most of a machine's answer to one of these read: what still fits
+/// in the answer posted to the hub.
+const MOST_MACHINE_ANSWER: usize = MOST_BODY - 1024;
 /// The most of a session's last reply read back.
 const MOST_REPLY: usize = 2000;
 /// How long Desk's plugin folder on a machine is waited for (read over
@@ -521,7 +522,7 @@ fn said<'a>(call: &'a Call, key: &str, required: bool) -> Result<Option<&'a str>
             match (v.trim().is_empty(), required) {
                 (true, true) => Err(bad()),
                 (true, false) => Ok(None),
-                (false, _) => Ok(Some(v.as_str())),
+                (false, _) => Ok(Some(v.trim())),
             }
         }
         _ => Err(bad()),
@@ -539,13 +540,25 @@ fn query_word(v: &str) -> String {
 /// there is sent once.
 async fn carry_machine<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &str) -> Outcome {
     let name = call.machine.as_str();
-    if let Some(extra) = call.input.as_object().and_then(|o| {
-        o.keys()
-            .find(|k| !matches!(k.as_str(), "path" | "remote" | "folder"))
-            .cloned()
-    }) {
+    // Each tool's own fields, and no others.
+    let fields: &[&str] = match tool {
+        FOLDERS | FOLDER_MAKE => &["path"],
+        REPOS => &["remote"],
+        _ => &["remote", "folder"],
+    };
+    let Some(input) = call.input.as_object() else {
+        return refused("That call says nothing Desk reads.".into());
+    };
+    if let Some(extra) = input.keys().find(|k| !fields.contains(&k.as_str())) {
         return refused(format!("That call's {extra} isn't one Desk sends."));
     }
+    // A boss that only watches makes nothing, whatever its hub says.
+    if tool == FOLDER_MAKE && call.level.as_str() == Some("watch") {
+        return refused("A boss that only watches makes no folders.".into());
+    }
+    // A read sent again changes nothing: one cut off is said, not left
+    // for the hub to wait out.
+    let reads = matches!(tool, FOLDERS | REPOS);
     let sent = match tool {
         FOLDERS => said(call, "path", false).map(|p| {
             let target = match p {
@@ -585,14 +598,21 @@ async fn carry_machine<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool
     {
         Ok(r) if (200..300).contains(&r.status) => match serde_json::from_str::<Value>(&r.body) {
             Ok(v) => Outcome::Answer(json!({"status": "ok", "body": v})),
+            Err(_) if reads => refused(format!("{name}'s answer couldn't be read")),
             Err(_) => Outcome::Unknown(format!("{name}'s answer couldn't be read")),
         },
-        Ok(r) if r.status == 404 => refused(format!(
-            "{name}'s Desk is older and can't answer that yet (404): update Desk there."
+        // No route there: an older Desk. A 404 of the route's own ("no
+        // such folder") is its answer.
+        Ok(r) if r.status == 404 && error_of(&r).is_none() => refused(format!(
+            "{name}'s Desk is older and can't answer that yet: update Desk there."
         )),
         Ok(r) if (400..500).contains(&r.status) && r.status != 408 => refusal(name, &r),
+        Ok(r) if reads => refused(format!("{name} couldn't answer that ({})", r.status)),
         Ok(r) => Outcome::Unknown(format!("{name} answered {}", r.status)),
         Err(Unanswered::NotSent(_)) => unreached(name),
+        Err(Unanswered::MaybeSent(why)) if reads => refused(format!(
+            "{name}'s answer couldn't be read whole ({why}): ask for less, like a folder further down"
+        )),
         Err(Unanswered::MaybeSent(why)) => Outcome::Unknown(why),
     }
 }
@@ -1294,6 +1314,77 @@ mod tests {
         none_in(&mut rx, 300).await;
         let _ = stop.send(true);
         assert_eq!(fake.routes_sent.lock().unwrap().len(), 2, "each sent once");
+    }
+
+    #[tokio::test]
+    async fn a_machine_tools_refusal_is_said_as_the_machine_says_it_and_a_read_cut_off_too() {
+        let (fake, mut rx) = with_routes(vec![
+            Does::Says(404, json!({"error": "no such folder"})),
+            Does::Says(
+                403,
+                json!({"error": "only a folder inside the home folder can be made"}),
+            ),
+            Does::Fails(Unanswered::MaybeSent("answer is too large".into())),
+            Does::Says(500, json!({})),
+        ]);
+        let calls = [
+            (
+                A,
+                "desk.folders",
+                json!({"path": "~/nope"}),
+                "no such folder",
+            ),
+            (
+                B,
+                "desk.folder_make",
+                json!({"path": "/etc/x"}),
+                "inside the home folder",
+            ),
+            (A, "desk.folders", json!({"path": "~/go"}), "ask for less"),
+            (
+                B,
+                "desk.repos",
+                json!({"remote": "a/b"}),
+                "couldn't answer that (500)",
+            ),
+        ];
+        for (id, tool, input, says) in calls {
+            let stop = start(&fake.polled(vec![desk_call(id, tool, input)]));
+            let (_, answer) = next(&mut rx).await;
+            let error = answer["body"]["error"].as_str().unwrap_or_default();
+            assert!(error.contains(says), "{tool}: {answer}");
+            assert!(!error.contains("Desk is older"), "{answer}");
+            let _ = stop.send(true);
+        }
+        assert_eq!(fake.routes_sent.lock().unwrap().len(), 4);
+        // Another tool's field, an input that isn't an object, and a
+        // watching boss's folder: nothing sent.
+        let mut watching = desk_call(
+            "0f0e0d0c-0b0a-4909-8807-0605040302cc",
+            "desk.folder_make",
+            json!({"path": "~/x"}),
+        );
+        watching["level"] = json!("watch");
+        let stop = start(&fake.polled(vec![
+            desk_call(A, "desk.folders", json!({"remote": "a/b"})),
+            desk_call(B, "desk.folders", json!("~")),
+            watching,
+        ]));
+        let mut got = [
+            next(&mut rx).await,
+            next(&mut rx).await,
+            next(&mut rx).await,
+        ];
+        got.sort_by(|a, b| a.0.cmp(&b.0));
+        for (_, answer) in &got {
+            assert!(answer["body"]["error"].is_string(), "{answer}");
+        }
+        let _ = stop.send(true);
+        assert_eq!(
+            fake.routes_sent.lock().unwrap().len(),
+            4,
+            "nothing more sent"
+        );
     }
 
     fn desk_call(id: &str, tool: &str, input: Value) -> Value {
