@@ -21,17 +21,24 @@ export function WorkUsageCard() {
           Background work on your plans
         </H>
       </div>
-      <ul className="plan-used-on">
+      <div className="plan-used-on">
+        <ul>
         {works.map((w) => (
           <li key={w.work} className="plan-place">
             <span>
-              <b>{w.label}</b> ·{" "}
-              <span className="muted small">{KIND[w.kind]}</span>
+              <b>{w.label}</b>
+              {KIND[w.kind] && (
+                <>
+                  {" "}
+                  · <span className="muted small">{KIND[w.kind]}</span>
+                </>
+              )}
             </span>
             <span className="plan-place-reading">{planUse(w)}</span>
           </li>
         ))}
-      </ul>
+        </ul>
+      </div>
     </section>
   );
 }

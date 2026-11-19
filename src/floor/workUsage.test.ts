@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { WorkUsage } from "../hub/types";
-import { percent, planUse, windowWord } from "./workUsage";
+import { inWeek, percent, planUse, windowWord } from "./workUsage";
 
 const w = (day: WorkUsage["day"], week: WorkUsage["week"]) => ({ day, week });
 
@@ -68,7 +68,7 @@ describe("planUse", () => {
         ),
       ),
     ).toBe(
-      "under 0.1% of your weekly Claude plan this week · under 0.1% today · 2 turns",
+      "under 0.1% of your weekly Claude plan this week · none today · 2 turns",
     );
   });
 });
@@ -77,8 +77,26 @@ describe("words", () => {
   it("rounds to one decimal", () => {
     expect(percent(4.24)).toBe("4.2%");
     expect(percent(4.26)).toBe("4.3%");
-    expect(percent(0.06)).toBe("0.1%");
+    expect(percent(0.06)).toBe("under 0.1%");
+    expect(percent(0.1)).toBe("0.1%");
     expect(percent(0.049)).toBe("under 0.1%");
+  });
+  it("keeps a work with a share but no turns, drops one with neither", () => {
+    const of = (work: string, share: number): WorkUsage => ({
+      work,
+      label: work,
+      agentId: "atlas",
+      kind: "monitor",
+      day: { turns: 0, tokens: 0, shares: [] },
+      week: {
+        turns: 0,
+        tokens: 0,
+        shares: [{ plan: "claude", windowMinutes: 10080, share }],
+      },
+    });
+    const quiet = of("monitor:a", 0);
+    const shared = of("monitor:b", 0.5);
+    expect(inWeek([quiet, shared])).toEqual([shared]);
   });
   it("names windows", () => {
     expect(windowWord(10080)).toBe("weekly");

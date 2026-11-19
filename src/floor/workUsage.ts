@@ -20,11 +20,9 @@ export const windowWord = (minutes: number): string =>
           ? `${minutes / 60}-hour`
           : `${minutes}-minute`;
 
-/** "4.2%", or "under 0.1%". */
-export const percent = (share: number): string => {
-  const r = Math.round(share * 10) / 10;
-  return r < 0.1 ? "under 0.1%" : `${r}%`;
-};
+/** "4.2%", or "under 0.1%" (as the hub says it). */
+export const percent = (share: number): string =>
+  share < 0.1 ? "under 0.1%" : `${Math.round(share * 10) / 10}%`;
 
 /** The share of the longest window, if any reported. */
 export const longest = (shares: readonly WorkShare[]): WorkShare | null =>
@@ -45,17 +43,22 @@ export const planUse = (w: Pick<WorkUsage, "day" | "week">): string => {
       (s) => s.plan === week.plan && s.windowMinutes === week.windowMinutes,
     ),
   );
-  const today = same ? percent(same.share) : "under 0.1%";
+  const today = same && same.share > 0 ? percent(same.share) : "none";
   return `${percent(week.share)} of your ${windowWord(week.windowMinutes)} ${PLAN[week.plan]} plan this week · ${today} today · ${turns(w.week.turns)}`;
 };
 
 export const KIND: Record<WorkUsageKind, string> = {
   job: "job",
   monitor: "monitor",
-  boss: "boss’s own turns",
+  // Its label already says it: "Atlas's own turns".
+  boss: "",
   heartbeat: "heartbeat",
   other: "other",
 };
 
+/** The works that did anything this week: a turn, or a share of a plan. */
 export const inWeek = (works: readonly WorkUsage[]): WorkUsage[] =>
-  works.filter((w: { week: WorkSpan }) => w.week.turns > 0);
+  works.filter(
+    (w: { week: WorkSpan }) =>
+      w.week.turns > 0 || w.week.shares.some((s) => s.share > 0),
+  );
