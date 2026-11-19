@@ -27,6 +27,13 @@ const s = (state: Session["state"], extra: Partial<Session> = {}): Session => ({
 });
 
 describe("notificationFor", () => {
+  it("tells you nothing of what a session's boss has", () => {
+    expect(notificationFor("working", s("blocked", { bossHas: "Desk" }))).toBeNull();
+    expect(notificationFor("working", s("asking", { bossHas: "Desk" }))).toBeNull();
+    // Unbossed, as always.
+    expect(notificationFor("working", s("blocked"))?.title).toBe("auth-fix needs you");
+  });
+
   it("tells you when a session needs you or finishes", () => {
     expect(notificationFor("working", s("blocked"))?.title).toBe("auth-fix needs you");
     expect(notificationFor("working", s("done", { lastReply: "Tests pass.\nmore" }))).toEqual({
