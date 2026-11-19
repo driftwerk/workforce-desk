@@ -58,7 +58,7 @@ describe("A route that can't run here", () => {
     const refused = "running your work on your ChatGPT (Codex) needs this hub's coding worker, and it has none";
     expect(
       describeAgent({ ...lattice, personalRoute: claude({ kind: "codex", title: "ChatGPT (Codex)", model: "gpt-5.3-codex", refused }) }, "Patchwork"),
-    ).toBe(`Patchwork · Your ChatGPT plan (Codex) (can’t run here) · gpt-5.3-codex · ${refused}`);
+    ).toBe(`Patchwork · Your ChatGPT plan (Codex), which can’t run here · ${refused}`);
   });
 });
 

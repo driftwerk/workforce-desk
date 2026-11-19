@@ -99,7 +99,8 @@ export const yourRoute = (a: Pick<Agent, "provider" | "personalRoute">): { label
   const r = a.personalRoute;
   if (!r || (!r.connected && r.fallback === "hub")) return null;
   const plan = PROVIDERS[r.kind] ?? `${r.title} plan`;
-  if (r.refused) return { label: `Your ${plan} (can’t run here)`, model: r.model, note: r.refused };
+  // Nothing runs on its model here, so none is named.
+  if (r.refused) return { label: `Your ${plan}, which can’t run here`, model: "", note: r.refused };
   const label = `Your ${plan}${r.connected ? "" : " (not connected)"}`;
   const note =
     r.fallback === "hub"

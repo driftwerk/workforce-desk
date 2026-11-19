@@ -543,10 +543,7 @@ function YourConversations({ agent }: { agent: Agent }) {
       <span>Your conversations</span>
       <b>
         {mine.label}{" "}
-        <span>
-          · {mine.model}
-          {mine.note && ` · ${mine.note}`}
-        </span>
+        <span>{["", mine.model, mine.note].filter((part, at) => at === 0 || part).join(" · ")}</span>
       </b>
       <span />
     </div>
