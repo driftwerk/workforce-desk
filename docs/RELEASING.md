@@ -43,7 +43,7 @@ hub keeps memories in SQLite; then it moves them into the store, once.
      with `lipo` (`scripts/build-sidecars.sh`). vellev embeds with ONNX
      Runtime, which `ort` ships prebuilt for Apple Silicon only: for Intel
      the job builds ONNX Runtime 1.28 from source
-     (`scripts/onnxruntime.sh`, cached by its pin). That source came from
+     (`scripts/onnxruntime.sh`, cached by `scripts/onnxruntime.pin`). That source came from
      github.com/microsoft/onnxruntime, which has been offline since
      2026-11-18 (see [ONNX Runtime](#onnx-runtime)), so on a cold cache the
      build stops until `ORT_SOURCE` names an approved checkout
@@ -70,7 +70,9 @@ hub keeps memories in SQLite; then it moves them into the store, once.
    `libonnxruntime.so.1`: every Linux backend ships it beside
    `desk-memory`, which finds it there (rpath `$ORIGIN`). That covers the
    artifact, the machines' tarball and the WSL copy. The Linux app's
-   `.deb` puts it in `/usr/lib/Desk`, and its AppImage in `usr/lib`.
+   packages put it in `/usr/lib/Desk`. The AppImage's tooling then moves a
+   copy into `usr/lib`, and the release checks that both packages load
+   their own copy.
    Every place that ships it checks it against its pin
    (`scripts/onnxruntime.sh check`). Each Desk install refuses a backend
    whose `desk-memory` names the library but which doesn't hold it.

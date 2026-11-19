@@ -9,6 +9,7 @@ on:
   pull_request:
     paths:
       - scripts/onnxruntime.sh
+      - scripts/onnxruntime.pin
       - scripts/build-sidecars.sh
       - vellev.ref
       - .github/workflows/intel-sidecars.yml
@@ -63,7 +64,7 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: ~/Library/Caches/desk-build/onnxruntime-x86_64
-          key: onnxruntime-x86_64-${{ hashFiles('desk/scripts/onnxruntime.sh') }}
+          key: onnxruntime-x86_64-${{ hashFiles('desk/scripts/onnxruntime.pin') }}
 
       - name: Build ONNX Runtime for Intel
         working-directory: desk
@@ -74,7 +75,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ~/Library/Caches/desk-build/onnxruntime-x86_64
-          key: onnxruntime-x86_64-${{ hashFiles('desk/scripts/onnxruntime.sh') }}
+          key: onnxruntime-x86_64-${{ hashFiles('desk/scripts/onnxruntime.pin') }}
 
       - uses: Swatinem/rust-cache@v2
         with:

@@ -50,27 +50,21 @@
 #   - the build uses that fresh checkout.
 # Its submodules then come, at the commits COMMIT's tree pins, from the URLs
 # its .gitmodules names. DIR/Release is what ORT_LIB_LOCATION names (about
-# 30 to 60 minutes; CI caches DIR by this file's hash).
+# 30 to 60 minutes; CI caches DIR by onnxruntime.pin's hash).
 #
 # The version must be the one the locked ort-sys of vellev's Cargo.lock
 # links: build-sidecars.sh checks that, and says so if a vellev bump moved
 # it.
 set -euo pipefail
 
-VERSION=1.28.0
-# v1.28.0, as cloned when the source build was added, and as the NuGet
-# package's .nuspec names it (<repository commit=...>).
-COMMIT=da9b5e364c465de65c49d91e696cd6485270757f
+# VERSION, COMMIT, MACOS_DEPLOYMENT_TARGET and BUILD_TOOLS.
+. "$(dirname "$0")/onnxruntime.pin"
 
 NUGET_URL=https://api.nuget.org/v3-flatcontainer/microsoft.ml.onnxruntime/$VERSION/microsoft.ml.onnxruntime.$VERSION.nupkg
 NUGET_SHA256=769d1d3ea8ab6cd69f737c9dd4d4462aa4ad0ccfa106eaf506efc40d7bead5db
 # runtimes/linux-<arch>/native/libonnxruntime.so inside it.
 LIB_SHA256_x86_64=1461ef7cc3d9e49982591721683cc3e3a55580aeca9a5254e7aac47b75ee4bab
 LIB_SHA256_aarch64=f1ec1a08eb99bd6e5401340f0a2b101381bf4694415480291dc13bcaa30f9ec7
-
-# The macOS build's tools, from PyPI, pinned by hash (universal2 wheels).
-BUILD_TOOLS='cmake==3.31.6 --hash=sha256:da9d4fd9abd571fd016ddb27da0428b10277010b23bb21e3678f8b9e96e1686e
-ninja==1.11.1.4 --hash=sha256:b33923c8da88e8da20b6053e38deb433f53656441614207e01d283ad02c5e8e7'
 
 say() { printf '\033[1m==> %s\033[0m\n' "$*" >&2; }
 die() { echo "onnxruntime.sh: $*" >&2; exit 1; }
@@ -144,10 +138,10 @@ safe_git() {
 
 macos() {
   local src built source
-  # The oldest macOS Desk runs on (tauri.macos.conf.json). build.py passes
-  # --apple_deploy_target to CMake only for framework builds, so CMake gets
-  # it too; without it everything targets the SDK's macOS.
-  export MACOSX_DEPLOYMENT_TARGET=13.0
+  # build.py passes --apple_deploy_target to CMake only for framework
+  # builds, so CMake gets it too; without it everything targets the SDK's
+  # macOS.
+  export MACOSX_DEPLOYMENT_TARGET=$MACOS_DEPLOYMENT_TARGET
   local platform=(--osx_arch x86_64 --apple_deploy_target "$MACOSX_DEPLOYMENT_TARGET"
     --cmake_extra_defines "CMAKE_OSX_DEPLOYMENT_TARGET=$MACOSX_DEPLOYMENT_TARGET")
 
@@ -163,13 +157,14 @@ macos() {
 and github.com/microsoft/onnxruntime, where that source came from, has been offline since 2026-11-18. \
 Set ORT_SOURCE to a git repository holding v$VERSION ($COMMIT) whose origin the release owner has approved; \
 only that commit is taken from it, checked (docs/RELEASING.md)."
+  case "$src" in -*) die "ORT_SOURCE ($src) can't start with -" ;; esac
 
   # COMMIT alone, into a folder of our own: nothing of ORT_SOURCE's but its
   # objects, each checked as it is copied.
   work=$(mktemp -d)
   source="$work/onnxruntime"
   safe_git init --quiet "$source"
-  safe_git -C "$source" fetch --quiet --no-tags --no-recurse-submodules "$src" "$COMMIT" ||
+  safe_git -C "$source" fetch --quiet --no-tags --no-recurse-submodules -- "$src" "$COMMIT" ||
     die "ORT_SOURCE ($src) has no commit $COMMIT, or its objects don't check"
   safe_git -C "$source" checkout --quiet --detach "$COMMIT"
   [ "$(safe_git -C "$source" rev-parse HEAD)" = "$COMMIT" ] || die "the checkout is not $COMMIT"

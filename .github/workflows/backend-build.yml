@@ -40,6 +40,7 @@ on:
     paths:
       - scripts/build-sidecars.sh
       - scripts/onnxruntime.sh
+      - scripts/onnxruntime.pin
       - scripts/openssl-static.sh
       - scripts/postgres-linux.sh
       - scripts/backend-tarball.sh

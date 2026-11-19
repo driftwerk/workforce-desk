@@ -71,7 +71,11 @@ pid=
 if [ -n "$machine" ]; then version=0.0.0-smoke+dev.machine; else version=0.0.0-smoke+dev.desktop; fi
 mkdir -p "$DESK_HOME/bin/$version"
 cp "$bin/desk-helper" "$bin/desk-agents" "$bin/desk-memory" "$DESK_HOME/bin/$version/"
-[ ! -f "$bin/libonnxruntime.so.1" ] || cp "$bin/libonnxruntime.so.1" "$DESK_HOME/bin/$version/"
+if grep -qF libonnxruntime.so.1 "$bin/desk-memory"; then
+  [ -f "$bin/libonnxruntime.so.1" ] ||
+    { echo "backend-smoke: no $bin/libonnxruntime.so.1, which desk-memory links" >&2; exit 2; }
+  cp "$bin/libonnxruntime.so.1" "$DESK_HOME/bin/$version/"
+fi
 "$DESK_HOME/bin/$version/desk-memory" --help >/dev/null ||
   { echo "backend-smoke: the memory store doesn't run as installed" >&2; exit 1; }
 ln -s "$version" "$DESK_HOME/bin/current"

@@ -112,7 +112,7 @@ jobs:
         uses: actions/cache@v6
         with:
           path: ~/Library/Caches/desk-build/onnxruntime-x86_64
-          key: onnxruntime-x86_64-${{ hashFiles('desk/scripts/onnxruntime.sh') }}
+          key: onnxruntime-x86_64-${{ hashFiles('desk/scripts/onnxruntime.pin') }}
 
       - name: Set the version
         working-directory: desk
@@ -361,9 +361,11 @@ jobs:
 
       # Where Tauri looks for the sidecars (externalBin in
       # tauri.linux.conf.json), executable again: an artifact keeps no modes.
-      # And the ONNX Runtime the memory store links, checked against its pin:
-      # the .deb puts it in /usr/lib/Desk and the AppImage in usr/lib
-      # (bundle.linux there), where its memory store looks for it.
+      # And the ONNX Runtime the memory store links, checked against its pin,
+      # which both packages put in /usr/lib/Desk (bundle.linux there), where
+      # its memory store looks for it. The AppImage's tooling (linuxdeploy)
+      # finds it there and moves a copy to usr/lib, which it points the
+      # programs at.
       - name: The helper, hub and memory store
         working-directory: desk
         run: |
@@ -502,11 +504,16 @@ jobs:
         working-directory: desk
         run: npm ci
 
-      # The Linux backend the installers carry, which Desk installs into WSL.
+      # The Linux backend the installers carry, which Desk installs into WSL,
+      # with the pinned ONNX Runtime.
       - uses: actions/download-artifact@v7
         with:
           name: backend-linux-x86_64
           path: desk/src-tauri/resources/backend/linux-x86_64
+
+      - name: Check the backend's ONNX Runtime
+        shell: bash
+        run: desk/scripts/onnxruntime.sh check desk/src-tauri/resources/backend/linux-x86_64/libonnxruntime.so.1 x86_64
 
       - name: Build Desk Helper.exe
         working-directory: desk

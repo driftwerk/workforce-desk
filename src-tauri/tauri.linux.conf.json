@@ -24,7 +24,7 @@
       },
       "appimage": {
         "files": {
-          "/usr/lib/libonnxruntime.so.1": "binaries/libonnxruntime.so.1"
+          "/usr/lib/Desk/libonnxruntime.so.1": "binaries/libonnxruntime.so.1"
         }
       }
     }
