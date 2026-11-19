@@ -124,7 +124,7 @@ act = { nudge = false, resume_restart = true, read_only_approvals = true, hand_o
         handOff: false,
         setMode: false,
       },
-      work: { preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", model: null, maxTurnsPerHour: 60, closeFinished: true },
+      work: { style: "sessions_only", parallel: 4, takeOn: "handed", engine: "claude", model: null, maxTurnsPerHour: 60, closeFinished: true },
       full: { anywhere: false, repos: [], workflows: [], budgetUsdPerDay: null, budgetClearedAt: null },
     });
   });
@@ -185,7 +185,7 @@ wake = { waiting_minutes = 2.5 }
         hand_off: false,
         set_mode: false,
       },
-      work: { prefer_sessions: true, parallel: 4, take_on: "handed", engine: "claude", max_turns_per_hour: 60, close_finished: true },
+      work: { style: "sessions_only", prefer_sessions: true, parallel: 4, take_on: "handed", engine: "claude", max_turns_per_hour: 60, close_finished: true },
     });
     expect(oversightOf(toml)).toEqual({ ...DEFAULT_OVERSIGHT, enabled: true, level: "suggest", summaries: { morning: "09:00", evening: "18:00" } });
   });
@@ -210,7 +210,7 @@ wake = { waiting_minutes = 2.5 }
   });
 
   it("reads how it runs sessions, inline or as its own table, and writes it under [oversight.work] as the hub reads it", () => {
-    expect(DEFAULT_OVERSIGHT.work).toEqual({ preferSessions: true, parallel: 4, takeOn: "handed", engine: "claude", model: null, maxTurnsPerHour: 60, closeFinished: true });
+    expect(DEFAULT_OVERSIGHT.work).toEqual({ style: "sessions_only", parallel: 4, takeOn: "handed", engine: "claude", model: null, maxTurnsPerHour: 60, closeFinished: true });
     const inline = oversightOf(`[oversight]
 work = { prefer_sessions = false, parallel = 12, take_on = "all", engine = "codex", model = "gpt-6.1-sol", max_turns_per_hour = 1, close_finished = false }
 `);
@@ -224,17 +224,18 @@ model = "gpt-6.1-sol"
 max_turns_per_hour = 1
 close_finished = false
 `);
-    expect(inline.work).toEqual({ preferSessions: false, parallel: 12, takeOn: "all", engine: "codex", model: "gpt-6.1-sol", maxTurnsPerHour: 1, closeFinished: false });
+    expect(inline.work).toEqual({ style: "direct", parallel: 12, takeOn: "all", engine: "codex", model: "gpt-6.1-sol", maxTurnsPerHour: 1, closeFinished: false });
     expect(own).toEqual(inline);
     const toml = withOversight(`${CONFIG}\n[oversight]\nenabled = true\n[oversight.work]\nfuture = 1\n`, {
       ...DEFAULT_OVERSIGHT,
       enabled: true,
-      work: { preferSessions: false, parallel: 6, takeOn: "all", engine: "codex", model: "gpt-6.1-sol", maxTurnsPerHour: 90, closeFinished: false },
+      work: { style: "direct", parallel: 6, takeOn: "all", engine: "codex", model: "gpt-6.1-sol", maxTurnsPerHour: 90, closeFinished: false },
     });
     expect(toml).toContain("[oversight.work]");
     expect((parse(toml) as { oversight: { work: unknown } }).oversight.work).toEqual({
       future: 1,
       model: "gpt-6.1-sol",
+      style: "direct",
       prefer_sessions: false,
       parallel: 6,
       take_on: "all",
@@ -245,6 +246,29 @@ close_finished = false
     // Back to the engine's own default: the key goes.
     const back = withOversight(toml, { ...DEFAULT_OVERSIGHT, enabled: true, work: { ...DEFAULT_OVERSIGHT.work, engine: "codex", model: null } });
     expect((parse(back) as { oversight: { work: Record<string, unknown> } }).oversight.work.model).toBeUndefined();
+  });
+
+  it("reads how it works: style wins, the old prefer_sessions maps only when style is absent or invalid, and sessions only is the default", () => {
+    const style = (work: string) => oversightOf(`[oversight]\nwork = { ${work} }\n`).work.style;
+    expect(style("")).toBe("sessions_only");
+    expect(style('style = "prefer_sessions"')).toBe("prefer_sessions");
+    expect(style('style = "direct"')).toBe("direct");
+    expect(style('style = "sessions_only", prefer_sessions = false')).toBe("sessions_only");
+    expect(style('style = "direct", prefer_sessions = true')).toBe("direct");
+    expect(style("prefer_sessions = true")).toBe("sessions_only");
+    expect(style("prefer_sessions = false")).toBe("direct");
+    expect(style('style = "sometimes", prefer_sessions = false')).toBe("direct");
+    expect(style('style = "sometimes", prefer_sessions = true')).toBe("sessions_only");
+    expect(style("style = 3")).toBe("sessions_only");
+    expect(style('style = "sometimes"')).toBe("sessions_only");
+  });
+
+  it("writes how it works as style and keeps writing prefer_sessions for an older hub, which is off only for do it myself, and keeps other keys", () => {
+    const written = (s: "sessions_only" | "prefer_sessions" | "direct") =>
+      (parse(withOversight(`${CONFIG}\n[oversight]\nenabled = true\n[oversight.work]\nfuture = 1\nstyle = "direct"\n`, { ...DEFAULT_OVERSIGHT, enabled: true, work: { ...DEFAULT_OVERSIGHT.work, style: s } })) as { oversight: { work: Record<string, unknown> } }).oversight.work;
+    expect(written("sessions_only")).toMatchObject({ future: 1, style: "sessions_only", prefer_sessions: true });
+    expect(written("prefer_sessions")).toMatchObject({ future: 1, style: "prefer_sessions", prefer_sessions: true });
+    expect(written("direct")).toMatchObject({ future: 1, style: "direct", prefer_sessions: false });
   });
 
   it("reads what the hub would refuse in [oversight.work] as the defaults, and never writes it", () => {

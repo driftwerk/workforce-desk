@@ -424,12 +424,33 @@ describe("Oversees the crew", () => {
     await waitFor(() => expect(oversight()).toMatchObject({ wake: { waiting_minutes: 5 } }));
   });
 
+  it("offers three ways of working, each said in a sentence, the saved one checked, and a pick or an arrow key saves it as style", async () => {
+    useOverview.setState({ manager: { agentId: "ledger", level: "act" } });
+    show(fakeHub(), `${START}\n[oversight]\nenabled = true\nlevel = "act"\n[oversight.work]\nprefer_sessions = false\n`);
+    const group = screen.getByRole("radiogroup", { name: "How Ledger works" });
+    const radios = within(group).getAllByRole("radio");
+    expect(radios.map((r) => r.querySelector("b")?.textContent)).toEqual(["Only in sessions", "Prefer sessions", "Do it myself"]);
+    expect(radios.map((r) => (r.querySelector("span")?.textContent ?? "").length > 20)).toEqual([true, true, true]);
+    expect(radios.map((r) => r.getAttribute("aria-checked"))).toEqual(["false", "false", "true"]);
+    expect(radios.map((r) => r.tabIndex)).toEqual([-1, -1, 0]);
+    await act(async () => fireEvent.click(radios[1]!));
+    await waitFor(() => expect(oversight()?.work).toMatchObject({ style: "prefer_sessions", prefer_sessions: true }));
+    expect(screen.getAllByRole("radio", { name: /Prefer sessions/ })[0]!.getAttribute("aria-checked")).toBe("true");
+    await act(async () => fireEvent.keyDown(screen.getByRole("radio", { name: /Prefer sessions/ }), { key: "ArrowLeft" }));
+    await waitFor(() => expect(oversight()?.work).toMatchObject({ style: "sessions_only", prefer_sessions: true }));
+    await act(async () => fireEvent.keyDown(screen.getByRole("radio", { name: /Only in sessions/ }), { key: "ArrowRight" }));
+    await act(async () => fireEvent.keyDown(screen.getByRole("radio", { name: /Prefer sessions/ }), { key: "ArrowRight" }));
+    await waitFor(() => expect(oversight()?.work).toMatchObject({ style: "direct", prefer_sessions: false }));
+    // Focus follows the arrow to the one now checked.
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("radio", { name: /Do it myself/ })));
+  });
+
   it("says how it works, and writes each choice to [oversight.work] as the hub reads it", async () => {
     useOverview.setState({ manager: { agentId: "ledger", level: "act" } });
     const hub = fakeHub();
     show(hub, `${START}\n[oversight]\nenabled = true\nlevel = "act"\n`);
     expect(screen.getByRole("heading", { name: "How Ledger works" })).toBeTruthy();
-    expect((screen.getByRole("checkbox", { name: /Always work in real sessions/ }) as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByRole("radio", { name: /Only in sessions/ }).getAttribute("aria-checked")).toBe("true");
     // On unless you turn it off.
     expect((screen.getByRole("checkbox", { name: /Close sessions I started when their work is done/ }) as HTMLInputElement).checked).toBe(true);
     expect(screen.getByRole("radio", { name: /Only what I hand it/ }).getAttribute("aria-checked")).toBe("true");
@@ -448,14 +469,14 @@ describe("Oversees the crew", () => {
     await waitFor(() => expect(oversight()).toMatchObject({ work: { parallel: 6 } }));
 
     await act(async () => fireEvent.click(screen.getByRole("radio", { name: /Every session it can/ })));
-    await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Always work in real sessions/ })));
+    await act(async () => fireEvent.click(screen.getByRole("radio", { name: /Do it myself/ })));
     await act(async () => fireEvent.click(screen.getByRole("checkbox", { name: /Close sessions I started when their work is done/ })));
     await act(async () => fireEvent.change(engine, { target: { value: "codex" } }));
     const turns = screen.getByRole("textbox", { name: "Work turns an hour" });
     fireEvent.change(turns, { target: { value: "90" } });
     await act(async () => fireEvent.blur(turns));
     await waitFor(() =>
-      expect(oversight()?.work).toEqual({ prefer_sessions: false, parallel: 6, take_on: "all", engine: "codex", max_turns_per_hour: 90, close_finished: false }),
+      expect(oversight()?.work).toEqual({ style: "direct", prefer_sessions: false, parallel: 6, take_on: "all", engine: "codex", max_turns_per_hour: 90, close_finished: false }),
     );
     expect(file).toContain("[oversight.work]");
   });
