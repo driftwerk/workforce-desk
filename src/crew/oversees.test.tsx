@@ -427,7 +427,7 @@ describe("Oversees the crew", () => {
   it("offers three ways of working, each said in a sentence, the saved one checked, and a pick or an arrow key saves it as style", async () => {
     useOverview.setState({ manager: { agentId: "ledger", level: "act" } });
     show(fakeHub(), `${START}\n[oversight]\nenabled = true\nlevel = "act"\n[oversight.work]\nprefer_sessions = false\n`);
-    const group = screen.getByRole("radiogroup", { name: "How it works" });
+    const group = screen.getByRole("radiogroup", { name: "How Ledger works" });
     const radios = within(group).getAllByRole("radio");
     expect(radios.map((r) => r.querySelector("b")?.textContent)).toEqual(["Only in sessions", "Prefer sessions", "Do it myself"]);
     expect(radios.map((r) => (r.querySelector("span")?.textContent ?? "").length > 20)).toEqual([true, true, true]);
@@ -441,6 +441,8 @@ describe("Oversees the crew", () => {
     await act(async () => fireEvent.keyDown(screen.getByRole("radio", { name: /Only in sessions/ }), { key: "ArrowRight" }));
     await act(async () => fireEvent.keyDown(screen.getByRole("radio", { name: /Prefer sessions/ }), { key: "ArrowRight" }));
     await waitFor(() => expect(oversight()?.work).toMatchObject({ style: "direct", prefer_sessions: false }));
+    // Focus follows the arrow to the one now checked.
+    await waitFor(() => expect(document.activeElement).toBe(screen.getByRole("radio", { name: /Do it myself/ })));
   });
 
   it("says how it works, and writes each choice to [oversight.work] as the hub reads it", async () => {

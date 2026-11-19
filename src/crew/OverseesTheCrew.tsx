@@ -49,12 +49,12 @@ const WORK_STYLE = (name: string): { id: WorkStyle; name: string; desc: string }
   {
     id: "sessions_only",
     name: "Only in sessions",
-    desc: `All of ${name}’s doing goes through sessions you can watch, type into and take over. It runs no commands, builds or code edits of its own, but still reads, searches and keeps its own notes.`,
+    desc: `All of ${name}’s work happens in sessions you can watch, type into and take over; it only reads, searches and keeps notes itself.`,
   },
   {
     id: "prefer_sessions",
     name: "Prefer sessions",
-    desc: `Code changes and long tasks go to sessions. ${name} may run quick commands itself for checks, lookups and ops: ssh, gh, reading files and logs. Destructive or irreversible steps still follow your directives.`,
+    desc: `Code changes and long tasks go to sessions, while ${name} runs quick checks, lookups and ops itself, such as ssh, gh, files and logs.`,
   },
   {
     id: "direct",
@@ -516,7 +516,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
           </div>
 
           <div className="oversee-part">
-            <h3>How {name} works</h3>
+            <h3 id={`${ids}-work`}>How {name} works</h3>
             <span className="oversee-sub">
               {o.level === "watch"
                 ? `At Watch, ${name} runs no sessions. Set it to Suggest or Act to hand it work.`
@@ -524,7 +524,7 @@ export function OverseesTheCrew({ agent }: { agent: Agent }) {
                   ? `At Suggest, each session ${name} would start or answer for comes to you to say yes to first.`
                   : `${name} runs the sessions it takes on with you: it hears when each turn ends, tells it the next step and answers what it can. Type in one and you’re driving for ${o.wake.holdMinutes === 1 ? "a minute" : `${o.wake.holdMinutes} minutes`} after your last keystroke.${o.act.handOutWork ? "" : " With “Hand out work” off, each session it would start comes to you to say yes to first."}`}
             </span>
-            <div className="oversee-levels oversee-levels-3" role="radiogroup" aria-label="How it works">
+            <div className="oversee-levels oversee-levels-3" role="radiogroup" aria-labelledby={`${ids}-work`}>
               {workStyles.map((w, i) => (
                 <button
                   key={w.id}
