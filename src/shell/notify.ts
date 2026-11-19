@@ -14,6 +14,8 @@ export const notificationFor = (
 ): { title: string; body: string } | null => {
   const state = shownState(s);
   if (before === undefined || before === state) return null;
+  // What its boss has is the boss's to deal with: nothing tells the person.
+  if (!waitsOnYou(s) && (state === "blocked" || state === "asking")) return null;
   const name = sessionName(key, s.name, s);
   if (state === "blocked")
     return {

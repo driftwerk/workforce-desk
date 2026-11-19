@@ -54,7 +54,7 @@ export const useGridSummaries = (): Record<string, GridSummary> => {
           if (items.includes(key)) continue;
           items.push(key);
           const state = shownState(s);
-          if (waitsOnYou({ state })) waiting.push(key);
+          if (waitsOnYou({ state, bossHas: s.bossHas })) waiting.push(key);
           else if (state === "working" || state === "starting") working += 1;
         }
         return [items.join("\n"), waiting.join("\n"), working];
