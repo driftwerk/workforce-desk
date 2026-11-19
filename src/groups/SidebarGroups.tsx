@@ -243,6 +243,9 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   }
   const present = [...items.keys()];
   const shown = resolve(layout, present);
+  /** The group each item sits in, as shown. */
+  const groupOfItem = new Map<ItemKey, string>();
+  for (const g of shown) for (const key of g.items) groupOfItem.set(key, g.id);
 
   // The item the focused pane of the grid the Grids view shows is (see
   // `itemOf`), while that pane is laid out; none in any other view.
@@ -497,7 +500,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
    *  in the group it oversees. */
   const tagOf = (item: Item) => {
     if (item.kind !== "agent") return null;
-    const sitsIn = shown.find((g) => g.items.includes(item.key))?.id ?? UNGROUPED;
+    const sitsIn = groupOfItem.get(item.key) ?? UNGROUPED;
     return bossTagOf(item.agent, isLocal(item.agent), sitsIn, manager, grantNamed);
   };
   const bossOf = (item: Item): string | null => (item.kind === "agent" ? bossTagSays(tagOf(item), groupName, hubLabel(item.agent.hubId)) : null);
