@@ -317,7 +317,7 @@ describe("a session Sarah runs", () => {
 
     // What waits to go in is a slim bar under its terminal; its line is
     // read from Messages with Desk….
-    expect(await within(card).findByText("1 message waiting to go in")).toBeTruthy();
+    expect(await within(card).findByText("1 message from Sarah waits for this turn to end · “Run the payment tests next.”")).toBeTruthy();
     await act(async () => fireEvent.click((await options()).getByRole("menuitem", { name: "Messages with Desk…" })));
     expect(await within(card).findByText(/Waiting for it to finish its turn/)).toBeTruthy();
     await act(async () => fireEvent.click(chip()!));
@@ -335,7 +335,7 @@ describe("a session Sarah runs", () => {
     expect(within(mine).getByText(/^You took this back from Sarah\. Sarah watches/)).toBeTruthy();
     expect(within(mine).getByRole("button", { name: "Hand to Sarah" })).toBeTruthy();
     fireEvent.keyDown(mine, { key: "Escape" });
-    expect(await within(card).findByText(/Not delivered: Sarah no longer runs it/)).toBeTruthy();
+    expect(await within(card).findByText(/Not delivered: withdrawn before it went in/)).toBeTruthy();
     expect(within(card).getByText(/I'm no longer running this session/)).toBeTruthy();
     expect(within(card).getAllByText(/A note here only: not typed in/).length).toBeGreaterThan(0);
 

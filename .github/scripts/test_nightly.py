@@ -90,6 +90,14 @@ class Notes(unittest.TestCase):
         self.assertIn("- two", msg)
 
 
+class Bump(unittest.TestCase):
+    def test_it_moves_hub_ref_alone_never_vellev_ref(self):
+        self.assertTrue(nightly.only_hub_ref(["hub.ref"]))
+        self.assertFalse(nightly.only_hub_ref(["hub.ref", "vellev.ref"]))
+        self.assertFalse(nightly.only_hub_ref(["vellev.ref"]))
+        self.assertFalse(nightly.only_hub_ref([]))
+
+
 class Skips(unittest.TestCase):
     def test_a_red_or_stuck_night_asks_for_a_person_and_nothing_to_do_doesnt(self):
         self.assertFalse(nightly.Skip("nothing changed").attention)

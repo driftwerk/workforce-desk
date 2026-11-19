@@ -15,9 +15,12 @@ vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(()
 let thread: LineMessage[] = [];
 const hub = {
   lineThread: vi.fn(() => Promise.resolve(thread)),
-  postLine: vi.fn((_id: string, text: string, when: "queue" | "now") =>
-    Promise.resolve(msg({ id: `posted-${when}`, from: YOU, to: S1, kind: "tell", text, asked: null, delivery: when === "now" ? "delivered" : "queued" })),
-  ),
+  // What it posts is on the line the hub reads back.
+  postLine: vi.fn((_id: string, text: string, when: "queue" | "now") => {
+    const m = msg({ id: `posted-${when}`, from: YOU, to: S1, kind: "tell", text, asked: null, delivery: when === "now" ? "delivered" : "queued" });
+    thread = [...thread, m];
+    return Promise.resolve(m);
+  }),
   editLine: vi.fn(() => Promise.resolve()),
   typing: vi.fn(() => Promise.resolve()),
   takeBackLine: vi.fn(() => Promise.resolve()),

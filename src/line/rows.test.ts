@@ -65,7 +65,8 @@ describe("a line's rows", () => {
     const boss = (m: Parameters<typeof msg>[0]) => deliveryText(msg({ from: DESK, to: S1, kind: "tell", asked: null, ...m }), NOW);
     expect(boss({ delivery: "queued", waiting: "person_driving" })).toBe("Waiting: you're driving");
     expect(boss({ delivery: "queued", waiting: "mode_ending" })).toBe("Waiting: Desk is putting it back in its own mode");
-    expect(boss({ delivery: "withdrawn" })).toBe("Not delivered: Sarah no longer runs it");
+    expect(boss({ delivery: "withdrawn" })).toBe("Not delivered: withdrawn before it went in");
+    expect(boss({ delivery: "queued", waiting: "next_call" })).toBe("Sent now: it reads this with its next tool call");
     expect(boss({ delivery: "noted" })).toBe("A note here only: not typed in");
     // One a newer hub sends that this Desk doesn't know says nothing.
     expect(boss({ delivery: "later" as never })).toBeNull();

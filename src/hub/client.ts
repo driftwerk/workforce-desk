@@ -696,8 +696,12 @@ export class DeskHub {
   };
   /** Changes a message of yours that hasn't gone out. */
   editLine = (id: string, text: string): Promise<void> => this.call("PATCH", `/api/desk/line/${encodeURIComponent(id)}`, { text });
-  /** Takes back a message of yours that hasn't gone out. */
+  /** Takes back a message that hasn't gone in: yours (gone, as if never
+   *  sent), or (a newer hub) a boss's (withdrawn unsent, and its boss told). */
   takeBackLine = (id: string): Promise<void> => this.call("DELETE", `/api/desk/line/${encodeURIComponent(id)}`);
+  /** Sends a message waiting for its session's turn to end into that turn
+   *  now (a newer hub: offered when the row's `actions` say so). */
+  sendLineNow = (id: string): Promise<LineMessage> => this.call("POST", `/api/desk/line/${encodeURIComponent(id)}/now`);
   /** Your answer to a question on a session's line. */
   answerLine = (id: string, text: string): Promise<LineMessage> => this.call("POST", `/api/desk/line/${encodeURIComponent(id)}/answer`, { text });
   /** Sets a session's question aside unanswered: it leaves what needs you,

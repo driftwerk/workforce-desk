@@ -92,6 +92,12 @@ def next_version(stable, today, run_number, last=None):
     return version
 
 
+def only_hub_ref(changed):
+    """The bump's commit changes hub.ref and nothing else: vellev.ref above all, which
+    is held where it is (docs/RELEASING.md) and is never the nightly's to move."""
+    return [p for p in changed if p] == ["hub.ref"]
+
+
 def short(sha):
     return sha[:8]
 
@@ -247,6 +253,9 @@ def bump(repo, hub_from, hub_to, hub_commits, run_url):
         "-c", "user.email=41898282+github-actions[bot]@users.noreply.github.com",
         "commit", "-q", "-m", bump_message(hub_from, hub_to, [s for _, s in hub_commits], run_url), "hub.ref")
     sha = git("rev-parse", "HEAD")
+    changed = git("diff", "--name-only", "HEAD~1", "HEAD").splitlines()
+    if not only_hub_ref(changed):
+        raise RuntimeError(f"the hub bump would change {changed}, not hub.ref alone")
     git("push", "-q", "origin", f"HEAD:refs/heads/{branch}")
     try:
         # CI, and the backend's smoke test a person's hub.ref pull request runs too.

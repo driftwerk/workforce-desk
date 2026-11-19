@@ -1,6 +1,6 @@
 import type { LineMessage } from "../hub/types";
 import { dayClock } from "../floor/time";
-import { waitsOnYou } from "./rows";
+import { fromLabel, waitsOnYou } from "./rows";
 
 /** What on a session's line is still open: the questions it asked you,
  *  waiting on you or gone ahead without an answer, and messages to it that
@@ -40,10 +40,55 @@ const oneLine = (s: string): string => s.replace(/\s+/g, " ").trim();
 const whereOf = (m: LineMessage): string =>
   waitsOnYou(m) ? "waiting on you" : m.chose ? "went ahead" : "went ahead without an answer";
 
+/** What a message waiting for a session does, after "1 message from Desk":
+ *  why it waits, in a few words (`many`: said of more than one). */
+export const waitPhrase = (m: LineMessage, many = false): string => {
+  const waits = many ? "wait" : "waits";
+  if (m.delivery === "handed") return many ? "are on their way in" : "is on its way in";
+  if (m.delivery === "held") return `${waits} for it to run again`;
+  switch (m.waiting) {
+    case "working":
+      return `${waits} for this turn to end`;
+    case "next_call":
+      return many ? "go in with its next tool call" : "goes in with its next tool call";
+    case "stopped":
+      return `${waits} for it to run again`;
+    case "typing":
+      return `${waits} while you type in its terminal`;
+    case "paused":
+      return `${waits}: Desk's breaker paused it`;
+    case "asking":
+      return `${waits} for you to answer it`;
+    case "person_driving":
+      return `${waits} until you hand it back`;
+    case "mode_ending":
+      return `${waits} for Desk to put it back in its own mode`;
+    default:
+      return `${waits} to go in`;
+  }
+};
+
+/** A message's first line, short enough for a bar. */
+export const previewOf = (text: string, max = 60): string => {
+  const first = oneLine(text.split("\n").find((l) => l.trim()) ?? text);
+  return first.length > max ? `${first.slice(0, max - 1).trimEnd()}…` : first;
+};
+
+/** "1 message from Desk waits for this turn to end · “Check the ledger…”":
+ *  how many, from whom (when they're all from one), why the first waits,
+ *  and its first line. */
+export const waitingText = (waiting: readonly LineMessage[], sessionId: string): string => {
+  const first = waiting[0]!;
+  const many = waiting.length > 1;
+  const senders = new Set(waiting.map((m) => fromLabel(m, sessionId)));
+  const who = senders.size === 1 ? ` from ${fromLabel(first, sessionId) === "You" ? "you" : fromLabel(first, sessionId)}` : "";
+  return `${plural(waiting.length, "message")}${who} ${waitPhrase(first, many)} · “${previewOf(first.text)}”`;
+};
+
 /** The slim bar's words: one question's work item, headline and where it
  *  stands; for more, how many and where they stand; else what waits to go
- *  in. */
-export const barText = (o: Open): string => {
+ *  in, from whom, why, and its first line. */
+export const barText = (o: Open, sessionId: string): string => {
   const q = o.questions.length;
   if (q === 1) {
     const m = o.questions[0]!;
@@ -54,7 +99,7 @@ export const barText = (o: Open): string => {
     const where = onYou ? "waiting on you" : o.questions.some((m) => m.chose) ? "went ahead with its defaults" : "went ahead without an answer";
     return `It asked you ${plural(q, "question")} · ${where}`;
   }
-  return `${plural(o.waiting.length, "message")} waiting to go in`;
+  return waitingText(o.waiting, sessionId);
 };
 
 /** Where one question stands, and when it asked, as its card heads it
