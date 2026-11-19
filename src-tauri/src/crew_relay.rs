@@ -99,6 +99,13 @@ const REPOS: &str = "desk.repos";
 /// A plan's ticket's repository's checkout on a machine (`remote`,
 /// `folder`): found, or a clone begun.
 const CHECKOUT: &str = "desk.checkout";
+/// A boss's short check on a machine (`command`, `cwd`, `timeout_secs`,
+/// `judged`, `by_person`), judged and run there ([`MOST_COMMAND`]).
+const RUN: &str = "desk.run";
+/// The longest command a check sends.
+const MOST_COMMAND: usize = 8 * 1024;
+/// The longest a check runs, in seconds.
+const MOST_RUN_SECS: u64 = 20;
 /// The longest path, or repository, a machine call says.
 const MOST_SAID: usize = 1024;
 /// The most of a machine's answer to one of these read: what still fits
@@ -529,6 +536,42 @@ fn said<'a>(call: &'a Call, key: &str, required: bool) -> Result<Option<&'a str>
     }
 }
 
+/// A check's body as the machine takes it: its command (at most
+/// [`MOST_COMMAND`], no NUL), where it runs, how long, and whether it is
+/// judged there; nothing else.
+fn run_body(call: &Call) -> Result<Vec<u8>, Outcome> {
+    let bad = |key: &str| refused(format!("That call's {key} couldn't be read."));
+    let command = match call.input.get("command") {
+        Some(Value::String(c))
+            if !c.trim().is_empty() && c.len() <= MOST_COMMAND && !c.contains('\0') =>
+        {
+            c.as_str()
+        }
+        _ => return Err(bad("command")),
+    };
+    let cwd = said(call, "cwd", false)?;
+    let secs = match call.input.get("timeout_secs") {
+        None | Some(Value::Null) => None,
+        Some(v) => match v.as_u64().filter(|s| (1..=MOST_RUN_SECS).contains(s)) {
+            Some(s) => Some(s),
+            None => return Err(bad("timeout_secs")),
+        },
+    };
+    let flag = |key: &str, default: bool| match call.input.get(key) {
+        None | Some(Value::Null) => Ok(default),
+        Some(Value::Bool(b)) => Ok(*b),
+        _ => Err(bad(key)),
+    };
+    let body = json!({
+        "command": command,
+        "cwd": cwd,
+        "timeout_secs": secs,
+        "judged": flag("judged", true)?,
+        "by_person": flag("by_person", false)?,
+    });
+    Ok(body.to_string().into_bytes())
+}
+
 /// `v` as it goes in an address's query.
 fn query_word(v: &str) -> String {
     url::form_urlencoded::byte_serialize(v.as_bytes()).collect()
@@ -544,6 +587,7 @@ async fn carry_machine<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool
     let fields: &[&str] = match tool {
         FOLDERS | FOLDER_MAKE => &["path"],
         REPOS => &["remote"],
+        RUN => &["command", "cwd", "timeout_secs", "judged", "by_person"],
         _ => &["remote", "folder"],
     };
     let Some(input) = call.input.as_object() else {
@@ -555,6 +599,9 @@ async fn carry_machine<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool
     // A boss that only watches makes nothing, whatever its hub says.
     if tool == FOLDER_MAKE && call.level.as_str() == Some("watch") {
         return refused("A boss that only watches makes no folders.".into());
+    }
+    if tool == RUN && call.level.as_str() == Some("watch") {
+        return refused("A boss that only watches runs nothing.".into());
     }
     // A read sent again changes nothing: one cut off is said, not left
     // for the hub to wait out.
@@ -580,6 +627,7 @@ async fn carry_machine<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool
             );
             ("GET", target, None)
         }),
+        RUN => run_body(call).map(|b| ("POST", "/api/desk/run".to_string(), Some(b))),
         _ => said(call, "remote", true).and_then(|r| {
             let folder = said(call, "folder", false)?;
             let body = json!({ "remote": r.unwrap_or_default(), "folder": folder })
@@ -710,7 +758,7 @@ async fn carry_in_turn<E: Ends>(
     let carried = async {
         match call.tool.as_str() {
             Some(t @ (SESSIONS | SESSION_START)) => carry_desk(ends, call, &machine, t).await,
-            Some(t @ (FOLDERS | FOLDER_MAKE | REPOS | CHECKOUT)) => {
+            Some(t @ (FOLDERS | FOLDER_MAKE | REPOS | CHECKOUT | RUN)) => {
                 carry_machine(ends, call, &machine, t).await
             }
             _ => carry(ends, call, &machine, timing).await,
@@ -1392,6 +1440,71 @@ mod tests {
         assert_eq!(
             fake.routes_sent.lock().unwrap().len(),
             4,
+            "nothing more sent"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_check_goes_to_the_machines_run_route_once_with_its_own_fields() {
+        let (fake, mut rx) = with_routes(vec![
+            Does::Says(200, json!({"outcome": "ran", "exit": 0, "stdout": "ok\n"})),
+            Does::Fails(Unanswered::MaybeSent("cut off".into())),
+        ]);
+        let stop = start(&fake.polled(vec![desk_call(
+            A,
+            "desk.run",
+            json!({"command": "git status\ngit log -1", "cwd": "~/app", "timeout_secs": 5, "judged": true, "by_person": false}),
+        )]));
+        let (_, answer) = next(&mut rx).await;
+        assert_eq!(answer["body"]["outcome"], "ran", "{answer}");
+        let _ = stop.send(true);
+        let sent = fake.routes_sent.lock().unwrap().clone();
+        assert_eq!(sent[0].1, "POST");
+        assert_eq!(sent[0].2, "/api/desk/run");
+        assert_eq!(
+            sent[0].3,
+            Some(
+                json!({"command": "git status\ngit log -1", "cwd": "~/app", "timeout_secs": 5, "judged": true, "by_person": false})
+            )
+        );
+        // Not said: judged, not the person's word.
+        let stop = start(&fake.polled(vec![desk_call(B, "desk.run", json!({"command": "ls"}))]));
+        none_in(&mut rx, 300).await;
+        let _ = stop.send(true);
+        let sent = fake.routes_sent.lock().unwrap().clone();
+        assert_eq!(sent.len(), 2, "a check cut off isn't sent again");
+        assert_eq!(sent[1].3.as_ref().unwrap()["judged"], true);
+        assert_eq!(sent[1].3.as_ref().unwrap()["by_person"], false);
+        // Odd fields, a watching boss, too long, no command: nothing sent.
+        let mut watching = desk_call(
+            "0f0e0d0c-0b0a-4909-8807-0605040302cc",
+            "desk.run",
+            json!({"command": "ls"}),
+        );
+        watching["level"] = json!("watch");
+        let stop = start(&fake.polled(vec![
+            desk_call(A, "desk.run", json!({"command": "ls", "env": {"X": "1"}})),
+            desk_call(B, "desk.run", json!({"command": "ls", "timeout_secs": 60})),
+            watching,
+            desk_call(
+                "0f0e0d0c-0b0a-4909-8807-0605040302dd",
+                "desk.run",
+                json!({"command": "x".repeat(9000)}),
+            ),
+            desk_call(
+                "0f0e0d0c-0b0a-4909-8807-0605040302ee",
+                "desk.run",
+                json!({"command": "ls", "judged": "no"}),
+            ),
+        ]));
+        for _ in 0..5 {
+            let (_, answer) = next(&mut rx).await;
+            assert!(answer["body"]["error"].is_string(), "{answer}");
+        }
+        let _ = stop.send(true);
+        assert_eq!(
+            fake.routes_sent.lock().unwrap().len(),
+            2,
             "nothing more sent"
         );
     }
