@@ -452,6 +452,11 @@
   {
     "kind": "http",
     "method": "POST",
+    "path": "/api/desk/line/m1/now"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
     "path": "/api/desk/sessions/s1/draft"
   },
   {

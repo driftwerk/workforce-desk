@@ -56,15 +56,33 @@ describe("what is open on a session's line", () => {
 
 describe("the slim bar's words", () => {
   it("says what it asked and where that stands", () => {
-    expect(barText({ questions: [lapsed("a", "x", "keep"), lapsed("b", "y")], waiting: [] })).toBe("It asked you 2 questions · went ahead with its defaults");
-    expect(barText({ questions: [lapsed("a", "x")], waiting: [] })).toBe("x · went ahead without an answer");
-    expect(barText({ questions: [lapsed("a", "x", "keep"), msg({ to: YOU, asked: "open" })], waiting: [] })).toBe("It asked you 2 questions · waiting on you");
-    expect(barText({ questions: [], waiting: [msg({ kind: "tell", to: S1 })] })).toBe("1 message waiting to go in");
+    expect(barText({ questions: [lapsed("a", "x", "keep"), lapsed("b", "y")], waiting: [] }, "s1")).toBe("It asked you 2 questions · went ahead with its defaults");
+    expect(barText({ questions: [lapsed("a", "x")], waiting: [] }, "s1")).toBe("x · went ahead without an answer");
+    expect(barText({ questions: [lapsed("a", "x", "keep"), msg({ to: YOU, asked: "open" })], waiting: [] }, "s1")).toBe("It asked you 2 questions · waiting on you");
+  });
+
+  it("says what waits to go in: how many, from whom, why, and the first one's first line", () => {
+    const tell = (more: Parameters<typeof msg>[0]) => msg({ from: DESK, to: S1, kind: "tell", asked: null, delivery: "queued", deliveredAt: null, ...more });
+    const desk = { kind: "manager" as const, id: "boss", name: "Desk" };
+    const working = tell({ from: desk, waiting: "working", text: "Check the ledger totals before the cut-over.\n\nThen tell me what moved." });
+    expect(barText({ questions: [], waiting: [working] }, "s1")).toBe("1 message from Desk waits for this turn to end · “Check the ledger totals before the cut-over.”");
+    // A long first line is cut short; more than one says how many.
+    const long = tell({ waiting: "working", text: "a".repeat(80) });
+    expect(barText({ questions: [], waiting: [long, tell({ id: "m2", waiting: "working" })] }, "s1")).toBe(`2 messages from Sarah wait for this turn to end · “${"a".repeat(59)}…”`);
+    // From more than one sender: no name.
+    expect(barText({ questions: [], waiting: [working, tell({ id: "m2", from: YOU })] }, "s1")).toMatch(/^2 messages wait for this turn to end · /);
+    expect(barText({ questions: [], waiting: [tell({ from: YOU, text: "and the refunds" })] }, "s1")).toBe("1 message from you waits to go in · “and the refunds”");
+    expect(barText({ questions: [], waiting: [tell({ waiting: "next_call", text: "x" })] }, "s1")).toBe("1 message from Sarah goes in with its next tool call · “x”");
+    expect(barText({ questions: [], waiting: [tell({ delivery: "held", text: "x" })] }, "s1")).toBe("1 message from Sarah waits for it to run again · “x”");
+    expect(barText({ questions: [], waiting: [tell({ delivery: "handed", text: "x" })] }, "s1")).toBe("1 message from Sarah is on its way in · “x”");
+    expect(barText({ questions: [], waiting: [tell({ waiting: "person_driving", text: "x" })] }, "s1")).toBe("1 message from Sarah waits until you hand it back · “x”");
+    // Its questions come first.
+    expect(barText({ questions: [lapsed("a", "x")], waiting: [working] }, "s1")).toBe("x · went ahead without an answer");
   });
 
   it("names one question by its work item and headline, never its details", () => {
-    expect(barText({ questions: [shaped()], waiting: [] })).toBe("W7 · PR 2 · Should PR 2 include the stub service? · went ahead");
-    expect(barText({ questions: [msg({ to: YOU, asked: "open", text: "Ship it?" })], waiting: [] })).toBe("Ship it? · waiting on you");
+    expect(barText({ questions: [shaped()], waiting: [] }, "s1")).toBe("W7 · PR 2 · Should PR 2 include the stub service? · went ahead");
+    expect(barText({ questions: [msg({ to: YOU, asked: "open", text: "Ship it?" })], waiting: [] }, "s1")).toBe("Ship it? · waiting on you");
   });
 });
 
