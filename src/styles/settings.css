@@ -1578,6 +1578,11 @@ legend.set-label {
   grid-template-columns: 1fr 2fr 80px;
   gap: 10px;
 }
+/* Help's Stable / Nightly: beside its words, as wide as its two names. */
+.setting-card > .update-channel {
+  flex: none;
+  min-width: 190px;
+}
 .seg-on-raised {
   background: var(--bg);
 }

@@ -24,7 +24,7 @@ vi.mock("../platform", () => ({
   machineHome: vi.fn(async () => "/home/dev"),
   inApp: true,
   openUrl: vi.fn(),
-  updating: vi.fn(async () => ({ how: "itself", neverBecause: null, download: null, sessionsKept: true })),
+  updating: vi.fn(async () => ({ how: "itself", neverBecause: null, download: null, releases: null, sessionsKept: true })),
   updateCheck: vi.fn(async () => null),
   updateDownload: vi.fn(),
   updateInstall: vi.fn(),
@@ -174,7 +174,7 @@ it("updates Desk on this Mac for a machine on a newer one, after saying what the
   expect(bb.textContent).toContain("Desk on this Mac restarts into 0.2.3 once nothing here is working.");
   act(() => useUpdates.setState({ state: { phase: "idle" }, waiting: false }));
   // A build that never updates says so, not that none is out.
-  vi.mocked(platform.updating).mockResolvedValueOnce({ how: "never", neverBecause: "It’s a development build.", download: null, sessionsKept: true });
+  vi.mocked(platform.updating).mockResolvedValueOnce({ how: "never", neverBecause: "It’s a development build.", download: null, releases: null, sessionsKept: true });
   await act(async () => fireEvent.click(button()));
   expect(bb.textContent).toContain("Desk on this Mac can’t update itself: It’s a development build.");
   act(() => useUpdates.setState({ never: null }));
@@ -205,7 +205,7 @@ it("names the machines that follow when Desk is ready to restart, and says their
   expect(screen.getByRole("status").textContent).toContain("Desk 0.2.1 is ready.");
   expect(screen.getByRole("status").textContent).toContain("devbox and hel-1 update to match after.");
   const { updating } = await import("../platform");
-  vi.mocked(updating).mockResolvedValueOnce({ how: "itself", neverBecause: null, download: null, sessionsKept: false });
+  vi.mocked(updating).mockResolvedValueOnce({ how: "itself", neverBecause: null, download: null, releases: null, sessionsKept: false });
   fireEvent.click(screen.getByRole("button", { name: "Update now" }));
   await act(async () => {});
   expect(screen.getByRole("status").textContent).toContain("Your machines’ sessions don’t stop. Each machine updates to 0.2.1 when Desk reconnects to it.");

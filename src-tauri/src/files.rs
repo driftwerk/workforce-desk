@@ -162,6 +162,11 @@ pub struct Settings {
     /// and the steps skipped. Older files have none (never offered).
     #[serde(default)]
     pub setup: Setup,
+    /// Which builds Desk updates to: `stable`, or `nightly` for a build of
+    /// each day's changes too (`updates::Channel`). Kept as text; anything
+    /// but `nightly` is Stable.
+    #[serde(default = "default_update_channel")]
+    pub update_channel: String,
 }
 
 /// The first-run setup's progress, kept so it can be picked up again.
@@ -190,6 +195,10 @@ fn default_theme() -> String {
 
 fn default_voice_engine() -> String {
     "cascade".into()
+}
+
+fn default_update_channel() -> String {
+    "stable".into()
 }
 
 fn default_true() -> bool {
@@ -231,6 +240,7 @@ impl Default for Settings {
             push_to_talk_shortcut: None,
             ask_shortcut: None,
             setup: Setup::default(),
+            update_channel: default_update_channel(),
         }
     }
 }
@@ -287,13 +297,16 @@ fn migrated(mut settings: Settings) -> Settings {
 /// Writes `settings`, keeping the setup and the audio the file already
 /// holds when they changed later than the ones written: a window whose
 /// store is older (it read the file before another moved them on) never
-/// rolls them back. Returns what was written.
+/// rolls them back. The update channel is the file's always: only
+/// [`save_update_channel`] changes it. Returns what was written.
 pub fn save_settings(paths: &Paths, settings: &Settings) -> Result<Settings> {
     let mut settings = settings.clone();
+    settings.update_channel = default_update_channel();
     if let Some(held) = std::fs::read_to_string(paths.settings())
         .ok()
         .and_then(|s| serde_json::from_str::<Settings>(&s).ok())
     {
+        settings.update_channel = held.update_channel;
         settings.setup = later_setup(settings.setup, held.setup);
         if later(&settings.audio_at, &held.audio_at) {
             settings.audio = held.audio;
@@ -302,6 +315,17 @@ pub fn save_settings(paths: &Paths, settings: &Settings) -> Result<Settings> {
     }
     desk_core::write_private(&paths.settings(), &serde_json::to_string_pretty(&settings)?)?;
     Ok(settings)
+}
+
+/// Sets which builds Desk updates to (`stable` or `nightly`), and nothing
+/// else in the file.
+pub fn save_update_channel(paths: &Paths, channel: &str) -> Result<()> {
+    if !matches!(channel, "stable" | "nightly") {
+        eyre::bail!("{channel:?} isn't an update channel: stable or nightly");
+    }
+    let mut settings = load_settings(paths)?;
+    settings.update_channel = channel.into();
+    desk_core::write_private(&paths.settings(), &serde_json::to_string_pretty(&settings)?)
 }
 
 /// Whether `held` changed later than `mine` (RFC 3339, so they compare as
@@ -457,6 +481,49 @@ mod tests {
         .unwrap();
         assert!(load_settings(&paths).unwrap().tuple);
         assert_eq!(load_settings(&paths).unwrap().theme, "harbour");
+    }
+
+    #[test]
+    fn the_update_channel_changes_only_on_its_own() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        // Older files have none: Stable.
+        std::fs::write(paths.settings(), r#"{"theme":"harbour"}"#).unwrap();
+        assert_eq!(load_settings(&paths).unwrap().update_channel, "stable");
+        save_update_channel(&paths, "nightly").unwrap();
+        let held = load_settings(&paths).unwrap();
+        assert_eq!(held.update_channel, "nightly");
+        assert_eq!(held.theme, "harbour");
+        // A window saving the rest, with an older idea of the channel,
+        // leaves it be.
+        save_settings(
+            &paths,
+            &Settings {
+                tuple: true,
+                update_channel: "stable".into(),
+                ..held
+            },
+        )
+        .unwrap();
+        let after = load_settings(&paths).unwrap();
+        assert!(after.tuple);
+        assert_eq!(after.update_channel, "nightly");
+        save_update_channel(&paths, "stable").unwrap();
+        assert_eq!(load_settings(&paths).unwrap().update_channel, "stable");
+        assert!(save_update_channel(&paths, "beta").is_err());
+        assert_eq!(load_settings(&paths).unwrap().update_channel, "stable");
+        // A first save, with no file yet, is Stable whatever it says.
+        let fresh = tempfile::tempdir().unwrap();
+        let fresh = Paths::at(fresh.path());
+        let written = save_settings(
+            &fresh,
+            &Settings {
+                update_channel: "nightly".into(),
+                ..Settings::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(written.update_channel, "stable");
     }
 
     #[test]

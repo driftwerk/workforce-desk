@@ -22,6 +22,9 @@ interface SettingsStore extends Settings {
   emoticons: boolean;
   imageSites: string[];
   setup: SetupProgress;
+  /** Which builds Desk updates to ("stable" or "nightly"), as read; only
+   *  `useUpdates().switchChannel` changes it. */
+  updateChannel: string;
   writtenReplies: string[];
   audio: AudioPrefs;
   audioAt?: string;
@@ -62,6 +65,7 @@ const readSettings = async (set: (patch: Partial<SettingsStore>) => void): Promi
     emoticons: s.emoticons ?? true,
     imageSites: s.imageSites ?? [],
     setup: s.setup ?? NO_SETUP,
+    updateChannel: s.updateChannel === "nightly" ? "nightly" : "stable",
     writtenReplies: s.writtenReplies ?? [],
     audio: { ...DEFAULT_AUDIO, ...s.audio },
     audioAt: s.audioAt,
@@ -95,6 +99,7 @@ export const useSettings = create<SettingsStore>((set, get) => ({
   emoticons: true,
   imageSites: [],
   setup: NO_SETUP,
+  updateChannel: "stable",
   keys: defaultShortcuts(),
   loaded: false,
   // One read at a time: a second caller (the shell, after the read before

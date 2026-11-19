@@ -862,12 +862,7 @@ fn sessions_kept(app: &App) -> bool {
 /// How this install of Desk gets a new version.
 #[tauri::command]
 fn updating(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult<updates::Updating> {
-    let endpoint = handle
-        .config()
-        .plugins
-        .0
-        .get("updater")
-        .and_then(|u| u["endpoints"][0].as_str().map(str::to_string));
+    let endpoint = updater_endpoint(&handle);
     Ok(updates::updating(
         how_here(&app),
         endpoint.as_deref(),
@@ -880,38 +875,127 @@ fn updating(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult<upda
 #[derive(Default)]
 struct PendingUpdate(Mutex<updates::Held<tauri_plugin_updater::Update>>);
 
+/// The update channel `settings.json` holds: Stable unless it says
+/// Nightly, and Stable when it can't be read.
+fn channel_here(app: &App) -> updates::Channel {
+    match files::load_settings(&app.paths) {
+        Ok(s) => updates::Channel::from_setting(&s.update_channel),
+        Err(e) => {
+            tracing::warn!("reading the update channel, so staying on Stable: {e}");
+            updates::Channel::Stable
+        }
+    }
+}
+
+/// Sets which builds Desk updates to: `stable` or `nightly`. The next
+/// check follows it; what an earlier one found is checked against it again
+/// before it downloads or installs.
+#[tauri::command]
+fn update_channel_set(app: State<'_, App>, channel: String) -> CommandResult<()> {
+    files::save_update_channel(&app.paths, &channel).map_err(text)?;
+    tracing::info!(%channel, "update channel set");
+    Ok(())
+}
+
+/// Looks in `feed` for a version newer than this Desk's and of the feed's
+/// own kind (`updates::takes`).
+async fn check_feed(
+    handle: &tauri::AppHandle,
+    feed: updates::Feed,
+) -> eyre::Result<Option<(tauri_plugin_updater::Update, semver::Version)>> {
+    use tauri_plugin_updater::UpdaterExt;
+    let mut builder = handle
+        .updater_builder()
+        .version_comparator(move |current, release| {
+            updates::takes(feed, &current, &release.version)
+        });
+    if feed == updates::Feed::Nightly {
+        let stable = updater_endpoint(handle)
+            .ok_or_else(|| eyre::eyre!("this build has no updater address"))?;
+        let nightly = updates::nightly_endpoint(&stable).ok_or_else(|| {
+            eyre::eyre!("the updater's address ({stable}) has no nightly feed beside it")
+        })?;
+        builder = builder.endpoints(vec![nightly.parse()?])?;
+    }
+    let found = builder.build()?.check().await?;
+    Ok(match found {
+        Some(u) => {
+            let v = semver::Version::parse(&u.version)?;
+            Some((u, v))
+        }
+        None => None,
+    })
+}
+
+/// The stable feed built into this Desk (`plugins.updater.endpoints`).
+fn updater_endpoint(handle: &tauri::AppHandle) -> Option<String> {
+    handle
+        .config()
+        .plugins
+        .0
+        .get("updater")
+        .and_then(|u| u["endpoints"][0].as_str().map(str::to_string))
+}
+
 /// Looks for a new version: its version, or none. A development build, or
-/// one whose program an update couldn't replace, never looks. A newer
-/// version than the one held replaces it, and its download.
+/// one whose program an update couldn't replace, never looks. On Stable
+/// only Stable's feed is read; on Nightly the nightly feed too, and the
+/// newer of the two is taken. A newer version than the one held replaces
+/// it, and its download.
 #[tauri::command]
 async fn update_check(
     handle: tauri::AppHandle,
     app: State<'_, App>,
     pending: State<'_, PendingUpdate>,
 ) -> CommandResult<Option<String>> {
-    use tauri_plugin_updater::UpdaterExt;
     if let updates::How::Never(why) = how_here(&app) {
         tracing::info!("not checking for updates: {why}");
         return Ok(None);
     }
-    let found = handle
-        .updater()
-        .map_err(text)?
-        .check()
-        .await
-        .map_err(text)?;
-    let version = found.as_ref().map(|u| u.version.clone());
-    pending.0.lock().map_err(text)?.found(found.map(|u| {
+    let channel = channel_here(&app);
+    let mut found = Vec::new();
+    for feed in channel.feeds() {
+        let result = check_feed(&handle, *feed).await;
+        if let Err(e) = &result {
+            tracing::warn!(?feed, "checking for updates: {e}");
+        }
+        found.push(result);
+    }
+    let found = updates::newest(found).map_err(text)?;
+    let version = found.as_ref().map(|(u, _)| u.version.clone());
+    pending.0.lock().map_err(text)?.found(found.map(|(u, _)| {
         let v = u.version.clone();
         (u, v)
     }));
     Ok(version)
 }
 
+/// Refused unless `version` is one this Desk's channel takes now: the
+/// channel may have changed since the check that found it.
+fn refuse_off_channel(handle: &tauri::AppHandle, app: &App, version: &str) -> CommandResult<()> {
+    let channel = channel_here(app);
+    if updates::allowed(channel, &handle.package_info().version, version) {
+        return Ok(());
+    }
+    tracing::warn!(
+        version,
+        ?channel,
+        "refusing an update its channel doesn't take"
+    );
+    Err(format!(
+        "Desk {version} isn't an update {} takes: check for updates again",
+        match channel {
+            updates::Channel::Stable => "Stable",
+            updates::Channel::Nightly => "Nightly",
+        }
+    ))
+}
+
 /// Downloads the version the last check found (its signature is checked
 /// as it installs), for an install that updates itself.
 #[tauri::command]
 async fn update_download(
+    handle: tauri::AppHandle,
     app: State<'_, App>,
     pending: State<'_, PendingUpdate>,
 ) -> CommandResult<()> {
@@ -927,6 +1011,7 @@ async fn update_download(
             None => return Err("Desk hasn't found an update to download".into()),
         }
     };
+    refuse_off_channel(&handle, &app, &version)?;
     let bytes = update.download(|_, _| {}, || {}).await.map_err(text)?;
     pending.0.lock().map_err(text)?.downloaded(&version, bytes);
     Ok(())
@@ -953,6 +1038,7 @@ async fn update_install(
             "Desk {version} isn't the newest version downloaded: check for updates again"
         ));
     };
+    refuse_off_channel(&handle, &app, &update.version)?;
     tracing::info!(version = %update.version, "installing the update, then restarting");
     tauri::async_runtime::spawn_blocking(move || update.install(bytes.as_slice()))
         .await
@@ -1337,6 +1423,7 @@ pub fn run() {
             data_remove,
             updating,
             update_check,
+            update_channel_set,
             update_download,
             update_install,
             resume_later,
