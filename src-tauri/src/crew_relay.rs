@@ -36,6 +36,16 @@
 //!   once: when it may have reached the machine but no answer came, its
 //!   outcome isn't known, and the hub finds the session there by its name.
 //!
+//! - **A boss's machine tools** (`desk.machines`, `desk.folders`,
+//!   `desk.folder_make` and `desk.repos`, queued by the hub's
+//!   `crew.machines`, `crew.machine_folders` and `crew.machine_make_folder`
+//!   after its checks), and a plan's ticket's checkout (`desk.checkout`,
+//!   queued by its plan runner), each go to one route there, with its own
+//!   fields and no others: `GET`/`POST /api/desk/folders`,
+//!   `GET /api/desk/repos` and `POST /api/desk/repos/checkout`. The list
+//!   of machines is answered here, from Desk's own. A folder made, and a
+//!   checkout (which may begin a clone), are sent once.
+//!
 //! These routes are on none of the lists the page's requests are checked
 //! against (see [`crate::broker::routes::relay_local`]).
 
@@ -77,6 +87,22 @@ const SESSION_START: &str = "desk.session_start";
 const START_FIELDS: &[&str] = &[
     "engine", "name", "cwd", "goal", "prompt", "view", "worktree", "model",
 ];
+/// The person's machines, as Desk has them: answered here.
+const MACHINES: &str = "desk.machines";
+/// The folders in a folder on a machine (`path`), as the folder picker
+/// lists them.
+const FOLDERS: &str = "desk.folders";
+/// A folder made on a machine (`path`), inside its home.
+const FOLDER_MAKE: &str = "desk.folder_make";
+/// A repository's checkouts on a machine (`remote`).
+const REPOS: &str = "desk.repos";
+/// A plan's ticket's repository's checkout on a machine (`remote`,
+/// `folder`): found, or a clone begun.
+const CHECKOUT: &str = "desk.checkout";
+/// The longest path, or repository, a machine call says.
+const MOST_SAID: usize = 1024;
+/// The most of a machine's answer to one of these read.
+const MOST_MACHINE_ANSWER: usize = 128 * 1024;
 /// The most of a session's last reply read back.
 const MOST_REPLY: usize = 2000;
 /// How long Desk's plugin folder on a machine is waited for (read over
@@ -149,6 +175,18 @@ pub trait Ends: Send + Sync + 'static {
     ) -> impl Future<Output = Result<Answer, Unanswered>> + Send;
     /// Desk's Claude Code plugin folder on `machine`, when it can say.
     fn plugin_dir(&self, machine: &MachineId) -> impl Future<Output = Option<String>> + Send;
+    /// Desk's machines: each one's id, name and whether it is reached now.
+    fn machines(&self) -> Vec<Value>;
+    /// `method target` (one of the relay's routes on a machine) sent to
+    /// `machine`'s hub with `body`, its answer read up to `most` bytes.
+    fn machine(
+        &self,
+        machine: &MachineId,
+        method: &'static str,
+        target: String,
+        body: Option<Vec<u8>>,
+        most: usize,
+    ) -> impl Future<Output = Result<Answer, Unanswered>> + Send;
 }
 
 /// One call as this computer's hub queued it. All but `id`, `machine` and
@@ -473,6 +511,92 @@ async fn carry_desk<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &
     }
 }
 
+/// `call`'s one text field `key`, when it says one: at most [`MOST_SAID`],
+/// with no control character.
+fn said<'a>(call: &'a Call, key: &str, required: bool) -> Result<Option<&'a str>, Outcome> {
+    let bad = || refused(format!("That call's {key} couldn't be read."));
+    match call.input.get(key) {
+        None | Some(Value::Null) if !required => Ok(None),
+        Some(Value::String(v)) if v.len() <= MOST_SAID && !v.chars().any(char::is_control) => {
+            match (v.trim().is_empty(), required) {
+                (true, true) => Err(bad()),
+                (true, false) => Ok(None),
+                (false, _) => Ok(Some(v.as_str())),
+            }
+        }
+        _ => Err(bad()),
+    }
+}
+
+/// `v` as it goes in an address's query.
+fn query_word(v: &str) -> String {
+    url::form_urlencoded::byte_serialize(v.as_bytes()).collect()
+}
+
+/// A boss's machine tool's call, or a plan's checkout (`tool`, one of
+/// [`FOLDERS`], [`FOLDER_MAKE`], [`REPOS`] and [`CHECKOUT`]), sent to its
+/// own route on `machine` with its own fields alone. What makes something
+/// there is sent once.
+async fn carry_machine<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &str) -> Outcome {
+    let name = call.machine.as_str();
+    if let Some(extra) = call.input.as_object().and_then(|o| {
+        o.keys()
+            .find(|k| !matches!(k.as_str(), "path" | "remote" | "folder"))
+            .cloned()
+    }) {
+        return refused(format!("That call's {extra} isn't one Desk sends."));
+    }
+    let sent = match tool {
+        FOLDERS => said(call, "path", false).map(|p| {
+            let target = match p {
+                Some(p) => format!("/api/desk/folders?path={}", query_word(p)),
+                None => "/api/desk/folders".to_string(),
+            };
+            ("GET", target, None)
+        }),
+        FOLDER_MAKE => said(call, "path", true).map(|p| {
+            let body = json!({ "path": p.unwrap_or_default() })
+                .to_string()
+                .into_bytes();
+            ("POST", "/api/desk/folders".to_string(), Some(body))
+        }),
+        REPOS => said(call, "remote", true).map(|r| {
+            let target = format!(
+                "/api/desk/repos?remote={}",
+                query_word(r.unwrap_or_default())
+            );
+            ("GET", target, None)
+        }),
+        _ => said(call, "remote", true).and_then(|r| {
+            let folder = said(call, "folder", false)?;
+            let body = json!({ "remote": r.unwrap_or_default(), "folder": folder })
+                .to_string()
+                .into_bytes();
+            Ok(("POST", "/api/desk/repos/checkout".to_string(), Some(body)))
+        }),
+    };
+    let (method, target, body) = match sent {
+        Ok(s) => s,
+        Err(o) => return o,
+    };
+    match ends
+        .machine(machine, method, target, body, MOST_MACHINE_ANSWER)
+        .await
+    {
+        Ok(r) if (200..300).contains(&r.status) => match serde_json::from_str::<Value>(&r.body) {
+            Ok(v) => Outcome::Answer(json!({"status": "ok", "body": v})),
+            Err(_) => Outcome::Unknown(format!("{name}'s answer couldn't be read")),
+        },
+        Ok(r) if r.status == 404 => refused(format!(
+            "{name}'s Desk is older and can't answer that yet (404): update Desk there."
+        )),
+        Ok(r) if (400..500).contains(&r.status) && r.status != 408 => refusal(name, &r),
+        Ok(r) => Outcome::Unknown(format!("{name} answered {}", r.status)),
+        Err(Unanswered::NotSent(_)) => unreached(name),
+        Err(Unanswered::MaybeSent(why)) => Outcome::Unknown(why),
+    }
+}
+
 /// `answer` posted for call `id`: until it is taken, or no one waits for
 /// it, each post within `post_try` and all within `post_for`.
 async fn post<E: Ends>(ends: &E, id: &str, answer: &Value, timing: Timing) {
@@ -557,6 +681,9 @@ async fn carry_in_turn<E: Ends>(
     let carried = async {
         match call.tool.as_str() {
             Some(t @ (SESSIONS | SESSION_START)) => carry_desk(ends, call, &machine, t).await,
+            Some(t @ (FOLDERS | FOLDER_MAKE | REPOS | CHECKOUT)) => {
+                carry_machine(ends, call, &machine, t).await
+            }
             _ => carry(ends, call, &machine, timing).await,
         }
     };
@@ -617,6 +744,10 @@ pub async fn run<E: Ends>(ends: Arc<E>, mut stop: watch::Receiver<bool>, timing:
                     }
                 };
                 let outcome = match call.time(timing.carry_for, SystemTime::now()) {
+                    // The machines Desk has: no machine's to send it to.
+                    Some(_) if call.tool.as_str() == Some(MACHINES) => Outcome::Answer(
+                        json!({"status": "ok", "body": {"machines": ends.machines()}}),
+                    ),
                     None => refused(format!(
                         "There's no time left to send it to {}.",
                         call.machine
@@ -739,6 +870,42 @@ impl Ends for Desk {
         }
     }
 
+    fn machines(&self) -> Vec<Value> {
+        use tauri::Manager;
+        let io = self.0.state::<crate::machines::MachineIo>();
+        io.ids()
+            .into_iter()
+            .filter_map(|id| {
+                let link = io.link(&id).ok()?;
+                Some(json!({
+                    "name": id,
+                    "label": link.machine().name,
+                    "reached": link.ready().is_some(),
+                }))
+            })
+            .collect()
+    }
+
+    fn machine(
+        &self,
+        machine: &MachineId,
+        method: &'static str,
+        target: String,
+        body: Option<Vec<u8>>,
+        most: usize,
+    ) -> impl Future<Output = Result<Answer, Unanswered>> + Send {
+        let machine = machine.as_str().to_string();
+        async move {
+            use tauri::Manager;
+            let broker = self
+                .0
+                .state::<crate::machines::MachineIo>()
+                .broker(&machine)
+                .map_err(Unanswered::NotSent)?;
+            broker.relay_machine(method, &target, body, most).await
+        }
+    }
+
     fn plugin_dir(&self, machine: &MachineId) -> impl Future<Output = Option<String>> + Send {
         use tauri::Manager;
         let link = self
@@ -796,6 +963,9 @@ mod tests {
         Hangs,
     }
 
+    /// A machine, a method, a target and a body sent.
+    type RouteSent = (String, String, String, Option<Value>);
+
     #[derive(Default)]
     struct Fake {
         polls: Mutex<VecDeque<Result<Answer, Unanswered>>>,
@@ -811,6 +981,11 @@ mod tests {
         desk: Mutex<VecDeque<Does>>,
         desk_sent: Mutex<Vec<(String, Option<Value>)>>,
         plugin: Option<String>,
+        /// What each machine's other routes do, in turn, and what each was
+        /// sent: machine, method, target and body.
+        routes: Mutex<VecDeque<Does>>,
+        routes_sent: Mutex<Vec<RouteSent>>,
+        listed: Vec<Value>,
     }
 
     impl Fake {
@@ -937,6 +1112,188 @@ mod tests {
         fn plugin_dir(&self, _: &MachineId) -> impl Future<Output = Option<String>> + Send {
             std::future::ready(self.plugin.clone())
         }
+
+        fn machines(&self) -> Vec<Value> {
+            self.listed.clone()
+        }
+
+        fn machine(
+            &self,
+            machine: &MachineId,
+            method: &'static str,
+            target: String,
+            body: Option<Vec<u8>>,
+            _most: usize,
+        ) -> impl Future<Output = Result<Answer, Unanswered>> + Send {
+            let body = body.map(|b| serde_json::from_slice::<Value>(&b).unwrap());
+            self.routes_sent.lock().unwrap().push((
+                machine.as_str().to_string(),
+                method.to_string(),
+                target,
+                body,
+            ));
+            let does = self.routes.lock().unwrap().pop_front();
+            async move {
+                match does {
+                    Some(Does::Says(s, b)) => ok(s, b),
+                    Some(Does::Fails(u)) => Err(u),
+                    Some(Does::Hangs) => std::future::pending().await,
+                    None => Err(Unanswered::NotSent("nothing there".into())),
+                }
+            }
+        }
+    }
+
+    fn with_routes(
+        does: Vec<Does>,
+    ) -> (
+        Arc<Fake>,
+        tokio::sync::mpsc::UnboundedReceiver<(String, Value)>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let fake = Fake {
+            machines: [("devbox".to_string(), Mutex::new(VecDeque::new()))].into(),
+            answers: Some(tx),
+            routes: Mutex::new(does.into()),
+            listed: vec![json!({"name": "devbox", "label": "Dev box", "reached": true})],
+            ..Fake::default()
+        };
+        (Arc::new(fake), rx)
+    }
+
+    /// The list of machines is Desk's own, answered here: nothing is sent.
+    #[tokio::test]
+    async fn the_machines_are_listed_from_desks_own() {
+        let (fake, mut rx) = with_routes(vec![]);
+        let mut call = desk_call(A, "desk.machines", json!({}));
+        call["machine"] = json!("desk");
+        let stop = start(&fake.polled(vec![call]));
+        assert_eq!(
+            next(&mut rx).await,
+            (
+                A.to_string(),
+                json!({"status": "ok", "body": {"machines": [
+                    {"name": "devbox", "label": "Dev box", "reached": true}
+                ]}})
+            )
+        );
+        assert!(fake.routes_sent.lock().unwrap().is_empty());
+        assert!(fake.sent().is_empty());
+        let _ = stop.send(true);
+    }
+
+    /// Each machine tool's call goes to its own route there, with its own
+    /// fields alone, its answer posted back as the machine gave it.
+    #[tokio::test]
+    async fn a_machine_tools_call_goes_to_its_own_route_with_its_own_fields() {
+        let (fake, mut rx) = with_routes(vec![
+            Does::Says(200, json!({"path": "/home/dev", "folders": []})),
+            Does::Says(201, json!({"path": "/home/dev/projects/acme"})),
+            Does::Says(200, json!({"repo": "github.com/a/b", "checkouts": []})),
+            Does::Says(
+                200,
+                json!({"state": "cloning", "path": "/home/dev/projects/a/b"}),
+            ),
+        ]);
+        let calls = [
+            (A, "desk.folders", json!({"path": "~/projects & co"})),
+            (B, "desk.folder_make", json!({"path": "~/projects/acme"})),
+        ];
+        for (id, tool, input) in calls {
+            let stop = start(&fake.polled(vec![desk_call(id, tool, input)]));
+            let (got, answer) = next(&mut rx).await;
+            assert_eq!(got, id);
+            assert_eq!(answer["status"], "ok", "{answer}");
+            let _ = stop.send(true);
+        }
+        let more = [
+            (A, "desk.repos", json!({"remote": "github.com/a/b"})),
+            (
+                B,
+                "desk.checkout",
+                json!({"remote": "github.com/a/b", "folder": null}),
+            ),
+        ];
+        for (id, tool, input) in more {
+            let stop = start(&fake.polled(vec![desk_call(id, tool, input)]));
+            let (_, answer) = next(&mut rx).await;
+            assert_eq!(answer["status"], "ok", "{answer}");
+            let _ = stop.send(true);
+        }
+        let sent = fake.routes_sent.lock().unwrap().clone();
+        let d = "devbox".to_string();
+        assert_eq!(
+            sent,
+            vec![
+                (
+                    d.clone(),
+                    "GET".into(),
+                    "/api/desk/folders?path=%7E%2Fprojects+%26+co".into(),
+                    None
+                ),
+                (
+                    d.clone(),
+                    "POST".into(),
+                    "/api/desk/folders".into(),
+                    Some(json!({"path": "~/projects/acme"}))
+                ),
+                (
+                    d.clone(),
+                    "GET".into(),
+                    "/api/desk/repos?remote=github.com%2Fa%2Fb".into(),
+                    None
+                ),
+                (
+                    d,
+                    "POST".into(),
+                    "/api/desk/repos/checkout".into(),
+                    Some(json!({"remote": "github.com/a/b", "folder": null}))
+                ),
+            ]
+        );
+        assert!(fake.sent().is_empty(), "never through the crew's own route");
+    }
+
+    /// A field a call shouldn't have, or one that isn't text, sends
+    /// nothing; an older machine's 404 is said in words; one that may have
+    /// made a folder but didn't answer posts nothing.
+    #[tokio::test]
+    async fn a_machine_tools_odd_call_sends_nothing_and_an_older_machine_is_said() {
+        let (fake, mut rx) = with_routes(vec![
+            Does::Says(404, json!({})),
+            Does::Fails(Unanswered::MaybeSent("cut off".into())),
+        ]);
+        let stop = start(&fake.polled(vec![
+            desk_call(A, "desk.folder_make", json!({"path": "~/x", "mode": "777"})),
+            desk_call(B, "desk.repos", json!({"remote": ["x"]})),
+        ]));
+        let mut got = [next(&mut rx).await, next(&mut rx).await];
+        got.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            got[0].1["body"]["error"],
+            "That call's mode isn't one Desk sends."
+        );
+        assert_eq!(
+            got[1].1["body"]["error"],
+            "That call's remote couldn't be read."
+        );
+        assert!(fake.routes_sent.lock().unwrap().is_empty());
+        let _ = stop.send(true);
+        let stop = start(&fake.polled(vec![desk_call(A, "desk.repos", json!({"remote": "a/b"}))]));
+        let (_, answer) = next(&mut rx).await;
+        assert!(
+            answer["body"]["error"].as_str().unwrap().contains("older"),
+            "{answer}"
+        );
+        let _ = stop.send(true);
+        let stop = start(&fake.polled(vec![desk_call(
+            B,
+            "desk.folder_make",
+            json!({"path": "~/y"}),
+        )]));
+        none_in(&mut rx, 300).await;
+        let _ = stop.send(true);
+        assert_eq!(fake.routes_sent.lock().unwrap().len(), 2, "each sent once");
     }
 
     fn desk_call(id: &str, tool: &str, input: Value) -> Value {

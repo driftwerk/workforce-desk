@@ -387,6 +387,11 @@ const RELAY_MACHINE: &[Route] = &[
     route("POST", "/api/desk/crew/served"),
     route("GET", "/api/desk/sessions"),
     route("POST", "/api/desk/sessions"),
+    // A boss's machine tools, and a plan's checkout (`crew_relay`).
+    with_query("GET", "/api/desk/folders", &["path"]),
+    route("POST", "/api/desk/folders"),
+    with_query("GET", "/api/desk/repos", &["remote"]),
+    route("POST", "/api/desk/repos/checkout"),
 ];
 
 /// `method target` as one of the relay's requests to this computer's hub.
@@ -885,6 +890,28 @@ mod tests {
         assert!(relay_machine("POST", "/api/desk/crew/served").is_ok());
         assert!(relay_machine("GET", "/api/desk/sessions").is_ok());
         assert!(relay_machine("POST", "/api/desk/sessions").is_ok());
+        assert!(relay_machine("GET", "/api/desk/folders?path=%2Fhome%2Fdev").is_ok());
+        assert!(relay_machine("POST", "/api/desk/folders").is_ok());
+        assert!(relay_machine("GET", "/api/desk/repos?remote=github.com%2Fa%2Fb").is_ok());
+        assert!(relay_machine("POST", "/api/desk/repos/checkout").is_ok());
+        // The repository routes are the relay's alone: never the page's.
+        for (method, target) in [
+            ("GET", "/api/desk/repos?remote=a%2Fb"),
+            ("POST", "/api/desk/repos/checkout"),
+        ] {
+            assert!(
+                http(method, target).is_err(),
+                "{method} {target} from the page"
+            );
+            assert!(
+                machine_http(method, target).is_err(),
+                "{method} {target} to a machine from the page"
+            );
+            assert!(
+                relay_local(method, target).is_err(),
+                "{method} {target} relayed here"
+            );
+        }
         for (method, target) in [
             ("POST", "/api/desk/crew/relay"),
             ("GET", relay.as_str()),
@@ -918,6 +945,10 @@ mod tests {
                 "POST",
                 "/api/desk/sessions/0f0e0d0c-0b0a-4909-8807-060504030201/prompt",
             ),
+            ("GET", "/api/desk/folders?hidden=1"),
+            ("GET", "/api/desk/folders?path=x&token=y"),
+            ("GET", "/api/desk/repos?remote=a%2Fb&token=y"),
+            ("POST", "/api/desk/run"),
         ] {
             assert!(
                 relay_machine(method, target).is_err(),
