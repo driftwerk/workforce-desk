@@ -1,7 +1,7 @@
 import { useId, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { ChargeBadge } from "../crew/ChargeBadge";
 import { useCharge } from "../crew/chargeStore";
-import { lookOf } from "../floor/background";
+import { lookOf, waitsOnYou } from "../floor/background";
 import { useSessionName } from "../groups/names";
 import { useHubLayout } from "../groups/hubLayout";
 import { askMove, ticketSubject } from "../groups/move";
@@ -45,7 +45,7 @@ export function Assignee({ who, waiting, mark }: { who: ActivityParty; waiting: 
       <span className={`dot dot-${look}`} aria-hidden="true" />
       <span className={who.kind === "session" ? "mono board-who-name" : "board-who-name"}>{name}</span>
       {mark}
-      {waiting && session && (session.state === "blocked" || session.state === "asking") ? (
+      {waiting && session && waitsOnYou(session) ? (
         <span className="state-blocked">{session.state === "asking" ? "asked you something" : "needs you"}</span>
       ) : (
         <ChargeBadge charge={charge} session={who.kind === "session" ? who.id : null} />
