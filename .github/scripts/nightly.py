@@ -35,6 +35,8 @@ import urllib.request
 HUB_REPO = os.environ.get("HUB_REPO", "driftwerk/workforce")
 HUB_CHECK = os.environ.get("HUB_CHECK", "pr-check.yml")
 CI = "ci.yml"
+# The Linux backend's smoke test, which a person's hub.ref pull request runs too.
+BACKEND = "backend.yml"
 RELEASE = "release.yml"
 CI_WAIT_MINUTES = int(os.environ.get("CI_WAIT_MINUTES", "180"))
 NIGHTLY = re.compile(r"^(\d+)\.(\d+)\.(\d+)-nightly\.([1-9]\d{7})\.([1-9]\d*)$")
@@ -43,7 +45,12 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 
 
 class Skip(Exception):
-    """No nightly tonight, and why: not a failure."""
+    """No nightly tonight, and why. `attention`: a person should look (CI red or stuck,
+    main moving under a bump), as against nothing to do (nothing changed, a release running)."""
+
+    def __init__(self, reason, attention=False):
+        super().__init__(reason)
+        self.attention = attention
 
 
 # What a person should look at even when the night goes well: a hub bump
@@ -193,23 +200,30 @@ def hub_compare(base, head):
     return c["status"], commits
 
 
-def ci_runs(repo, sha):
-    runs = gh_api(f"repos/{repo}/actions/workflows/{CI}/runs?head_sha={sha}&per_page=20")
+def ci_runs(repo, sha, workflow=CI):
+    runs = gh_api(f"repos/{repo}/actions/workflows/{workflow}/runs?head_sha={sha}&per_page=20")
     return (runs or {}).get("workflow_runs") or []
 
 
-def wait_for_ci(repo, sha, appear_minutes=15):
-    """Desk's CI at exactly `sha`, waited for while it runs: its run, or None if none came."""
-    deadline = time.time() + CI_WAIT_MINUTES * 60
+# One deadline for all of tonight's waiting, so a failed bump's wait and the gate after it
+# end inside the job's timeout.
+DEADLINE = time.time() + CI_WAIT_MINUTES * 60
+
+
+def wait_for_ci(repo, sha, appear_minutes=15, workflow=CI):
+    """`workflow` (Desk's CI) at exactly `sha`, waited for while it runs: its run, or None
+    if none came."""
     appear = time.time() + appear_minutes * 60
     while True:
-        latest = newest_run(ci_runs(repo, sha))
+        latest = newest_run(ci_runs(repo, sha, workflow))
         if latest and latest["status"] == "completed":
             return latest
         if not latest and time.time() > appear:
             return None
-        if time.time() > deadline:
-            raise Skip(f"Desk's CI at {short(sha)} was still running after {CI_WAIT_MINUTES} minutes: {latest['html_url']}")
+        if time.time() > DEADLINE:
+            where = latest["html_url"] if latest else "no run yet"
+            raise Skip(f"{workflow} at {short(sha)} was still running after {CI_WAIT_MINUTES} minutes: {where}",
+                       attention=True)
         time.sleep(60)
 
 
@@ -217,9 +231,10 @@ def gate(repo, sha):
     """Desk's CI passed at `sha`, or Skip saying why not."""
     latest = wait_for_ci(repo, sha, appear_minutes=5)
     if not latest:
-        raise Skip(f"Desk's CI never ran at {short(sha)}, so it isn't built")
+        raise Skip(f"Desk's CI never ran at {short(sha)}, so it isn't built", attention=True)
     if latest["conclusion"] != "success":
-        raise Skip(f"Desk's CI at {short(sha)} ended {latest['conclusion']}, so it isn't built: {latest['html_url']}")
+        raise Skip(f"Desk's CI at {short(sha)} ended {latest['conclusion']}, so it isn't built: {latest['html_url']}",
+                   attention=True)
 
 
 def bump(repo, hub_from, hub_to, hub_commits, run_url):
@@ -234,17 +249,20 @@ def bump(repo, hub_from, hub_to, hub_commits, run_url):
     sha = git("rev-parse", "HEAD")
     git("push", "-q", "origin", f"HEAD:refs/heads/{branch}")
     try:
-        run(["gh", "workflow", "run", CI, "--repo", repo, "--ref", branch])
-        latest = wait_for_ci(repo, sha)
-        if not latest:
-            return None, f"Desk's CI didn't start for the hub bump to {short(hub_to)}"
-        if latest["conclusion"] != "success":
-            return None, (f"Desk's CI failed with hub {short(hub_to)}, so the bump was left out: "
-                          f"{latest['html_url']}")
+        # CI, and the backend's smoke test a person's hub.ref pull request runs too.
+        for workflow in (CI, BACKEND):
+            run(["gh", "workflow", "run", workflow, "--repo", repo, "--ref", branch])
+        for workflow in (CI, BACKEND):
+            latest = wait_for_ci(repo, sha, workflow=workflow)
+            if not latest:
+                return None, f"{workflow} didn't start for the hub bump to {short(hub_to)}"
+            if latest["conclusion"] != "success":
+                return None, (f"{workflow} failed with hub {short(hub_to)}, so the bump was left out: "
+                              f"{latest['html_url']}")
         pushed = run(["git", "push", "-q", "origin", f"{sha}:refs/heads/main"], check=False)
         if pushed.returncode != 0:
             raise Skip(f"main moved while Desk's CI checked the hub bump to {short(hub_to)}; "
-                       "the next nightly takes both")
+                       "the next nightly takes both", attention=True)
         return sha, None
     finally:
         run(["git", "push", "-q", "origin", "--delete", branch], check=False)
@@ -275,7 +293,7 @@ def plan():
     releases_repo = os.environ.get("RELEASES_REPO") or repo
     dry = os.environ.get("DRY_RUN") == "true"
     branch = os.environ.get("GITHUB_REF_NAME", "")
-    default = os.environ.get("DEFAULT_BRANCH", "main")
+    default = os.environ.get("DEFAULT_BRANCH") or "main"
     run_url = f"{os.environ.get('GITHUB_SERVER_URL', 'https://github.com')}/{repo}/actions/runs/{os.environ.get('GITHUB_RUN_ID', '')}"
     if not dry and branch != default:
         raise RuntimeError(f"a nightly is published from {default} only; this run is on {branch}: use dry_run")
@@ -363,6 +381,8 @@ def main():
     try:
         plan()
     except Skip as e:
+        if e.attention:
+            ATTENTION.append(f"No nightly tonight: {e}.")
         output(build="false", version="", ref="", hub_ref="", reason=str(e), attention=" ".join(ATTENTION))
         summary(f"### No nightly tonight\n\n{e}.")
         print(f"::notice::No nightly tonight: {e}")

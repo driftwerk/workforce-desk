@@ -170,8 +170,9 @@ Desk derives that address from its built-in stable endpoint; it is never in
 is its own pre-release, `v<version>`, carrying its downloads and the
 machines' backends (Desk on a nightly sets machines up from its own
 version's release), never marked latest; the `nightly` release holds only
-the feed. The last 14 nightlies are kept and older ones deleted with their
-tags.
+the feed. A nightly is deleted, with its tag, once a stable as new as it is
+out (every Desk on it moves to that stable) and 14 newer nightlies have
+followed it; until then it stays, for a Desk still on it.
 
 **Why no Desk on Stable can get a nightly.**
 - Stable reads `latest.json` only. Nothing on the nightly path writes a
@@ -195,23 +196,29 @@ tested by `test_nightly.py`):
 3. Finds the newest commit on the hub's main whose **PR Check** passed. If
    it is ahead of `hub.ref`, it commits the bump (`Desk ships hub <sha>:
    …`, the hub commits listed) on a branch `nightly/hub-…`, runs Desk's CI
-   there (`workflow_dispatch`: a push with the job's token starts none), and
-   fast-forwards `main` to it once CI passes. `main`'s ruleset only forbids
+   there, and the Linux backend's smoke test (`backend.yml`), as a person's
+   `hub.ref` pull request would (`workflow_dispatch`: a push with the job's
+   token starts none), and fast-forwards `main` to it once both pass. `main`'s ruleset only forbids
    force-pushes and deletion, so the bot can push; if it ever requires pull
    requests, this step fails and the night's issue says so. A bump whose CI
    fails is left out (that night's nightly is built without it, if Desk
    changed) and reported. `vellev.ref` is left as it is.
 4. Skips when there are no new commits on `main` and no hub bump.
 5. Builds only a commit whose Desk CI passed, at that exact commit; else it
-   skips and says why in the run's summary.
+   skips and says why in the run's summary and the night's issue.
 6. Calls `release.yml` with `channel: nightly`: the same builds, signing and
-   notarizing (Windows: the NSIS installer only, since the MSI takes no
-   pre-release version), published as above. The release notes list the
+   notarizing, published as above. Windows gets the NSIS installer only,
+   since the MSI takes no pre-release version, and Linux the AppImage only:
+   dpkg would order `0.2.11-nightly.…` after `0.2.11`, so the stable after a
+   nightly `.deb` would look like a downgrade. The release notes list the
    pull requests merged since the last nightly (before the first, since the
    latest stable) and the hub commits brought in.
 
-A night that fails, or leaves a hub bump out, opens an issue labelled
-`nightly` (or comments on the open one); the next good night closes it.
+A night that fails, skips because Desk's CI is red, cancelled or stuck, or
+leaves a hub bump out, opens an issue labelled `nightly` (or comments on the
+open one), saying which platforms were published when only part of the build
+failed; the next good night closes it. "Nothing changed" and "a release is
+running" are quiet skips.
 
 **Dry run.** Run **Nightly** from the Actions tab with **dry_run**: it plans,
 gates and builds, signs and notarizes everything as a real night does, and

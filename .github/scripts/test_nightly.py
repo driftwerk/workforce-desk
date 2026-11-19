@@ -90,6 +90,12 @@ class Notes(unittest.TestCase):
         self.assertIn("- two", msg)
 
 
+class Skips(unittest.TestCase):
+    def test_a_red_or_stuck_night_asks_for_a_person_and_nothing_to_do_doesnt(self):
+        self.assertFalse(nightly.Skip("nothing changed").attention)
+        self.assertTrue(nightly.Skip("CI red", attention=True).attention)
+
+
 class Runs(unittest.TestCase):
     def test_the_newest_run_of_a_commit_counts(self):
         runs = [

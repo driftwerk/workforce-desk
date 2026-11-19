@@ -21,10 +21,6 @@ on:
         description: "Do everything but publish: no commit to main, no release, no feed"
         type: boolean
         default: false
-  # TEMPORARY, for PR #355 only: a dry run of this branch, since a workflow
-  # can't be dispatched before it is on main. Removed before merging.
-  push:
-    branches: [nightly-channel]
 
 permissions: {}
 
@@ -39,7 +35,7 @@ jobs:
   plan:
     name: Plan tonight's nightly
     runs-on: ubuntu-latest
-    # Waiting for Desk's CI on a hub bump (up to three hours) included.
+    # Waiting for Desk's CI (three hours at most, all told) included.
     timeout-minutes: 240
     permissions:
       # The hub.ref bump: its branch, and main fast-forwarded to it.
@@ -65,8 +61,8 @@ jobs:
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
-          DRY_RUN: ${{ inputs.dry_run || github.event_name == 'push' }}
-          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          DRY_RUN: ${{ inputs.dry_run || false }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'main' }}
         run: python3 .github/scripts/nightly.py
 
       - uses: actions/upload-artifact@v7
@@ -87,7 +83,7 @@ jobs:
       version: ${{ needs.plan.outputs.version }}
       channel: nightly
       ref: ${{ needs.plan.outputs.ref }}
-      dry_run: ${{ inputs.dry_run || github.event_name == 'push' }}
+      dry_run: ${{ inputs.dry_run || false }}
       hub_ref: ${{ needs.plan.outputs.hub_ref }}
     secrets: inherit
 
@@ -96,9 +92,10 @@ jobs:
   report:
     name: Report
     needs: [plan, build]
-    if: always() && !(inputs.dry_run || github.event_name == 'push')
+    if: always() && !inputs.dry_run
     runs-on: ubuntu-latest
     permissions:
+      contents: read
       issues: write
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -115,7 +112,15 @@ jobs:
           ATTENTION: ${{ needs.plan.outputs.attention }}
         run: |
           if [ "$PLAN" != success ] || [ "$BUILD" = failure ] || [ "$BUILD" = cancelled ]; then
-            what="Nightly ${VERSION:-planning} didn't finish: planning $PLAN, build ${BUILD:-not started}. Nothing was published unless the run says so."
+            # Linux or Windows failing leaves the rest published: say which.
+            fed=$(curl -fsSL "https://github.com/$RELEASES_REPO/releases/download/nightly/latest-nightly.json" | jq -r .version) || fed=
+            if [ -n "$VERSION" ] && [ "$fed" = "$VERSION" ]; then
+              platforms=$(curl -fsSL "https://github.com/$RELEASES_REPO/releases/download/nightly/latest-nightly.json" | jq -r '.platforms | keys | join(", ")')
+              what="Nightly $VERSION was published for $platforms only: part of its build failed."
+            else
+              what="Nightly ${VERSION:-planning} didn't finish (planning $PLAN, build ${BUILD:-not started}) and wasn't published."
+            fi
+            [ -z "$ATTENTION" ] || what="$what $ATTENTION"
             .github/scripts/nightly-issue.sh failed "$what"
           elif [ -n "$ATTENTION" ]; then
             .github/scripts/nightly-issue.sh attention "$ATTENTION"

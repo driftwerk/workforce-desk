@@ -431,15 +431,18 @@ jobs:
 
       # The AppImage is the updater's download, signed with the updater key
       # (createUpdaterArtifacts in tauri.linux.conf.json); the .deb is updated
-      # by the system's package manager.
+      # by the system's package manager. A nightly builds the AppImage alone:
+      # dpkg would order 0.2.11-nightly.… after 0.2.11 (its "-" starts a
+      # Debian revision), so the stable after it would look like a downgrade.
       - name: Build the AppImage and the .deb
         working-directory: desk
         env:
+          BUNDLES: ${{ needs.version.outputs.channel == 'nightly' && 'appimage' || 'appimage,deb' }}
           ENDPOINT: https://github.com/${{ env.RELEASES_REPO }}/releases/latest/download/latest.json
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         run: |
-          npx tauri build --bundles appimage,deb \
+          npx tauri build --bundles "$BUNDLES" \
             --config "{\"plugins\":{\"updater\":{\"endpoints\":[\"$ENDPOINT\"]}}}"
 
       - name: Collect
@@ -447,8 +450,10 @@ jobs:
         run: |
           out="${{ github.workspace }}/out"
           mkdir -p "$out"
-          cp target/release/bundle/appimage/*.AppImage target/release/bundle/appimage/*.AppImage.sig \
-            target/release/bundle/deb/*.deb "$out/"
+          cp target/release/bundle/appimage/*.AppImage target/release/bundle/appimage/*.AppImage.sig "$out/"
+          if [ "${{ needs.version.outputs.channel }}" != nightly ]; then
+            cp target/release/bundle/deb/*.deb "$out/"
+          fi
           ls -la "$out"
 
       - uses: actions/upload-artifact@v7
@@ -731,6 +736,13 @@ jobs:
           else
             feed=out/latest.json
           fi
+          set -o pipefail
+          # Both Macs always; Linux and Windows when they were built.
+          want='["darwin-aarch64","darwin-x86_64"]'
+          ls out/*.AppImage >/dev/null 2>&1 && want=$(jq -c '. + ["linux-x86_64"]' <<<"$want")
+          ls out/*-setup.exe >/dev/null 2>&1 && want=$(jq -c '. + ["windows-x86_64"]' <<<"$want")
+          jq -e --argjson want "$want" '(.platforms | keys) == ($want | sort)' "$feed" >/dev/null ||
+            { echo "::error::the feed's platforms aren't $want"; exit 1; }
           jq -r '.plugins.updater.pubkey' desk/src-tauri/tauri.conf.json | base64 --decode > updater.pub
           jq -r '.platforms | to_entries[] | "\(.key) \(.value.url) \(.value.signature)"' "$feed" |
             while read -r platform url signature; do
@@ -823,15 +835,23 @@ jobs:
           [ "$got" = "$VERSION" ] || { echo "::error::the nightly feed says ${got:-nothing}, not $VERSION"; exit 1; }
           echo "Stable's latest is $latest; the nightly feed offers $VERSION."
 
-      # The last 14 nightlies are kept (a Desk on one still finds its
-      # machines' backend there); older ones go, with their tags.
+      # A nightly goes once a stable as new as it is out (a Desk on it moves
+      # to that stable, even on Stable) and 14 newer nightlies follow it.
+      # Until then it stays, with its machines' backend, for a Desk still on it.
       - name: Prune old nightlies
         if: needs.version.outputs.channel == 'nightly' && !inputs.dry_run
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN || github.token }}
         run: |
-          gh release list --repo "$RELEASES_REPO" --limit 200 --json tagName,isPrerelease,createdAt \
-            --jq '[.[] | select(.isPrerelease and (.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-nightly\\.")))] | sort_by(.createdAt) | reverse | .[14:] | .[].tagName' |
+          set -o pipefail
+          releases=$(gh release list --repo "$RELEASES_REPO" --limit 200 --json tagName,isPrerelease,isDraft,createdAt)
+          stable=$(jq -r '[.[] | select((.isPrerelease | not) and (.isDraft | not)) | .tagName | select(test("^v[0-9]+\\.[0-9]+\\.[0-9]+$")) | ltrimstr("v")] | .[]' <<<"$releases" | sort -V | tail -1)
+          [ -n "$stable" ] || exit 0
+          jq -r '[.[] | select(.isPrerelease and (.tagName | test("^v[0-9]+\\.[0-9]+\\.[0-9]+-nightly\\.")))] | sort_by(.createdAt) | reverse | .[14:] | .[].tagName' <<<"$releases" |
             while read -r tag; do
+              base=${tag#v}
+              base=${base%%-*}
+              # Superseded: its own stable (or a later one) is out.
+              [ "$(printf '%s\n%s\n' "$base" "$stable" | sort -V | tail -1)" = "$stable" ] || continue
               gh release delete "$tag" --repo "$RELEASES_REPO" --cleanup-tag --yes || echo "::warning::couldn't remove $tag"
             done
