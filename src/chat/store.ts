@@ -392,13 +392,20 @@ interface AgentsResponse {
 const personalRouteOf = (raw: unknown): PersonalRouteShown | null => {
   if (!raw || typeof raw !== "object") return null;
   const r = raw as Record<string, unknown>;
-  if (typeof r.kind !== "string" || typeof r.model !== "string" || (r.fallback !== "wait" && r.fallback !== "hub")) return null;
+  if (
+    typeof r.kind !== "string" ||
+    typeof r.model !== "string" ||
+    !r.model.trim() ||
+    (r.fallback !== "wait" && r.fallback !== "hub") ||
+    typeof r.connected !== "boolean"
+  )
+    return null;
   return {
     kind: r.kind,
     title: typeof r.title === "string" ? r.title : r.kind,
     model: r.model,
     fallback: r.fallback,
-    connected: r.connected === true,
+    connected: r.connected,
   };
 };
 

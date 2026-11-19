@@ -240,9 +240,11 @@ function useRoute<V>(load: () => Promise<V>, deps: unknown[]) {
     setProblem(null);
     try {
       const next = await send();
-      if (at === current.current) setView(next);
-      // What each agent is shown to run on for you follows the choice.
-      void useChat.getState().refreshRoster();
+      if (at === current.current) {
+        setView(next);
+        // What each agent is shown to run on for you follows the choice.
+        void useChat.getState().refreshRoster();
+      }
     } catch (e) {
       if (at === current.current) setProblem(plainError(e));
     } finally {

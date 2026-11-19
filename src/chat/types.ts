@@ -97,7 +97,12 @@ export const yourRoute = (a: Pick<Agent, "provider" | "personalRoute">): { label
   if (!r || (!r.connected && r.fallback === "hub")) return null;
   const plan = PROVIDERS[r.kind] ?? `${r.title} plan`;
   const label = `Your ${plan}${r.connected ? "" : " (not connected)"}`;
-  const note = r.fallback === "hub" ? `falls back to ${providerLabel(a.provider) ?? "the hub’s models"}` : null;
+  const note =
+    r.fallback === "hub"
+      ? `falls back to ${providerLabel(a.provider) ?? "the hub’s models"}`
+      : r.connected
+        ? "stops if your plan can’t take a turn"
+        : "waits until you connect it";
   return { label, model: r.model, note };
 };
 
