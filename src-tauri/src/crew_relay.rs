@@ -104,8 +104,8 @@ const CHECKOUT: &str = "desk.checkout";
 const RUN: &str = "desk.run";
 /// The longest command a check sends.
 const MOST_COMMAND: usize = 8 * 1024;
-/// The longest a check runs, in seconds.
-const MOST_RUN_SECS: u64 = 20;
+/// The longest a check runs, in seconds: well within a call's carrying.
+const MOST_RUN_SECS: u64 = 15;
 /// The longest path, or repository, a machine call says.
 const MOST_SAID: usize = 1024;
 /// The most of a machine's answer to one of these read: what still fits
@@ -562,12 +562,19 @@ fn run_body(call: &Call) -> Result<Vec<u8>, Outcome> {
         Some(Value::Bool(b)) => Ok(*b),
         _ => Err(bad(key)),
     };
+    let (judged, by_person) = (flag("judged", true)?, flag("by_person", false)?);
+    // Unjudged only for the person's own yes, or a boss acting fully.
+    if !judged && !by_person && call.level.as_str() != Some("full") {
+        return Err(refused(
+            "Only the person, or a boss acting fully, runs a check unjudged.".into(),
+        ));
+    }
     let body = json!({
         "command": command,
         "cwd": cwd,
         "timeout_secs": secs,
-        "judged": flag("judged", true)?,
-        "by_person": flag("by_person", false)?,
+        "judged": judged,
+        "by_person": by_person,
     });
     Ok(body.to_string().into_bytes())
 }
@@ -1449,6 +1456,7 @@ mod tests {
         let (fake, mut rx) = with_routes(vec![
             Does::Says(200, json!({"outcome": "ran", "exit": 0, "stdout": "ok\n"})),
             Does::Fails(Unanswered::MaybeSent("cut off".into())),
+            Does::Says(200, json!({"outcome": "ran", "exit": 0, "stdout": ""})),
         ]);
         let stop = start(&fake.polled(vec![desk_call(
             A,
@@ -1496,8 +1504,19 @@ mod tests {
                 "desk.run",
                 json!({"command": "ls", "judged": "no"}),
             ),
+            desk_call(
+                "0f0e0d0c-0b0a-4909-8807-0605040302ef",
+                "desk.run",
+                json!({"command": "ls", "timeout_secs": 16}),
+            ),
+            // Unjudged for a boss acting within Desk: never.
+            desk_call(
+                "0f0e0d0c-0b0a-4909-8807-0605040302f0",
+                "desk.run",
+                json!({"command": "ls", "judged": false}),
+            ),
         ]));
-        for _ in 0..5 {
+        for _ in 0..7 {
             let (_, answer) = next(&mut rx).await;
             assert!(answer["body"]["error"].is_string(), "{answer}");
         }
@@ -1507,6 +1526,20 @@ mod tests {
             2,
             "nothing more sent"
         );
+        // Acting fully, or the person's yes: sent unjudged.
+        let mut full = desk_call(
+            "0f0e0d0c-0b0a-4909-8807-0605040302f1",
+            "desk.run",
+            json!({"command": "ls", "judged": false}),
+        );
+        full["level"] = json!("full");
+        let stop = start(&fake.polled(vec![full]));
+        let (_, answer) = next(&mut rx).await;
+        assert_eq!(answer["body"]["outcome"], "ran", "{answer}");
+        let _ = stop.send(true);
+        let sent = fake.routes_sent.lock().unwrap().clone();
+        assert_eq!(sent.len(), 3);
+        assert_eq!(sent[2].3.as_ref().unwrap()["judged"], false);
     }
 
     fn desk_call(id: &str, tool: &str, input: Value) -> Value {
