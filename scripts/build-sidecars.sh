@@ -117,12 +117,15 @@ vellev_target=${VELLEV_TARGET_DIR:-$vellev/target}
 # that is offline, so it is Desk 0.2.10's, pinned (scripts/intel-memory.sh).
 # That script refuses any other vellev.ref, and runs first so a mismatch
 # fails before the long builds.
-case " $targets " in
-  *" x86_64-apple-darwin "*)
-    intel_memory="$cache/intel-memory-x86_64-apple-darwin"
-    "$root/scripts/intel-memory.sh" "$intel_memory"
-    ;;
-esac
+intel_memory=
+for t in $targets; do
+  [ "$t" = x86_64-apple-darwin ] || continue
+  # The vellev the other targets build must be the one it was built from.
+  [ "$(git -C "$vellev" rev-parse HEAD)" = "$vellev_ref" ] ||
+    die "Intel Macs' memory store is vellev.ref's ($vellev_ref); $vellev is at another commit"
+  intel_memory="$cache/intel-memory-x86_64-apple-darwin"
+  "$root/scripts/intel-memory.sh" "$intel_memory"
+done
 case " ${ORT_SHARED:+shared} " in
   *" shared "*)
     ort_sys=$(awk '/^name = "ort-sys"$/ { getline; print $3 }' "$vellev/Cargo.lock" | tr -d '"')
@@ -205,8 +208,11 @@ for t in $targets; do
     out="$bin/$shipped-$t"
     rm -f "$out"
     if [ "$name" = vellev ] && [ "$t" = x86_64-apple-darwin ]; then
-      # Desk 0.2.10's, as it shipped (already stripped).
+      # Desk 0.2.10's, as it shipped (already stripped), checked again
+      # where it lands.
+      [ -n "$intel_memory" ] || die "no Intel memory store was fetched"
       cp "$intel_memory" "$out"
+      "$root/scripts/intel-memory.sh" check "$out"
       continue
     fi
     cp "$dir/$t/release/$name" "$out"

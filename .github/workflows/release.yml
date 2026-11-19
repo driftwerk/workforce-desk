@@ -26,7 +26,7 @@ on:
         required: true
         type: string
       dry_run:
-        description: "Build, sign and check everything, but publish nothing: the release is kept as this run's artifact"
+        description: "Build, sign and check everything, but publish nothing"
         type: boolean
         default: false
 
@@ -176,6 +176,12 @@ jobs:
         run: |
           npx tauri build --target universal-apple-darwin --bundles app \
             --config "{\"plugins\":{\"updater\":{\"endpoints\":[\"$ENDPOINT\"]}}}"
+
+      # The app's Intel memory store is the pinned one (Desk 0.2.10's:
+      # scripts/intel-memory.sh), checked before signing replaces its
+      # signature.
+      - name: Check the Intel memory store
+        run: desk/scripts/intel-memory.sh check "$APP/Contents/MacOS/Desk Memory"
 
       - name: Import the Developer ID certificate
         id: cert
@@ -656,15 +662,6 @@ jobs:
             --argjson platforms "$platforms" \
             '{version: $v, notes: $notes, pub_date: $date, platforms: $platforms}' > out/latest.json
           jq '.platforms | keys' out/latest.json
-
-      - name: Keep the dry run's release
-        if: ${{ inputs.dry_run }}
-        uses: actions/upload-artifact@v7
-        with:
-          name: dry-run-release
-          path: out/
-          retention-days: 3
-          if-no-files-found: error
 
       - name: Publish the release
         if: ${{ !inputs.dry_run }}

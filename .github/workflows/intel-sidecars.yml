@@ -89,15 +89,19 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: scripts/build-sidecars.sh
 
-      # Nothing may need a newer macOS than Desk's 13.0.
+      # Nothing may need a newer macOS than Desk's 13.0 (an older target is
+      # fine: Rust's default writes LC_VERSION_MIN_MACOSX 10.12), and the
+      # memory store is the pinned one.
       - name: Check the sidecars' minimum macOS
         working-directory: desk/src-tauri/binaries
         run: |
           for f in *-x86_64-apple-darwin; do
-            minos=$(otool -l "$f" | awk '$1 == "minos" { print $2; exit }')
-            echo "$f targets macOS $minos"
-            [ "$minos" = 13.0 ] || { echo "::error::$f targets macOS $minos, not 13.0"; exit 1; }
+            v=$(otool -l "$f" | awk '$1 == "minos" { print $2; exit } /LC_VERSION_MIN_MACOSX/ { m = 1 } m && $1 == "version" { print $2; exit }')
+            echo "$f targets macOS $v"
+            [ -n "$v" ] && echo "$v" | awk -F. '{ exit !($1 < 13 || ($1 == 13 && $2 + 0 == 0)) }' ||
+              { echo "::error::$f targets macOS '$v', newer than 13.0"; exit 1; }
           done
+          ../../scripts/intel-memory.sh check "Desk Memory-x86_64-apple-darwin"
 
       - name: Run the memory store (Rosetta)
         working-directory: desk/src-tauri/binaries

@@ -261,11 +261,14 @@ that repository and built it. No step of Desk's build fetches from it now:
     `PROVENANCE.txt`. That pre-release is not a Desk release, is never the
     latest, and its tag doesn't start with `v`, so neither release.yml nor
     the updater looks at it.
-  - `scripts/intel-memory.sh` pins it by sha256. It checks again that it is
-    a single x86_64 program signed by that team for macOS 13.0, and
-    `build-sidecars.sh` ships it as it is.
+  - `scripts/intel-memory.sh` pins it by sha256. It checks a private copy
+    again (a single x86_64 program, signed with that team's Developer ID,
+    for macOS 13.0) before moving it into place. `build-sidecars.sh` ships it
+    as it is and checks it again where it lands. The release checks the
+    app's Desk Memory once more before signing it.
 
-  **vellev.ref is held at `c68c9736` while this lasts.** Both
+  **vellev.ref is held at `c68c9736` while this lasts**, for every platform,
+  since one vellev.ref serves them all. Both
   `intel-memory.sh` and therefore `build-sidecars.sh` refuse any other
   vellev before building, and `intel-sidecars.yml` runs whenever
   `vellev.ref` changes. A vellev bump has to wait until ONNX Runtime's
