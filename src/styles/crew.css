@@ -122,6 +122,10 @@
   line-height: 1.5;
 }
 .dialog-scroll {
+  /* Shrinks to what the dialog's max height leaves, and scrolls: without
+     these a tall body pushes the dialog past the window, out of reach. */
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 8px 28px 18px;
   display: flex;
   flex-direction: column;
