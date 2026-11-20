@@ -1757,6 +1757,38 @@ export interface UsageView {
   readings: PlanReading[];
 }
 
+/** One plan window's share of background work, in percentage points (0-100). */
+export interface WorkShare {
+  plan: PlanKind;
+  windowMinutes: number;
+  share: number;
+}
+
+export interface WorkSpan {
+  turns: number;
+  tokens: number;
+  /** Empty for work that ran on an API key, or before any reading. */
+  shares: WorkShare[];
+}
+
+export type WorkUsageKind = "job" | "monitor" | "boss" | "heartbeat" | "other";
+
+export interface WorkUsage {
+  /** Stable key: `job:<id>`, `monitor:<id>`, `boss:<agent>`, `heartbeat:<agent>`. */
+  work: string;
+  label: string;
+  agentId: string;
+  kind: WorkUsageKind;
+  day: WorkSpan;
+  week: WorkSpan;
+}
+
+/** `GET /api/desk/usage/work`, sorted by week share, highest first. */
+export interface WorkUsageView {
+  asOf: string;
+  works: WorkUsage[];
+}
+
 // ── The board: the person's tickets, worked on by sessions and agents ────
 
 export type TicketState = "backlog" | "todo" | "doing" | "review" | "done" | "dropped";

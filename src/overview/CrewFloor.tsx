@@ -4,6 +4,7 @@ import { SetupFloor } from "../setup/slot";
 import { useChat } from "../chat/store";
 import { BriefCard, PausedNote, RightNow, useMinute } from "../floor/RightNow";
 import { PlanCards } from "../floor/PlanCards";
+import { WorkUsageCard } from "../floor/WorkUsageCard";
 import { SpendCard } from "../spend/SpendCard";
 import { AccountNeeds } from "../floor/AccountNeeds";
 import { OverseerCard } from "../floor/OverseerCard";
@@ -202,6 +203,7 @@ export function FloorColumn({
           {/* The overseer's brief is of everything: one group's Floor says its own. */}
           <RightNow brief={(!scope && brief) || null} needs={!sections} />
           <PlanCards />
+          <WorkUsageCard />
           <SpendCard />
           <Today now={now} />
         </>

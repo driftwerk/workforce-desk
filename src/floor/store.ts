@@ -6,7 +6,7 @@ import { FEATURES, type HubAccount } from "../chat/types";
 import { HubError } from "../hub/client";
 import { deskListeners, useDesk } from "../hub/store";
 import { floorOf, type Choice } from "../hub/floor";
-import type { DeskEvent, FloorView, LineAsked, Need, UsageView } from "../hub/types";
+import type { DeskEvent, FloorView, LineAsked, Need, UsageView, WorkUsageView } from "../hub/types";
 import { useLine } from "../line/store";
 import { usePlans as useBossPlans } from "../crew/planStore";
 import { missing } from "../overview/store";
@@ -27,6 +27,8 @@ export interface HubFloor {
   state: "loading" | "ready" | "failed" | "unsupported";
   floor: FloorView | null;
   usage: UsageView | null;
+  /** Each background work's use of the plans; absent from an older hub. */
+  work?: WorkUsageView | null;
   /** The hub's clock less this computer's, from `asOf` when it was read. */
   offset: number;
   /** The last read failed; what's shown is from `at`. */
@@ -85,7 +87,7 @@ export const useFloor = create<FloorStore>((set, get) => {
     const nth = (begun.get(hubId) ?? 0) + 1;
     begun.set(hubId, nth);
     const api = floorOf(hub);
-    const [floor, usage] = await Promise.allSettled([api.floor(day).then((view) => ({ view, receivedAt: Date.now() })), api.usage()]);
+    const [floor, usage, work] = await Promise.allSettled([api.floor(day).then((view) => ({ view, receivedAt: Date.now() })), api.usage(), api.workUsage()]);
     if (!sameAccount(accountOf(hubId), hub)) return;
     if (floor.status === "rejected") {
       if (missing(floor.reason)) return put(hubId, () => ({ ...blank(), state: "unsupported" }));
@@ -102,6 +104,7 @@ export const useFloor = create<FloorStore>((set, get) => {
           state: "ready",
           floor: { ...view, needs: view.needs.filter((n) => (s.answered[`${hubId}/${n.id}`]?.read ?? 0) < nth) },
           usage: usage.status === "fulfilled" ? usage.value : missing(usage.reason) ? null : (s.hubs[hubId]?.usage ?? null),
+          work: work.status === "fulfilled" ? work.value : missing(work.reason) ? null : (s.hubs[hubId]?.work ?? null),
           offset: Date.parse(view.asOf) - receivedAt,
           stale: false,
           at: new Date(receivedAt).toISOString(),
