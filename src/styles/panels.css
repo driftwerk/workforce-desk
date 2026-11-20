@@ -69,7 +69,7 @@
 .rpanel {
   flex: 1;
   min-width: 0;
-  margin: 16px 0;
+  margin: calc(var(--title-h) + 2px) 0 16px;
   border-radius: var(--radius-lg);
   border: 1px solid var(--border);
   display: flex;
@@ -171,7 +171,7 @@ body.rpanel-resizing * {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 30px 16px 0 16px;
+  padding: calc(var(--title-h) + 2px) 16px 0 16px;
 }
 .crumb {
   display: inline-flex;

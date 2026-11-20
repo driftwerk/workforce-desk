@@ -9,7 +9,7 @@
 /* Room for the title strip: macOS's title bar, which overlays the content,
    and on every system what shows in it (app.css `.title-slot`). */
 .grids {
-  padding-top: 28px;
+  padding-top: var(--title-h);
 }
 .grids-none,
 .grid-window.grids-none {
