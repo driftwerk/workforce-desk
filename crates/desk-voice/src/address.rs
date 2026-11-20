@@ -63,7 +63,7 @@ fn edit_distance(a: &str, b: &str) -> usize {
 
 /// How far `said` is from the name's letters `name`, if it sounds like it.
 fn as_said(said: &str, name: &str) -> Option<usize> {
-    Some(edit_distance(said, name)).filter(|d| *d <= name.len() / 4)
+    Some(edit_distance(said, name)).filter(|d| *d <= name.chars().count() / 4)
 }
 
 /// The same, once the spotter has heard the name: a short one may also be a
@@ -71,7 +71,7 @@ fn as_said(said: &str, name: &str) -> Option<usize> {
 fn as_spotted(said: &str, name: &str) -> Option<usize> {
     as_said(said, name).or_else(|| {
         Some(edit_distance(said, name))
-            .filter(|d| *d == 1 && name.len() >= 3 && said.len() == name.len())
+            .filter(|d| *d == 1 && name.chars().count() >= 3 && said.chars().count() == name.chars().count())
     })
 }
 
@@ -165,6 +165,8 @@ mod tests {
         );
         assert_eq!(strip_name("What's on?", "Kat"), None);
         assert_eq!(strip_name("At three, remind me", "Kat"), None);
+        // Letters, not bytes: "Zoe" is one letter off "Zoë".
+        assert_eq!(strip_name("Zoe, hi", "Zoë"), Some("hi"));
     }
 
     #[test]

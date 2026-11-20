@@ -705,7 +705,10 @@ impl Listener {
     fn wake(&mut self, name: &str, now: Instant) {
         let accepted = self.conversation.keyword(name, now);
         tracing::info!(name, accepted, "voice: heard a name");
-        self.named_at = accepted.then_some(self.clock);
+        // A rejected name leaves one heard before it as it was.
+        if accepted {
+            self.named_at = Some(self.clock);
+        }
     }
 
     fn transcribe(&mut self, samples: &[f32], out: &mut dyn FnMut(Heard)) -> String {
