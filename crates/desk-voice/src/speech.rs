@@ -37,6 +37,9 @@ const ECHO_MEMORY: u64 = SPEECH_RATE as u64 * 4;
 /// samples: the room's tail, and how late a speaker reports a sentence finished.
 const LINGER: u64 = SPEECH_RATE as u64 * 3 / 10;
 
+/// The longest a name may be heard before the speech it opens is marked.
+const NAME_LEAD: u64 = SPEECH_RATE as u64 * 3;
+
 /// What the listener noticed while being fed.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Heard {
@@ -521,6 +524,7 @@ impl Listener {
     pub fn set_mode(&mut self, mode: ListenMode, now: Instant) {
         tracing::info!(?mode, "voice: listening");
         self.conversation.set_mode(mode, now);
+        self.named_at = None;
         self.ears.reset_spotter();
     }
 
@@ -571,11 +575,7 @@ impl Listener {
                         self.named = Some(name);
                         continue;
                     }
-                    let accepted = self.conversation.keyword(&name, now);
-                    tracing::info!(name, accepted, "voice: heard a name");
-                    if accepted {
-                        self.named_at = Some(self.clock);
-                    }
+                    self.wake(&name, now);
                 }
                 Sound::SpeechStarted => {
                     tracing::info!("voice: speech started");
@@ -611,10 +611,11 @@ impl Listener {
     /// or not anything would be done with its words: until now, it hasn't
     /// been shown to be anyone.
     fn segment(&mut self, samples: &[f32], now: Instant, out: &mut dyn FnMut(Heard)) {
+        let start = self.stretch.start;
         let named_before = self
             .named_at
             .take()
-            .is_some_and(|at| at < self.stretch.start);
+            .is_some_and(|at| at < start && start - at <= NAME_LEAD);
         if self.conversation.is_speaking() {
             let text = self.ears.transcribe(samples);
             tracing::info!(text, "voice: transcribed over playback");
@@ -625,6 +626,7 @@ impl Listener {
                 return;
             }
             self.barged(now, out);
+            self.named_at = None;
             if let Some(t) = self.conversation.transcript(&text, now) {
                 out(heard(t));
             }
@@ -694,10 +696,16 @@ impl Listener {
             self.stretch.a_person = true;
             out(Heard::BargeIn);
             if let Some(name) = self.named.take() {
-                let accepted = self.conversation.keyword(&name, now);
-                tracing::info!(name, accepted, "voice: heard a name");
+                self.wake(&name, now);
             }
         }
+    }
+
+    /// The spotter heard `name`, here in the audio.
+    fn wake(&mut self, name: &str, now: Instant) {
+        let accepted = self.conversation.keyword(name, now);
+        tracing::info!(name, accepted, "voice: heard a name");
+        self.named_at = accepted.then_some(self.clock);
     }
 
     fn transcribe(&mut self, samples: &[f32], out: &mut dyn FnMut(Heard)) -> String {
@@ -716,6 +724,7 @@ impl Listener {
             return false;
         }
         self.push_to_talk = Some(Vec::new());
+        self.named_at = None;
         self.conversation.speech_started(now);
         let interrupted = self.conversation.interrupted();
         if interrupted {
@@ -748,6 +757,7 @@ impl Listener {
         if !self.conversation.is_speaking() {
             self.barge.reset();
             self.named = None;
+            self.named_at = None;
         }
         self.conversation.speaking();
     }
@@ -1023,6 +1033,22 @@ mod tests {
             .collect();
         let (_, heard) = listening(sounds, "How are you?");
         assert_eq!(heard, [Heard::Transcribing, kat("How are you?")]);
+    }
+
+    #[test]
+    fn a_name_heard_long_before_any_speech_must_open_it() {
+        let sounds = std::iter::once(vec![Sound::Name("Kat".into())])
+            .chain(silence(190))
+            .chain([
+                vec![Sound::SpeechStarted],
+                vec![Sound::Segment(vec![0.1; VAD_WINDOW])],
+            ])
+            .collect();
+        let (_, heard) = listening(sounds, "turn the telly down");
+        assert!(
+            matches!(heard.last(), Some(Heard::NotToThem(n)) if n.name == "Kat"),
+            "{heard:?}"
+        );
     }
 
     #[test]

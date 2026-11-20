@@ -12,6 +12,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) 
 afterEach(() => {
   cleanup();
   useMic.setState(QUIET);
+  useVoiceStore.setState({ notice: null });
 });
 
 describe("VoicePill", () => {
@@ -52,7 +53,13 @@ describe("VoicePill", () => {
     act(() => useVoiceStore.setState({ status: { state: "listening", conversation: null }, thinking: false, heardBy: null, transcript: "", error: null, notice }));
     render(<VoicePill />);
     expect(screen.getByText(notice).className).toBe("voice-detail");
-    act(() => useVoiceStore.setState({ notice: null }));
+    act(() => {
+      useChat.setState({ roster: [{ hubId: "local", id: "kat", name: "Kat", model: null, provider: null, isDefault: false }] });
+      toggleTalk("local/kat");
+    });
+    expect(screen.queryByText(notice)).toBeNull();
+    act(() => useMic.setState(QUIET));
+    act(() => useVoiceStore.setState({ status: { state: "off" } }));
     expect(screen.queryByText(notice)).toBeNull();
   });
 

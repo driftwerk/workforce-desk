@@ -188,7 +188,7 @@ export class Turns {
 
   status(s: VoiceStatus) {
     if (s.state === "off" || (s.state === "listening" && s.conversation === null)) this.current = null;
-    if ((s.state === "heard-name" || s.state === "transcribing") && useVoiceStore.getState().notice) useVoiceStore.setState({ notice: null });
+    if (s.state !== "listening" && s.state !== "speaking" && useVoiceStore.getState().notice) useVoiceStore.setState({ notice: null });
     if (s.state !== "speaking" && useVoiceStore.getState().speakingFor) useVoiceStore.setState({ speakingFor: null });
     if (s.state === "speaking") this.speaking = true;
     else if (this.speaking && saying === 0) {
@@ -335,7 +335,7 @@ export function useVoice(enabled: boolean) {
 
   useEffect(() => {
     if (enabled) {
-      useVoiceStore.setState({ error: null });
+      useVoiceStore.setState({ error: null, notice: null });
       enableVoice(engine).catch(failed);
     } else void disableVoice().catch(failed);
   }, [enabled, engine]);

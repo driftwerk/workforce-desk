@@ -13,7 +13,8 @@ import { endConversation, REPLY_SILENCE_MS, switchConversation, talkOrEnd, Turns
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/plugin-global-shortcut", () => ({ register: vi.fn(), unregister: vi.fn() }));
 
-const store = useChat.getState();
+/** The chat store's own actions, before any test stands in for them. */
+const realChat = useChat.getInitialState();
 
 const atlas: Agent = { hubId: "local", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: false };
 const key = "local/atlas";
@@ -446,7 +447,7 @@ describe("spoken turns by name, through the chat store", () => {
     FakeSocket.reset();
     setDevToken("local", "tok");
     useSettings.setState({ agentVoices: { "local/kat": { provider: "fish_audio", model: "s2.1-pro", voice: "v" } } });
-    useChat.setState({ hubs: [local], roster: [desk, kat], conversations: {}, openDm: store.openDm, watchDm: store.watchDm, send: store.send });
+    useChat.setState({ hubs: [local], roster: [desk, kat], conversations: {}, openDm: realChat.openDm, watchDm: realChat.watchDm, send: realChat.send });
     turns = fresh();
   });
   afterEach(() => {
@@ -475,11 +476,17 @@ describe("spoken turns by name, through the chat store", () => {
     expect(deskSocket.chats.map((c) => c.content)).toEqual(["Keep me informed"]);
   });
 
-  it("say why what was heard went nowhere until something more is heard", () => {
+  it.each([
+    ["a name is heard", (t: Turns) => t.status({ state: "heard-name", agent: "Kat" })],
+    ["something is transcribed", (t: Turns) => t.status({ state: "transcribing" })],
+    ["voice is turned off", (t: Turns) => t.status({ state: "off" })],
+    ["something is said to an agent", (t: Turns) => t.heard({ agent: "Kat", text: "How are you?" })],
+  ])("say why what was heard went nowhere until %s", (_, next) => {
     useVoiceStore.setState({ notice: "Heard “Kat”, but couldn’t make out what was said." });
     turns.status({ state: "listening", conversation: null });
+    turns.status({ state: "speaking" });
     expect(useVoiceStore.getState().notice).not.toBeNull();
-    turns.status({ state: "heard-name", agent: "Kat" });
+    next(turns);
     expect(useVoiceStore.getState().notice).toBeNull();
   });
 });

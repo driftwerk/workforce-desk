@@ -61,24 +61,27 @@ fn edit_distance(a: &str, b: &str) -> usize {
     row[b.len()]
 }
 
-/// The edits a name of `letters` letters may be heard with.
-fn as_said(letters: usize) -> usize {
-    letters / 4
+/// How far `said` is from the name's letters `name`, if it sounds like it.
+fn as_said(said: &str, name: &str) -> Option<usize> {
+    Some(edit_distance(said, name)).filter(|d| *d <= name.len() / 4)
 }
 
-/// The same, once the spotter has heard the name: a short one may be a
-/// letter off ("Cat" for "Kat").
-fn as_spotted(letters: usize) -> usize {
-    if letters >= 3 {
-        as_said(letters).max(1)
-    } else {
-        as_said(letters)
-    }
+/// The same, once the spotter has heard the name: a short one may also be a
+/// letter off ("Cat" for "Kat"), in a word as long as it.
+fn as_spotted(said: &str, name: &str) -> Option<usize> {
+    as_said(said, name).or_else(|| {
+        Some(edit_distance(said, name))
+            .filter(|d| *d == 1 && name.len() >= 3 && said.len() == name.len())
+    })
 }
 
 /// How far the first words are from `name`, and where they end; `None` when
-/// they don't sound like it, within `allowed` edits for its length.
-fn leading(text: &str, name: &str, allowed: fn(usize) -> usize) -> Option<(usize, usize)> {
+/// they don't sound like it (`sounds`).
+fn leading(
+    text: &str,
+    name: &str,
+    sounds: fn(&str, &str) -> Option<usize>,
+) -> Option<(usize, usize)> {
     let target = letters(name);
     if target.is_empty() {
         return None;
@@ -89,14 +92,12 @@ fn leading(text: &str, name: &str, allowed: fn(usize) -> usize) -> Option<(usize
         .take_while(|(w, _)| FILLERS.contains(&w.as_str()))
         .count();
     let rest = &words[skip..];
-    let allowed = allowed(target.len());
     let span = spoken_words(name).len() + 1;
     (1..=span.min(rest.len()))
-        .map(|k| {
+        .filter_map(|k| {
             let said: String = rest[..k].iter().map(|(w, _)| w.as_str()).collect();
-            (edit_distance(&said, &target), rest[k - 1].1)
+            sounds(&said, &target).map(|d| (d, rest[k - 1].1))
         })
-        .filter(|(d, _)| *d <= allowed)
         .min_by_key(|(d, _)| *d)
 }
 
@@ -163,6 +164,7 @@ mod tests {
             Some("how are you?")
         );
         assert_eq!(strip_name("What's on?", "Kat"), None);
+        assert_eq!(strip_name("At three, remind me", "Kat"), None);
     }
 
     #[test]

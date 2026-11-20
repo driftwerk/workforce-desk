@@ -157,8 +157,8 @@ impl Conversation {
         true
     }
 
-    /// The name heard was said before the speech now ending began, so its
-    /// transcript can't show it: that speech is what was said to them.
+    /// The name was heard before this stretch of speech began: what was said
+    /// is for them, whether or not it opens with the name.
     pub fn named_before_speech(&mut self) {
         if let Phase::Named { this_segment, .. } = &mut self.phase {
             *this_segment = false;
