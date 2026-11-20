@@ -1,10 +1,18 @@
 import { useEffect, type RefObject } from "react";
-import { forget } from "./mic";
+import { create } from "zustand";
 
 /** The DMs this window shows (Rooms, grid panes, the side panel), by agent
  *  key, with their roots, newest focus last: what "talk here" means. */
 const shown = new Map<string, Set<HTMLElement>>();
 let recent: string[] = [];
+
+/** `shown`'s agents, for hooks. */
+const useShown = create<Record<string, true>>(() => ({}));
+
+const publish = () => useShown.setState(Object.fromEntries([...shown.keys()].map((a) => [a, true] as const)), true);
+
+/** Whether `agent`'s DM is shown in this window, as it changes. */
+export const useDmShown = (agent: string | null): boolean => useShown((s) => !!agent && !!s[agent]);
 
 const touch = (agent: string) => {
   recent = [...recent.filter((a) => a !== agent), agent];
@@ -21,8 +29,7 @@ export const targetDm = (active: Element | null = document.activeElement): strin
 export const isShown = (agent: string): boolean => shown.has(agent);
 
 /** Says `agent`'s DM is shown at `root` while mounted, and which DM was
- *  focused last. When the last one showing an agent goes, the microphone
- *  it held is let go. */
+ *  focused last. */
 export function useDmPresence(agent: string | null, root: RefObject<HTMLElement | null>) {
   useEffect(() => {
     const el = root.current;
@@ -30,6 +37,7 @@ export function useDmPresence(agent: string | null, root: RefObject<HTMLElement 
     const roots = shown.get(agent) ?? new Set<HTMLElement>();
     roots.add(el);
     shown.set(agent, roots);
+    if (!useShown.getState()[agent]) publish();
     if (el.contains(document.activeElement)) touch(agent);
     const focused = () => touch(agent);
     el.addEventListener("focusin", focused);
@@ -41,12 +49,11 @@ export function useDmPresence(agent: string | null, root: RefObject<HTMLElement 
       if (roots.size) return;
       shown.delete(agent);
       // Moving a pane remounts its DM at once; only a DM that stays gone
-      // lets the microphone go.
+      // stops being shown and the one focused last.
       queueMicrotask(() => {
-        if (!shown.has(agent)) {
-          recent = recent.filter((a) => a !== agent);
-          forget(agent);
-        }
+        if (shown.has(agent)) return;
+        recent = recent.filter((a) => a !== agent);
+        publish();
       });
     };
   }, [agent, root]);
@@ -56,4 +63,5 @@ export function useDmPresence(agent: string | null, root: RefObject<HTMLElement 
 export const resetShown = (): void => {
   shown.clear();
   recent = [];
+  publish();
 };

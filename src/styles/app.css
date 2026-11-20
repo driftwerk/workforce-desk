@@ -2134,6 +2134,24 @@ button.thread-bar:hover {
   height: 28px;
   z-index: 30;
 }
+/* What shows in the title strip, centred above the strip that moves the
+   window: the spoken conversation and "Desk is using the browser". Every
+   view leaves the strip's height clear at its top. */
+.title-slot {
+  position: fixed;
+  top: 1px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 31;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 160px);
+  pointer-events: none;
+}
+.title-slot > * {
+  pointer-events: auto;
+}
 
 .working-line {
   display: flex;
@@ -2721,6 +2739,14 @@ button.thread-bar:hover {
   height: 1px;
   margin: 4px 6px;
   background: var(--border);
+}
+.menu-rows,
+.menu-radios {
+  display: flex;
+  flex-direction: column;
+}
+.menu-row {
+  min-height: 44px;
 }
 
 /* ── A sidebar row with a ⋯ menu that shows on hover ───────────────────── */

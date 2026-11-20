@@ -203,22 +203,7 @@ function MenuList({
             }}
             onClick={(e) => (entry.disabled ? undefined : entry.submenu ? openSub(i, e.currentTarget, true) : onChoose(entry.onSelect))}
           >
-            <span className="menu-label">
-              {entry.label}
-              {entry.hint && <span className="menu-hint"> · {entry.hint}</span>}
-              {entry.detail && <span className="menu-detail">{entry.detail}</span>}
-            </span>
-            {entry.kbd && <span className="menu-kbd">{entry.kbd}</span>}
-            {entry.checked && (
-              <span className="menu-kbd" aria-hidden="true">
-                ✓
-              </span>
-            )}
-            {entry.submenu && (
-              <span className="menu-kbd" aria-hidden="true">
-                ▸
-              </span>
-            )}
+            <ItemBody entry={entry} />
           </button>
         ),
       )}
@@ -281,6 +266,100 @@ function SubMenu({
         onChoose={onChoose}
         onTab={onTab}
       />
+    </div>
+  );
+}
+
+type Item = Extract<MenuEntry, { kind: "item" }>;
+
+/** What an item shows: its label, hint and detail, its keys, a tick when
+ *  it's on, and an arrow when it opens a submenu. */
+function ItemBody({ entry }: { entry: Item }) {
+  return (
+    <>
+      <span className="menu-label">
+        {entry.label}
+        {entry.hint && <span className="menu-hint"> · {entry.hint}</span>}
+        {entry.detail && <span className="menu-detail">{entry.detail}</span>}
+      </span>
+      {entry.kbd && <span className="menu-kbd">{entry.kbd}</span>}
+      {entry.checked && (
+        <span className="menu-kbd" aria-hidden="true">
+          ✓
+        </span>
+      )}
+      {entry.submenu && (
+        <span className="menu-kbd" aria-hidden="true">
+          ▸
+        </span>
+      )}
+    </>
+  );
+}
+
+/** Entries as runs: a set of radio choices together, anything else alone. */
+const runs = (entries: MenuEntry[]): { at: number; entries: MenuEntry[] }[] =>
+  entries.reduce<{ at: number; entries: MenuEntry[] }[]>((all, entry, at) => {
+    const last = all.at(-1);
+    const radio = (e: MenuEntry | undefined) => e?.kind === "item" && !!e.radio;
+    return radio(entry) && radio(last?.entries[0]) ? [...all.slice(0, -1), { at: last!.at, entries: [...last!.entries, entry] }] : [...all, { at, entries: [entry] }];
+  }, []);
+
+/** A menu's entries as rows in place, in a popover: a choice runs at once,
+ *  a submenu opens as a menu under its row. */
+export function MenuRows({ label, entries }: { label: string; entries: MenuEntry[] }) {
+  const [open, setOpen] = useState<{ index: number; at: { x: number; y: number }; from: HTMLElement } | null>(null);
+  const sub = open ? entries[open.index] : undefined;
+  const row = (entry: MenuEntry, i: number) =>
+    entry.kind === "separator" ? (
+      <div key={i} className="menu-sep" role="separator" />
+    ) : entry.kind === "note" ? (
+      <p key={i} className="menu-note">
+        {entry.text}
+      </p>
+    ) : (
+      <button
+        key={i}
+        type="button"
+        className="menu-item menu-row"
+        role={entry.radio ? "radio" : undefined}
+        aria-checked={entry.radio ? !!entry.checked : undefined}
+        aria-pressed={entry.radio || entry.submenu ? undefined : entry.checked}
+        aria-disabled={entry.disabled || undefined}
+        aria-haspopup={entry.submenu ? "menu" : undefined}
+        aria-expanded={entry.submenu ? open?.index === i : undefined}
+        onClick={(e) => {
+          if (entry.disabled) return;
+          if (!entry.submenu) return entry.onSelect?.();
+          const r = e.currentTarget.getBoundingClientRect();
+          setOpen({ index: i, at: { x: r.left, y: r.bottom + 4 }, from: e.currentTarget });
+        }}
+      >
+        <ItemBody entry={entry} />
+      </button>
+    );
+  return (
+    <div className="menu-rows" role="group" aria-label={label}>
+      {runs(entries).map((run) =>
+        run.entries.length > 1 ? (
+          <div key={run.at} role="radiogroup" className="menu-radios">
+            {run.entries.map((e, i) => row(e, run.at + i))}
+          </div>
+        ) : (
+          row(run.entries[0]!, run.at)
+        ),
+      )}
+      {open && sub?.kind === "item" && sub.submenu && (
+        <Menu
+          label={sub.label}
+          at={open.at}
+          entries={entriesOf(sub.submenu)}
+          onClose={(refocus) => {
+            setOpen(null);
+            if (refocus) open.from.focus();
+          }}
+        />
+      )}
     </div>
   );
 }

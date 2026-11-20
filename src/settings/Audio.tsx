@@ -117,21 +117,19 @@ function Picker({
   );
 }
 
-/** How loud the microphone is, as a bar: read ten times a second while
- *  shown and the window is in view, without re-rendering anything else. */
-export function LevelMeter() {
-  const bar = useRef<HTMLSpanElement>(null);
-  const fill = useRef<HTMLSpanElement>(null);
+/** How loud the microphone is, as a meter's fill (0 to 1) handed to
+ *  `onFill`: read ten times a second while the window is in view,
+ *  re-rendering nothing. */
+export const useLevel = (onFill: (fill: number) => void): void => {
+  const latest = useRef(onFill);
+  latest.current = onFill;
   useEffect(() => {
     let live = true;
     const t = setInterval(() => {
       if (document.hidden) return;
       audioLevel()
         .then((level) => {
-          if (!live || typeof level !== "number") return;
-          const f = meterFill(level);
-          if (fill.current) fill.current.style.width = `${f * 100}%`;
-          bar.current?.setAttribute("aria-valuenow", String(Math.round(f * 100)));
+          if (live && typeof level === "number") latest.current(meterFill(level));
         })
         .catch(() => undefined);
     }, METER_MS);
@@ -140,6 +138,16 @@ export function LevelMeter() {
       clearInterval(t);
     };
   }, []);
+};
+
+/** How loud the microphone is, as a bar. */
+export function LevelMeter() {
+  const bar = useRef<HTMLSpanElement>(null);
+  const fill = useRef<HTMLSpanElement>(null);
+  useLevel((f) => {
+    if (fill.current) fill.current.style.width = `${f * 100}%`;
+    bar.current?.setAttribute("aria-valuenow", String(Math.round(f * 100)));
+  });
   return (
     <span ref={bar} className="audio-meter" role="meter" aria-label="Microphone level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={0}>
       <span ref={fill} className="audio-meter-fill" style={{ width: "0%" }} />

@@ -4,9 +4,9 @@ import { emptyConversation, reduce, type ConversationState } from "../chat/conve
 import { useChat } from "../chat/store";
 import { useSettings } from "../settings/store";
 import { FEATURES, type Agent, type ChatMessage, type ServerMessage } from "../chat/types";
-import { claimMode, useMic } from "./mic";
+import { claimMode, QUIET, useMic } from "./mic";
 import { useVoiceStore } from "./store";
-import { endConversation, REPLY_SILENCE_MS, talkOrEnd, Turns } from "./useVoice";
+import { endConversation, REPLY_SILENCE_MS, switchConversation, talkOrEnd, Turns } from "./useVoice";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/plugin-global-shortcut", () => ({ register: vi.fn(), unregister: vi.fn() }));
@@ -33,7 +33,7 @@ const calls = (command: string) => vi.mocked(invoke).mock.calls.filter(([c]) => 
 beforeEach(() => {
   vi.useFakeTimers();
   vi.mocked(invoke).mockClear();
-  useMic.setState({ talk: null, hold: null, pressed: false, replying: 0, problem: null });
+  useMic.setState(QUIET);
   useSettings.setState({ agentVoices: {}, writtenReplies: [], voiceEngine: "cascade" });
   useVoiceStore.setState({ waiting: {}, speakingFor: null, thinking: false });
   useChat.setState({
@@ -41,6 +41,7 @@ beforeEach(() => {
     activeAgent: null,
     conversations: { [key]: { ...emptyConversation(), connected: true } },
     openDm: vi.fn(),
+    watchDm: vi.fn(),
     send: vi.fn(() => true),
   });
 });
@@ -128,6 +129,7 @@ describe("spoken turns in a DM with the microphone", () => {
       voice: { reply: "spoken", speech: { provider: "fish_audio" } },
     });
     expect(useChat.getState().openDm).not.toHaveBeenCalled();
+    expect(useChat.getState().watchDm).toHaveBeenCalledWith(scoutKey);
   });
 
   it("go to the DM holding to talk, which then gives the microphone back", () => {
@@ -390,12 +392,32 @@ describe("the engine that says a DM's answer", () => {
     expect(calls("voice_speak")).toHaveLength(0);
   });
 
+  it("moving the conversation to another agent stops what the first was saying, and hears the next", () => {
+    const turns = fresh();
+    useMic.setState({ talk: key });
+    turns.heard({ agent: null, text: "what failed?" });
+    switchConversation("local/scout");
+    expect(useMic.getState()).toMatchObject({ talk: "local/scout", from: key });
+    expect(calls("voice_stop_speaking")).toHaveLength(1);
+    useChat.setState((s) => ({ conversations: { ...s.conversations, [key]: answer("Two tests.") } }));
+    expect(calls("voice_speak")).toHaveLength(0);
+    switchConversation("local/scout");
+    expect(calls("voice_stop_speaking")).toHaveLength(1);
+  });
+
   it("the talk button starts a conversation, and ends one", () => {
     talkOrEnd(key);
     expect(useMic.getState().talk).toBe(key);
     expect(calls("voice_stop_speaking")).toHaveLength(0);
     talkOrEnd(key);
     expect(useMic.getState().talk).toBeNull();
+    expect(calls("voice_stop_speaking")).toHaveLength(1);
+  });
+
+  it("the talk button in another agent's DM moves the conversation there", () => {
+    talkOrEnd(key);
+    talkOrEnd("local/scout");
+    expect(useMic.getState()).toMatchObject({ talk: "local/scout", from: key });
     expect(calls("voice_stop_speaking")).toHaveLength(1);
   });
 });

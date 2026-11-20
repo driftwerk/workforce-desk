@@ -3,7 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSettings } from "../settings/store";
 import { DmVoiceBar, DmVoiceControls, MicBadge } from "./DmVoice";
-import { toggleTalk, useMic } from "./mic";
+import { useChat } from "../chat/store";
+import { defaultShortcuts } from "../shortcuts/keys";
+import { QUIET, toggleTalk, useMic } from "./mic";
 import { useVoiceStore } from "./store";
 import { useVoice } from "./useVoice";
 
@@ -17,8 +19,8 @@ const calls = (command: string) => vi.mocked(invoke).mock.calls.filter(([c]) => 
 beforeEach(() => {
   vi.mocked(invoke).mockClear();
   vi.mocked(invoke).mockImplementation(() => Promise.resolve());
-  useMic.setState({ talk: null, hold: null, pressed: false, replying: 0, problem: null });
-  useSettings.setState({ writtenReplies: [], loaded: true });
+  useMic.setState(QUIET);
+  useSettings.setState({ writtenReplies: [], loaded: true, keys: defaultShortcuts("macos") });
   useVoiceStore.setState({ here: true, status: { state: "listening", conversation: null }, waiting: {}, speakingFor: null });
 });
 afterEach(cleanup);
@@ -39,6 +41,14 @@ describe("a DM's voice controls", () => {
     expect(useMic.getState()).toMatchObject({ hold: key, pressed: true });
     expect(calls("voice_push_to_talk")).toEqual([{ pressed: true }]);
     fireEvent.pointerUp(button, { pointerId: 1 });
+    expect(useMic.getState()).toMatchObject({ hold: key, pressed: false });
+    expect(calls("voice_push_to_talk")).toEqual([{ pressed: true }, { pressed: false }]);
+  });
+
+  it("let a hold go if they go while it's held", () => {
+    const { unmount } = render(<DmVoiceControls agent={key} name="Atlas" />);
+    fireEvent.pointerDown(screen.getByLabelText("Hold to talk to Atlas"), { button: 0, pointerId: 1 });
+    unmount();
     expect(useMic.getState()).toMatchObject({ hold: key, pressed: false });
     expect(calls("voice_push_to_talk")).toEqual([{ pressed: true }, { pressed: false }]);
   });
@@ -77,6 +87,63 @@ describe("a DM's voice bar and badge", () => {
     expect(useMic.getState().talk).toBeNull();
     expect(screen.queryByText("Atlas is listening")).toBeNull();
   });
+
+  it("mute the conversation and unmute it, without ending it", () => {
+    act(() => toggleTalk(key));
+    render(<DmVoiceBar agent={key} name="Atlas" />);
+    fireEvent.click(screen.getByRole("button", { name: "Mute" }));
+    expect(useMic.getState()).toMatchObject({ talk: key, muted: true });
+    expect(screen.getByText("You’re muted")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "Unmute" }));
+    expect(useMic.getState().muted).toBe(false);
+  });
+});
+
+describe("voice's shortcuts, wherever you are", () => {
+  const press = (code: string) => act(() => void fireEvent.keyDown(window, { code, ctrlKey: true, shiftKey: true }));
+
+  it("end the conversation with Talk here when no DM is shown, and mute it", () => {
+    const { unmount } = renderHook(() => useVoice(false));
+    act(() => toggleTalk(key));
+    press("KeyO");
+    expect(useMic.getState().muted).toBe(true);
+    press("KeyO");
+    expect(useMic.getState().muted).toBe(false);
+    press("KeyL");
+    expect(useMic.getState().talk).toBeNull();
+    press("KeyO");
+    expect(useMic.getState().muted).toBe(false);
+    unmount();
+  });
+});
+
+describe("a conversation's agent leaving the roster", () => {
+  const atlas = { hubId: "local", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: false };
+
+  const local = { id: "local", label: "This computer", url: "", local: true, revision: "" };
+
+  it("ends it once its hub has been read without it, not while its hub can't be read", () => {
+    useChat.setState({ hubs: [local], roster: [atlas], rosterRead: false, rosterErrors: {} });
+    const { unmount } = renderHook(() => useVoice(false));
+    act(() => toggleTalk(key));
+    act(() => useChat.setState({ roster: [] }));
+    expect(useMic.getState().talk).toBe(key);
+    act(() => useChat.setState({ roster: [atlas], rosterRead: true }));
+    act(() => useChat.setState({ roster: [], rosterErrors: { local: "couldn't reach it" } }));
+    expect(useMic.getState().talk).toBe(key);
+    act(() => useChat.setState({ roster: [], rosterErrors: {} }));
+    expect(useMic.getState().talk).toBeNull();
+    unmount();
+  });
+
+  it("ends it when its hub is gone", () => {
+    useChat.setState({ hubs: [local], roster: [atlas], rosterRead: true, rosterErrors: {} });
+    const { unmount } = renderHook(() => useVoice(false));
+    act(() => toggleTalk(key));
+    act(() => useChat.setState({ hubs: [], roster: [] }));
+    expect(useMic.getState().talk).toBeNull();
+    unmount();
+  });
 });
 
 describe("voice following the microphone", () => {
@@ -96,7 +163,7 @@ describe("voice following the microphone", () => {
     const { unmount } = renderHook(() => useVoice(false));
     await act(async () => toggleTalk(key));
     await act(async () => undefined);
-    expect(useMic.getState()).toMatchObject({ talk: null, problem: { agent: key, message: "microphone access was denied" } });
+    expect(useMic.getState()).toMatchObject({ talk: null, problem: { agent: key, mode: "talk", message: "microphone access was denied" } });
     unmount();
   });
 });

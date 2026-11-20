@@ -296,3 +296,286 @@
   padding: 4px 2px 2px;
   font-size: 12.5px;
 }
+
+/* ── The spoken conversation, in the title strip ─────────────────────── */
+
+.talk-pill {
+  --talk-accent: var(--signal);
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  max-width: 100%;
+  height: 26px;
+  padding: 0 2px;
+  border-radius: 999px;
+  border: 1px solid var(--talk-accent);
+  background: var(--raised);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  box-shadow: 0 1px 2px var(--lift);
+}
+.talk-live {
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+}
+.talk-busy {
+  --talk-accent: var(--working);
+}
+.talk-muted {
+  --talk-accent: var(--faint);
+  border-style: dashed;
+  color: var(--muted);
+}
+.talk-problem {
+  --talk-accent: var(--blocked);
+  background: var(--blocked-soft);
+  color: var(--blocked);
+}
+.talk-who,
+.talk-state,
+.talk-dot-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 22px;
+  padding: 0 6px 0 1px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+}
+.talk-state {
+  padding-left: 4px;
+}
+.talk-who:hover,
+.talk-state:hover,
+.talk-dot-btn:hover,
+.talk-pill .talk-icon:hover {
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  color: inherit;
+}
+.talk-pill .mark-xs {
+  width: 20px;
+  height: 20px;
+}
+.talk-name {
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  font-weight: 600;
+  font-size: 13px;
+}
+.talk-muted .mark-face {
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+.talk-muted .talk-name {
+  color: var(--text);
+}
+.talk-line {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.talk-busy .talk-line {
+  color: var(--working);
+}
+.talk-problem .talk-line {
+  color: inherit;
+}
+.talk-alert {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: var(--blocked);
+  color: var(--on-blocked);
+  font-weight: 600;
+}
+.talk-pill .talk-icon {
+  width: 24px;
+  height: 22px;
+  border-radius: 999px;
+  color: inherit;
+}
+.talk-live .talk-icon {
+  color: var(--text);
+}
+.talk-pill .btn-sm {
+  min-height: 20px;
+  height: 20px;
+  padding: 0 10px;
+  font-size: 12px;
+  box-shadow: none;
+}
+.talk-end {
+  margin-left: 2px;
+}
+.talk-meter {
+  --level: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  height: 14px;
+}
+.talk-meter i {
+  width: 2px;
+  height: calc(3px + var(--level) * var(--bar) * 11px);
+  border-radius: 1px;
+  background: var(--talk-accent);
+  transition: height 0.1s linear;
+}
+.talk-meter i:nth-child(1) {
+  --bar: 0.4;
+}
+.talk-meter i:nth-child(2) {
+  --bar: 0.8;
+}
+.talk-meter i:nth-child(3) {
+  --bar: 1;
+}
+.talk-meter i:nth-child(4) {
+  --bar: 0.6;
+}
+.talk-meter i:nth-child(5) {
+  --bar: 0.9;
+}
+
+/* In the agent's own DM, whose voice bar says it all: a dot. */
+.talk-dot {
+  padding: 0;
+  width: 26px;
+  justify-content: center;
+}
+.talk-dot-btn {
+  justify-content: center;
+  width: 22px;
+  padding: 0;
+}
+.talk-dot-mark {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--talk-accent);
+}
+.talk-live .talk-dot-mark {
+  animation: voice-pulse 1.2s ease-in-out infinite;
+}
+
+/* Its popover, under it, over the page. */
+.popover.talk-pop {
+  width: 380px;
+  max-width: min(380px, calc(100vw - 16px));
+  max-height: calc(100vh - 44px);
+  overflow-y: auto;
+  gap: 12px;
+  padding: 14px;
+}
+.talk-pop-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.talk-pop-mark {
+  --talk-accent: var(--signal);
+  display: grid;
+}
+.talk-pop-mark.talk-busy {
+  --talk-accent: var(--working);
+}
+.talk-pop-mark.talk-muted {
+  --talk-accent: var(--faint);
+}
+.talk-pop-mark.talk-problem {
+  --talk-accent: var(--blocked);
+}
+.talk-pop-mark .mark {
+  border-color: var(--talk-accent);
+}
+.talk-pop-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.talk-pop-title .muted {
+  font-variant-numeric: tabular-nums;
+}
+.talk-pop .talk-pop-dm {
+  align-self: center;
+  min-height: 44px;
+  padding: 0 6px;
+  border-radius: var(--radius-sm);
+  color: var(--signal-soft-text);
+}
+.talk-pop .talk-pop-dm:hover {
+  text-decoration: underline;
+}
+.talk-pop-said {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  font-size: 13px;
+  line-height: 1.45;
+  -webkit-user-select: text;
+  user-select: text;
+}
+.talk-pop-said p {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.talk-pop-agent {
+  color: var(--signal-soft-text);
+}
+.talk-pop-actions {
+  display: flex;
+  gap: 6px;
+}
+.talk-pop-actions .btn {
+  flex: 1;
+  min-height: 44px;
+  border-radius: var(--radius-sm);
+}
+.talk-pop-actions .btn:not(.btn-signal) {
+  background: var(--surface);
+}
+.talk-pop-actions .btn[aria-pressed="true"] {
+  border-color: var(--signal);
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+}
+.talk-pop .menu-rows {
+  margin: 0 -6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+
+/* On the agent's sidebar row: you're talking with it. */
+.gi-mic {
+  display: inline-grid;
+  place-items: center;
+  color: var(--signal-soft-text);
+}
+.gi-mic svg {
+  width: 14px;
+  height: 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .talk-live .talk-dot-mark,
+  .talk-meter i {
+    animation: none;
+    transition: none;
+  }
+}

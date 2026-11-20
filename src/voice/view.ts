@@ -1,3 +1,4 @@
+import type { ChatMessage } from "../chat/types";
 import type { VoiceStatus } from "./api";
 import type { MicState } from "./mic";
 
@@ -27,12 +28,16 @@ export interface HoldToTalk {
   available: boolean;
 }
 
-/** A DM has the microphone: its agent's name, and whether voice by name
- *  is on (and so paused until it's given back). */
+/** A DM has the microphone: its agent's name, whether voice by name is on
+ *  (and so paused until it's given back), and whether it's a spoken
+ *  conversation, which the title bar's pill shows instead. */
 export interface MicHeld {
   name: string;
   byName: boolean;
+  talk: boolean;
 }
+
+const OFF: PillView = { agent: null, title: "Voice is off", detail: "Turn it on to talk to agents by name", step: null, progress: null };
 
 /** What the voice pill says for the engine's state. */
 export const pillView = (
@@ -44,6 +49,8 @@ export const pillView = (
   mic: MicHeld | null = null,
 ): PillView => {
   const quoted = transcript ? `“${transcript}”` : "";
+  if (mic?.talk)
+    return mic.byName ? { agent: null, title: "Voice by name is paused", detail: `While you talk with ${mic.name}`, step: null, progress: null } : OFF;
   if (mic && s.state !== "downloading")
     return {
       agent: mic.name,
@@ -54,7 +61,7 @@ export const pillView = (
     };
   switch (s.state) {
     case "off":
-      return { agent: null, title: "Voice is off", detail: "Turn it on to talk to agents by name", step: null, progress: null };
+      return OFF;
     case "downloading":
       return {
         agent: null,
@@ -138,6 +145,7 @@ export const dmVoiceView = (
   const view = (line: string, detail: string | null = null): DmVoiceView => ({ line, detail, problem: false, speaking, live });
   const answers = written ? `${name} answers in writing` : `${name} answers aloud`;
   if (speaking) return view(`${name} is speaking`, "Talk over it, or stop it");
+  if (mic.talk === key && mic.muted && !(mic.hold === key && mic.pressed)) return view("You’re muted", "Unmute to talk again");
   if (live) {
     if (status.state === "downloading") return view("Getting voice ready", `${Math.round(status.progress * 100)}% · a one-time download, kept on this computer`);
     if (status.state === "off") return view("Starting the microphone…");
@@ -148,4 +156,50 @@ export const dmVoiceView = (
   }
   if (waiting) return view(`${name} is thinking`);
   return null;
+};
+
+/** What the title bar's pill says of the spoken conversation. */
+export interface TalkView {
+  agent: string;
+  tone: "live" | "busy" | "muted" | "problem";
+  line: string;
+  /** How long it has been going belongs after the line. */
+  elapsed: boolean;
+  /** The agent's answer is being read aloud: it can be stopped. */
+  speaking: boolean;
+}
+
+/** The pill for the spoken conversation, or for why the microphone couldn't
+ *  be had for one (`blocked`: the system keeps it from Desk); null with
+ *  neither. */
+export const talkView = (mic: MicState, status: VoiceStatus, waiting: boolean, speakingFor: string | null, blocked: boolean): TalkView | null => {
+  if (mic.problem?.mode === "talk") return { agent: mic.problem.agent, tone: "problem", line: blocked ? "Microphone blocked — fix" : "Microphone problem — fix", elapsed: false, speaking: false };
+  const agent = mic.talk;
+  if (!agent) return null;
+  const view = (tone: TalkView["tone"], line: string, extra: Partial<TalkView> = {}): TalkView => ({ agent, tone, line, elapsed: false, speaking: false, ...extra });
+  if (status.state === "downloading") return view("busy", `Getting voice ready · ${Math.round(status.progress * 100)}%`);
+  if (status.state === "off") return view("busy", "Starting…");
+  if (status.state === "speaking" && speakingFor === agent) return view("live", "Speaking", { speaking: true });
+  if (mic.hold === agent && mic.pressed) return view("live", "Listening — let go to send");
+  if (waiting) return view("busy", "Thinking…");
+  if (status.state === "transcribing" || mic.hold === agent) return view("busy", "Transcribing…");
+  if (mic.muted) return view("muted", "Muted — tap to talk");
+  if (mic.hold) return view("muted", "Paused");
+  return view("live", "Listening", { elapsed: true });
+};
+
+/** A duration as a clock: `m:ss`, hours in the minutes. */
+export const clock = (ms: number): string => {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+};
+
+/** The last thing you said in a conversation since `since` (ms, by this
+ *  computer's clock, which stamps what you send), and what the agent has
+ *  answered to it since, whatever its hub's clock says. */
+export const lastExchange = (messages: readonly ChatMessage[], since: number): { you: string | null; agent: string | null } => {
+  const said = messages.filter((m) => m.status !== "error" && m.content.trim());
+  const at = said.findLastIndex((m) => m.role === "user");
+  if (at < 0 || Date.parse(said[at]!.at) < since) return { you: null, agent: null };
+  return { you: said[at]!.content, agent: said.slice(at + 1).findLast((m) => m.role === "assistant")?.content ?? null };
 };

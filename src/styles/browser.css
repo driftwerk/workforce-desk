@@ -30,14 +30,6 @@
   padding: 2px 10px;
 }
 
-/* In the macOS title strip: centred, above the strip that moves the window. */
-.browser-pill-titlebar {
-  position: fixed;
-  top: 1px;
-  left: 50%;
-  transform: translateX(-50%);
-  z-index: 31;
-}
 .browser-pill-titlebar .browser-pill-open,
 .browser-pill-titlebar .btn-sm {
   min-height: 24px;

@@ -3,8 +3,6 @@ import { useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { useShortcuts } from "../shortcuts/manager";
 import { Mark } from "../ui/Mark";
-import { useChat } from "../chat/store";
-import { agentKey } from "../chat/types";
 import { stopSpeaking } from "./api";
 import { owner, useMic } from "./mic";
 import { useVoiceStore } from "./store";
@@ -12,19 +10,13 @@ import { retryVoice } from "./useVoice";
 import { ProblemNote } from "../ui/ProblemNote";
 import { permissionProblem, useRecheckOnFocus } from "../ui/privacy";
 import { pillView, STEPS } from "./view";
+import { MicIcon } from "./DmVoice";
+import { useAgentName } from "./TalkPill";
 import "../styles/voice.css";
 
-function MicIcon() {
-  return (
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-      <rect x="9" y="3" width="6" height="11" rx="3" />
-      <path d="M5 11a7 7 0 0 0 14 0M12 18v3" />
-    </svg>
-  );
-}
-
-/** Voice at a glance: what it's doing, what it heard, and the mic switch
- *  (Desk's `voice` setting; mount `useVoice` with that setting). */
+/** Voice by name at a glance: what it's doing, what it heard, and the mic
+ *  switch (Desk's `voice` setting; mount `useVoice` with that setting). A
+ *  spoken conversation shows in the title bar's pill (`TalkPill`) instead. */
 export function VoicePill() {
   const { status, thinking, heardBy, transcript, error } = useVoiceStore();
   const on = useSettings((s) => s.voice);
@@ -35,10 +27,12 @@ export function VoicePill() {
   useRecheckOnFocus("microphone", micProblem !== null, retryVoice);
   const holdKeys = useSettings((s) => s.keys.pushToTalk);
   const holdTaken = useShortcuts((s) => s.status.pushToTalk.state === "taken");
-  // A DM with the microphone, by its agent's name.
-  const holder = owner(useMic());
-  const holderName = useChat((s) => (holder ? (s.roster.find((a) => agentKey(a) === holder.agent)?.name ?? null) : null));
-  const mic = holder && holderName ? { name: holderName, byName: on } : null;
+  // A DM with the microphone, by its agent's name; a spoken conversation by
+  // the agent it's with, whoever holds the microphone for now.
+  const mics = useMic();
+  const holder = mics.talk ? { agent: mics.talk, mode: "talk" as const } : owner(mics);
+  const holderName = useAgentName(holder?.agent ?? null);
+  const mic = holder && holderName ? { name: holderName, byName: on, talk: holder.mode === "talk" } : null;
   const view = pillView(status, thinking, heardBy, transcript, { label: shortcutLabel(holdKeys), available: !holdTaken }, mic);
   const current = view.step ? STEPS.findIndex((s) => s.step === view.step) : -1;
   const ring = { "--voice-progress": view.progress ?? 0 } as CSSProperties;
@@ -57,7 +51,7 @@ export function VoicePill() {
           <span className="voice-title">{view.title}</span>
           <span className={error && !micProblem ? "voice-detail voice-error" : "voice-detail"}>{micProblem ? view.detail : (error ?? view.detail)}</span>
         </span>
-        {status.state === "speaking" && (
+        {status.state === "speaking" && !mic?.talk && (
           <button type="button" className="voice-btn" onClick={() => void stopSpeaking()} aria-label="Stop speaking">
             <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
               <rect x="1" y="1" width="10" height="10" rx="2" fill="currentColor" />

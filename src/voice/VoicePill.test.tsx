@@ -2,12 +2,17 @@ import { act, cleanup, fireEvent, render, screen } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useSettings } from "../settings/store";
 import { useShortcuts } from "../shortcuts/manager";
+import { useChat } from "../chat/store";
+import { QUIET, toggleTalk, useMic } from "./mic";
 import { useVoiceStore } from "./store";
 import { VoicePill } from "./VoicePill";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  useMic.setState(QUIET);
+});
 
 describe("VoicePill", () => {
   it("shows the turn's progress and the transcript", () => {
@@ -82,5 +87,19 @@ describe("VoicePill", () => {
     await vi.waitFor(() => expect(useVoiceStore.getState().error).toBeNull());
     expect(calls.mock.calls.some(([cmd]) => cmd === "voice_enable")).toBe(true);
     expect(screen.queryByText("Allow Desk to use the microphone.")).toBeNull();
+  });
+
+  it("leaves a spoken conversation to the title bar, saying only that voice by name waits", () => {
+    act(() => {
+      useChat.setState({ roster: [{ hubId: "local", id: "kat", name: "Kat", model: null, provider: null, isDefault: false }] });
+      useSettings.setState({ voice: true });
+      useVoiceStore.setState({ status: { state: "speaking" }, thinking: false, heardBy: "Kat", transcript: "", error: null });
+      toggleTalk("local/kat");
+    });
+    render(<VoicePill />);
+    expect(screen.getByText("Voice by name is paused")).toBeTruthy();
+    expect(screen.getByText("While you talk with Kat")).toBeTruthy();
+    expect(screen.queryByLabelText("Stop speaking")).toBeNull();
+    expect(screen.queryByText("Kat has the mic")).toBeNull();
   });
 });
