@@ -89,9 +89,11 @@ const STATUSES: &[&str] = &["ok", "suggested", "refused"];
 const SESSIONS: &str = "desk.sessions";
 /// A plan's ticket's session started on a machine.
 const SESSION_START: &str = "desk.session_start";
-/// What a plan's start may say, as New session says it: nothing else goes.
+/// What a plan's start may say, as New session says it, and the session id
+/// its plan gave it (`id`, a UUID), so a start sent again is the same one:
+/// nothing else goes.
 const START_FIELDS: &[&str] = &[
-    "engine", "name", "cwd", "goal", "prompt", "view", "worktree", "model",
+    "engine", "name", "cwd", "goal", "prompt", "view", "worktree", "model", "id",
 ];
 /// The person's machines, as Desk has them: answered here.
 const MACHINES: &str = "desk.machines";
@@ -498,6 +500,13 @@ async fn carry_desk<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &
             .is_some_and(|v| !v.is_string() && !v.is_null())
     }) {
         return refused(format!("That start's {k} couldn't be read."));
+    }
+    if given
+        .get("id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| !uuid_ok(id))
+    {
+        return refused("That start's id couldn't be read.".to_string());
     }
     let mut start: serde_json::Map<String, Value> = START_FIELDS
         .iter()
@@ -1887,7 +1896,7 @@ mod tests {
             vec![Does::Says(200, made.clone()), Does::Says(200, made)],
             None,
         );
-        let input = json!({"engine": "codex", "name": "VEL-3", "cwd": "/x",
+        let input = json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "id": SESSION,
                            "group": "acme", "boss": "local:mallory"});
         let mut planned = desk_call(A, "desk.session_start", input.clone());
         planned["group"] = plan.into();
@@ -1911,9 +1920,9 @@ mod tests {
         assert_eq!(
             sent,
             vec![
-                json!({"engine": "codex", "name": "VEL-3", "cwd": "/x",
+                json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "id": SESSION,
                        "group": plan, "boss": "local:desk"}),
-                json!({"engine": "codex", "name": "VEL-3", "cwd": "/x"}),
+                json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "id": SESSION}),
             ]
         );
     }
@@ -1994,8 +2003,17 @@ mod tests {
                 "desk.session_start",
                 json!({"engine": "codex", "name": "VEL-2", "cwd": ["/x"]}),
             ),
+            desk_call(
+                SESSION,
+                "desk.session_start",
+                json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "id": "not-a-uuid"}),
+            ),
         ]));
-        let mut got = [next(&mut rx).await, next(&mut rx).await];
+        let mut got = [
+            next(&mut rx).await,
+            next(&mut rx).await,
+            next(&mut rx).await,
+        ];
         got.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(got[0].0, A);
         assert!(
@@ -2008,6 +2026,10 @@ mod tests {
         assert_eq!(
             got[1].1,
             json!({"status": "refused", "body": {"error": "That start's cwd couldn't be read."}})
+        );
+        assert_eq!(
+            got[2].1,
+            json!({"status": "refused", "body": {"error": "That start's id couldn't be read."}})
         );
         assert!(fake.desk_sent.lock().unwrap().is_empty());
         let _ = stop.send(true);

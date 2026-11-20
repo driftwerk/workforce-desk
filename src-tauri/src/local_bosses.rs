@@ -131,7 +131,8 @@ pub struct MachineWanted {
 pub struct Wanted {
     pub grant_version: u64,
     /// Whether its plans' grants are said ([`WANTED_PATH`] asks for them):
-    /// until they are, those a machine holds are left as they are.
+    /// until they are, those a machine holds are left as they are, but for
+    /// one past its time, which goes.
     #[serde(default)]
     pub plans_known: bool,
     #[serde(default)]
@@ -288,13 +289,16 @@ fn ours(held: &Value) -> bool {
     }
 }
 
+/// When `held` says it was `k` (`issuedAt`, `expiresAt`).
+fn held_at(held: &Value, k: &str) -> Option<DateTime<Utc>> {
+    held[k]
+        .as_str()
+        .and_then(|t| t.parse::<DateTime<Utc>>().ok())
+}
+
 /// Whether `held` is past half its life at `now`, so renewed.
 fn renewal_due(held: &Value, now: DateTime<Utc>) -> bool {
-    let at = |k: &str| {
-        held[k]
-            .as_str()
-            .and_then(|t| t.parse::<DateTime<Utc>>().ok())
-    };
+    let at = |k: &str| held_at(held, k);
     match (at("issuedAt"), at("expiresAt")) {
         (Some(issued), Some(expires)) => expires - now < (expires - issued) / 2,
         _ => true,
@@ -962,10 +966,15 @@ pub async fn sync<E: Engine>(
                 continue;
             }
         };
+        let now = Utc::now();
         let held = match held_on(engine).await {
             Ok(h) => h
                 .into_iter()
-                .filter(|(g, _)| wanted.plans_known || plan_of(g).is_none())
+                .filter(|(g, h)| {
+                    wanted.plans_known
+                        || plan_of(g).is_none()
+                        || held_at(h, "expiresAt").is_some_and(|e| e <= now)
+                })
                 .collect(),
             Err(why) => {
                 out.failed.push((id.clone(), why));

@@ -885,7 +885,8 @@ async fn a_plans_grant_is_written_as_the_hub_says_without_asking_and_goes_with_i
     sync(&f.bosses, &f.kept, &more, &on(&[&devbox])).await;
     let g = devbox.grant(&key).unwrap();
     assert_eq!((members_of(&g).len(), &g["stopped"]), (2, &made));
-    // A hub that doesn't say its plans' grants yet leaves it as it is.
+    // A hub that doesn't say its plans' grants yet leaves it as it is,
+    // until it is past its time.
     let unknown = Wanted {
         plans_known: false,
         ..wanted(&[("devbox", vec![], &[S2])])
@@ -893,6 +894,12 @@ async fn a_plans_grant_is_written_as_the_hub_says_without_asking_and_goes_with_i
     let s = sync(&f.bosses, &f.kept, &unknown, &on(&[&devbox])).await;
     assert_eq!(s.failed, vec![]);
     assert_eq!(members_of(&devbox.grant(&key).unwrap()).len(), 2);
+    let ended = json!(Utc::now() - chrono::Duration::minutes(1));
+    devbox.held.lock().unwrap().grants.get_mut(&key).unwrap()["expiresAt"] = ended;
+    sync(&f.bosses, &f.kept, &unknown, &on(&[&devbox])).await;
+    assert!(devbox.grant(&key).is_none(), "past its time: deleted");
+    sync(&f.bosses, &f.kept, &more, &on(&[&devbox])).await;
+    assert!(devbox.grant(&key).is_some());
     // The plan has no sessions there any more, or ended: deleted.
     sync(
         &f.bosses,
