@@ -14,7 +14,7 @@ use sherpa_onnx::{
 };
 
 use crate::barge::{Barge, Cut, Verdict, judge};
-use crate::conversation::{Conversation, ListenMode, Phase, Timing, Transcript};
+use crate::conversation::{Conversation, ListenMode, NotToThem, Phase, Timing, Transcript};
 use crate::decode::Audio;
 use crate::directions::without_directions;
 use crate::keywords::{Keywords, SentencePiece, vocabulary};
@@ -45,12 +45,7 @@ pub enum Heard {
     /// A segment is being transcribed.
     Transcribing,
     Utterance(Utterance),
-    /// A name was heard, but what was said with it wasn't for them: the
-    /// person is told, since nothing is sent.
-    NotToThem {
-        name: String,
-        text: String,
-    },
+    NotToThem(NotToThem),
     /// Push-to-talk was let go with nothing said.
     Nothing,
 }
@@ -74,13 +69,13 @@ pub enum Sound {
 fn heard(transcript: Transcript) -> Heard {
     match transcript {
         Transcript::Request(u) => Heard::Utterance(u),
-        Transcript::NotToThem { name, text } => {
+        Transcript::NotToThem(n) => {
             tracing::info!(
-                name,
-                text,
-                "voice: heard a name, but not said to them; not sent"
+                name = n.name,
+                text = n.text,
+                "voice: heard a name; not said to them"
             );
-            Heard::NotToThem { name, text }
+            Heard::NotToThem(n)
         }
     }
 }
@@ -482,6 +477,8 @@ pub struct Listener {
     /// A name heard in what's being judged over playback: it counts if that
     /// turns out to be someone talking.
     named: Option<String>,
+    /// Where in the audio the name that woke the conversation was heard.
+    named_at: Option<u64>,
 }
 
 impl Listener {
@@ -506,6 +503,7 @@ impl Listener {
             lag: 0,
             stretch: Stretch::default(),
             named: None,
+            named_at: None,
         }
     }
 
@@ -575,6 +573,9 @@ impl Listener {
                     }
                     let accepted = self.conversation.keyword(&name, now);
                     tracing::info!(name, accepted, "voice: heard a name");
+                    if accepted {
+                        self.named_at = Some(self.clock);
+                    }
                 }
                 Sound::SpeechStarted => {
                     tracing::info!("voice: speech started");
@@ -610,6 +611,10 @@ impl Listener {
     /// or not anything would be done with its words: until now, it hasn't
     /// been shown to be anyone.
     fn segment(&mut self, samples: &[f32], now: Instant, out: &mut dyn FnMut(Heard)) {
+        let named_before = self
+            .named_at
+            .take()
+            .is_some_and(|at| at < self.stretch.start);
         if self.conversation.is_speaking() {
             let text = self.ears.transcribe(samples);
             tracing::info!(text, "voice: transcribed over playback");
@@ -634,6 +639,9 @@ impl Listener {
         {
             tracing::info!("voice: heard our own reply; not sent");
             return;
+        }
+        if named_before {
+            self.conversation.named_before_speech();
         }
         if let Some(t) = self.conversation.transcript(&text, now) {
             out(heard(t));
@@ -979,30 +987,119 @@ mod tests {
         heard
     }
 
-    /// "Hey Kat" is spotted before voice activity marks speech, so the
-    /// segment transcribed holds only what followed it: that is for Kat.
-    #[test]
-    fn a_name_spotted_before_its_speech_addresses_the_segment() {
-        let told = std::sync::Arc::new(std::sync::Mutex::new(Told::default()));
+    /// Ears that report `sounds` one frame at a time, transcribing as `says`.
+    fn listening(sounds: Vec<Vec<Sound>>, says: &str) -> (Listener, Vec<Heard>) {
+        let told = std::sync::Arc::new(std::sync::Mutex::new(Told {
+            says: says.into(),
+            ..Told::default()
+        }));
         let now = Instant::now();
         let mut listener =
             Listener::with_ears(Box::new(ToldEars(told.clone())), Timing::default(), now);
-        let frame = vec![0.1; VAD_WINDOW];
         let mut heard = Vec::new();
-        let mut hear = |sounds: Vec<Sound>, listener: &mut Listener| {
-            told.lock().unwrap().sounds.extend(sounds);
-            listener.feed(&frame, now, &mut |h| heard.push(h));
-        };
-        told.lock().unwrap().says = "How are you?".into();
-        hear(vec![Sound::Name("Kat".into())], &mut listener);
-        hear(vec![Sound::SpeechStarted], &mut listener);
-        hear(vec![Sound::Segment(frame.clone())], &mut listener);
+        for frame in sounds {
+            told.lock().unwrap().sounds.extend(frame);
+            listener.feed(&[0.1; VAD_WINDOW], now, &mut |h| heard.push(h));
+        }
+        (listener, heard)
+    }
+
+    fn silence(frames: usize) -> impl Iterator<Item = Vec<Sound>> {
+        std::iter::repeat_n(Vec::new(), frames)
+    }
+
+    fn kat(text: &str) -> Heard {
+        Heard::Utterance(Utterance::new(Some("Kat".into()), text))
+    }
+
+    #[test]
+    fn a_name_said_before_its_speech_addresses_the_segment() {
+        let sounds = std::iter::once(vec![Sound::Name("Kat".into())])
+            .chain(silence(40))
+            .chain([
+                vec![Sound::SpeechStarted],
+                vec![Sound::Segment(vec![0.1; VAD_WINDOW])],
+            ])
+            .collect();
+        let (_, heard) = listening(sounds, "How are you?");
+        assert_eq!(heard, [Heard::Transcribing, kat("How are you?")]);
+    }
+
+    #[test]
+    fn a_name_heard_as_its_speech_began_must_open_it() {
+        let (_, heard) = listening(
+            vec![
+                vec![Sound::Name("Kat".into()), Sound::SpeechStarted],
+                vec![Sound::Segment(vec![0.1; VAD_WINDOW])],
+            ],
+            "I asked kat yesterday",
+        );
         assert_eq!(
             heard,
             [
                 Heard::Transcribing,
-                Heard::Utterance(Utterance::new(Some("Kat".into()), "How are you?"))
+                Heard::NotToThem(NotToThem {
+                    name: "Kat".into(),
+                    text: "I asked kat yesterday".into()
+                })
             ]
+        );
+    }
+
+    #[test]
+    fn a_name_heard_in_speech_that_went_straight_on_must_open_it() {
+        let segment = || vec![Sound::Segment(vec![0.1; VAD_WINDOW])];
+        let (listener, heard) = listening(
+            vec![
+                vec![Sound::SpeechStarted],
+                segment(),
+                vec![Sound::Name("Kat".into())],
+                segment(),
+            ],
+            "and then I told Kat it was fine",
+        );
+        assert!(
+            matches!(heard.last(), Some(Heard::NotToThem(n)) if n.name == "Kat"),
+            "{heard:?}"
+        );
+        assert_eq!(listener.conversation.phase(), &Phase::Idle);
+    }
+
+    #[test]
+    fn a_name_in_a_reply_talked_over_doesnt_take_the_conversation() {
+        let told = std::sync::Arc::new(std::sync::Mutex::new(Told::default()));
+        let now = Instant::now();
+        let mut listener =
+            Listener::with_ears(Box::new(ToldEars(told.clone())), Timing::default(), now);
+        let mut heard = Vec::new();
+        let mut hear = |sounds: Vec<Sound>, says: &str, listener: &mut Listener| {
+            told.lock().unwrap().sounds.extend(sounds);
+            told.lock().unwrap().says = says.into();
+            listener.feed(&[0.3; VAD_WINDOW], now, &mut |h| heard.push(h));
+        };
+        let segment = || Sound::Segment(vec![0.3; VAD_WINDOW]);
+        hear(
+            vec![Sound::SpeechStarted, Sound::Name("Allan".into())],
+            "",
+            &mut listener,
+        );
+        hear(vec![segment()], "Allan, status?", &mut listener);
+        listener.speaking();
+        listener.playing("Atlas says the build is green.");
+        hear(
+            vec![Sound::Name("Atlas".into()), Sound::SpeechStarted],
+            "",
+            &mut listener,
+        );
+        hear(vec![segment()], "stop", &mut listener);
+        assert!(heard.contains(&Heard::BargeIn), "{heard:?}");
+        assert_eq!(
+            heard.last(),
+            Some(&Heard::Utterance(Utterance::new(None, "stop")))
+        );
+        assert_eq!(
+            listener.conversation.phase(),
+            &Phase::Engaged("Allan".into())
         );
     }
 

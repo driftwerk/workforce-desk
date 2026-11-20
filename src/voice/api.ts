@@ -64,6 +64,10 @@ export const onSpeechStopped = (f: () => void): Promise<() => void> => listen("v
 export const onVoiceError = (f: (message: string) => void): Promise<() => void> =>
   listen<string>("voice-error", (e) => f(e.payload));
 
+/** Something heard that nothing was done with, and why (`voice-notice`). */
+export const onVoiceNotice = (f: (message: string) => void): Promise<() => void> =>
+  listen<string>("voice-notice", (e) => f(e.payload));
+
 /** One voice to choose from. */
 export interface VoiceOption {
   id: string;

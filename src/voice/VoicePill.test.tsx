@@ -47,6 +47,15 @@ describe("VoicePill", () => {
     expect(screen.getByText("microphone access was denied").className).toContain("voice-error");
   });
 
+  it("says why what was heard went nowhere, as a hint, not an error", () => {
+    const notice = "Heard “Kat”, but couldn’t make out what was said.";
+    act(() => useVoiceStore.setState({ status: { state: "listening", conversation: null }, thinking: false, heardBy: null, transcript: "", error: null, notice }));
+    render(<VoicePill />);
+    expect(screen.getByText(notice).className).toBe("voice-detail");
+    act(() => useVoiceStore.setState({ notice: null }));
+    expect(screen.queryByText(notice)).toBeNull();
+  });
+
   it("shows the configured hold-to-talk keys, and says when another app has them", () => {
     act(() => {
       useSettings.getState().setShortcut("pushToTalk", "Control+Alt+K");

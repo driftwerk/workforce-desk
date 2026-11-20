@@ -61,9 +61,24 @@ fn edit_distance(a: &str, b: &str) -> usize {
     row[b.len()]
 }
 
+/// The edits a name of `letters` letters may be heard with.
+fn as_said(letters: usize) -> usize {
+    letters / 4
+}
+
+/// The same, once the spotter has heard the name: a short one may be a
+/// letter off ("Cat" for "Kat").
+fn as_spotted(letters: usize) -> usize {
+    if letters >= 3 {
+        as_said(letters).max(1)
+    } else {
+        as_said(letters)
+    }
+}
+
 /// How far the first words are from `name`, and where they end; `None` when
-/// they don't sound like it.
-fn leading(text: &str, name: &str) -> Option<(usize, usize)> {
+/// they don't sound like it, within `allowed` edits for its length.
+fn leading(text: &str, name: &str, allowed: fn(usize) -> usize) -> Option<(usize, usize)> {
     let target = letters(name);
     if target.is_empty() {
         return None;
@@ -74,7 +89,7 @@ fn leading(text: &str, name: &str) -> Option<(usize, usize)> {
         .take_while(|(w, _)| FILLERS.contains(&w.as_str()))
         .count();
     let rest = &words[skip..];
-    let allowed = target.len() / 4;
+    let allowed = allowed(target.len());
     let span = spoken_words(name).len() + 1;
     (1..=span.min(rest.len()))
         .map(|k| {
@@ -91,17 +106,17 @@ fn after(text: &str, end: usize) -> &str {
         .trim_end()
 }
 
-/// What follows `name` when the transcript opens with it ("Hey Atlas,
-/// what failed?" → "what failed?").
+/// What follows `name`, which the spotter heard, when the transcript opens
+/// with it ("Hey Atlas, what failed?" → "what failed?").
 pub fn strip_name<'a>(text: &'a str, name: &str) -> Option<&'a str> {
-    leading(text, name).map(|(_, end)| after(text, end))
+    leading(text, name, as_spotted).map(|(_, end)| after(text, end))
 }
 
 /// The roster name the transcript opens with, if any, and the rest.
 pub fn addressed<'a, 'n>(text: &'a str, names: &'n [String]) -> Option<(&'n str, &'a str)> {
     names
         .iter()
-        .filter_map(|n| leading(text, n).map(|(d, end)| (d, n.as_str(), end)))
+        .filter_map(|n| leading(text, n, as_said).map(|(d, end)| (d, n.as_str(), end)))
         .min_by_key(|(d, _, _)| *d)
         .map(|(_, name, end)| (name, after(text, end)))
 }
@@ -143,6 +158,11 @@ mod tests {
         assert_eq!(strip_name("I asked atlas", "Atlas"), None);
         assert_eq!(strip_name("Al, hi", "Al"), Some("hi"));
         assert_eq!(strip_name("All of it", "Al"), None);
+        assert_eq!(
+            strip_name("Hey Cat, how are you?", "Kat"),
+            Some("how are you?")
+        );
+        assert_eq!(strip_name("What's on?", "Kat"), None);
     }
 
     #[test]
@@ -157,6 +177,7 @@ mod tests {
             Some(("scout", "run it"))
         );
         assert_eq!(addressed("what's left", &names), None);
+        assert_eq!(addressed("Cat videos", &["Kat".to_string()]), None);
         assert_eq!(addressed("Atlas", &[]), None);
     }
 

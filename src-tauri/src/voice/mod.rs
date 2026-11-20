@@ -184,6 +184,10 @@ impl VoiceEvents for Events {
         let _ = self.app.emit("voice-error", message);
     }
 
+    fn notice(&self, message: &str) {
+        let _ = self.app.emit("voice-notice", message);
+    }
+
     fn stopped(&self, reason: StopReason) {
         let _ = self.app.emit("voice-stopped", reason);
     }

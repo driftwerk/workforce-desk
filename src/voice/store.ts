@@ -15,6 +15,8 @@ interface VoiceStore {
   /** Voice runs in this window (`useVoice` is mounted). */
   here: boolean;
   error: string | null;
+  /** Why what was last heard went nowhere, until something more is. */
+  notice: string | null;
 }
 
 export const useVoiceStore = create<VoiceStore>(() => ({
@@ -26,4 +28,5 @@ export const useVoiceStore = create<VoiceStore>(() => ({
   speakingFor: null,
   here: false,
   error: null,
+  notice: null,
 }));
