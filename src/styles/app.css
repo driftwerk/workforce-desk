@@ -2136,10 +2136,11 @@ button.thread-bar:hover {
 }
 /* What shows in the title strip, centred above the strip that moves the
    window: the spoken conversation and "Desk is using the browser". Every
-   view leaves the strip's height clear at its top. */
+   view leaves the strip's height clear at its top. Set 4px down, so the
+   pill clears the window's edge by as much as it does the header below. */
 .title-slot {
   position: fixed;
-  top: 1px;
+  top: 4px;
   left: 50%;
   transform: translateX(-50%);
   z-index: 31;
