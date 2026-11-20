@@ -32,9 +32,13 @@
 //!   `desk.session_start`, queued by the hub's own plan runner for a plan
 //!   the person approved, never by a boss's tool) go as New session's own
 //!   requests: `GET` and `POST /api/desk/sessions` on that machine, with
-//!   Desk's plugin folder there in the start's environment. A start is sent
-//!   once: when it may have reached the machine but no answer came, its
-//!   outcome isn't known, and the hub finds the session there by its name.
+//!   Desk's plugin folder there in the start's environment. A start the hub
+//!   queued under a plan's grant (`plan-<plan>`) says that grant and the
+//!   call's boss, from the call itself, never its input: the machine starts
+//!   it run by that boss from launch, only while its grant there names that
+//!   boss. A start is sent once: when it may have reached the machine but
+//!   no answer came, its outcome isn't known, and the hub finds the session
+//!   there by its name.
 //!
 //! - **A boss's machine tools** (`desk.machines`, `desk.folders`,
 //!   `desk.folder_make`, `desk.repos` and `desk.run`, queued by the hub's
@@ -85,9 +89,11 @@ const STATUSES: &[&str] = &["ok", "suggested", "refused"];
 const SESSIONS: &str = "desk.sessions";
 /// A plan's ticket's session started on a machine.
 const SESSION_START: &str = "desk.session_start";
-/// What a plan's start may say, as New session says it: nothing else goes.
+/// What a plan's start may say, as New session says it, and the session id
+/// its plan gave it (`id`, a UUID), so a start sent again is the same one:
+/// nothing else goes.
 const START_FIELDS: &[&str] = &[
-    "engine", "name", "cwd", "goal", "prompt", "view", "worktree", "model",
+    "engine", "name", "cwd", "goal", "prompt", "view", "worktree", "model", "id",
 ];
 /// The person's machines, as Desk has them: answered here.
 const MACHINES: &str = "desk.machines";
@@ -349,6 +355,15 @@ fn error_of(reply: &Answer) -> Option<String> {
     Some(e.chars().take(500).collect())
 }
 
+/// The machine's own code for why it refused, when it gives one: a short
+/// word of lowercase letters and underscores, which the hub acts on
+/// (a plan's start that waits for its grant there).
+fn code_of(reply: &Answer) -> Option<String> {
+    let v: Value = serde_json::from_str(&reply.body).ok()?;
+    let c = v.get("code")?.as_str()?;
+    (c.len() <= 64 && c.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')).then(|| c.to_string())
+}
+
 /// Call `call` carried to `machine`, sent again (with its own id) when no
 /// answer came.
 async fn carry<E: Ends>(ends: &E, call: &Call, machine: &MachineId, timing: Timing) -> Outcome {
@@ -423,6 +438,7 @@ fn session_of(v: &Value) -> Option<Value> {
         "state": text("state"),
         "createdAt": text("createdAt"),
         "lastReply": reply,
+        "bossHas": text("bossHas"),
     });
     if let Some(e) = v.get("exited").filter(|e| e.is_object()) {
         let field = |k: &str| e.get(k).cloned().unwrap_or(Value::Null);
@@ -446,7 +462,13 @@ fn tail_chars(text: &str, max: usize) -> &str {
 
 /// Why a machine refused one of Desk's own requests, briefly.
 fn refusal(name: &str, r: &Answer) -> Outcome {
-    refused(error_of(r).unwrap_or_else(|| format!("{name} refused it ({})", r.status)))
+    let why = error_of(r).unwrap_or_else(|| format!("{name} refused it ({})", r.status));
+    match code_of(r) {
+        Some(code) => {
+            Outcome::Answer(json!({"status": "refused", "body": {"error": why, "code": code}}))
+        }
+        None => refused(why),
+    }
 }
 
 /// A plan's call on `machine`'s sessions (`tool`, one of [`SESSIONS`] and
@@ -500,10 +522,26 @@ async fn carry_desk<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &
     }) {
         return refused(format!("That start's {k} couldn't be read."));
     }
+    if given
+        .get("id")
+        .and_then(Value::as_str)
+        .is_some_and(|id| !uuid_ok(id))
+    {
+        return refused("That start's id couldn't be read.".to_string());
+    }
     let mut start: serde_json::Map<String, Value> = START_FIELDS
         .iter()
         .filter_map(|k| given.get(*k).map(|v| ((*k).to_string(), v.clone())))
         .collect();
+    if let (Some(grant), Some(boss)) = (
+        call.group
+            .as_str()
+            .filter(|g| crate::local_bosses::plan_of(g).is_some()),
+        call.boss.as_str(),
+    ) {
+        start.insert("group".into(), grant.into());
+        start.insert("boss".into(), boss.into());
+    }
     // Claude Code without Desk's plugin would tell Desk nothing of its
     // turns: nothing is started until the folder is known.
     let claude = given
@@ -1847,7 +1885,7 @@ mod tests {
             json!({"status": "ok", "body": {
                 "id": SESSION, "name": "VEL-3", "displayName": null,
                 "cwd": "/home/dev/vellev", "state": "starting", "lastReply": null,
-                "createdAt": "2026-11-14T08:00:00Z",
+                "createdAt": "2026-11-14T08:00:00Z", "bossHas": null,
             }})
         );
         let sent = fake.desk_sent.lock().unwrap().clone();
@@ -1867,6 +1905,49 @@ mod tests {
         let _ = stop.send(true);
     }
 
+    /// A start the hub queued under a plan's grant goes with that grant and
+    /// the call's own boss, whatever its input says, and the machine's word
+    /// of who has it comes back; one under a group's grant says neither.
+    #[tokio::test]
+    async fn a_plans_start_under_its_grant_says_that_grant_and_the_calls_boss_alone() {
+        let plan = "plan-6f9619ff-8b86-4d01-b42d-00cf4fc964ff";
+        let made = json!({"id": SESSION, "name": "VEL-3", "cwd": "/x", "state": "starting",
+                          "bossHas": "desk"});
+        let (fake, mut rx) = with_desk(
+            vec![Does::Says(200, made.clone()), Does::Says(200, made)],
+            None,
+        );
+        let input = json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "id": SESSION,
+                           "group": "acme", "boss": "local:mallory"});
+        let mut planned = desk_call(A, "desk.session_start", input.clone());
+        planned["group"] = plan.into();
+        planned["boss"] = "local:desk".into();
+        let mut odd = desk_call(B, "desk.session_start", input);
+        odd["group"] = "plan-not-a-plan".into();
+        let stop = start(&fake.polled(vec![planned]));
+        let (_, answer) = next(&mut rx).await;
+        assert_eq!(answer["body"]["bossHas"], "desk");
+        let _ = stop.send(true);
+        let stop = start(&fake.polled(vec![odd]));
+        next(&mut rx).await;
+        let _ = stop.send(true);
+        let sent: Vec<Value> = fake
+            .desk_sent
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(_, b)| b.clone())
+            .collect();
+        assert_eq!(
+            sent,
+            vec![
+                json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "id": SESSION,
+                       "group": plan, "boss": "local:desk"}),
+                json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "id": SESSION}),
+            ]
+        );
+    }
+
     /// A start is sent once: refused there, it is said; maybe there but
     /// unanswered, nothing is posted and it isn't sent again.
     #[tokio::test]
@@ -1874,6 +1955,11 @@ mod tests {
         let (fake, mut rx) = with_desk(
             vec![
                 Does::Says(400, json!({"error": "There's no folder /home/dev/nope."})),
+                Does::Says(
+                    409,
+                    json!({"error": "Not held yet.", "code": "plan_grant_not_held"}),
+                ),
+                Does::Says(409, json!({"error": "Odd.", "code": "Not A Code"})),
                 Does::Fails(Unanswered::MaybeSent("cut off".into())),
                 Does::Says(502, json!({})),
             ],
@@ -1889,6 +1975,24 @@ mod tests {
             )
         );
         let _ = stop.send(true);
+        // The machine's own code for it goes with it; one that isn't a code
+        // doesn't.
+        for (id, body) in [
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302c1",
+                json!({"error": "Not held yet.", "code": "plan_grant_not_held"}),
+            ),
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302c2",
+                json!({"error": "Odd."}),
+            ),
+        ] {
+            let stop =
+                start(&fake.polled(vec![desk_call(id, "desk.session_start", input.clone())]));
+            let (_, answer) = next(&mut rx).await;
+            assert_eq!(answer, json!({"status": "refused", "body": body}));
+            let _ = stop.send(true);
+        }
         // Cut off, or a gateway's error: maybe started, so not sent again.
         for _ in 0..2 {
             let stop = start(&fake.polled(vec![desk_call(B, "desk.session_start", input.clone())]));
@@ -1897,7 +2001,7 @@ mod tests {
         }
         // Each start went once, with no plugin folder to give (Codex needs none).
         let sent = fake.desk_sent.lock().unwrap().clone();
-        assert_eq!(sent.len(), 3);
+        assert_eq!(sent.len(), 5);
         assert!(
             sent.iter()
                 .all(|(_, b)| b.as_ref().is_some_and(|b| b.get("env").is_none()))
@@ -1920,8 +2024,17 @@ mod tests {
                 "desk.session_start",
                 json!({"engine": "codex", "name": "VEL-2", "cwd": ["/x"]}),
             ),
+            desk_call(
+                SESSION,
+                "desk.session_start",
+                json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "id": "not-a-uuid"}),
+            ),
         ]));
-        let mut got = [next(&mut rx).await, next(&mut rx).await];
+        let mut got = [
+            next(&mut rx).await,
+            next(&mut rx).await,
+            next(&mut rx).await,
+        ];
         got.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(got[0].0, A);
         assert!(
@@ -1934,6 +2047,10 @@ mod tests {
         assert_eq!(
             got[1].1,
             json!({"status": "refused", "body": {"error": "That start's cwd couldn't be read."}})
+        );
+        assert_eq!(
+            got[2].1,
+            json!({"status": "refused", "body": {"error": "That start's id couldn't be read."}})
         );
         assert!(fake.desk_sent.lock().unwrap().is_empty());
         let _ = stop.send(true);
