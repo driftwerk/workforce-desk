@@ -139,7 +139,7 @@ describe("a session's line", () => {
     ];
     await show();
     expect(within(rowOf("try --release")).getByText(/Desk's breaker paused it/)).toBeTruthy();
-    expect(within(rowOf("say main")).getByText(/it's asking you something/)).toBeTruthy();
+    expect(within(rowOf("say main")).getByText(/its turn ended asking you something/)).toBeTruthy();
   });
 
   it("offers only Send where the engine can't take a message mid-turn", async () => {
