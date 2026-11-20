@@ -209,7 +209,10 @@ tested by `test_nightly.py`):
    …`, the hub commits listed) on a branch `nightly/hub-…`, runs Desk's CI
    there, and the Linux backend's smoke test (`backend.yml`), as a person's
    `hub.ref` pull request would (`workflow_dispatch`: a push with the job's
-   token starts none), and fast-forwards `main` to it once both pass. `main`'s ruleset only forbids
+   token starts none), and fast-forwards `main` to it once both pass. If `main`
+   moved meanwhile (it does, most days) the bump is made again on the new
+   `main`, twice at most; after that it is left for the next night, never the
+   night itself. `main`'s ruleset only forbids
    force-pushes and deletion, so the bot can push; if it ever requires pull
    requests, this step fails and the night's issue says so. A bump whose CI
    fails is left out (that night's nightly is built without it, if Desk
@@ -217,8 +220,12 @@ tested by `test_nightly.py`):
    refused unless `hub.ref` is all it changes (so the vellev hold below
    stands).
 4. Skips when there are no new commits on `main` and no hub bump.
-5. Builds only a commit whose Desk CI passed, at that exact commit; else it
-   skips and says why in the run's summary and the night's issue.
+5. Builds only a commit whose Desk CI passed, at that exact commit: `main`'s
+   tip, taken afresh once any bump is settled (a tip whose CI a newer push
+   cancelled gives way to the newer tip). If the tip's CI is red, it builds
+   the newest commit of `main` whose CI passed, when that is newer than the
+   last nightly, and says so; else it skips and says why in the run's
+   summary and the night's issue.
 6. Calls `release.yml` with `channel: nightly`: the same builds, signing and
    notarizing, published as above. Windows gets the NSIS installer only,
    since the MSI takes no pre-release version, and Linux the AppImage only:

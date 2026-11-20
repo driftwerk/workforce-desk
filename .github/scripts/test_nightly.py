@@ -3,8 +3,11 @@
 
 import datetime
 import os
+import pathlib
 import sys
+import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import nightly  # noqa: E402
@@ -119,6 +122,76 @@ class Runs(unittest.TestCase):
         ]
         self.assertEqual(nightly.newest_run(runs)["id"], 2)
         self.assertIsNone(nightly.newest_run([]))
+
+
+def ci(conclusion, sha="x"):
+    return {"status": "completed", "conclusion": conclusion, "html_url": f"https://ci/{sha}"}
+
+
+class Main(unittest.TestCase):
+    """Main moves all day: a night builds the newest green commit, never skips because it moved."""
+
+    def settle(self, tips, runs, green=None, last=None):
+        tips = iter(tips)
+        tip = {}
+
+        def git(*args, check=True):
+            if args[0] == "rev-parse":
+                return tip["now"]
+            tip["now"] = next(tips)
+            return ""
+
+        with mock.patch.object(nightly, "git", git), \
+             mock.patch.object(nightly, "wait_for_ci", lambda repo, sha, **kw: runs[sha]), \
+             mock.patch.object(nightly, "newest_green", lambda repo, branch: green):
+            return nightly.settle("o/r", "main", last)
+
+    def test_the_tip_that_passed_is_built(self):
+        self.assertEqual(self.settle([B], {B: ci("success")}), (B, ""))
+
+    def test_a_tip_a_newer_push_cancelled_gives_way_to_the_newer_tip(self):
+        self.assertEqual(self.settle([A, B], {A: ci("cancelled"), B: ci("success")}), (B, ""))
+
+    def test_a_red_tip_builds_the_newest_green_commit(self):
+        sha, caveat = self.settle([C], {C: ci("failure")}, green=B)
+        self.assertEqual(sha, B)
+        self.assertIn("newest commit whose CI passed", caveat)
+
+    def test_a_red_tip_with_nothing_newer_than_the_last_nightly_is_a_skip(self):
+        with self.assertRaises(nightly.Skip) as e:
+            self.settle([C], {C: ci("failure")}, green=B, last={"desk_commit": B})
+        self.assertTrue(e.exception.attention)
+
+    def test_a_tip_whose_ci_never_ran_is_a_skip_without_a_green_commit(self):
+        with self.assertRaises(nightly.Skip):
+            self.settle([C], {C: None})
+
+    def bump(self, once, fresh="hub"):
+        results = iter(once)
+        with tempfile.TemporaryDirectory() as d, \
+             mock.patch.object(nightly, "bump_once", lambda *a: next(results)), \
+             mock.patch.object(nightly, "git", lambda *a, **k: ""):
+            old = os.getcwd()
+            os.chdir(d)
+            try:
+                pathlib.Path("hub.ref").write_text({"hub": A, "taken": C}[fresh] + "\n")
+                return nightly.bump("o/r", A, B, [], "https://run")
+            finally:
+                os.chdir(old)
+
+    def test_a_bump_that_finds_main_moved_is_made_again_on_the_new_main(self):
+        self.assertEqual(self.bump([(None, None), (C, None)]), (C, None))
+
+    def test_a_bump_that_keeps_finding_main_moved_is_left_out_not_the_night(self):
+        sha, why = self.bump([(None, None), (None, None)])
+        self.assertIsNone(sha)
+        self.assertIn("kept moving", why)
+
+    def test_a_hub_main_took_on_its_own_needs_no_bump(self):
+        self.assertEqual(self.bump([(None, None)], fresh="taken"), (None, ""))
+
+    def test_a_bump_whose_ci_failed_is_left_out_at_once(self):
+        self.assertEqual(self.bump([(None, "ci failed")]), (None, "ci failed"))
 
 
 if __name__ == "__main__":
