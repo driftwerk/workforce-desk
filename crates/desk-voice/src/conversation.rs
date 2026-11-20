@@ -57,6 +57,32 @@ pub enum Phase {
     Engaged(String),
 }
 
+/// What a finished stretch of speech comes to.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Transcript {
+    Request(Utterance),
+    NotToThem(NotToThem),
+}
+
+/// `name` was heard, but `text` (possibly empty) didn't open with it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct NotToThem {
+    pub name: String,
+    pub text: String,
+}
+
+impl NotToThem {
+    /// What the person is told, since nothing was sent.
+    pub fn message(&self) -> String {
+        let name = &self.name;
+        if self.text.is_empty() {
+            format!("Heard “{name}”, but couldn’t make out what was said.")
+        } else {
+            format!("Heard “{name}”, but what followed wasn’t said to them, so nothing was sent.")
+        }
+    }
+}
+
 pub struct Conversation {
     timing: Timing,
     mode: ListenMode,
@@ -131,6 +157,14 @@ impl Conversation {
         true
     }
 
+    /// The name was heard before this stretch of speech began: what was said
+    /// is for them, whether or not it opens with the name.
+    pub fn named_before_speech(&mut self) {
+        if let Phase::Named { this_segment, .. } = &mut self.phase {
+            *this_segment = false;
+        }
+    }
+
     /// Speech began. Over playback it may or may not be someone talking: see
     /// [`interrupted`](Self::interrupted).
     pub fn speech_started(&mut self, now: Instant) {
@@ -163,13 +197,13 @@ impl Conversation {
     }
 
     /// A speech segment's transcript; what to send, if anything.
-    pub fn transcript(&mut self, text: &str, now: Instant) -> Option<Utterance> {
+    pub fn transcript(&mut self, text: &str, now: Instant) -> Option<Transcript> {
         self.last = now;
+        let text = text.trim();
         match self.mode {
             ListenMode::Names => {}
             ListenMode::Open => {
-                let text = text.trim();
-                return (!text.is_empty()).then(|| Utterance::new(None, text));
+                return (!text.is_empty()).then(|| Transcript::Request(Utterance::new(None, text)));
             }
             ListenMode::Held => return None,
         }
@@ -183,10 +217,18 @@ impl Conversation {
                 let request = match strip_name(text, &agent) {
                     Some(rest) => rest,
                     None if this_segment => {
-                        self.phase = resume.map_or(Phase::Idle, Phase::Engaged);
-                        return None;
+                        return match resume {
+                            Some(was) if !text.is_empty() => self.request(was, None, text, now),
+                            resume => {
+                                self.phase = resume.map_or(Phase::Idle, Phase::Engaged);
+                                Some(Transcript::NotToThem(NotToThem {
+                                    name: agent,
+                                    text: text.to_string(),
+                                }))
+                            }
+                        };
                     }
-                    None => text.trim(),
+                    None => text,
                 };
                 if request.is_empty() {
                     self.phase = Phase::Named {
@@ -198,24 +240,29 @@ impl Conversation {
                 }
                 self.request(agent.clone(), Some(agent), request, now)
             }
-            Phase::Engaged(agent) => self.request(agent, None, text.trim(), now),
+            Phase::Engaged(agent) => self.request(agent, None, text, now),
         }
     }
 
+    /// `text` for `agent`. A farewell ends the conversation; nothing made out
+    /// keeps it going, with nothing sent.
     fn request(
         &mut self,
         agent: String,
         named: Option<String>,
         text: &str,
         now: Instant,
-    ) -> Option<Utterance> {
+    ) -> Option<Transcript> {
         if is_farewell(text) {
             self.end();
             return None;
         }
         self.phase = Phase::Engaged(agent);
+        if text.is_empty() {
+            return None;
+        }
         self.awaiting = Some(now);
-        Some(Utterance::new(named, text))
+        Some(Transcript::Request(Utterance::new(named, text)))
     }
 
     /// Push-to-talk: always sent. Listening by name, a leading roster name
@@ -309,7 +356,7 @@ mod tests {
         from: u64,
         to: u64,
         text: &str,
-    ) -> Option<Utterance> {
+    ) -> Option<Transcript> {
         c.speech_started(clock.at(from));
         c.speech_ended(clock.at(to));
         c.transcript(text, clock.at(to))
@@ -317,6 +364,17 @@ mod tests {
 
     fn u(agent: Option<&str>, text: &str) -> Option<Utterance> {
         Some(Utterance::new(agent.map(String::from), text))
+    }
+
+    fn sent(agent: Option<&str>, text: &str) -> Option<Transcript> {
+        u(agent, text).map(Transcript::Request)
+    }
+
+    fn not_to(name: &str, text: &str) -> Option<Transcript> {
+        Some(Transcript::NotToThem(NotToThem {
+            name: name.into(),
+            text: text.into(),
+        }))
     }
 
     #[test]
@@ -327,13 +385,13 @@ mod tests {
         c.speech_ended(clock.at(2_000));
         assert_eq!(
             c.transcript("Atlas, what failed overnight?", clock.at(2_000)),
-            u(Some("Atlas"), "what failed overnight?")
+            sent(Some("Atlas"), "what failed overnight?")
         );
         c.speaking();
         c.spoken(clock.at(6_000));
         assert_eq!(
             said(&mut c, &clock, 7_000, 8_000, "And the night before?"),
-            u(None, "And the night before?")
+            sent(None, "And the night before?")
         );
         assert_eq!(c.phase(), &Phase::Engaged("Atlas".into()));
     }
@@ -358,7 +416,7 @@ mod tests {
         assert!(c.wants_transcript());
         assert_eq!(
             said(&mut c, &clock, 1_500, 3_000, "What failed overnight?"),
-            u(Some("Atlas"), "What failed overnight?")
+            sent(Some("Atlas"), "What failed overnight?")
         );
     }
 
@@ -370,13 +428,83 @@ mod tests {
         c.speech_ended(clock.at(2_000));
         assert_eq!(
             c.transcript("I asked atlas yesterday", clock.at(2_000)),
-            None
+            not_to("Atlas", "I asked atlas yesterday")
         );
         assert_eq!(c.phase(), &Phase::Idle);
     }
 
     #[test]
-    fn a_false_wake_mid_conversation_keeps_the_conversation() {
+    fn a_name_heard_with_nothing_made_out_says_so() {
+        let (mut c, clock) = start();
+        c.speech_started(clock.at(0));
+        c.keyword("Atlas", clock.at(300));
+        c.speech_ended(clock.at(1_000));
+        assert_eq!(c.transcript("  ", clock.at(1_000)), not_to("Atlas", ""));
+        assert_eq!(c.phase(), &Phase::Idle);
+    }
+
+    #[test]
+    fn a_name_said_before_its_speech_addresses_what_follows() {
+        let (mut c, clock) = start();
+        assert!(c.keyword("Kat", clock.at(0)));
+        c.speech_started(clock.at(1_300));
+        c.speech_ended(clock.at(2_300));
+        c.named_before_speech();
+        assert_eq!(
+            c.transcript("How are you?", clock.at(2_300)),
+            sent(Some("Kat"), "How are you?")
+        );
+        assert_eq!(c.phase(), &Phase::Engaged("Kat".into()));
+        assert_eq!(
+            said(&mut c, &clock, 4_000, 6_000, "And what's on today?"),
+            sent(None, "And what's on today?")
+        );
+    }
+
+    #[test]
+    fn a_name_said_with_no_speech_after_it_times_out() {
+        let (mut c, clock) = start();
+        assert!(c.keyword("Kat", clock.at(0)));
+        assert!(!c.tick(clock.at(7_900)));
+        assert!(c.tick(clock.at(8_000)));
+        assert_eq!(c.phase(), &Phase::Idle);
+    }
+
+    #[test]
+    fn being_told_is_said_in_plain_words() {
+        let told = |text: &str| {
+            NotToThem {
+                name: "Kat".into(),
+                text: text.into(),
+            }
+            .message()
+        };
+        assert_eq!(
+            told(""),
+            "Heard “Kat”, but couldn’t make out what was said."
+        );
+        assert_eq!(
+            told("I asked kat yesterday"),
+            "Heard “Kat”, but what followed wasn’t said to them, so nothing was sent."
+        );
+    }
+
+    #[test]
+    fn a_false_wake_on_a_farewell_ends_the_conversation() {
+        let (mut c, clock) = start();
+        c.speech_started(clock.at(0));
+        c.keyword("Atlas", clock.at(300));
+        c.speech_ended(clock.at(1_000));
+        c.transcript("Atlas, status?", clock.at(1_000));
+        c.speech_started(clock.at(2_000));
+        c.keyword("Allan", clock.at(2_300));
+        c.speech_ended(clock.at(3_000));
+        assert_eq!(c.transcript("Thanks, that's all.", clock.at(3_000)), None);
+        assert_eq!(c.phase(), &Phase::Idle);
+    }
+
+    #[test]
+    fn a_false_wake_mid_conversation_is_a_follow_up() {
         let (mut c, clock) = start();
         c.speech_started(clock.at(0));
         c.keyword("Atlas", clock.at(300));
@@ -385,8 +513,31 @@ mod tests {
         c.speech_started(clock.at(2_000));
         c.keyword("Allan", clock.at(2_500));
         c.speech_ended(clock.at(3_000));
-        assert_eq!(c.transcript("ask about it later", clock.at(3_000)), None);
+        assert_eq!(
+            c.transcript("ask about it later", clock.at(3_000)),
+            sent(None, "ask about it later")
+        );
         assert_eq!(c.phase(), &Phase::Engaged("Atlas".into()));
+        c.speech_started(clock.at(4_000));
+        c.keyword("Allan", clock.at(4_300));
+        c.speech_ended(clock.at(5_000));
+        assert_eq!(c.transcript("", clock.at(5_000)), not_to("Allan", ""));
+        assert_eq!(c.phase(), &Phase::Engaged("Atlas".into()));
+    }
+
+    #[test]
+    fn nothing_made_out_in_a_conversation_is_not_sent() {
+        let (mut c, clock) = start();
+        c.speech_started(clock.at(0));
+        c.keyword("Atlas", clock.at(300));
+        c.speech_ended(clock.at(1_000));
+        c.transcript("Atlas, status?", clock.at(1_000));
+        assert_eq!(said(&mut c, &clock, 2_000, 3_000, " "), None);
+        assert_eq!(c.phase(), &Phase::Engaged("Atlas".into()));
+        assert_eq!(
+            said(&mut c, &clock, 4_000, 5_000, "and the build?"),
+            sent(None, "and the build?")
+        );
     }
 
     #[test]
@@ -401,7 +552,7 @@ mod tests {
         c.speech_ended(clock.at(3_000));
         assert_eq!(
             c.transcript("Allan, and yours?", clock.at(3_000)),
-            u(Some("Allan"), "and yours?")
+            sent(Some("Allan"), "and yours?")
         );
         assert_eq!(c.phase(), &Phase::Engaged("Allan".into()));
     }
@@ -533,12 +684,12 @@ mod tests {
         assert!(c.wants_transcript());
         assert_eq!(
             said(&mut c, &clock, 0, 1_000, " what failed overnight? "),
-            u(None, "what failed overnight?")
+            sent(None, "what failed overnight?")
         );
         // A leading name is part of what was said, not who it's for.
         assert_eq!(
             said(&mut c, &clock, 2_000, 3_000, "Allan, and yours?"),
-            u(None, "Allan, and yours?")
+            sent(None, "Allan, and yours?")
         );
         assert_eq!(said(&mut c, &clock, 4_000, 4_300, "  "), None);
     }
@@ -551,7 +702,7 @@ mod tests {
         assert!(!c.tick(clock.at(600_000)));
         assert_eq!(
             said(&mut c, &clock, 600_000, 601_000, "Thanks, that's all."),
-            u(None, "Thanks, that's all.")
+            sent(None, "Thanks, that's all.")
         );
         assert!(!c.tick(clock.at(700_000)));
     }

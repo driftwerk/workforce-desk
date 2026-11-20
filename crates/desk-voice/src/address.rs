@@ -61,9 +61,28 @@ fn edit_distance(a: &str, b: &str) -> usize {
     row[b.len()]
 }
 
+/// How far `said` is from the name's letters `name`, if it sounds like it.
+fn as_said(said: &str, name: &str) -> Option<usize> {
+    Some(edit_distance(said, name)).filter(|d| *d <= name.chars().count() / 4)
+}
+
+/// The same, once the spotter has heard the name: a short one may also be a
+/// letter off ("Cat" for "Kat"), in a word as long as it.
+fn as_spotted(said: &str, name: &str) -> Option<usize> {
+    as_said(said, name).or_else(|| {
+        Some(edit_distance(said, name)).filter(|d| {
+            *d == 1 && name.chars().count() >= 3 && said.chars().count() == name.chars().count()
+        })
+    })
+}
+
 /// How far the first words are from `name`, and where they end; `None` when
-/// they don't sound like it.
-fn leading(text: &str, name: &str) -> Option<(usize, usize)> {
+/// they don't sound like it (`sounds`).
+fn leading(
+    text: &str,
+    name: &str,
+    sounds: fn(&str, &str) -> Option<usize>,
+) -> Option<(usize, usize)> {
     let target = letters(name);
     if target.is_empty() {
         return None;
@@ -74,14 +93,12 @@ fn leading(text: &str, name: &str) -> Option<(usize, usize)> {
         .take_while(|(w, _)| FILLERS.contains(&w.as_str()))
         .count();
     let rest = &words[skip..];
-    let allowed = target.len() / 4;
     let span = spoken_words(name).len() + 1;
     (1..=span.min(rest.len()))
-        .map(|k| {
+        .filter_map(|k| {
             let said: String = rest[..k].iter().map(|(w, _)| w.as_str()).collect();
-            (edit_distance(&said, &target), rest[k - 1].1)
+            sounds(&said, &target).map(|d| (d, rest[k - 1].1))
         })
-        .filter(|(d, _)| *d <= allowed)
         .min_by_key(|(d, _)| *d)
 }
 
@@ -91,17 +108,17 @@ fn after(text: &str, end: usize) -> &str {
         .trim_end()
 }
 
-/// What follows `name` when the transcript opens with it ("Hey Atlas,
-/// what failed?" → "what failed?").
+/// What follows `name`, which the spotter heard, when the transcript opens
+/// with it ("Hey Atlas, what failed?" → "what failed?").
 pub fn strip_name<'a>(text: &'a str, name: &str) -> Option<&'a str> {
-    leading(text, name).map(|(_, end)| after(text, end))
+    leading(text, name, as_spotted).map(|(_, end)| after(text, end))
 }
 
 /// The roster name the transcript opens with, if any, and the rest.
 pub fn addressed<'a, 'n>(text: &'a str, names: &'n [String]) -> Option<(&'n str, &'a str)> {
     names
         .iter()
-        .filter_map(|n| leading(text, n).map(|(d, end)| (d, n.as_str(), end)))
+        .filter_map(|n| leading(text, n, as_said).map(|(d, end)| (d, n.as_str(), end)))
         .min_by_key(|(d, _, _)| *d)
         .map(|(_, name, end)| (name, after(text, end)))
 }
@@ -143,6 +160,14 @@ mod tests {
         assert_eq!(strip_name("I asked atlas", "Atlas"), None);
         assert_eq!(strip_name("Al, hi", "Al"), Some("hi"));
         assert_eq!(strip_name("All of it", "Al"), None);
+        assert_eq!(
+            strip_name("Hey Cat, how are you?", "Kat"),
+            Some("how are you?")
+        );
+        assert_eq!(strip_name("What's on?", "Kat"), None);
+        assert_eq!(strip_name("At three, remind me", "Kat"), None);
+        // Letters, not bytes: "Zoe" is one letter off "Zoë".
+        assert_eq!(strip_name("Zoe, hi", "Zoë"), Some("hi"));
     }
 
     #[test]
@@ -157,6 +182,7 @@ mod tests {
             Some(("scout", "run it"))
         );
         assert_eq!(addressed("what's left", &names), None);
+        assert_eq!(addressed("Cat videos", &["Kat".to_string()]), None);
         assert_eq!(addressed("Atlas", &[]), None);
     }
 
