@@ -1394,8 +1394,9 @@ export type LineWait =
   | "working"
   | "typing"
   | "paused"
-  /** Its turn ended asking you something: only you, or a boss that runs
-   *  it or gives its answer, go in until then. */
+  /** Its turn ended asking you something: until it's answered, only your
+   *  messages go in, or its boss's answer, or the messages of the boss
+   *  that runs it. */
   | "asking"
   /** A dialog in its terminal (a permission request, or its questions
    *  there) waits on an answer: this goes in after it is answered and its

@@ -9,6 +9,6 @@ describe("why a message waits", () => {
     const waiting = (waiting: "dialog" | "asking") =>
       whyWaiting(msg({ from: DESK, to: S1, kind: "tell", asked: null, delivery: "queued", deliveredAt: null, at, waiting }), session, Date.parse(at));
     expect(waiting("dialog")).toBe("acme-web waits on a dialog in its terminal: this goes in after it is answered and its turn ends.");
-    expect(waiting("asking")).toBe("acme-web is asking you something: this goes in once you've answered.");
+    expect(waiting("asking")).toBe("acme-web's turn ended asking you something: this goes in once you've answered it.");
   });
 });

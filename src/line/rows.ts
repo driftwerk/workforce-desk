@@ -61,7 +61,7 @@ export const deliveryText = (m: LineMessage, now: number): string | null => {
         case "paused":
           return "Waiting: Desk's breaker paused it";
         case "asking":
-          return "Waiting: it's asking you something";
+          return "Waiting: its turn ended asking you something";
         case "dialog":
           return "Waiting: a dialog in its terminal";
         case "person_driving":
@@ -166,14 +166,16 @@ export const onThread = (m: LineMessage, sessionId: string): boolean =>
 const BELOW_DRIVING: ReadonlySet<LineMessage["waiting"]> = new Set([undefined, "asking"]);
 
 /** `list` once the wheel of `sessionId`, which a boss runs, changed hands,
- *  as the hub's line gate reads it: the boss's tells still waiting to go in
- *  wait on you while you drive, unless something the hub ranks first holds
- *  them; once you don't, "you're driving" is no longer why. Its questions
- *  and answers are never held for the wheel. */
+ *  as the hub's line gate reads it: the boss's tells, and its answers to
+ *  the question a turn ended on, still waiting to go in wait on you while
+ *  you drive, unless something the hub ranks first holds them; once you
+ *  don't, "you're driving" is no longer why. Its questions, and its answers
+ *  to a session's own asks, are never held for the wheel. */
 export const withWheel = (list: readonly LineMessage[], sessionId: string, driving: boolean): LineMessage[] => {
   let changed = false;
   const next = list.map((m) => {
-    if (m.delivery !== "queued" || m.kind !== "tell" || m.from.kind !== "manager" || m.to.kind !== "session" || m.to.id !== sessionId) return m;
+    const held = m.kind === "tell" || (m.kind === "answer" && !m.inReplyTo);
+    if (m.delivery !== "queued" || !held || m.from.kind !== "manager" || m.to.kind !== "session" || m.to.id !== sessionId) return m;
     const waiting = driving ? (BELOW_DRIVING.has(m.waiting) ? ("person_driving" as const) : m.waiting) : m.waiting === "person_driving" ? undefined : m.waiting;
     if (waiting === m.waiting) return m;
     changed = true;

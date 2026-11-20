@@ -18,7 +18,7 @@ describe("a line's rows", () => {
     expect(to({ delivery: "queued", waiting: "working" })).toBe("Waiting for it to finish its turn");
     expect(to({ delivery: "queued", waiting: "typing" })).toBe("Waiting: you're typing in its terminal");
     expect(to({ delivery: "queued", waiting: "paused" })).toBe("Waiting: Desk's breaker paused it");
-    expect(to({ delivery: "queued", waiting: "asking" })).toBe("Waiting: it's asking you something");
+    expect(to({ delivery: "queued", waiting: "asking" })).toBe("Waiting: its turn ended asking you something");
     expect(to({ delivery: "queued", waiting: "dialog" })).toBe("Waiting: a dialog in its terminal");
     expect(to({ delivery: "held" })).toBe("Held: it gets this when it runs again");
     expect(to({ delivery: "handed" })).toBe("On its way");
@@ -37,7 +37,9 @@ describe("a line's rows", () => {
       tell("stopped", { waiting: "stopped" }),
       tell("working", { waiting: "working" }),
       msg({ id: "ask", from: DESK, to: S1, kind: "ask", delivery: "queued", deliveredAt: null }),
-      msg({ id: "answer", from: DESK, to: S1, kind: "answer", asked: null, delivery: "queued", deliveredAt: null }),
+      msg({ id: "answer", from: DESK, to: S1, kind: "answer", asked: null, inReplyTo: "q1", delivery: "queued", deliveredAt: null }),
+      msg({ id: "turnAnswer", from: DESK, to: S1, kind: "answer", asked: null, inReplyTo: null, delivery: "queued", deliveredAt: null }),
+      tell("dialog", { waiting: "dialog" }),
       tell("yours", { from: YOU }),
       tell("sent", { delivery: "delivered" }),
       tell("other", { to: S2 }),
@@ -53,12 +55,14 @@ describe("a line's rows", () => {
       working: "working",
       ask: undefined,
       answer: undefined,
+      turnAnswer: "person_driving",
+      dialog: "dialog",
       yours: undefined,
       sent: undefined,
       other: undefined,
     });
     const back = withWheel(driven, "s1", false);
-    expect(waits(back)).toEqual({ ...waits(list), plain: undefined, asking: undefined });
+    expect(waits(back)).toEqual({ ...waits(list), plain: undefined, asking: undefined, turnAnswer: undefined });
     expect(withWheel(list, "s1", false)).toBe(list);
   });
 
