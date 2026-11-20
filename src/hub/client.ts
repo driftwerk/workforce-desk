@@ -356,8 +356,9 @@ export const deskCall = <T>(hub: HubRef, method: string, path: string, body?: un
 /** The most messages one read of a room or thread returns. */
 export const ROOM_PAGE = 100;
 
-/** The hub's answer to a typing ping for an agent that isn't a boss. */
-const NO_BOSS = "There is no boss by that name here.";
+/** The hub's answer to a typing ping for an agent it doesn't know (an
+ *  older hub: for one that isn't a boss). */
+const NO_AGENT = ["There is no agent by that name here.", "There is no boss by that name here."];
 
 /** What an engine's own sign-in says when that engine's hub is older than
  *  this Desk and refuses the person's paired Desk for it. */
@@ -847,17 +848,17 @@ export class DeskHub {
   doneItem = (id: string): Promise<{ done: string }> => this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/done`);
   /** Drops what the boss asked you, unanswered. */
   dropItem = (id: string): Promise<{ done: string }> => this.desk("POST", `/api/desk/items/${encodeURIComponent(id)}/drop`);
-  /** You're typing to the boss `agent`: its posts wait for a pause. Quiet
-   *  on a hub without the route (an older one), or for an agent that
-   *  isn't a boss. */
+  /** You're typing to `agent`: its own posts (a boss's updates, what your
+   *  monitors saw) wait for a pause. Quiet on a hub without the route (an
+   *  older one), or for an agent it doesn't know. */
   dmTyping = async (agent: string): Promise<void> => {
     if (this.#unheard.has("typing")) return;
     try {
       await this.desk("POST", `/api/desk/dm/${encodeURIComponent(agent)}/typing`);
     } catch (e) {
       // Its posts come as they did. A hub without the route isn't asked
-      // again; one that says the agent is no boss still is, for others.
-      if (e instanceof HubError && e.status === 404 && e.message !== NO_BOSS) this.#unheard.add("typing");
+      // again; one that doesn't know the agent still is, for others.
+      if (e instanceof HubError && e.status === 404 && !NO_AGENT.includes(e.message)) this.#unheard.add("typing");
     }
   };
   /** When the boss `agent`'s next roundup comes (null: none comes); null

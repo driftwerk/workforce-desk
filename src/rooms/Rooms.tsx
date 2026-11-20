@@ -723,7 +723,7 @@ export function DirectMessage({ agent: inPane }: { agent?: string } = {}) {
             busy={busy}
             connected={convo.connected}
             overseeing={!!overseeing}
-            boss={local && (manager?.agentId === agent.id || !!manager?.bosses?.some((b) => b.agentId === agent.id))}
+            onThisComputer={!!local}
             inPane={!!inPane}
             files={files}
             sending={sending}
@@ -1030,7 +1030,7 @@ function DmComposer({
   busy,
   connected,
   overseeing,
-  boss,
+  onThisComputer,
   inPane,
   files,
   sending: [sending, setSending],
@@ -1049,9 +1049,9 @@ function DmComposer({
   busy: boolean;
   connected: boolean;
   overseeing: boolean;
-  /** A boss on this computer (the main one or a group's): its posts wait
-   *  while you type to it. */
-  boss: boolean;
+  /** An agent on this computer: what it would post on its own (a boss's
+   *  updates, what your monitors saw) waits while you type to it. */
+  onThisComputer: boolean;
   /** In a grid's pane: its placeholder is short, as a room's is there. */
   inPane: boolean;
   files: Files;
@@ -1106,7 +1106,7 @@ function DmComposer({
     setDraft(next);
     requestAnimationFrame(() => composer.current?.setSelectionRange(next.length, next.length));
   });
-  // Typing to a boss on this computer: its posts wait for your pause.
+  // Typing to an agent on this computer: its own posts wait for your pause.
   const pingBoss = useMemo(() => typingPinger((id) => void useDesk.getState().hub?.dmTyping?.(id), DM_TYPING_EVERY_MS), []);
   const emoji = useEmojiInput({
     field: composer,
@@ -1227,7 +1227,7 @@ function DmComposer({
           onChange={(e) => {
             setDraft(e.target.value);
             emoji.onChange(e);
-            if (boss) pingBoss(agent.id, e.target.value);
+            if (onThisComputer) pingBoss(agent.id, e.target.value);
           }}
           onSelect={emoji.onSelect}
           onFocus={emoji.onFocus}

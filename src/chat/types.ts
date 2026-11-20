@@ -275,6 +275,8 @@ export type DeliveryKind =
   | "update"
   /** A boss's catch-up on your return. */
   | "away"
+  /** What one of your monitors saw, in its agent's DM. */
+  | "monitor"
   | "other";
 
 export type DeskPlace =

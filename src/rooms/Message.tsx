@@ -30,6 +30,7 @@ export const DELIVERY_BADGES: Partial<Record<DeliveryKind, string>> = {
   workflow: "Workflow",
   check_in: "Check-in",
   approval: "Approval",
+  monitor: "Monitor",
 };
 
 /** What a boss's update is labelled, after its time: a word, not a

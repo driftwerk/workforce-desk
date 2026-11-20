@@ -42,6 +42,19 @@ describe("what interrupts you", () => {
   });
 });
 
+describe("a monitor's delivery", () => {
+  it("is told as a Monitor message for you, interrupting at Only things for me as a reminder does", async () => {
+    const { noticesFrom } = await import("./notices");
+    useDesk.setState({ rooms: { r1: { id: "r1", name: "Ops" } } as never });
+    noticesFrom({
+      type: "roomMessage",
+      message: { id: "m1", roomId: "r1", author: "local/scout", delivery: "monitor", content: "Invoice from Acme: #42", createdAt: "2026-11-19T09:00:00Z" },
+    } as never);
+    // Sent at the default level, Only things for me: for you, not quiet.
+    expect(sent).toEqual([{ title: "scout · Monitor · Ops", body: "Invoice from Acme: #42" }]);
+  });
+});
+
 describe("sending a notification", () => {
   it("sends each once, at the place's level, and none from a detached window", () => {
     notifyPlace(n({ id: "a" }));

@@ -63,6 +63,7 @@ export const DELIVERY_LABEL: Partial<Record<DeliveryKind, string>> = {
   question: "Needs you",
   update: "Update",
   away: "While you were away",
+  monitor: "Monitor",
 };
 
 /** A notice's first line of text, short. */
