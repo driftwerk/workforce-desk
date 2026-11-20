@@ -19,6 +19,7 @@ describe("a line's rows", () => {
     expect(to({ delivery: "queued", waiting: "typing" })).toBe("Waiting: you're typing in its terminal");
     expect(to({ delivery: "queued", waiting: "paused" })).toBe("Waiting: Desk's breaker paused it");
     expect(to({ delivery: "queued", waiting: "asking" })).toBe("Waiting: it's asking you something");
+    expect(to({ delivery: "queued", waiting: "dialog" })).toBe("Waiting: a dialog in its terminal");
     expect(to({ delivery: "held" })).toBe("Held: it gets this when it runs again");
     expect(to({ delivery: "handed" })).toBe("On its way");
     expect(to({ delivery: "delivered" })).toMatch(/^Delivered /);

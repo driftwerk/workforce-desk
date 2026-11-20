@@ -62,6 +62,8 @@ export const deliveryText = (m: LineMessage, now: number): string | null => {
           return "Waiting: Desk's breaker paused it";
         case "asking":
           return "Waiting: it's asking you something";
+        case "dialog":
+          return "Waiting: a dialog in its terminal";
         case "person_driving":
           return "Waiting: you're driving";
         case "mode_ending":

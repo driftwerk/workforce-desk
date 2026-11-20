@@ -29,6 +29,8 @@ export const whyWaiting = (m: LineMessage, session: Session, now = Date.now()): 
       return `Desk's breaker paused ${name}: only your own messages go in until you let it go on.${forHow}`;
     case "asking":
       return `${name} is asking you something: this goes in once you've answered.${forHow}`;
+    case "dialog":
+      return `${name} waits on a dialog in its terminal: this goes in after it is answered and its turn ends.${forHow}`;
     case "person_driving":
       return `You're driving ${name}: its boss's messages go in once you hand it back.${forHow}`;
     case "mode_ending":
