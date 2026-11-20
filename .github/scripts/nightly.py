@@ -11,7 +11,11 @@ In order:
      and main is fast-forwarded to it once that CI is green. A bump whose CI fails is left
      out, and said; main never gets a red bump.
   4. Skips when neither Desk's main nor hub.ref changed since the last nightly.
-  5. Gate: Desk's CI must have passed at the exact commit to be built.
+  5. Gate: Desk's CI must have passed at the exact commit to be built. That is main's
+     tip, taken afresh (it moves all day); when its CI was superseded by a newer push, the
+     newer tip; when it is red, the newest commit of main whose CI passed, if that is
+     newer than the last nightly. A bump that finds main moved is made again on the new
+     main (twice at most) and otherwise left for the next night, never the night itself.
   6. The version: the latest stable's next patch, as a nightly
      (0.2.10 -> 0.2.11-nightly.20261120.42, the date in UTC and this workflow's run number).
   7. The notes: the pull requests merged since the last nightly (their squash commits'
@@ -25,6 +29,7 @@ pushes nothing: it builds the commit as it is, with the hub it would bump to (`h
 import datetime
 import json
 import os
+import pathlib
 import re
 import subprocess
 import sys
@@ -38,6 +43,8 @@ CI = "ci.yml"
 # The Linux backend's smoke test, which a person's hub.ref pull request runs too.
 BACKEND = "backend.yml"
 RELEASE = "release.yml"
+BUMP_TRIES = 2
+TIP_TRIES = 4
 CI_WAIT_MINUTES = int(os.environ.get("CI_WAIT_MINUTES", "180"))
 NIGHTLY = re.compile(r"^(\d+)\.(\d+)\.(\d+)-nightly\.([1-9]\d{7})\.([1-9]\d*)$")
 STABLE = re.compile(r"^v?(\d+)\.(\d+)\.(\d+)$")
@@ -133,7 +140,7 @@ def notes(version, sha, since_label, changes, hub_from, hub_to, hub_commits, rep
         out.append("")
         out += [f"- {subject} ({short(c)})" for c, subject in hub_commits] or ["- (no commits listed)"]
     if attention:
-        out += ["", "## Left out", "", attention]
+        out += ["", "## Worth a look", "", attention]
     out += ["", f"Built from https://github.com/{repo}/commit/{sha}."]
     return "\n".join(out) + "\n"
 
@@ -187,6 +194,13 @@ def is_dry_run(run):
     return "(dry run)" in (run.get("display_title") or "")
 
 
+def no_release_running(repo):
+    """Skip while a Release run that will publish is under way."""
+    running = release_running(repo)
+    if running:
+        raise Skip(f"a release is running: {running}")
+
+
 def release_running(repo):
     """A Release run under way that will publish, if any: a dry run doesn't count."""
     for status in ("in_progress", "queued", "waiting", "pending", "requested"):
@@ -197,13 +211,16 @@ def release_running(repo):
     return None
 
 
-def hub_green():
-    """The newest hub commit on main whose checks passed."""
-    runs = gh_api(
-        f"repos/{HUB_REPO}/actions/workflows/{HUB_CHECK}/runs?branch=main&event=push&status=success&per_page=1"
-    )
+def green_sha(repo, workflow, branch):
+    """The head of the newest push to `branch` whose `workflow` run passed, or None."""
+    runs = gh_api(f"repos/{repo}/actions/workflows/{workflow}/runs?branch={branch}&event=push&status=success&per_page=1")
     found = (runs or {}).get("workflow_runs") or []
     return found[0]["head_sha"] if found else None
+
+
+def hub_green():
+    """The newest hub commit on main whose checks passed."""
+    return green_sha(HUB_REPO, HUB_CHECK, "main")
 
 
 def hub_compare(base, head):
@@ -221,21 +238,24 @@ def ci_runs(repo, sha, workflow=CI):
 # One deadline for all of tonight's waiting, so a failed bump's wait and the gate after it
 # end inside the job's timeout.
 DEADLINE = time.time() + CI_WAIT_MINUTES * 60
+# The bump's waits end an hour sooner, so a bump that drags on leaves time to build the tip.
+BUMP_DEADLINE = DEADLINE - 3600
 
 
-def wait_for_ci(repo, sha, appear_minutes=15, workflow=CI):
+def wait_for_ci(repo, sha, appear_minutes=15, workflow=CI, bump=False):
     """`workflow` (Desk's CI) at exactly `sha`, waited for while it runs: its run, or None
     if none came."""
     appear = time.time() + appear_minutes * 60
+    deadline, minutes = (BUMP_DEADLINE, CI_WAIT_MINUTES - 60) if bump else (DEADLINE, CI_WAIT_MINUTES)
     while True:
         latest = newest_run(ci_runs(repo, sha, workflow))
         if latest and latest["status"] == "completed":
             return latest
         if not latest and time.time() > appear:
             return None
-        if time.time() > DEADLINE:
+        if time.time() > deadline:
             where = latest["html_url"] if latest else "no run yet"
-            raise Skip(f"{workflow} at {short(sha)} was still running after {CI_WAIT_MINUTES} minutes: {where}",
+            raise Skip(f"{workflow} at {short(sha)} was still running after {minutes} minutes: {where}",
                        attention=True)
         time.sleep(60)
 
@@ -250,10 +270,68 @@ def gate(repo, sha):
                    attention=True)
 
 
-def bump(repo, hub_from, hub_to, hub_commits, run_url):
-    """Commits hub.ref = `hub_to` on a branch, runs Desk's CI there, and fast-forwards main
-    to it once green. Returns the new main commit, or (None, why) when the bump is left out."""
-    branch = f"nightly/hub-{short(hub_to)}-{os.environ.get('GITHUB_RUN_ID', 'local')}"
+def newer_than_last(sha, last):
+    """`sha` is a commit the last nightly's Desk commit leads up to; true when there was no
+    last nightly, false when its feed names no Desk commit."""
+    if last is None:
+        return True
+    base = last.get("desk_commit")
+    return bool(base) and (base != sha and run(["git", "merge-base", "--is-ancestor", base, sha], check=False).returncode == 0)
+
+
+def settle(repo, branch, last):
+    """The commit of `branch` to build, and what a person should know of it: its tip, taken
+    afresh, once Desk's CI passed there (a tip whose run a newer push cancelled gives way
+    to the newer tip); a red or unbuilt tip gives way to the newest green commit when that
+    is newer than the last nightly's."""
+    tip, problem = None, ""
+    for _ in range(TIP_TRIES):
+        git("fetch", "-q", "origin", branch)
+        tip = git("rev-parse", f"origin/{branch}")
+        latest = wait_for_ci(repo, tip, appear_minutes=5)
+        if latest and latest["conclusion"] == "success":
+            return tip, ""
+        if not (latest and latest["conclusion"] == "cancelled"):
+            problem = (f"Desk's CI ended {latest['conclusion']} at {short(tip)}: {latest['html_url']}" if latest
+                       else f"Desk's CI never ran at {short(tip)}")
+            break
+        problem = f"Desk's CI at {short(tip)} was cancelled: {latest['html_url']}"
+    green = green_sha(repo, CI, branch)
+    if green and green != tip and newer_than_last(green, last):
+        return green, f"{problem}, so {short(green)}, the newest commit whose CI passed, is built."
+    raise Skip(f"{problem}, so it isn't built", attention=True)
+
+
+def bump(repo, branch, hub_from, hub_to, hub_commits, run_url):
+    """Commits hub.ref = `hub_to` on a branch, runs Desk's CI there, and fast-forwards `branch`
+    (main) to it once green. When it moved meanwhile this is done again on the new tip, up to
+    BUMP_TRIES times. Returns the new commit, or (None, why) when the bump is left out (why is
+    empty when `branch` took the hub on its own); the checkout is as it was found then."""
+    start = git("rev-parse", "HEAD")
+    sha, why = None, None
+    for attempt in range(BUMP_TRIES):
+        try:
+            sha, why = bump_once(repo, branch, attempt, hub_from, hub_to, hub_commits, run_url)
+        except Skip as e:
+            sha, why = None, str(e)
+        if sha or why:
+            break
+        git("fetch", "-q", "origin", branch)
+        git("reset", "-q", "--hard", f"origin/{branch}")
+        if pathlib.Path("hub.ref").read_text().strip() != hub_from:
+            why = ""
+            break
+    else:
+        why = f"{branch} kept moving while Desk's CI checked the hub bump to {short(hub_to)}; the next nightly takes it"
+    if not sha:
+        git("reset", "-q", "--hard", start)
+    return sha, why
+
+
+def bump_once(repo, branch, attempt, hub_from, hub_to, hub_commits, run_url):
+    """One try of the bump: (commit, None) when main is at it, (None, why) when it is left
+    out, and (None, None) when main moved while its CI ran."""
+    work = f"nightly/hub-{short(hub_to)}-{os.environ.get('GITHUB_RUN_ID', 'local')}-{attempt}"
     with open("hub.ref", "w") as f:
         f.write(hub_to + "\n")
     git("-c", "user.name=github-actions[bot]",
@@ -263,25 +341,22 @@ def bump(repo, hub_from, hub_to, hub_commits, run_url):
     changed = git("diff", "--name-only", "HEAD~1", "HEAD").splitlines()
     if not only_hub_ref(changed):
         raise RuntimeError(f"the hub bump would change {changed}, not hub.ref alone")
-    git("push", "-q", "origin", f"HEAD:refs/heads/{branch}")
+    git("push", "-q", "origin", f"HEAD:refs/heads/{work}")
     try:
         # CI, and the backend's smoke test a person's hub.ref pull request runs too.
         for workflow in (CI, BACKEND):
-            run(["gh", "workflow", "run", workflow, "--repo", repo, "--ref", branch])
+            run(["gh", "workflow", "run", workflow, "--repo", repo, "--ref", work])
         for workflow in (CI, BACKEND):
-            latest = wait_for_ci(repo, sha, workflow=workflow)
+            latest = wait_for_ci(repo, sha, workflow=workflow, bump=True)
             if not latest:
                 return None, f"{workflow} didn't start for the hub bump to {short(hub_to)}"
             if latest["conclusion"] != "success":
                 return None, (f"{workflow} failed with hub {short(hub_to)}, so the bump was left out: "
                               f"{latest['html_url']}")
-        pushed = run(["git", "push", "-q", "origin", f"{sha}:refs/heads/main"], check=False)
-        if pushed.returncode != 0:
-            raise Skip(f"main moved while Desk's CI checked the hub bump to {short(hub_to)}; "
-                       "the next nightly takes both", attention=True)
-        return sha, None
+        pushed = run(["git", "push", "-q", "origin", f"{sha}:refs/heads/{branch}"], check=False)
+        return (sha, None) if pushed.returncode == 0 else (None, None)
     finally:
-        run(["git", "push", "-q", "origin", "--delete", branch], check=False)
+        run(["git", "push", "-q", "origin", "--delete", work], check=False)
 
 
 def output(**kw):
@@ -314,9 +389,7 @@ def plan():
     if not dry and branch != default:
         raise RuntimeError(f"a nightly is published from {default} only; this run is on {branch}: use dry_run")
 
-    running = release_running(repo)
-    if running:
-        raise Skip(f"a release is running: {running}")
+    no_release_running(repo)
 
     last = feed(releases_repo)
     head = git("rev-parse", "HEAD")
@@ -342,21 +415,32 @@ def plan():
             print(bump_message(hub_now, candidate, [s for _, s in hub_commits], run_url))
             hub_ref, override = candidate, candidate
         else:
-            bumped, why = bump(repo, hub_now, candidate, hub_commits, run_url)
+            bumped, why = bump(repo, default, hub_now, candidate, hub_commits, run_url)
             if bumped:
                 sha, hub_ref = bumped, candidate
-            else:
+            elif why:
                 attention = why
                 ATTENTION.append(why)
                 print(f"::warning::{why}")
-                # Without the bump: only if Desk itself changed since the last nightly.
-                git("reset", "-q", "--hard", head)
-                if last and last.get("desk_commit") == head and last.get("hub_ref") == hub_now:
-                    raise Skip(f"{why}; nothing else changed since {last.get('version')}")
 
-    # The bump was gated as it was made; anything else is gated here.
-    if sha == head:
+    # The bump was gated as it was made; anything else is gated here, on main's tip as it
+    # is now. A dry run, on a branch of its own, gates the commit it is on.
+    if sha == head and dry:
         gate(repo, sha)
+    elif sha == head:
+        sha, caveat = settle(repo, default, last)
+        no_release_running(repo)
+        if last and last.get("desk_commit") not in (None, "", sha) and not newer_than_last(sha, last):
+            raise Skip(f"{short(sha)}, main's tip with CI passed, doesn't lead on from the last nightly's "
+                       f"{short(last['desk_commit'])}, so it isn't built", attention=True)
+        hub_ref = git("show", f"{sha}:hub.ref").strip()
+        if caveat:
+            attention = " ".join(x for x in (attention, caveat) if x)
+            ATTENTION.append(caveat)
+            print(f"::warning::{caveat}")
+        if last and last.get("desk_commit") == sha and last.get("hub_ref") == hub_ref:
+            raise Skip(f"nothing changed since the last nightly, {last.get('version')}"
+                       + (f"; {attention}" if attention else ""))
 
     tags = [r["tag_name"] for r in gh_api(f"repos/{releases_repo}/releases?per_page=100")
             if not r["prerelease"] and not r["draft"]]
@@ -386,6 +470,7 @@ def plan():
     with open("notes/notes.md", "w") as f:
         f.write(notes(version, sha, since_label, changes, hub_from, hub_ref, brought, repo, attention))
 
+    no_release_running(repo)
     output(build="true", version=version, ref=sha, hub_ref=override, reason="", attention=attention)
     summary(f"### Nightly {version}{' (dry run)' if dry else ''}\n\n"
             f"Desk {short(sha)}, hub {short(hub_ref)}"
