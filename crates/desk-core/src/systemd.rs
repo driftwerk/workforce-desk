@@ -46,13 +46,10 @@ fn plain(what: &str) -> eyre::Result<&str> {
 /// macOS. (By default systemd would end everything the service started.)
 /// It is restarted however often it stops: no start limit gives up on it.
 ///
-/// When the box runs out of memory and the kernel kills one of the
-/// service's processes — a session's `claude`, most often, as a user
-/// service's processes are its first choice over a build run from an SSH
-/// login — systemd carries on with the rest (`OOMPolicy=continue`). Its
-/// default, `stop`, would stop the whole service for it: the helper, the
-/// hub and every other session with them, again at each kill while memory
-/// stays short.
+/// When the kernel kills one of the service's processes for memory (a
+/// session's `claude`, say), systemd leaves the rest running
+/// (`OOMPolicy=continue`); the default, `stop`, would stop the helper, the
+/// hub and every session.
 pub fn unit_text(unit: &Unit) -> eyre::Result<String> {
     let command = std::iter::once(&unit.program)
         .chain(&unit.args)
@@ -122,10 +119,7 @@ mod tests {
             env: vec![],
         })
         .unwrap();
-        let service = text.split("[Service]\n").nth(1).unwrap();
-        let service = service.split("\n[").next().unwrap();
-        assert!(service.lines().any(|l| l == "OOMPolicy=continue"));
-        assert!(!text.contains("OOMPolicy=stop"));
+        assert!(text.contains("\nKillMode=process\nOOMPolicy=continue\n"));
     }
 
     #[test]
