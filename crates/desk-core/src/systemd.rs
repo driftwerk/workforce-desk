@@ -45,6 +45,11 @@ fn plain(what: &str) -> eyre::Result<&str> {
 /// holder it leaves keeps the sessions' terminals for the next one, as on
 /// macOS. (By default systemd would end everything the service started.)
 /// It is restarted however often it stops: no start limit gives up on it.
+///
+/// When the kernel kills one of the service's processes for memory (a
+/// session's `claude`, say), systemd leaves the rest running
+/// (`OOMPolicy=continue`); the default, `stop`, would stop the helper, the
+/// hub and every session.
 pub fn unit_text(unit: &Unit) -> eyre::Result<String> {
     let command = std::iter::once(&unit.program)
         .chain(&unit.args)
@@ -68,6 +73,7 @@ pub fn unit_text(unit: &Unit) -> eyre::Result<String> {
          RestartSec=2\n\
          TimeoutStopSec=90\n\
          KillMode=process\n\
+         OOMPolicy=continue\n\
          \n\
          [Install]\n\
          WantedBy=default.target\n",
@@ -103,6 +109,17 @@ mod tests {
         ));
         assert!(text.ends_with("[Install]\nWantedBy=default.target\n"));
         assert!(text.contains("StartLimitIntervalSec=0\n"));
+    }
+
+    #[test]
+    fn a_process_killed_for_memory_leaves_the_rest_running() {
+        let text = unit_text(&Unit {
+            program: "/x/desk-helper".into(),
+            args: vec![],
+            env: vec![],
+        })
+        .unwrap();
+        assert!(text.contains("\nKillMode=process\nOOMPolicy=continue\n"));
     }
 
     #[test]
