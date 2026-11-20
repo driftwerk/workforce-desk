@@ -59,6 +59,8 @@ export const waitPhrase = (m: LineMessage, many = false): string => {
       return `${waits}: Desk's breaker paused it`;
     case "asking":
       return `${waits} for you to answer it`;
+    case "dialog":
+      return `${waits} for the dialog in its terminal`;
     case "person_driving":
       return `${waits} until you hand it back`;
     case "mode_ending":

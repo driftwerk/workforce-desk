@@ -9,6 +9,14 @@
   box-sizing: border-box;
 }
 
+/* The title strip: what the window's top holds apart from its views, the
+   spoken conversation's pill centred in it and, on macOS, the traffic lights
+   (tauri.macos.conf.json `trafficLightPosition` centres them in it). Every
+   view's top padding is this plus its own gap. */
+:root {
+  --title-h: 40px;
+}
+
 html,
 body,
 #root {
@@ -952,7 +960,7 @@ body.side-resizing * {
   overflow-y: auto;
 }
 .floor {
-  padding: 34px 32px 24px;
+  padding: calc(var(--title-h) + 6px) 32px 24px;
   gap: 22px;
 }
 .floor-head {
@@ -1134,14 +1142,14 @@ body.side-resizing * {
 /* ── Rooms ──────────────────────────────────────────────────────────────── */
 
 .room-empty {
-  padding: 34px 32px;
+  padding: calc(var(--title-h) + 6px) 32px;
   gap: 10px;
 }
 .room-head {
   display: flex;
   align-items: center;
   gap: 14px;
-  padding: 30px 28px 12px;
+  padding: calc(var(--title-h) + 2px) 28px 12px;
 }
 .room-title {
   display: flex;
@@ -2131,7 +2139,7 @@ button.thread-bar:hover {
 .titlebar {
   position: fixed;
   inset: 0 0 auto 0;
-  height: 28px;
+  height: var(--title-h);
   z-index: 30;
 }
 /* What shows in the title strip, centred above the strip that moves the
@@ -2139,7 +2147,8 @@ button.thread-bar:hover {
    view leaves the strip's height clear at its top. */
 .title-slot {
   position: fixed;
-  top: 1px;
+  top: 0;
+  height: var(--title-h);
   left: 50%;
   transform: translateX(-50%);
   z-index: 31;
@@ -2280,7 +2289,7 @@ button.thread-bar:hover {
    Later. Clear of the macOS drag strip as the sidebar is. */
 .update-notice {
   flex: none;
-  margin: 30px 16px 0 16px;
+  margin: calc(var(--title-h) + 2px) 16px 0 16px;
   display: flex;
   flex-wrap: wrap;
   gap: 8px 14px;
@@ -3632,7 +3641,7 @@ samp,
   align-items: flex-end;
   gap: 16px;
   flex-wrap: wrap;
-  padding: 34px 32px 18px;
+  padding: calc(var(--title-h) + 6px) 32px 18px;
 }
 .unread-title {
   display: flex;
@@ -4011,7 +4020,7 @@ button.urow-open {
 
 .hub-down {
   position: fixed;
-  top: 40px;
+  top: calc(var(--title-h) + 12px);
   left: 50%;
   transform: translateX(-50%);
   width: min(560px, calc(100% - 40px));

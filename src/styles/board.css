@@ -16,7 +16,7 @@
   align-items: center;
   flex-wrap: wrap;
   gap: 10px 14px;
-  padding: 30px 28px 14px;
+  padding: calc(var(--title-h) + 2px) 28px 14px;
   border-bottom: 1px solid var(--border);
   flex: none;
 }

@@ -135,6 +135,8 @@ pub trait VoiceEvents: Send + Sync + 'static {
     fn unheard(&self);
     /// Something went wrong that the person should hear about.
     fn error(&self, message: &str);
+    /// Something the person should know that isn't anything going wrong.
+    fn notice(&self, _message: &str) {}
     /// What was being said was stopped: nothing more of that reply is wanted.
     fn stopped(&self, _reason: StopReason) {}
 }
