@@ -682,7 +682,8 @@ const BUSY: Record<Exclude<Asking, null>, string> = {
 /** A change of scope in full: what approving it would approve. */
 function ChangeDetails({ changes, names }: { changes: PlanChanges; names: ReadonlyMap<string, string> }) {
   const machineName = useMachineName();
-  const where = (t: { engine: Engine; folder: string }) => `${ENGINE_TITLE[t.engine]} in ${homeShort(t.folder)}`;
+  const folder = (f: string) => (f.trim() ? homeShort(f) : "a folder Desk finds");
+  const where = (t: { engine: Engine; folder: string }) => `${ENGINE_TITLE[t.engine]} in ${folder(t.folder)}`;
   const named = (ids: readonly string[]) => ids.map((id) => names.get(id) ?? "a ticket").join(", ");
   return (
     <ul className="pc-changes" aria-label="What approving it changes">
@@ -744,7 +745,7 @@ function ChangeDetails({ changes, names }: { changes: PlanChanges; names: Readon
           )}
           {c.folder && (
             <span className="small mono">
-              Folder: {homeShort(c.folder.from)} → {homeShort(c.folder.to)}
+              Folder: {folder(c.folder.from)} → {folder(c.folder.to)}
             </span>
           )}
           {c.view && (
