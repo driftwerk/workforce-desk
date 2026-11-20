@@ -1492,6 +1492,68 @@ mod tests {
         );
     }
 
+    /// Every call the hub queues for a machine that isn't a group's
+    /// (its `MACHINE_CALLS` and `DESK_CALLS`) goes to that machine's own
+    /// route: none reaches its served route, which takes a group's alone.
+    #[tokio::test]
+    async fn no_machine_call_goes_to_the_served_route() {
+        let calls = [
+            ("desk.sessions", json!({})),
+            (
+                "desk.session_start",
+                json!({"engine": "claude", "name": "VEL-1", "cwd": "/home/dev/app"}),
+            ),
+            ("desk.folders", json!({"path": "~"})),
+            ("desk.folder_make", json!({"path": "~/app"})),
+            ("desk.repos", json!({"remote": "github.com/a/b"})),
+            (
+                "desk.checkout",
+                json!({"remote": "github.com/a/b", "folder": "~/app"}),
+            ),
+            ("desk.run", json!({"command": "df -h ~"})),
+        ];
+        let (fake, mut rx) = with_routes(
+            calls
+                .iter()
+                .map(|_| Does::Says(200, json!({"outcome": "ran", "exit": 0})))
+                .collect(),
+        );
+        let polled: Vec<Value> = calls
+            .iter()
+            .enumerate()
+            .map(|(i, (tool, input))| {
+                desk_call(
+                    &format!("0f0e0d0c-0b0a-4909-8807-0605040303{i:02x}"),
+                    tool,
+                    input.clone(),
+                )
+            })
+            .collect();
+        let stop = start_with(
+            &fake.polled(polled),
+            Timing {
+                carry_for: Duration::from_secs(25),
+                ..quick()
+            },
+        );
+        for _ in &calls {
+            next(&mut rx).await;
+        }
+        let _ = stop.send(true);
+        assert!(fake.sent().is_empty(), "{:?}", fake.sent());
+        let routes: Vec<String> = fake
+            .routes_sent
+            .lock()
+            .unwrap()
+            .iter()
+            .map(|(_, m, t, _)| format!("{m} {t}"))
+            .collect();
+        assert!(
+            routes.contains(&"POST /api/desk/run".to_string()),
+            "{routes:?}"
+        );
+    }
+
     #[tokio::test]
     async fn a_check_goes_to_the_machines_run_route_once_with_its_own_fields() {
         let (fake, mut rx) = with_routes(vec![
