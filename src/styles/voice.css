@@ -362,8 +362,15 @@
   height: 20px;
 }
 .talk-name {
+  max-width: 16ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 600;
   font-size: 13px;
+}
+.talk-muted .mark-face {
+  filter: grayscale(1);
+  opacity: 0.6;
 }
 .talk-muted .talk-name {
   color: var(--text);
@@ -389,13 +396,16 @@
   border-radius: 50%;
   background: var(--blocked);
   color: var(--on-blocked);
-  font-weight: 700;
+  font-weight: 600;
 }
 .talk-pill .talk-icon {
   width: 24px;
   height: 22px;
   border-radius: 999px;
   color: inherit;
+}
+.talk-live .talk-icon {
+  color: var(--text);
 }
 .talk-pill .btn-sm {
   min-height: 20px;
@@ -475,8 +485,6 @@
 .talk-pop-mark {
   --talk-accent: var(--signal);
   display: grid;
-  border-radius: 12px;
-  box-shadow: 0 0 0 2px var(--raised), 0 0 0 4px var(--talk-accent);
 }
 .talk-pop-mark.talk-busy {
   --talk-accent: var(--working);
@@ -488,7 +496,7 @@
   --talk-accent: var(--blocked);
 }
 .talk-pop-mark .mark {
-  border: 0;
+  border-color: var(--talk-accent);
 }
 .talk-pop-title {
   flex: 1;
@@ -506,13 +514,16 @@
   border-radius: var(--radius-sm);
   color: var(--signal-soft-text);
 }
+.talk-pop .talk-pop-dm:hover {
+  text-decoration: underline;
+}
 .talk-pop-said {
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 10px;
   border-radius: var(--radius-sm);
-  background: var(--sunken);
+  background: var(--surface);
   font-size: 13px;
   line-height: 1.45;
   -webkit-user-select: text;
@@ -535,6 +546,9 @@
   flex: 1;
   min-height: 44px;
   border-radius: var(--radius-sm);
+}
+.talk-pop-actions .btn:not(.btn-signal) {
+  background: var(--surface);
 }
 .talk-pop-actions .btn[aria-pressed="true"] {
   border-color: var(--signal);

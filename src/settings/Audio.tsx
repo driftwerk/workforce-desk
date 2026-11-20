@@ -118,13 +118,12 @@ function Picker({
 }
 
 /** How loud the microphone is, as a meter's fill (0 to 1) handed to
- *  `onFill`: read ten times a second while `on` and the window is in view,
+ *  `onFill`: read ten times a second while the window is in view,
  *  re-rendering nothing. */
-export const useLevel = (on: boolean, onFill: (fill: number) => void): void => {
+export const useLevel = (onFill: (fill: number) => void): void => {
   const latest = useRef(onFill);
   latest.current = onFill;
   useEffect(() => {
-    if (!on) return;
     let live = true;
     const t = setInterval(() => {
       if (document.hidden) return;
@@ -138,14 +137,14 @@ export const useLevel = (on: boolean, onFill: (fill: number) => void): void => {
       live = false;
       clearInterval(t);
     };
-  }, [on]);
+  }, []);
 };
 
 /** How loud the microphone is, as a bar. */
 export function LevelMeter() {
   const bar = useRef<HTMLSpanElement>(null);
   const fill = useRef<HTMLSpanElement>(null);
-  useLevel(true, (f) => {
+  useLevel((f) => {
     if (fill.current) fill.current.style.width = `${f * 100}%`;
     bar.current?.setAttribute("aria-valuenow", String(Math.round(f * 100)));
   });

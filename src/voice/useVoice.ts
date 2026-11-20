@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useChat } from "../chat/store";
+import { hubOf, useChat } from "../chat/store";
 import { agentKey, type Agent, type DeskVoice } from "../chat/types";
 import { useSettings } from "../settings/store";
 import { useAppHold, useAppShortcut, useGlobalShortcut } from "../shortcuts/manager";
@@ -155,9 +155,12 @@ export const switchConversation = (agent: string): void => {
   void stopSpeaking().catch(failed);
 };
 
-/** Starts `agent`'s spoken conversation, or ends it. */
+/** Starts `agent`'s spoken conversation, moves the one going on to it, or
+ *  ends it. */
 export const talkOrEnd = (agent: string): void => {
-  if (useMic.getState().talk === agent) endConversation(agent);
+  const { talk } = useMic.getState();
+  if (talk === agent) endConversation(agent);
+  else if (talk) switchConversation(agent);
   else toggleTalk(agent);
 };
 
@@ -290,14 +293,14 @@ export class Turns {
 
 /** Gives the engine to whoever has the microphone (see `mic.ts`) whenever
  *  that changes; one that can't be had goes back to voice by name, saying
- *  why in the DM that asked. */
+ *  why (`micFailed`). */
 const followMic = (): (() => void) => {
   let mode = claimMode();
   const claim = (next: typeof mode) => {
     const claimed: Promise<unknown> = claimVoice(next)
       .catch((e: unknown) => {
         const who = owner();
-        if (who) micFailed(who.agent, e instanceof Error ? e.message : String(e));
+        if (who) micFailed(who, e instanceof Error ? e.message : String(e));
       })
       .finally(() => {
         if (claiming === claimed) claiming = null;
@@ -353,12 +356,16 @@ export function useVoice(enabled: boolean) {
       onVoiceError((message) => useVoiceStore.setState({ error: message })),
     ];
     const unfollow = followMic();
-    // A talk with an agent that's gone from the roster ends.
+    // A talk with an agent its hub no longer lists, or whose hub is gone,
+    // ends; one whose hub couldn't be read goes on.
     const unwatchRoster = useChat.subscribe((s, prev) => {
       if (s.roster === prev.roster || !s.rosterRead) return;
       const { talk, hold, problem } = useMic.getState();
-      for (const agent of new Set([talk, hold, problem?.agent]))
-        if (agent && !s.roster.some((a) => agentKey(a) === agent)) forget(agent);
+      const gone = (agent: string) => {
+        const hub = hubOf(agent);
+        return !s.hubs.some((h) => h.id === hub) || (!s.rosterErrors[hub] && !s.roster.some((a) => agentKey(a) === agent));
+      };
+      for (const agent of new Set([talk, hold, problem?.agent])) if (agent && gone(agent)) forget(agent);
     });
     useVoiceStore.setState({ here: true });
     voiceStatus()

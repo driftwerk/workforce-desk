@@ -21,8 +21,8 @@ export interface MicState {
   /** Answers to a DM being read out: the engine that says them stays up, whoever
    *  has the microphone by then, hearing nothing but someone talking over it. */
   replying: number;
-  /** Why the microphone couldn't be had, for the DM that asked. */
-  problem: { agent: string; message: string } | null;
+  /** Why the microphone couldn't be had, and for whose talk or hold. */
+  problem: { agent: string; mode: Owner["mode"]; message: string } | null;
   /** The talk hears only what's held, without ending. */
   muted: boolean;
   /** When the talk started (ms). */
@@ -70,7 +70,6 @@ export const switchTalk = (agent: string): void => useMic.setState((s) => (s.tal
 
 export const endTalk = (agent: string): void => useMic.setState((s) => (s.talk === agent ? noTalk : {}));
 
-/** Mutes the spoken conversation, or unmutes it. */
 export const toggleMute = (): void => useMic.setState((s) => (s.talk ? { muted: !s.muted } : {}));
 
 export const dismissProblem = (): void => useMic.setState({ problem: null });
@@ -84,10 +83,10 @@ export const releaseHold = (): void => useMic.setState({ pressed: false });
 /** What was held was sent, or nothing was heard: the microphone goes back. */
 export const holdDone = (): void => useMic.setState((s) => (s.pressed ? {} : { hold: null }));
 
-/** The microphone couldn't be had for `agent`: it goes back to voice by
- *  name, saying why in that DM. */
-export const micFailed = (agent: string, message: string): void =>
-  useMic.setState({ ...QUIET, problem: { agent, message } });
+/** The microphone couldn't be had for `owner`'s talk or hold: it goes back
+ *  to voice by name, saying why in that DM, and for a talk in the title bar. */
+export const micFailed = ({ agent, mode }: Owner, message: string): void =>
+  useMic.setState({ ...QUIET, problem: { agent, mode, message } });
 
 /** `agent` isn't on the roster any more: whatever it held is let go. */
 export const forget = (agent: string): void =>

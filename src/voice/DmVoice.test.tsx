@@ -120,15 +120,27 @@ describe("voice's shortcuts, wherever you are", () => {
 describe("a conversation's agent leaving the roster", () => {
   const atlas = { hubId: "local", id: "atlas", name: "Atlas", model: null, provider: null, isDefault: false };
 
-  it("ends it, once the roster has been read without it", () => {
-    useChat.setState({ roster: [atlas], rosterRead: false });
+  const local = { id: "local", label: "This computer", url: "", local: true, revision: "" };
+
+  it("ends it once its hub has been read without it, not while its hub can't be read", () => {
+    useChat.setState({ hubs: [local], roster: [atlas], rosterRead: false, rosterErrors: {} });
     const { unmount } = renderHook(() => useVoice(false));
     act(() => toggleTalk(key));
     act(() => useChat.setState({ roster: [] }));
     expect(useMic.getState().talk).toBe(key);
     act(() => useChat.setState({ roster: [atlas], rosterRead: true }));
+    act(() => useChat.setState({ roster: [], rosterErrors: { local: "couldn't reach it" } }));
     expect(useMic.getState().talk).toBe(key);
-    act(() => useChat.setState({ roster: [] }));
+    act(() => useChat.setState({ roster: [], rosterErrors: {} }));
+    expect(useMic.getState().talk).toBeNull();
+    unmount();
+  });
+
+  it("ends it when its hub is gone", () => {
+    useChat.setState({ hubs: [local], roster: [atlas], rosterRead: true, rosterErrors: {} });
+    const { unmount } = renderHook(() => useVoice(false));
+    act(() => toggleTalk(key));
+    act(() => useChat.setState({ hubs: [], roster: [] }));
     expect(useMic.getState().talk).toBeNull();
     unmount();
   });
@@ -151,7 +163,7 @@ describe("voice following the microphone", () => {
     const { unmount } = renderHook(() => useVoice(false));
     await act(async () => toggleTalk(key));
     await act(async () => undefined);
-    expect(useMic.getState()).toMatchObject({ talk: null, problem: { agent: key, message: "microphone access was denied" } });
+    expect(useMic.getState()).toMatchObject({ talk: null, problem: { agent: key, mode: "talk", message: "microphone access was denied" } });
     unmount();
   });
 });

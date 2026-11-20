@@ -373,7 +373,7 @@ const adopt = (key: string, value: unknown) => {
 };
 
 /** The hub an agent key (`hub/agent`) is on. */
-const hubOf = (key: string): string => key.slice(0, key.indexOf("/"));
+export const hubOf = (key: string): string => key.slice(0, key.indexOf("/"));
 
 interface AgentsResponse {
   agents: {

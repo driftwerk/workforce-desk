@@ -173,7 +173,7 @@ export interface TalkView {
  *  be had for one (`blocked`: the system keeps it from Desk); null with
  *  neither. */
 export const talkView = (mic: MicState, status: VoiceStatus, waiting: boolean, speakingFor: string | null, blocked: boolean): TalkView | null => {
-  if (mic.problem) return { agent: mic.problem.agent, tone: "problem", line: blocked ? "Microphone blocked — fix" : "Microphone problem — fix", elapsed: false, speaking: false };
+  if (mic.problem?.mode === "talk") return { agent: mic.problem.agent, tone: "problem", line: blocked ? "Microphone blocked — fix" : "Microphone problem — fix", elapsed: false, speaking: false };
   const agent = mic.talk;
   if (!agent) return null;
   const view = (tone: TalkView["tone"], line: string, extra: Partial<TalkView> = {}): TalkView => ({ agent, tone, line, elapsed: false, speaking: false, ...extra });
@@ -194,11 +194,12 @@ export const clock = (ms: number): string => {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 };
 
-/** The last thing you said in a conversation since `since` (ms), and what
- *  the agent answered after it. */
+/** The last thing you said in a conversation since `since` (ms, by this
+ *  computer's clock, which stamps what you send), and what the agent has
+ *  answered to it since, whatever its hub's clock says. */
 export const lastExchange = (messages: readonly ChatMessage[], since: number): { you: string | null; agent: string | null } => {
-  const recent = messages.filter((m) => m.status !== "error" && Date.parse(m.at) >= since && m.content.trim());
-  const at = recent.findLastIndex((m) => m.role === "user");
-  const reply = recent.slice(at + 1).findLast((m) => m.role === "assistant");
-  return { you: at >= 0 ? recent[at]!.content : null, agent: reply?.content ?? null };
+  const said = messages.filter((m) => m.status !== "error" && m.content.trim());
+  const at = said.findLastIndex((m) => m.role === "user");
+  if (at < 0 || Date.parse(said[at]!.at) < since) return { you: null, agent: null };
+  return { you: said[at]!.content, agent: said.slice(at + 1).findLast((m) => m.role === "assistant")?.content ?? null };
 };

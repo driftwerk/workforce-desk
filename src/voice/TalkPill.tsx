@@ -31,7 +31,8 @@ function MutedIcon() {
   );
 }
 
-const useAgentName = (key: string | null): string | null =>
+/** Agent `key`'s name on the roster, or null. */
+export const useAgentName = (key: string | null): string | null =>
   useChat((s) => (key ? (s.roster.find((a) => agentKey(a) === key)?.name ?? null) : null));
 
 const openDm = (agent: string): void => {
@@ -49,10 +50,9 @@ function Elapsed({ since }: { since: number }) {
   return <>{clock(now - since)}</>;
 }
 
-/** How loud the microphone is, as a few bars. */
 function Meter() {
   const bars = useRef<HTMLSpanElement>(null);
-  useLevel(true, (f) => bars.current?.style.setProperty("--level", String(f)));
+  useLevel((f) => bars.current?.style.setProperty("--level", String(f)));
   return (
     <span ref={bars} className="talk-meter" aria-hidden="true">
       <i />
@@ -77,6 +77,7 @@ const useTalkEntries = (agent: string, name: string): MenuEntry[] => {
         {
           kind: "item",
           label: "Switch to",
+          hint: [...new Set(others.map((a) => a.name))].slice(0, 3).join(", "),
           submenu: () =>
             others.map((a) => ({
               kind: "item" as const,
@@ -93,14 +94,13 @@ const useTalkEntries = (agent: string, name: string): MenuEntry[] => {
 /** The popover's body: who the conversation is with and since when, what
  *  was said last, its controls and choices; or what kept the microphone
  *  from it, with the fix. */
-function TalkDetails({ agent, name, view, problem }: { agent: string; name: string; view: TalkView; problem: Problem | null }) {
+function TalkDetails({ agent, name, view, problem, entries }: { agent: string; name: string; view: TalkView; problem: Problem | null; entries: MenuEntry[] }) {
   const { since, from, muted, holding } = useMic(
     useShallow((m) => ({ since: m.since, from: m.from, muted: m.muted, holding: m.hold === agent && m.pressed })),
   );
   const fromName = useAgentName(from);
   const said = useChat(useShallow((s) => lastExchange(since === null ? [] : (s.conversations[agent]?.messages ?? []), since ?? 0)));
   const hold = useHoldButton(agent);
-  const entries = useTalkEntries(agent, name);
   const muteKeys = useSettings((s) => s.keys.muteTalk);
   useEffect(refreshDevices, []);
   return (
@@ -156,7 +156,7 @@ function TalkDetails({ agent, name, view, problem }: { agent: string; name: stri
             )}
           </div>
           <div className="talk-pop-actions">
-            <button type="button" className="btn" aria-pressed={muted} title={`${muted ? "Unmute" : "Mute"} (${shortcutLabel(muteKeys)})`} onClick={toggleMute}>
+            <button type="button" className="btn" title={`${muted ? "Unmute" : "Mute"} (${shortcutLabel(muteKeys)})`} onClick={toggleMute}>
               {muted ? "Unmute" : "Mute"}
             </button>
             <button type="button" className="btn" aria-pressed={holding} {...hold}>
@@ -166,7 +166,7 @@ function TalkDetails({ agent, name, view, problem }: { agent: string; name: stri
               End
             </button>
           </div>
-          <MenuRows label={`How ${name} answers, the microphone and speaker`} entries={entries} />
+          <MenuRows label="Conversation options" entries={entries} />
         </>
       )}
     </>
@@ -176,27 +176,29 @@ function TalkDetails({ agent, name, view, problem }: { agent: string; name: stri
 /** The spoken conversation, in the title bar on every view until it's
  *  ended: who it's with, what it's doing, Mute, its choices and End, and a
  *  popover with the rest. In the agent's own DM, whose voice bar says it
- *  all, only a dot. A microphone that couldn't be had shows here too, with
- *  its fix. */
+ *  all, only a dot. A microphone that couldn't be had for it shows here
+ *  too, with its fix. */
 export function TalkPill() {
   const mic = useMic();
-  const agent = mic.problem?.agent ?? mic.talk;
+  const failed = mic.problem?.mode === "talk" ? mic.problem : null;
+  const agent = failed?.agent ?? mic.talk;
   const status = useVoiceStore((s) => s.status);
   const speakingFor = useVoiceStore((s) => s.speakingFor);
   const waiting = useVoiceStore((s) => !!agent && !!s.waiting[agent]);
   const here = useVoiceHere();
-  const name = useAgentName(agent);
+  const name = useAgentName(agent) ?? agent;
   const inDm = useDmShown(agent);
   const muteKeys = useSettings((s) => s.keys.muteTalk);
-  const permission = mic.problem ? permissionProblem(mic.problem.message, "starting the microphone") : null;
-  const problem: Problem | null = mic.problem ? (permission ?? { plain: mic.problem.message, what: "starting the microphone" }) : null;
+  const permission = failed ? permissionProblem(failed.message, "starting the microphone") : null;
+  const problem: Problem | null = failed ? (permission ?? { plain: failed.message, what: "starting the microphone" }) : null;
   useRecheckOnFocus("microphone", permission !== null, () => {
-    const failed = useMic.getState().problem;
-    if (failed) toggleTalk(failed.agent);
+    const p = useMic.getState().problem;
+    if (p?.mode === "talk") toggleTalk(p.agent);
   });
+  const pill = useRef<HTMLDivElement>(null);
+  const more = useRef<HTMLButtonElement>(null);
   const [from, setFrom] = useState<HTMLElement | null>(null);
   const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
-  const more = useRef<HTMLButtonElement>(null);
   const entries = useTalkEntries(agent ?? "", name ?? "");
   useEffect(() => {
     setFrom(null);
@@ -208,14 +210,14 @@ export function TalkPill() {
   const view = talkView(mic, status, waiting, speakingFor, permission !== null);
   if (!here || !view || !agent || !name) return null;
   const toggle = (el: HTMLElement) => setFrom((open) => (open ? null : el));
-  const popover = from && (
-    <Popover label={`Talking with ${name}`} from={from} align="center" className="talk-pop" onClose={() => setFrom(null)}>
-      <TalkDetails agent={agent} name={name} view={view} problem={problem} />
+  const popover = from && pill.current && (
+    <Popover label={`Talking with ${name}`} from={from} anchor={pill.current} align="center" className="talk-pop" onClose={() => setFrom(null)}>
+      <TalkDetails agent={agent} name={name} view={view} problem={problem} entries={entries} />
     </Popover>
   );
   if (inDm)
     return (
-      <div className={`talk-pill talk-dot talk-${view.tone}`} onMouseDown={(e) => e.stopPropagation()}>
+      <div ref={pill} className={`talk-pill talk-dot talk-${view.tone}`}>
         <button
           type="button"
           className="talk-dot-btn"
@@ -230,9 +232,9 @@ export function TalkPill() {
         {popover}
       </div>
     );
-  const muteLabel = mic.muted ? "Unmute your microphone" : "Mute your microphone";
+  const tapToTalk = mic.muted && !problem;
   return (
-    <div className={`talk-pill talk-${view.tone}`} role="group" aria-label={`Talking with ${name}`} onMouseDown={(e) => e.stopPropagation()}>
+    <div ref={pill} className={`talk-pill talk-${view.tone}`} role="group" aria-label={`Talking with ${name}`}>
       <button type="button" className="talk-who" aria-label={`Open ${name}’s DM`} title={`Open ${name}’s DM`} onClick={() => openDm(agent)}>
         {problem ? (
           <span className="talk-alert" aria-hidden="true">
@@ -246,10 +248,10 @@ export function TalkPill() {
       <button
         type="button"
         className="talk-state"
-        aria-haspopup={mic.muted && !problem ? undefined : "dialog"}
-        aria-expanded={mic.muted && !problem ? undefined : !!from}
-        title={mic.muted && !problem ? "Unmute" : "Conversation controls"}
-        onClick={(e) => (mic.muted && !problem ? toggleMute() : toggle(e.currentTarget))}
+        aria-haspopup={tapToTalk ? undefined : "dialog"}
+        aria-expanded={tapToTalk ? undefined : !!from}
+        title={tapToTalk ? "Unmute" : "Conversation controls"}
+        onClick={(e) => (tapToTalk ? toggleMute() : toggle(e.currentTarget))}
       >
         {view.tone === "live" && !view.speaking && <Meter />}
         <span className="talk-line">
@@ -275,9 +277,8 @@ export function TalkPill() {
           <button
             type="button"
             className="icon-btn-sm talk-icon"
-            aria-pressed={mic.muted}
-            aria-label={muteLabel}
-            title={`${muteLabel} (${shortcutLabel(muteKeys)})`}
+            aria-label={mic.muted ? "Unmute your microphone" : "Mute your microphone"}
+            title={`${mic.muted ? "Unmute" : "Mute"} (${shortcutLabel(muteKeys)})`}
             onClick={toggleMute}
           >
             {mic.muted ? <MutedIcon /> : <MicIcon />}
@@ -286,9 +287,9 @@ export function TalkPill() {
             ref={more}
             type="button"
             className="icon-btn-sm talk-icon"
-            aria-label={`How ${name} answers, the microphone and speaker`}
+            aria-label="Conversation options"
             aria-haspopup="menu"
-            title={`How ${name} answers, the microphone and speaker`}
+            title={`How ${name} answers, the microphone and speaker, and who you talk with`}
             onClick={(e) => {
               const r = e.currentTarget.getBoundingClientRect();
               setMenu({ x: r.left, y: r.bottom + 4 });
@@ -311,7 +312,7 @@ export function TalkPill() {
       )}
       {menu && (
         <Menu
-          label={`How ${name} answers, the microphone and speaker`}
+          label="Conversation options"
           at={menu}
           entries={entries}
           onClose={(refocus) => {

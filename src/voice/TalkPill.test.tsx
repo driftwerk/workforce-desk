@@ -95,7 +95,7 @@ describe("the title bar's pill", () => {
     render(<TalkPill />);
     fireEvent.click(screen.getByRole("button", { name: "Mute your microphone" }));
     expect(useMic.getState()).toMatchObject({ talk: key, muted: true });
-    expect(screen.getByRole("button", { name: "Unmute your microphone" }).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.getByRole("button", { name: "Unmute your microphone" })).toBeTruthy();
     expect(pill().className).toContain("talk-muted");
     fireEvent.click(screen.getByRole("button", { name: "Muted — tap to talk" }));
     expect(useMic.getState().muted).toBe(false);
@@ -132,8 +132,9 @@ describe("the title bar's pill", () => {
   it("offers how the agent answers, the microphone and speaker, from ▾", () => {
     act(() => toggleTalk(key));
     render(<TalkPill />);
-    fireEvent.click(screen.getByRole("button", { name: "How Kat answers, the microphone and speaker" }));
+    fireEvent.click(screen.getByRole("button", { name: "Conversation options" }));
     const menu = screen.getByRole("menu");
+    expect(within(menu).getByRole("menuitemradio", { name: "Kat answers aloud" }).getAttribute("aria-checked")).toBe("true");
     fireEvent.click(within(menu).getByText("Kat answers in writing"));
     expect(useSettings.getState().writtenReplies).toEqual([key]);
   });
@@ -210,7 +211,7 @@ describe("the pill's popover", () => {
   it("moves the conversation to another agent, naming its workspace where names repeat", () => {
     act(() => toggleTalk(key));
     render(<TalkPill />);
-    fireEvent.click(within(open()).getByRole("button", { name: "Switch to" }));
+    fireEvent.click(within(open()).getByRole("button", { name: /^Switch to/ }));
     const menu = screen.getByRole("menu", { name: "Switch to" });
     expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Ash · This computer", "Ash · Office"]);
     fireEvent.click(within(menu).getByText("· Office").closest("button")!);
@@ -221,7 +222,7 @@ describe("the pill's popover", () => {
   it("says what kept the microphone, with a way to try again or dismiss it", () => {
     act(() => {
       toggleTalk(key);
-      micFailed(key, "Desk isn't allowed to use the microphone");
+      micFailed({ agent: key, mode: "talk" }, "Desk isn't allowed to use the microphone");
     });
     render(<TalkPill />);
     expect(pill().className).toContain("talk-problem");
@@ -231,11 +232,41 @@ describe("the pill's popover", () => {
     expect(within(pop).getByRole("button", { name: "Open Microphone settings" })).toBeTruthy();
     fireEvent.click(within(pop).getByRole("button", { name: "Try again" }));
     expect(useMic.getState()).toMatchObject({ talk: key, problem: null });
-    act(() => micFailed(key, "no input device"));
+    act(() => micFailed({ agent: key, mode: "talk" }, "no input device"));
     expect(status().textContent).toBe("Microphone problem — fix");
     fireEvent.click(within(pill()).getByRole("button", { name: "Dismiss" }));
     expect(useMic.getState().problem).toBeNull();
     expect(screen.queryByRole("group")).toBeNull();
+  });
+
+  it("leaves a hold that failed to its DM, never offering to start a conversation", () => {
+    const { container } = render(<TalkPill />);
+    act(() => micFailed({ agent: key, mode: "hold" }, "Desk isn't allowed to use the microphone"));
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("keeps focus where it is as the conversation changes, so a held key holds", () => {
+    act(() => toggleTalk(key));
+    render(<TalkPill />);
+    const pop = open();
+    const hold = within(pop).getByRole("button", { name: "Hold to talk" });
+    act(() => hold.focus());
+    fireEvent.keyDown(hold, { key: " " });
+    expect(useMic.getState()).toMatchObject({ hold: key, pressed: true });
+    act(() => useVoiceStore.setState({ status: { state: "transcribing" }, waiting: { [key]: true } }));
+    expect(document.activeElement).toBe(hold);
+    expect(useMic.getState().pressed).toBe(true);
+    fireEvent.keyUp(hold, { key: " " });
+    expect(useMic.getState().pressed).toBe(false);
+  });
+
+  it("shows the agent's key while its name isn't known, so a live microphone is never hidden", () => {
+    act(() => {
+      toggleTalk(key);
+      useChat.setState({ roster: [] });
+    });
+    render(<TalkPill />);
+    expect(screen.getByRole("group", { name: `Talking with ${key}` })).toBeTruthy();
   });
 
   it("closes when the conversation ends elsewhere, and doesn't open again with the next", () => {

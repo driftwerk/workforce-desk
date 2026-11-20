@@ -6,7 +6,7 @@ import { create } from "zustand";
 const shown = new Map<string, Set<HTMLElement>>();
 let recent: string[] = [];
 
-/** The agents whose DM is shown, for what follows it. */
+/** `shown`'s agents, for hooks. */
 const useShown = create<Record<string, true>>(() => ({}));
 
 const publish = () => useShown.setState(Object.fromEntries([...shown.keys()].map((a) => [a, true] as const)), true);
@@ -37,7 +37,7 @@ export function useDmPresence(agent: string | null, root: RefObject<HTMLElement 
     const roots = shown.get(agent) ?? new Set<HTMLElement>();
     roots.add(el);
     shown.set(agent, roots);
-    if (roots.size === 1) publish();
+    if (!useShown.getState()[agent]) publish();
     if (el.contains(document.activeElement)) touch(agent);
     const focused = () => touch(agent);
     el.addEventListener("focusin", focused);
@@ -48,11 +48,12 @@ export function useDmPresence(agent: string | null, root: RefObject<HTMLElement 
       roots.delete(el);
       if (roots.size) return;
       shown.delete(agent);
-      publish();
       // Moving a pane remounts its DM at once; only a DM that stays gone
-      // stops being the one focused last.
+      // stops being shown and the one focused last.
       queueMicrotask(() => {
-        if (!shown.has(agent)) recent = recent.filter((a) => a !== agent);
+        if (shown.has(agent)) return;
+        recent = recent.filter((a) => a !== agent);
+        publish();
       });
     };
   }, [agent, root]);

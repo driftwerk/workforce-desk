@@ -3,8 +3,6 @@ import { useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { useShortcuts } from "../shortcuts/manager";
 import { Mark } from "../ui/Mark";
-import { useChat } from "../chat/store";
-import { agentKey } from "../chat/types";
 import { stopSpeaking } from "./api";
 import { owner, useMic } from "./mic";
 import { useVoiceStore } from "./store";
@@ -13,6 +11,7 @@ import { ProblemNote } from "../ui/ProblemNote";
 import { permissionProblem, useRecheckOnFocus } from "../ui/privacy";
 import { pillView, STEPS } from "./view";
 import { MicIcon } from "./DmVoice";
+import { useAgentName } from "./TalkPill";
 import "../styles/voice.css";
 
 /** Voice by name at a glance: what it's doing, what it heard, and the mic
@@ -32,7 +31,7 @@ export function VoicePill() {
   // the agent it's with, whoever holds the microphone for now.
   const mics = useMic();
   const holder = mics.talk ? { agent: mics.talk, mode: "talk" as const } : owner(mics);
-  const holderName = useChat((s) => (holder ? (s.roster.find((a) => agentKey(a) === holder.agent)?.name ?? null) : null));
+  const holderName = useAgentName(holder?.agent ?? null);
   const mic = holder && holderName ? { name: holderName, byName: on, talk: holder.mode === "talk" } : null;
   const view = pillView(status, thinking, heardBy, transcript, { label: shortcutLabel(holdKeys), available: !holdTaken }, mic);
   const current = view.step ? STEPS.findIndex((s) => s.step === view.step) : -1;

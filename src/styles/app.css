@@ -2136,7 +2136,7 @@ button.thread-bar:hover {
 }
 /* What shows in the title strip, centred above the strip that moves the
    window: the spoken conversation and "Desk is using the browser". Every
-   view leaves the strip's height clear at its top, so nothing moves. */
+   view leaves the strip's height clear at its top. */
 .title-slot {
   position: fixed;
   top: 1px;
@@ -2740,19 +2740,13 @@ button.thread-bar:hover {
   margin: 4px 6px;
   background: var(--border);
 }
-/* A menu's entries as rows in place, in a popover. */
-.menu-rows {
+.menu-rows,
+.menu-radios {
   display: flex;
   flex-direction: column;
 }
 .menu-row {
   min-height: 44px;
-}
-.menu-row .menu-hint {
-  max-width: 50%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 /* ── A sidebar row with a ⋯ menu that shows on hover ───────────────────── */

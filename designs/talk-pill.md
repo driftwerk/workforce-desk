@@ -18,11 +18,11 @@ A DM going away no longer touches the microphone. `useDmPresence` keeps only wha
 The microphone can still be let go in two situations:
 
 - **A hold button unmounts while it's pressed.** The button's own hook releases it, through `endHold`, so the engine also gets `pushToTalk(false)`. Today `forget` drops the state but never tells the engine.
-- **The agent leaves the roster.** `useVoice` watches the roster. Once the roster has been read and the talking agent isn't on it, it calls `forget(agent)`. That clears `talk`, `hold`, `pressed`, `problem` and `muted` for that agent. `forget` keeps its name, and its doc now says it's for an agent that's gone.
+- **The agent leaves the roster.** `useVoice` watches the roster. Once the agent's hub has been read without it (no `rosterErrors` entry for that hub), or the hub is gone, it calls `forget(agent)`. A hub that couldn't be read keeps the conversation going. That clears `talk`, `hold`, `pressed`, `problem` and `muted` for that agent. `forget` keeps its name, and its doc now says it's for an agent that's gone.
 
 `Turns.heard` sends to the microphone's owner through `useChat.send`. That needs the agent's live conversation. So when the owner isn't shown anywhere, `heard` calls `chat.watchDm(key)`, which connects without navigating, before sending. A conversation switched to an agent whose DM was never opened then still reaches it.
 
-`talkHere` with no target DM now ends the live conversation (`endConversation(talk)`). The existing shortcut then works from every view.
+`talkOrEnd` in another agent's DM moves the conversation there (`switchConversation`). `talkHere` with no target DM now ends the live conversation (`endConversation(talk)`). The existing shortcut then works from every view.
 
 ## The mic store (mic.ts)
 
@@ -38,7 +38,7 @@ New and changed actions:
 - `switchTalk(agent)`: one atomic `setState` that sets `talk: agent`, `since: now`, `from: the previous talk`, `muted: false` and `problem: null`. The microphone never passes through `null`, so voice by name doesn't wake up between the two agents.
 - `toggleMute()`: flips `muted`, only while `talk` is set.
 - `dismissProblem()`: sets `problem: null`.
-- `micFailed`: also clears `muted`, `since` and `from`.
+- `micFailed(owner, message)`: also clears `muted`, `since` and `from`, and records whether a talk or a hold failed (`problem.mode`). Only a talk's failure shows in the pill, and only a talk is retried.
 
 `claimMode` with mute:
 
@@ -105,15 +105,15 @@ The pill appends "· m:ss" to "Listening".
 ### src/voice/TalkPill.tsx (new): `TalkPill`
 
 - Mounted once in App, in a new title strip slot. It renders nothing where voice doesn't run here (`useVoiceStore.here`) and when `talkView` is null.
-- It finds the agent's name from the roster and uses its key as a fallback.
+- It finds the agent's name from the roster (`useAgentName`, shared with VoicePill) and uses its key as a fallback, so a live microphone is never hidden.
 
 **The full pill** is a `role="group"` labelled "Talking with Kat". Left to right:
 
 1. **Name button.** `AgentMark` (xs) and the name. It opens the agent's DM: close Settings, then `openTarget({kind: "agent"})`.
 2. **Status button.** The meter (live tone only) and the line, with `<Elapsed since>` while listening. `aria-haspopup="dialog"` and `aria-expanded`. Clicking it opens the popover, or unmutes when muted ("tap to talk").
 3. **Stop reply** (`.btn` small), while speaking.
-4. **Mute** icon button. `aria-pressed`; the label is "Mute your microphone" or "Unmute your microphone"; the title shows its shortcut.
-5. **▾** icon button. Opens a `Menu` with `useTalkEntries`.
+4. **Mute** icon button. Its label changes (no `aria-pressed`, so it is never read as "Unmute, pressed"): "Mute your microphone" or "Unmute your microphone"; the title shows its shortcut.
+5. **▾** icon button, "Conversation options". Opens a `Menu` with `useTalkEntries`, computed once in the pill and passed to the popover.
 6. **End** (`.btn-signal`). Calls `endConversation`.
 
 For the problem state there's no Mute, and End becomes Dismiss.
@@ -122,13 +122,13 @@ A visually hidden `<span role="status" aria-live="polite">` says the line withou
 
 **The dot.** When the talking agent's DM is shown in the window, the pill shrinks to a single 26px button containing a dot in the tone's colour. It opens the same popover. Its label is "Talking with Kat: conversation controls".
 
-**The popover** (`Popover`, centred under the pill):
+**The popover** (`Popover`, centred under the whole pill via its new `anchor`, following it as the pill's width changes; focus goes back to the button that opened it):
 
 - **Head.** The agent's mark (md), "Talking with Kat", "Started in the DM · m:ss" or "Moved from Ash · m:ss", and an "Open DM" link.
-- **Last exchange.** "You · …" and "Kat · …", or "Nothing said yet". It reads `conversations[talk]` with a selector that returns the two strings, so streaming doesn't re-render the pill.
+- **Last exchange.** "You · …" and "Kat · …", or "Nothing said yet". It reads `conversations[talk]` with a selector that returns the two strings, inside the popover only, so streaming re-renders only the open popover.
 - **Problem.** `ProblemNote` with `permissionProblem` and a "Try again" button (`toggleTalk(agent)`). `useRecheckOnFocus("microphone")` retries once access is granted.
 - **Buttons.** Mute or Unmute (`.btn`), Hold to talk (`.btn`, the shared hold handlers), End (`.btn-signal`). All 44px tall.
-- **Choices.** `EntryRows` over `useTalkEntries`.
+- **Choices.** `MenuRows` over `useTalkEntries`.
 
 **`useTalkEntries(agent, name)`**:
 
@@ -136,7 +136,7 @@ A visually hidden `<span role="status" aria-live="polite">` says the line withou
 - `useAudioEntries()`
 - "Switch to" with a submenu of the other roster agents, each with its hub when names repeat. Choosing one calls `switchConversation`.
 
-**`EntryRows` (new, in src/ui/Menu.tsx).** It shows a menu's entries as a list of rows in place. Each row is a 44px button showing label, hint and a ✓ when checked. A row with a submenu opens a `Menu` beside it. A separator becomes a rule.
+**`MenuRows` (new, in src/ui/Menu.tsx).** It shows a menu's entries as a list of rows in place. Each row is a 44px button with the same body as a `Menu` item (`ItemBody`, shared). Radio entries sit in a `radiogroup` as `role="radio"`; a row with a submenu opens a `Menu` under it.
 
 ### DmVoice.tsx
 
@@ -149,16 +149,19 @@ A visually hidden `<span role="status" aria-live="polite">` says the line withou
 
 ### Settings/Audio.tsx
 
-`useLevel(on, onFill)` holds `LevelMeter`'s 10 Hz polling, and both meters use it. The pill reads the engine's own microphone through `voice_audio_level`. It never opens a meter stream (no `audioMeter`).
+`useLevel(onFill)` holds `LevelMeter`'s 10 Hz polling, and both meters use it. The pill reads the engine's own microphone through `voice_audio_level`. It never opens a meter stream (no `audioMeter`).
 
 ### Popover.tsx
 
 - New `align?: "end" | "center"`, defaulting to `"end"` as today.
 - A mousedown or Escape inside a `[data-menu]` element is left to that menu, so device submenus work inside the popover.
+- `onClose` is read through a ref, and the first control takes focus only when the popover opens, so a re-render never moves focus (a held Hold to talk stays held).
+- It goes above its anchor only when it fits there; fitting neither way, it's kept on screen.
 
 ### dms.ts
 
 - `useDmShown(agent)` is a hook backed by a zustand store of shown agents. The store updates when the first DM for an agent mounts and when the last one unmounts.
+- A DM going is published in the same microtask that prunes `recent`, so a pane moving doesn't flicker the dot.
 - It counts mounted DMs only: Rooms' DM, a grid pane, and the Floor's side panel. Each of these has its own `DmVoiceBar`, so the dot never hides something you can't see elsewhere.
 
 ### Sidebar crew rows (src/groups/SidebarGroups.tsx)
@@ -176,9 +179,9 @@ A hold without a talk still shows as today, because the header pill only shows t
 
 ## Where the pill sits
 
-**macOS.** A fixed slot centred in the 28px `.titlebar` strip (`.title-slot`, z-index 31, `pointer-events: none` except on its children). It holds `TalkPill` and, on macOS only, `BrowserPill place="titlebar"`, side by side. `.browser-pill-titlebar` loses its own fixed position. The pill is 26px tall at `top: 1px`, so the strip's height doesn't change. Mousedown on the pill stops propagation.
+**macOS.** A fixed slot centred in the 28px `.titlebar` strip (`.title-slot`, z-index 31, `pointer-events: none` except on its children). It holds `TalkPill` and, on macOS only, `BrowserPill place="titlebar"`, side by side. `.browser-pill-titlebar` loses its own fixed position. The pill is 26px tall at `top: 1px`, so the strip's height doesn't change. The slot is a sibling of the drag strip, so a press on the pill never drags the window, and nothing stops a press from closing an open menu.
 
-**Windows and Linux.** The same slot at the same place. Every view already pads its top by 34px, so it covers nothing and moves nothing. BrowserPill stays in its band there.
+**Windows and Linux.** The same slot at the same place. Floor, Rooms, Settings and the sidebar already pad their tops by 30–34px; Grids, which padded only on macOS, now leaves the strip's 28px on every system. BrowserPill stays in its band there.
 
 The popover is portaled to `body` and anchored under the pill. Nothing below it moves.
 
@@ -195,7 +198,7 @@ The popover is portaled to `body` and anchored under the pill. Nothing below it 
 
 **The meter** is five 2px bars in `--signal`, scaled by a `--level` custom property set on its element. The pulse respects `prefers-reduced-motion`.
 
-**The popover** is `.popover.talk-pop`, 380px wide. The exchange box uses `--sunken` with `--radius-sm`. "You ·" is `--faint` and "Kat ·" is `--signal-soft-text`. The buttons are `.btn` and `.btn-signal` at `min-height: 44px`, and the rows are 44px tall.
+**The popover** is `.popover.talk-pop`, 380px wide. The exchange box and the popover's plain buttons use `--surface`, with `--radius-sm`. The muted pill greys the agent's mark. "You ·" is `--faint` and "Kat ·" is `--signal-soft-text`. The buttons are `.btn` and `.btn-signal` at `min-height: 44px`, and the rows are 44px tall.
 
 ## Tests
 

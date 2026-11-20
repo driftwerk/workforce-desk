@@ -3,14 +3,16 @@ import { createPortal } from "react-dom";
 
 const MARGIN = 8;
 
-/** A small panel under the button that opened it (`from`), over everything
- *  and kept on screen: its right edge under the button's, or (`center`)
- *  centred under it. Escape or a click elsewhere closes it, and Escape puts
- *  focus back on that button; both are left to a menu opened from it. Its
- *  first control takes focus. */
+/** A small panel under the button that opened it (`from`), or under
+ *  `anchor` when it's part of something wider, over everything and kept on
+ *  screen, following it as it changes size: its right edge under the
+ *  anchor's, or (`center`) centred under it. Escape or a click elsewhere
+ *  closes it, and Escape puts focus back on that button; both are left to a
+ *  menu opened from it. Its first control takes focus as it opens. */
 export function Popover({
   label,
   from,
+  anchor = from,
   onClose,
   children,
   className = "",
@@ -18,38 +20,43 @@ export function Popover({
 }: {
   label: string;
   from: HTMLElement;
+  anchor?: HTMLElement;
   onClose: () => void;
   children: ReactNode;
   className?: string;
   align?: "end" | "center";
 }) {
   const ref = useRef<HTMLDivElement>(null);
+  const close = useRef(onClose);
+  close.current = onClose;
   const [pos, setPos] = useState<{ left: number; top: number } | null>(null);
   useLayoutEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const at = from.getBoundingClientRect();
+    const at = anchor.getBoundingClientRect();
     const box = el.getBoundingClientRect();
     const wanted = align === "center" ? at.left + (at.width - box.width) / 2 : at.right - box.width;
     const left = Math.max(MARGIN, Math.min(wanted, window.innerWidth - box.width - MARGIN));
     const below = at.bottom + 6;
     const above = at.top - box.height - 6;
-    // Above only when it doesn't fit below and does there: never over the button.
-    const top = below + box.height > window.innerHeight - MARGIN && above >= MARGIN ? above : below;
-    setPos({ left, top });
-  }, [from, align]);
+    const fitsBelow = below + box.height <= window.innerHeight - MARGIN;
+    const top = fitsBelow ? below : above >= MARGIN ? above : Math.max(MARGIN, window.innerHeight - box.height - MARGIN);
+    setPos((p) => (p?.left === left && p.top === top ? p : { left, top }));
+  });
   useEffect(() => {
     ref.current?.querySelector<HTMLElement>("button, [href], input")?.focus();
+  }, [from]);
+  useEffect(() => {
     const inMenu = (e: Event) => e.target instanceof Element && !!e.target.closest("[data-menu]");
     const away = (e: MouseEvent) => {
       if (inMenu(e) || (e.target instanceof Node && (ref.current?.contains(e.target) || from.contains(e.target)))) return;
-      onClose();
+      close.current();
     };
     const key = (e: KeyboardEvent) => {
       if (e.key !== "Escape" || inMenu(e)) return;
       e.preventDefault();
       e.stopPropagation();
-      onClose();
+      close.current();
       from.focus();
     };
     document.addEventListener("mousedown", away);
@@ -58,7 +65,7 @@ export function Popover({
       document.removeEventListener("mousedown", away);
       document.removeEventListener("keydown", key, true);
     };
-  }, [from, onClose]);
+  }, [from]);
   return createPortal(
     <div
       ref={ref}

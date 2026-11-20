@@ -413,4 +413,11 @@ describe("the engine that says a DM's answer", () => {
     expect(useMic.getState().talk).toBeNull();
     expect(calls("voice_stop_speaking")).toHaveLength(1);
   });
+
+  it("the talk button in another agent's DM moves the conversation there", () => {
+    talkOrEnd(key);
+    talkOrEnd("local/scout");
+    expect(useMic.getState()).toMatchObject({ talk: "local/scout", from: key });
+    expect(calls("voice_stop_speaking")).toHaveLength(1);
+  });
 });

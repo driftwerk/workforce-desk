@@ -130,7 +130,7 @@ describe("a DM's voice bar", () => {
   });
 
   it("says why the microphone couldn't be had", () => {
-    expect(dmVoiceView(key, "Atlas", mic({ problem: { agent: key, message: "microphone access was denied" } }), listening, false, null, false)).toMatchObject({
+    expect(dmVoiceView(key, "Atlas", mic({ problem: { agent: key, mode: "hold", message: "microphone access was denied" } }), listening, false, null, false)).toMatchObject({
       line: "microphone access was denied",
       problem: true,
     });
@@ -177,9 +177,10 @@ describe("the title bar's pill", () => {
   });
 
   it("says the microphone couldn't be had, blocked or otherwise, before anything else", () => {
-    const failed = mic({ talk: null, problem: { agent: key, message: "no input device" } });
+    const failed = mic({ talk: null, problem: { agent: key, mode: "talk", message: "no input device" } });
     expect(talkView(failed, listening, false, null, false)).toEqual({ agent: key, tone: "problem", line: "Microphone problem — fix", elapsed: false, speaking: false });
     expect(talkView(failed, listening, false, null, true)?.line).toBe("Microphone blocked — fix");
+    expect(talkView(mic({ talk: null, problem: { agent: key, mode: "hold", message: "no input device" } }), listening, false, null, false)).toBeNull();
   });
 });
 
@@ -211,6 +212,10 @@ describe("the last exchange", () => {
   it("is nothing from before it began, and leaves out failures", () => {
     expect(lastExchange([msg("1", "user", "before", 5)], 10_000)).toEqual({ you: null, agent: null });
     expect(lastExchange([msg("1", "user", "hi", 20), msg("2", "assistant", "couldn't", 21, "error")], 10_000)).toEqual({ you: "hi", agent: null });
-    expect(lastExchange([msg("1", "assistant", "Hello", 20)], 10_000)).toEqual({ you: null, agent: "Hello" });
+    expect(lastExchange([msg("1", "assistant", "Hello", 20)], 10_000)).toEqual({ you: null, agent: null });
+  });
+
+  it("takes the agent's answer whatever its hub's clock says", () => {
+    expect(lastExchange([msg("1", "user", "hi", 20), msg("2", "assistant", "Hello", 2)], 10_000)).toEqual({ you: "hi", agent: "Hello" });
   });
 });

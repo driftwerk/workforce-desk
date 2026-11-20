@@ -50,8 +50,8 @@ export const useAudioEntries = (): MenuEntry[] => {
 /** Whether `agent` (`name`) answers what's said aloud or in writing, as a
  *  menu's entries. */
 export const answerEntries = (agent: string, name: string, written: boolean): MenuEntry[] => [
-  { kind: "item", label: `${name} answers aloud`, checked: !written, onSelect: () => setReply(agent, "spoken") },
-  { kind: "item", label: `${name} answers in writing`, checked: written, onSelect: () => setReply(agent, "written") },
+  { kind: "item", label: `${name} answers aloud`, radio: true, checked: !written, onSelect: () => setReply(agent, "spoken") },
+  { kind: "item", label: `${name} answers in writing`, radio: true, checked: written, onSelect: () => setReply(agent, "written") },
 ];
 
 /** Whether voice runs in this window: Desk's main window runs it, a grid in
@@ -225,7 +225,7 @@ export function DmVoiceBar({ agent, name }: { agent: string; name: string }) {
       )}
       {mic.talk === agent && (
         <>
-          <button type="button" className="link small" aria-pressed={mic.muted} onClick={toggleMute}>
+          <button type="button" className="link small" onClick={toggleMute}>
             {mic.muted ? "Unmute" : "Mute"}
           </button>
           <button type="button" className="link small" onClick={() => endConversation(agent)}>

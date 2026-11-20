@@ -75,9 +75,9 @@ describe("the microphone's owner", () => {
 
   it("goes back to voice by name when it can't be had, saying why in that DM", () => {
     toggleTalk("local/atlas");
-    micFailed("local/atlas", "microphone access was denied");
+    micFailed({ agent: "local/atlas", mode: "talk" }, "microphone access was denied");
     expect(owner()).toBeNull();
-    expect(useMic.getState().problem).toEqual({ agent: "local/atlas", message: "microphone access was denied" });
+    expect(useMic.getState().problem).toEqual({ agent: "local/atlas", mode: "talk", message: "microphone access was denied" });
     toggleTalk("local/atlas");
     expect(useMic.getState().problem).toBeNull();
   });
@@ -89,7 +89,7 @@ describe("the microphone's owner", () => {
     expect(owner()?.agent).toBe("local/atlas");
     forget("local/atlas");
     expect(useMic.getState()).toMatchObject({ talk: null, hold: null, pressed: false, muted: false, since: null });
-    micFailed("local/atlas", "no input device");
+    micFailed({ agent: "local/atlas", mode: "talk" }, "no input device");
     forget("local/atlas");
     expect(useMic.getState().problem).toBeNull();
   });
@@ -152,7 +152,7 @@ describe("a spoken conversation", () => {
     endTalk("local/atlas");
     expect(useMic.getState().muted).toBe(false);
     muted();
-    micFailed("local/atlas", "no input device");
+    micFailed({ agent: "local/atlas", mode: "talk" }, "no input device");
     expect(useMic.getState()).toMatchObject({ muted: false, since: null });
     dismissProblem();
     expect(useMic.getState().problem).toBeNull();

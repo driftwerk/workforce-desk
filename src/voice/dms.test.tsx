@@ -59,7 +59,7 @@ describe("which DM a DM shortcut acts on", () => {
     expect(useMic.getState().talk).toBe("local/atlas");
   });
 
-  it("says whether an agent's DM is shown, as it changes", () => {
+  it("says whether an agent's DM is shown, as it changes, not flickering as a pane moves", async () => {
     function Shown({ agent }: { agent: string }) {
       return <output aria-label={`shown ${agent}`}>{String(useDmShown(agent))}</output>;
     }
@@ -81,7 +81,17 @@ describe("which DM a DM shortcut acts on", () => {
       </>,
     );
     expect(shown()).toBe("true");
+    rerender(
+      <>
+        <Shown agent="local/atlas" />
+        <Dm key="moved" agent="local/atlas" />
+      </>,
+    );
+    await act(async () => undefined);
+    expect(shown()).toBe("true");
     rerender(<Shown agent="local/atlas" />);
+    expect(shown()).toBe("true");
+    await act(async () => undefined);
     expect(shown()).toBe("false");
   });
 });
