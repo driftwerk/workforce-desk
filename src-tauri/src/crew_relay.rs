@@ -401,8 +401,8 @@ async fn carry<E: Ends>(ends: &E, call: &Call, machine: &MachineId, timing: Timi
 }
 
 /// A session as a machine lists it, as much as a plan reads: its id,
-/// names, folder, state, when it was made and last reply (capped); none
-/// without an id.
+/// names, folder, state, when it was made, last reply (capped) and how its
+/// process last ended on its own, where its Desk says; none without an id.
 fn session_of(v: &Value) -> Option<Value> {
     let id = v.get("id")?.as_str()?;
     let text = |k: &str| {
@@ -415,7 +415,7 @@ fn session_of(v: &Value) -> Option<Value> {
         .get("lastReply")
         .and_then(Value::as_str)
         .map(|r| r.chars().take(MOST_REPLY).collect::<String>());
-    Some(json!({
+    let mut s = json!({
         "id": id,
         "name": text("name"),
         "displayName": text("displayName"),
@@ -423,7 +423,11 @@ fn session_of(v: &Value) -> Option<Value> {
         "state": text("state"),
         "createdAt": text("createdAt"),
         "lastReply": reply,
-    }))
+    });
+    if let Some(exited) = v.get("exited").filter(|e| e.is_object()) {
+        s["exited"] = exited.clone();
+    }
+    Some(s)
 }
 
 /// Why a machine refused one of Desk's own requests, briefly.
@@ -450,8 +454,8 @@ async fn carry_desk<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &
         }) else {
             return refused(format!("{name}'s sessions couldn't be read"));
         };
-        // Too much to post: the replies shortened, then left out, before
-        // the list is.
+        // Too much to post: the replies and last outputs shortened (an
+        // output to its end), then left out, before the list is.
         for most in [MOST_REPLY, 200, 0] {
             for s in &mut listed {
                 if let Some(r) = s["lastReply"].as_str() {
@@ -459,6 +463,10 @@ async fn carry_desk<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &
                         0 => Value::Null,
                         m => r.chars().take(m).collect::<String>().into(),
                     };
+                }
+                if let Some(o) = s.pointer("/exited/lastOutput").and_then(Value::as_str) {
+                    let skip = o.chars().count().saturating_sub(most);
+                    s["exited"]["lastOutput"] = o.chars().skip(skip).collect::<String>().into();
                 }
             }
             let answer = json!({"status": "ok", "body": listed});
@@ -1918,13 +1926,15 @@ mod tests {
         let _ = stop.send(true);
     }
 
-    /// A long list is posted with its replies shortened, not refused.
+    /// A long list is posted with its replies and last outputs shortened
+    /// (an output to its end), not refused.
     #[tokio::test]
     async fn a_long_listing_shortens_its_replies() {
         let many: Vec<Value> = (0..400)
             .map(|i| {
                 json!({"id": format!("1a2b3c4d-0b0a-4909-8807-{i:012}"), "name": "x",
-                       "state": "idle", "lastReply": "y".repeat(3000)})
+                       "state": "idle", "lastReply": "y".repeat(3000),
+                       "exited": {"code": 1, "lastOutput": format!("{}error", "z".repeat(3000))}})
             })
             .collect();
         let (fake, mut rx) = with_desk(vec![Does::Says(200, Value::Array(many))], None);
@@ -1934,7 +1944,24 @@ mod tests {
         let listed = answer["body"].as_array().unwrap();
         assert_eq!(listed.len(), 400);
         assert!(listed[0]["lastReply"].as_str().unwrap().len() <= 200);
+        let output = listed[0]["exited"]["lastOutput"].as_str().unwrap();
+        assert!(output.len() <= 200 && output.ends_with("error"), "{output}");
+        assert_eq!(listed[0]["exited"]["code"], 1);
         let _ = stop.send(true);
+    }
+
+    /// How a machine's session ended as it started goes with it as its
+    /// Desk said; a Desk that doesn't say leaves it out.
+    #[test]
+    fn a_session_carries_how_it_last_ended_only_where_its_desk_says() {
+        let exited = json!({"code": 1, "lastOutput": "error: bad flag", "at": "2026-11-20T09:00:00Z", "onStart": true});
+        let said =
+            session_of(&json!({"id": SESSION, "state": "interrupted", "exited": exited})).unwrap();
+        assert_eq!(said["exited"], exited);
+        let older = session_of(&json!({"id": SESSION, "state": "interrupted"})).unwrap();
+        assert!(older.get("exited").is_none(), "{older}");
+        let none = session_of(&json!({"id": SESSION, "state": "idle", "exited": null})).unwrap();
+        assert!(none.get("exited").is_none(), "{none}");
     }
 
     /// A plan's listing reads the machine's sessions, each as much as a
