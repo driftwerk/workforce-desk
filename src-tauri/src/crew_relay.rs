@@ -545,8 +545,10 @@ fn said<'a>(call: &'a Call, key: &str, required: bool) -> Result<Option<&'a str>
 
 /// A check's body as the machine takes it: its command (at most
 /// [`MOST_COMMAND`], no NUL), where it runs, how long (at most
-/// [`MOST_RUN_SECS`]), and whether it is judged there; nothing else.
-fn run_body(call: &Call) -> Result<Vec<u8>, Outcome> {
+/// [`MOST_RUN_SECS`]), and whether it is judged there; nothing else. With
+/// it, the seconds it runs for. One whose answer is too large to bring
+/// back may have run: its outcome isn't known.
+fn run_body(call: &Call) -> Result<(Vec<u8>, u64), Outcome> {
     let bad = |key: &str| refused(format!("That call's {key} couldn't be read."));
     let command = match call.input.get("command") {
         Some(Value::String(c))
@@ -581,15 +583,15 @@ fn run_body(call: &Call) -> Result<Vec<u8>, Outcome> {
             "Only the person, or a boss acting fully, runs a check unjudged.".into(),
         ));
     }
+    let secs = secs.unwrap_or(RUN_SECS);
     let body = json!({
         "command": command,
         "cwd": cwd,
-        // Said, so the machine runs it for the time Desk reserved for it.
-        "timeout_secs": secs.unwrap_or(RUN_SECS),
+        "timeout_secs": secs,
         "judged": judged,
         "by_person": by_person,
     });
-    Ok(body.to_string().into_bytes())
+    Ok((body.to_string().into_bytes(), secs))
 }
 
 /// `v` as it goes in an address's query.
@@ -623,17 +625,17 @@ async fn carry_machine<E: Ends>(
     if let Some(extra) = input.keys().find(|k| !fields.contains(&k.as_str())) {
         return refused(format!("That call's {extra} isn't one Desk sends."));
     }
-    // A boss that only watches makes nothing, whatever its hub says: what
-    // makes or runs something goes for a level that acts or suggests alone.
-    let acts = matches!(call.level.as_str(), Some("suggest" | "act" | "full"));
-    if matches!(tool, FOLDER_MAKE | RUN) && !acts && call.level.as_str() != Some("watch") {
-        return refused("That call's level couldn't be read.".into());
-    }
-    if tool == FOLDER_MAKE && !acts {
-        return refused("A boss that only watches makes no folders.".into());
-    }
-    if tool == RUN && !acts {
-        return refused("A boss that only watches runs nothing.".into());
+    // A boss that only watches makes and runs nothing, whatever its hub
+    // says.
+    match (tool, call.level.as_str()) {
+        (FOLDER_MAKE, Some("watch")) => {
+            return refused("A boss that only watches makes no folders.".into());
+        }
+        (RUN, Some("watch")) => return refused("A boss that only watches runs nothing.".into()),
+        (RUN, level) if !matches!(level, Some("suggest" | "act" | "full")) => {
+            return refused("That call's level couldn't be read.".into());
+        }
+        _ => {}
     }
     // A read sent again changes nothing: one cut off is said, not left
     // for the hub to wait out.
@@ -659,14 +661,9 @@ async fn carry_machine<E: Ends>(
             );
             ("GET", target, None)
         }),
-        RUN => run_body(call).and_then(|b| {
+        RUN => run_body(call).and_then(|(b, secs)| {
             // Sent only with the time to run it and bring its answer back:
             // one cut off while it runs there may have done what it does.
-            let secs = call
-                .input
-                .get("timeout_secs")
-                .and_then(Value::as_u64)
-                .unwrap_or(RUN_SECS);
             if until.saturating_duration_since(Instant::now())
                 < Duration::from_secs(secs) + RUN_SLACK
             {
@@ -1492,9 +1489,10 @@ mod tests {
         );
     }
 
-    /// Every call the hub queues for a machine that isn't a group's
-    /// (its `MACHINE_CALLS` and `DESK_CALLS`) goes to that machine's own
-    /// route: none reaches its served route, which takes a group's alone.
+    /// Every call the hub queues for a machine that isn't a group's (its
+    /// `MACHINE_CALLS` and `DESK_CALLS`, but `desk.machines`, answered
+    /// here) goes to that machine's own route: none reaches its served
+    /// route, which takes a group's alone.
     #[tokio::test]
     async fn no_machine_call_goes_to_the_served_route() {
         let calls = [
@@ -1541,17 +1539,25 @@ mod tests {
         }
         let _ = stop.send(true);
         assert!(fake.sent().is_empty(), "{:?}", fake.sent());
-        let routes: Vec<String> = fake
+        let mut routes: Vec<String> = fake
             .routes_sent
             .lock()
             .unwrap()
             .iter()
             .map(|(_, m, t, _)| format!("{m} {t}"))
             .collect();
-        assert!(
-            routes.contains(&"POST /api/desk/run".to_string()),
-            "{routes:?}"
+        routes.sort();
+        assert_eq!(
+            routes,
+            [
+                "GET /api/desk/folders?path=%7E",
+                "GET /api/desk/repos?remote=github.com%2Fa%2Fb",
+                "POST /api/desk/folders",
+                "POST /api/desk/repos/checkout",
+                "POST /api/desk/run",
+            ]
         );
+        assert!(!fake.desk_sent.lock().unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -1559,21 +1565,14 @@ mod tests {
         let (fake, mut rx) = with_routes(vec![
             Does::Says(200, json!({"outcome": "ran", "exit": 0, "stdout": "ok\n"})),
             Does::Fails(Unanswered::MaybeSent("cut off".into())),
-            Does::Says(200, json!({"outcome": "ran", "exit": 0, "stdout": ""})),
-            Does::Says(200, json!({"outcome": "ran", "exit": 0, "stdout": ""})),
         ]);
-        // A call's whole time, as a check is carried in.
-        let roomy = Timing {
-            carry_for: Duration::from_secs(25),
-            ..quick()
-        };
         let stop = start_with(
             &fake.polled(vec![desk_call(
                 A,
                 "desk.run",
                 json!({"command": "git status\ngit log -1", "cwd": "~/app", "timeout_secs": 5, "judged": true, "by_person": false}),
             )]),
-            roomy,
+            roomy(),
         );
         let (_, answer) = next(&mut rx).await;
         assert_eq!(answer["body"]["outcome"], "ran", "{answer}");
@@ -1590,7 +1589,7 @@ mod tests {
         // Not said: judged, not the person's word.
         let stop = start_with(
             &fake.polled(vec![desk_call(B, "desk.run", json!({"command": "ls"}))]),
-            roomy,
+            roomy(),
         );
         none_in(&mut rx, 300).await;
         let _ = stop.send(true);
@@ -1603,121 +1602,87 @@ mod tests {
             10,
             "the time reserved"
         );
-        // Each refused for its own reason, and nothing sent.
-        let at = |id: &str, level: Value, input: Value| {
-            let mut c = desk_call(id, "desk.run", input);
-            c["level"] = level;
-            c
-        };
-        let refusals: Vec<(&str, Value, Value, &str)> = vec![
+    }
+
+    /// Each check Desk can't send is refused for its own reason, and
+    /// nothing goes to the machine.
+    #[tokio::test]
+    async fn a_check_desk_cant_send_is_refused_for_its_own_reason() {
+        let (fake, mut rx) = with_routes(vec![]);
+        let refusals: Vec<(Value, Value, &str)> = vec![
             (
-                "0f0e0d0c-0b0a-4909-8807-0605040302c1",
                 json!("act"),
                 json!({"command": "ls", "env": {"X": "1"}}),
                 "isn't one Desk sends",
             ),
             (
-                "0f0e0d0c-0b0a-4909-8807-0605040302c2",
                 json!("act"),
                 json!({"command": "ls", "timeout_secs": 60}),
                 "timeout_secs",
             ),
             (
-                "0f0e0d0c-0b0a-4909-8807-0605040302c3",
                 json!("act"),
                 json!({"command": "ls", "timeout_secs": 16}),
                 "timeout_secs",
             ),
             (
-                "0f0e0d0c-0b0a-4909-8807-0605040302c4",
                 json!("act"),
                 json!({"command": "ls", "timeout_secs": 0}),
                 "timeout_secs",
             ),
             (
-                "0f0e0d0c-0b0a-4909-8807-0605040302c5",
                 json!("act"),
                 json!({"command": "ls", "timeout_secs": 5.5}),
                 "timeout_secs",
             ),
             (
-                "0f0e0d0c-0b0a-4909-8807-0605040302c6",
                 json!("act"),
                 json!({"command": "x".repeat(9000)}),
                 "command",
             ),
+            (json!("act"), json!({"command": "   "}), "command"),
+            (json!("act"), json!({"command": "ls\u{0}x"}), "command"),
             (
-                "0f0e0d0c-0b0a-4909-8807-0605040302c7",
-                json!("act"),
-                json!({"command": "   "}),
-                "command",
-            ),
-            (
-                "0f0e0d0c-0b0a-4909-8807-0605040302c8",
-                json!("act"),
-                json!({"command": "ls\u{0}x"}),
-                "command",
-            ),
-            (
-                "0f0e0d0c-0b0a-4909-8807-0605040302c9",
                 json!("act"),
                 json!({"command": "ls", "cwd": "~/a\u{7}"}),
                 "cwd",
             ),
             (
-                "0f0e0d0c-0b0a-4909-8807-0605040302ca",
                 json!("act"),
                 json!({"command": "ls", "judged": "no"}),
                 "judged",
             ),
             // Unjudged for a boss acting within Desk: never.
             (
-                "0f0e0d0c-0b0a-4909-8807-0605040302cb",
                 json!("act"),
                 json!({"command": "ls", "judged": false}),
                 "acting fully",
             ),
             // The person's word is never also judged.
             (
-                "0f0e0d0c-0b0a-4909-8807-0605040302cc",
                 json!("act"),
                 json!({"command": "ls", "by_person": true}),
                 "by_person",
             ),
             // A boss that watches, or whose level isn't one Desk knows.
+            (json!("watch"), json!({"command": "ls"}), "only watches"),
             (
-                "0f0e0d0c-0b0a-4909-8807-0605040302cd",
-                json!("watch"),
-                json!({"command": "ls"}),
-                "only watches",
-            ),
-            (
-                "0f0e0d0c-0b0a-4909-8807-0605040302ce",
                 json!("watch"),
                 json!({"command": "ls", "judged": false, "by_person": true}),
                 "only watches",
             ),
-            (
-                "0f0e0d0c-0b0a-4909-8807-0605040302cf",
-                Value::Null,
-                json!({"command": "ls"}),
-                "level",
-            ),
-            (
-                "0f0e0d0c-0b0a-4909-8807-0605040302d0",
-                json!("Full"),
-                json!({"command": "ls"}),
-                "level",
-            ),
+            (Value::Null, json!({"command": "ls"}), "level"),
+            (json!("Full"), json!({"command": "ls"}), "level"),
         ];
         let stop = start_with(
             &fake.polled(
                 refusals
                     .iter()
-                    .map(|(id, level, input, _)| at(id, level.clone(), input.clone()))
+                    .enumerate()
+                    .map(|(i, (level, input, _))| run_call(i, level.clone(), input.clone()))
                     .collect(),
             ),
-            roomy,
+            roomy(),
         );
         let mut got = std::collections::HashMap::new();
         for _ in 0..refusals.len() {
@@ -1725,33 +1690,31 @@ mod tests {
             got.insert(id, answer);
         }
         let _ = stop.send(true);
-        for (id, _, input, says) in &refusals {
-            let error = got[*id]["body"]["error"]
+        for (i, (_, input, says)) in refusals.iter().enumerate() {
+            let error = got[&run_id(i)]["body"]["error"]
                 .as_str()
                 .unwrap_or_default()
                 .to_string();
             assert!(error.contains(says), "{input}: {error}");
         }
-        assert_eq!(
-            fake.routes_sent.lock().unwrap().len(),
-            2,
-            "nothing more sent"
-        );
-        // Acting fully, or the person's yes: sent unjudged.
+        assert!(fake.routes_sent.lock().unwrap().is_empty(), "nothing sent");
+    }
+
+    /// Acting fully, or on the person's yes, a check is sent unjudged.
+    #[tokio::test]
+    async fn a_check_goes_unjudged_acting_fully_or_on_the_persons_word() {
+        let ran = || Does::Says(200, json!({"outcome": "ran", "exit": 0, "stdout": ""}));
+        let (fake, mut rx) = with_routes(vec![ran(), ran()]);
         let stop = start_with(
             &fake.polled(vec![
-                at(
-                    "0f0e0d0c-0b0a-4909-8807-0605040302f1",
-                    json!("full"),
-                    json!({"command": "ls", "judged": false}),
-                ),
-                at(
-                    "0f0e0d0c-0b0a-4909-8807-0605040302f2",
+                run_call(0, json!("full"), json!({"command": "ls", "judged": false})),
+                run_call(
+                    1,
                     json!("act"),
                     json!({"command": "ls", "judged": false, "by_person": true}),
                 ),
             ]),
-            roomy,
+            roomy(),
         );
         for _ in 0..2 {
             let (_, answer) = next(&mut rx).await;
@@ -1759,18 +1722,19 @@ mod tests {
         }
         let _ = stop.send(true);
         let sent = fake.routes_sent.lock().unwrap().clone();
-        assert_eq!(sent.len(), 4);
+        assert_eq!(sent.len(), 2);
         assert!(
-            sent[2..]
-                .iter()
+            sent.iter()
                 .all(|s| s.3.as_ref().unwrap()["judged"] == false)
         );
-        // Not the time left to run it and bring it back: never sent.
-        let stop = start(&fake.polled(vec![desk_call(
-            "0f0e0d0c-0b0a-4909-8807-0605040302f3",
-            "desk.run",
-            json!({"command": "ls"}),
-        )]));
+    }
+
+    /// Without the time left to run it and bring it back, a check is never
+    /// sent.
+    #[tokio::test]
+    async fn a_check_without_the_time_to_run_is_never_sent() {
+        let (fake, mut rx) = with_routes(vec![]);
+        let stop = start(&fake.polled(vec![desk_call(A, "desk.run", json!({"command": "ls"}))]));
         let (_, answer) = next(&mut rx).await;
         let _ = stop.send(true);
         assert!(
@@ -1780,7 +1744,26 @@ mod tests {
                 .contains("isn't time left"),
             "{answer}"
         );
-        assert_eq!(fake.routes_sent.lock().unwrap().len(), 4, "nothing sent");
+        assert!(fake.routes_sent.lock().unwrap().is_empty(), "nothing sent");
+    }
+
+    /// A call's whole time, as a check is carried in.
+    fn roomy() -> Timing {
+        Timing {
+            carry_for: Duration::from_secs(25),
+            ..quick()
+        }
+    }
+
+    fn run_id(i: usize) -> String {
+        format!("0f0e0d0c-0b0a-4909-8807-0605040302{i:02x}")
+    }
+
+    /// A check, `i`th of its test, from a boss at `level`.
+    fn run_call(i: usize, level: Value, input: Value) -> Value {
+        let mut c = desk_call(&run_id(i), "desk.run", input);
+        c["level"] = level;
+        c
     }
 
     fn desk_call(id: &str, tool: &str, input: Value) -> Value {

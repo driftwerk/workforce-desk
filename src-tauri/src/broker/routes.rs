@@ -394,7 +394,6 @@ const RELAY_MACHINE: &[Route] = &[
     route("POST", "/api/desk/folders"),
     with_query("GET", "/api/desk/repos", &["remote"]),
     route("POST", "/api/desk/repos/checkout"),
-    // A boss's check on a machine (`crew_relay`), judged there.
     route("POST", "/api/desk/run"),
 ];
 
