@@ -436,6 +436,7 @@ mod tests {
              RestartSec=2\n\
              TimeoutStopSec=90\n\
              KillMode=process\n\
+             OOMPolicy=continue\n\
              \n\
              [Install]\n\
              WantedBy=default.target\n"
