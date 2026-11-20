@@ -194,6 +194,13 @@ def is_dry_run(run):
     return "(dry run)" in (run.get("display_title") or "")
 
 
+def no_release_running(repo):
+    """Skip while a Release run that will publish is under way."""
+    running = release_running(repo)
+    if running:
+        raise Skip(f"a release is running: {running}")
+
+
 def release_running(repo):
     """A Release run under way that will publish, if any: a dry run doesn't count."""
     for status in ("in_progress", "queued", "waiting", "pending", "requested"):
@@ -235,19 +242,20 @@ DEADLINE = time.time() + CI_WAIT_MINUTES * 60
 BUMP_DEADLINE = DEADLINE - 3600
 
 
-def wait_for_ci(repo, sha, appear_minutes=15, workflow=CI, deadline=None):
+def wait_for_ci(repo, sha, appear_minutes=15, workflow=CI, bump=False):
     """`workflow` (Desk's CI) at exactly `sha`, waited for while it runs: its run, or None
     if none came."""
     appear = time.time() + appear_minutes * 60
+    deadline, minutes = (BUMP_DEADLINE, CI_WAIT_MINUTES - 60) if bump else (DEADLINE, CI_WAIT_MINUTES)
     while True:
         latest = newest_run(ci_runs(repo, sha, workflow))
         if latest and latest["status"] == "completed":
             return latest
         if not latest and time.time() > appear:
             return None
-        if time.time() > (deadline or DEADLINE):
+        if time.time() > deadline:
             where = latest["html_url"] if latest else "no run yet"
-            raise Skip(f"{workflow} at {short(sha)} was still running after {CI_WAIT_MINUTES} minutes: {where}",
+            raise Skip(f"{workflow} at {short(sha)} was still running after {minutes} minutes: {where}",
                        attention=True)
         time.sleep(60)
 
@@ -263,9 +271,12 @@ def gate(repo, sha):
 
 
 def newer_than_last(sha, last):
-    """`sha` is a commit the last nightly's Desk commit leads up to (or there was none)."""
-    base = (last or {}).get("desk_commit")
-    return not base or (base != sha and run(["git", "merge-base", "--is-ancestor", base, sha], check=False).returncode == 0)
+    """`sha` is a commit the last nightly's Desk commit leads up to; true when there was no
+    last nightly, false when its feed names no Desk commit."""
+    if last is None:
+        return True
+    base = last.get("desk_commit")
+    return bool(base) and (base != sha and run(["git", "merge-base", "--is-ancestor", base, sha], check=False).returncode == 0)
 
 
 def settle(repo, branch, last):
@@ -298,9 +309,9 @@ def bump(repo, branch, hub_from, hub_to, hub_commits, run_url):
     empty when `branch` took the hub on its own); the checkout is as it was found then."""
     start = git("rev-parse", "HEAD")
     sha, why = None, None
-    for _ in range(BUMP_TRIES):
+    for attempt in range(BUMP_TRIES):
         try:
-            sha, why = bump_once(repo, branch, hub_from, hub_to, hub_commits, run_url)
+            sha, why = bump_once(repo, branch, attempt, hub_from, hub_to, hub_commits, run_url)
         except Skip as e:
             sha, why = None, str(e)
         if sha or why:
@@ -317,10 +328,10 @@ def bump(repo, branch, hub_from, hub_to, hub_commits, run_url):
     return sha, why
 
 
-def bump_once(repo, branch, hub_from, hub_to, hub_commits, run_url):
+def bump_once(repo, branch, attempt, hub_from, hub_to, hub_commits, run_url):
     """One try of the bump: (commit, None) when main is at it, (None, why) when it is left
     out, and (None, None) when main moved while its CI ran."""
-    work = f"nightly/hub-{short(hub_to)}-{os.environ.get('GITHUB_RUN_ID', 'local')}"
+    work = f"nightly/hub-{short(hub_to)}-{os.environ.get('GITHUB_RUN_ID', 'local')}-{attempt}"
     with open("hub.ref", "w") as f:
         f.write(hub_to + "\n")
     git("-c", "user.name=github-actions[bot]",
@@ -336,7 +347,7 @@ def bump_once(repo, branch, hub_from, hub_to, hub_commits, run_url):
         for workflow in (CI, BACKEND):
             run(["gh", "workflow", "run", workflow, "--repo", repo, "--ref", work])
         for workflow in (CI, BACKEND):
-            latest = wait_for_ci(repo, sha, workflow=workflow, deadline=BUMP_DEADLINE)
+            latest = wait_for_ci(repo, sha, workflow=workflow, bump=True)
             if not latest:
                 return None, f"{workflow} didn't start for the hub bump to {short(hub_to)}"
             if latest["conclusion"] != "success":
@@ -378,9 +389,7 @@ def plan():
     if not dry and branch != default:
         raise RuntimeError(f"a nightly is published from {default} only; this run is on {branch}: use dry_run")
 
-    running = release_running(repo)
-    if running:
-        raise Skip(f"a release is running: {running}")
+    no_release_running(repo)
 
     last = feed(releases_repo)
     head = git("rev-parse", "HEAD")
@@ -420,6 +429,10 @@ def plan():
         gate(repo, sha)
     elif sha == head:
         sha, caveat = settle(repo, default, last)
+        no_release_running(repo)
+        if last and last.get("desk_commit") not in (None, "", sha) and not newer_than_last(sha, last):
+            raise Skip(f"{short(sha)}, main's tip with CI passed, doesn't lead on from the last nightly's "
+                       f"{short(last['desk_commit'])}, so it isn't built", attention=True)
         hub_ref = git("show", f"{sha}:hub.ref").strip()
         if caveat:
             attention = " ".join(x for x in (attention, caveat) if x)
@@ -457,6 +470,7 @@ def plan():
     with open("notes/notes.md", "w") as f:
         f.write(notes(version, sha, since_label, changes, hub_from, hub_ref, brought, repo, attention))
 
+    no_release_running(repo)
     output(build="true", version=version, ref=sha, hub_ref=override, reason="", attention=attention)
     summary(f"### Nightly {version}{' (dry run)' if dry else ''}\n\n"
             f"Desk {short(sha)}, hub {short(hub_ref)}"

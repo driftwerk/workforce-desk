@@ -190,6 +190,52 @@ class Main(unittest.TestCase):
             finally:
                 os.chdir(old)
 
+    def test_a_last_without_a_desk_commit_is_not_older_or_newer(self):
+        self.assertFalse(nightly.newer_than_last(B, {"version": "x"}))
+
+    def test_the_deadline_that_fired_is_the_one_named(self):
+        runs = [{"status": "in_progress", "created_at": "t", "id": 1, "html_url": "u"}]
+        with mock.patch.object(nightly, "ci_runs", lambda *a, **k: runs), \
+             mock.patch.object(nightly, "BUMP_DEADLINE", 0), mock.patch.object(nightly, "CI_WAIT_MINUTES", 180):
+            with self.assertRaises(nightly.Skip) as e:
+                nightly.wait_for_ci("o/r", A, bump=True)
+        self.assertIn("after 120 minutes", str(e.exception))
+        with mock.patch.object(nightly, "ci_runs", lambda *a, **k: runs), \
+             mock.patch.object(nightly, "DEADLINE", 0), mock.patch.object(nightly, "CI_WAIT_MINUTES", 180):
+            with self.assertRaises(nightly.Skip) as e:
+                nightly.wait_for_ci("o/r", A)
+        self.assertIn("after 180 minutes", str(e.exception))
+
+    def test_a_release_that_starts_meanwhile_holds_the_night(self):
+        with mock.patch.object(nightly, "release_running", lambda repo: None):
+            nightly.no_release_running("o/r")
+        with mock.patch.object(nightly, "release_running", lambda repo: "https://run"):
+            with self.assertRaises(nightly.Skip):
+                nightly.no_release_running("o/r")
+
+    def test_each_bump_try_has_its_own_work_branch(self):
+        pushed = []
+
+        def git(*args, check=True):
+            return "HEAD~1" if args[0] == "rev-parse" else ("hub.ref" if args[0] == "diff" else "")
+
+        def run(cmd, check=True, **kw):
+            pushed.append(cmd)
+            return mock.Mock(returncode=1)
+
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(nightly, "git", git), \
+             mock.patch.object(nightly, "run", run), \
+             mock.patch.object(nightly, "wait_for_ci", lambda *a, **k: ci("success")):
+            old = os.getcwd()
+            os.chdir(d)
+            try:
+                for attempt in (0, 1):
+                    nightly.bump_once("o/r", "main", attempt, A, B, [], "https://run")
+            finally:
+                os.chdir(old)
+        deletes = [c[-1] for c in pushed if "--delete" in c]
+        self.assertEqual(len(set(deletes)), 2)
+
     def bump(self, once, fresh="hub"):
         results = iter(once)
         with tempfile.TemporaryDirectory() as d, \
