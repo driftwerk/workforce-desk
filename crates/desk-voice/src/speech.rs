@@ -5,7 +5,7 @@
 use std::collections::{HashSet, VecDeque};
 use std::time::Instant;
 
-use eyre::{Context, Result, eyre};
+use eyre::{eyre, Context, Result};
 use sherpa_onnx::{
     GenerationConfig, KeywordSpotter, KeywordSpotterConfig, OfflineRecognizer,
     OfflineRecognizerConfig, OfflineTransducerModelConfig, OfflineTts, OfflineTtsConfig,
@@ -13,12 +13,12 @@ use sherpa_onnx::{
     SileroVadModelConfig, VadModelConfig, VoiceActivityDetector,
 };
 
-use crate::barge::{Barge, Cut, Verdict, judge};
+use crate::barge::{judge, Barge, Cut, Verdict};
 use crate::conversation::{Conversation, ListenMode, NotToThem, Phase, Timing, Transcript};
 use crate::decode::Audio;
 use crate::directions::without_directions;
-use crate::keywords::{Keywords, SentencePiece, vocabulary};
-use crate::models::{ASR, KWS, Models, TTS, VAD};
+use crate::keywords::{vocabulary, Keywords, SentencePiece};
+use crate::models::{Models, ASR, KWS, TTS, VAD};
 use crate::resample::SPEECH_RATE;
 use crate::voices::kokoro_speaker;
 use crate::{Utterance, VoiceState};

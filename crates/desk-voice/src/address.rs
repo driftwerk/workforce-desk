@@ -70,8 +70,9 @@ fn as_said(said: &str, name: &str) -> Option<usize> {
 /// letter off ("Cat" for "Kat"), in a word as long as it.
 fn as_spotted(said: &str, name: &str) -> Option<usize> {
     as_said(said, name).or_else(|| {
-        Some(edit_distance(said, name))
-            .filter(|d| *d == 1 && name.chars().count() >= 3 && said.chars().count() == name.chars().count())
+        Some(edit_distance(said, name)).filter(|d| {
+            *d == 1 && name.chars().count() >= 3 && said.chars().count() == name.chars().count()
+        })
     })
 }
 
