@@ -76,6 +76,14 @@ export interface Background {
   since: string;
 }
 
+/** A session restarted with work of its own running, which the restart
+ *  stopped: Desk told it, and it re-checks that work. */
+export interface Restarted {
+  at: string;
+  /** How many background tasks and subagents were stopped. */
+  stopped: number;
+}
+
 export interface PendingApproval {
   id: string;
   tool: string;
@@ -163,6 +171,9 @@ export interface Session {
   group?: { id: string; name: string } | null;
   /** Background work still running after its turn ended; absent from older hubs. */
   background?: Background | null;
+  /** Restarted over work it had running, until the turn that re-checks it
+   *  ends; absent from older hubs. */
+  restarted?: Restarted | null;
   /** Present only while it runs in a non-asking mode an unbound boss set. */
   mode?: "auto" | "bypassPermissions";
   /** While it is asking: what, and why Desk read it so; absent from older hubs. */
@@ -170,6 +181,11 @@ export interface Session {
   /** Why what it waits on is the person's though a boss runs it ("Desk
    *  left this to you."); absent while the boss has it, and from older hubs. */
   waitsOnYou?: string;
+  /** The boss that has it now, by name: it runs it, has the wheel, and
+   *  nothing it waits on is the person's. While set, nothing of it calls
+   *  for the person's attention: shown calm, "Desk has it"; absent from
+   *  older hubs. */
+  bossHas?: string;
   createdAt: string;
   updatedAt: string;
 }

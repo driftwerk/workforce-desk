@@ -15,6 +15,7 @@ import { NeedsJump } from "../floor/NeedsJump";
 import { RestoreBanner } from "../floor/RestoreBanner";
 import { GROUPS, Tile } from "../floor/SessionTile";
 import { isAgentTurn } from "../floor/needs";
+import { waitsOnYou } from "../floor/background";
 import { useLocalFloor, useMerged, useNeedCounts } from "../floor/store";
 import { Today } from "../floor/Today";
 import { agentItem, sessionItem, type ItemKey } from "../groups/model";
@@ -73,7 +74,7 @@ export const floorGroups = (overview: Overview, all: Session[], needs: ReadonlyM
   for (const s of all) {
     // An agent's turn is its agent's, on its tile; only one waiting on you
     // shows on its own.
-    if (isAgentTurn(s) && !(needs ? needs.has(sessionItem(s.id)) : s.state === "blocked")) continue;
+    if (isAgentTurn(s) && !(needs ? needs.has(sessionItem(s.id)) : waitsOnYou(s) && s.state === "blocked")) continue;
     const title = sessionGroup(s);
     if (title) groups.get(title)?.sessions.push(s);
   }
@@ -102,7 +103,7 @@ export const deskItems = (groups: readonly FloorGroup[], hubId: string | null): 
           engine: s.engine,
           text: s.goal || (s.lastPrompt ? plain(s.lastPrompt) : null),
           // Blocked with nothing on a hub's floor asking: said as it is.
-          look: s.state === "blocked" || s.state === "asking" ? "blocked" : look,
+          look: waitsOnYou(s) ? "blocked" : look,
         }),
       ),
       ...(hubId
@@ -128,7 +129,7 @@ export function useCrewFloor(overview: Overview) {
   // A session whose work went on in another is folded under that one's tile,
   // unless it waits on you: one left running that asks keeps its own.
   const folded = handedOn(merged);
-  const waits = (s: Session) => needs.has(sessionItem(s.id)) || s.state === "blocked" || s.state === "asking";
+  const waits = (s: Session) => needs.has(sessionItem(s.id)) || waitsOnYou(s);
   // One group's: its sessions and agents (of this computer) alone.
   const inScope = (key: ItemKey) => !scope || groupOfKey(layoutGroups, key) === scope;
   const all = floorGroups(

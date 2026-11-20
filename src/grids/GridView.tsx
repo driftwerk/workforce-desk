@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { useChat } from "../chat/store";
-import { shownState } from "../floor/background";
+import { shownState, waitsOnYou } from "../floor/background";
 import { useDesk } from "../hub/store";
 import { useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
@@ -71,7 +71,7 @@ export function useGridCounts(grid: Grid | undefined): { panes: number; working:
         const c = p.content;
         const s = c?.kind === "session" ? d.sessions[sessionKeyIn(c)!] : c?.kind === "terminal" ? trackedIn(d.sessions, terminalKeyIn(c)) : null;
         const state = s && shownState(s);
-        if (state === "blocked" || state === "asking") needs += 1;
+        if (s && state && waitsOnYou({ state, bossHas: s.bossHas })) needs += 1;
         else if (state === "working" || state === "starting") working += 1;
       }
       return [working, needs];

@@ -292,8 +292,10 @@ export function OwnSignIn({ engine, accounts, machine }: { engine: EngineInfo; a
   );
 }
 
-/** "Switch automatically when an account hits its limit": off unless the
- *  person turns it on. Desk never switches back by itself. */
+/** "Switch automatically when an account hits its limit": as the hub says,
+ *  on there unless the person turned it off. Desk only ever moves a session
+ *  to another account of the same engine, checks first that it serves, and
+ *  never switches back by itself. */
 function AutoSwitch({ machine, store }: { machine: MachineId; store: AccountsStore }) {
   const hub = useHubOf(machine);
   const fail = useDesk((s) => s.fail);
@@ -310,7 +312,7 @@ function AutoSwitch({ machine, store }: { machine: MachineId; store: AccountsSto
   return (
     <SwitchRow
       label="Switch automatically when an account hits its limit"
-      sub="Desk moves its sessions to an account with room and says so on the Floor. It asks before switching back."
+      sub="When an account hits its limit or is turned away, Desk checks another of the same engine's accounts can serve, moves the sessions there with their conversations, and tells you in its DM. It asks before switching back."
       on={on}
       onChange={(next) => void set(next)}
     />

@@ -128,7 +128,8 @@ export function usePaneLabel(content: PaneContent | null): Label {
       meta: [withAccount(ENGINE[session.engine], session), session.model && modelTitle(session.engine, session.model), statusOf(session, STATE_LABEL)].filter(Boolean).join(" · "),
       state: lookOf(session),
       tracked,
-      asking: session.pending || session.state === "asking" ? session : null,
+      // What its boss has is the boss's to answer: no "needs you" here.
+      asking: (session.pending || session.state === "asking") && !session.bossHas ? session : null,
       cwd: content.kind === "terminal" ? home(info?.cwd ?? content.cwd) : null,
       mono: true,
     };
