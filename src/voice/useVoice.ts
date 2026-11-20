@@ -11,6 +11,7 @@ import {
   onSpeechStopped,
   onUtterance,
   onVoiceError,
+  onVoiceNotice,
   onVoiceState,
   pushToTalk,
   setVoiceRoster,
@@ -187,6 +188,7 @@ export class Turns {
 
   status(s: VoiceStatus) {
     if (s.state === "off" || (s.state === "listening" && s.conversation === null)) this.current = null;
+    if (s.state !== "listening" && s.state !== "speaking" && useVoiceStore.getState().notice) useVoiceStore.setState({ notice: null });
     if (s.state !== "speaking" && useVoiceStore.getState().speakingFor) useVoiceStore.setState({ speakingFor: null });
     if (s.state === "speaking") this.speaking = true;
     else if (this.speaking && saying === 0) {
@@ -211,7 +213,7 @@ export class Turns {
     const agent = mic ? (chat.roster.find((a) => agentKey(a) === mic.agent) ?? null) : resolveAgent(u.agent, chat.roster, this.current, chat.activeAgent);
     const written = !!mic && !u.callId && replyOf(mic.agent) === "written";
     const reply = u.callId ? toModel(u.callId) : written ? inWriting : aloud(agent ? agentKey(agent) : null, agent ? voiceOf(agent) : undefined, !!mic);
-    useVoiceStore.setState({ transcript: u.text, heardBy: agent?.name ?? null, error: null });
+    useVoiceStore.setState({ transcript: u.text, heardBy: agent?.name ?? null, error: null, notice: null });
     if (!agent) {
       reply.answer(missingAgent(u.agent, wakeNames(chat.roster)));
       return;
@@ -333,7 +335,7 @@ export function useVoice(enabled: boolean) {
 
   useEffect(() => {
     if (enabled) {
-      useVoiceStore.setState({ error: null });
+      useVoiceStore.setState({ error: null, notice: null });
       enableVoice(engine).catch(failed);
     } else void disableVoice().catch(failed);
   }, [enabled, engine]);
@@ -354,6 +356,7 @@ export function useVoice(enabled: boolean) {
       onUnheard(holdDone),
       onSpeechStopped(() => turns.stopped()),
       onVoiceError((message) => useVoiceStore.setState({ error: message })),
+      onVoiceNotice((notice) => useVoiceStore.setState({ notice })),
     ];
     const unfollow = followMic();
     // A talk with an agent its hub no longer lists, or whose hub is gone,

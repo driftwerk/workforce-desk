@@ -12,6 +12,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) 
 afterEach(() => {
   cleanup();
   useMic.setState(QUIET);
+  useVoiceStore.setState({ notice: null });
 });
 
 describe("VoicePill", () => {
@@ -45,6 +46,21 @@ describe("VoicePill", () => {
     act(() => useVoiceStore.setState({ status: { state: "off" }, error: "microphone access was denied" }));
     render(<VoicePill />);
     expect(screen.getByText("microphone access was denied").className).toContain("voice-error");
+  });
+
+  it("says why what was heard went nowhere, as a hint, not an error", () => {
+    const notice = "Heard “Kat”, but couldn’t make out what was said.";
+    act(() => useVoiceStore.setState({ status: { state: "listening", conversation: null }, thinking: false, heardBy: null, transcript: "", error: null, notice }));
+    render(<VoicePill />);
+    expect(screen.getByText(notice).className).toBe("voice-detail");
+    act(() => {
+      useChat.setState({ roster: [{ hubId: "local", id: "kat", name: "Kat", model: null, provider: null, isDefault: false }] });
+      toggleTalk("local/kat");
+    });
+    expect(screen.queryByText(notice)).toBeNull();
+    act(() => useMic.setState(QUIET));
+    act(() => useVoiceStore.setState({ status: { state: "off" } }));
+    expect(screen.queryByText(notice)).toBeNull();
   });
 
   it("shows the configured hold-to-talk keys, and says when another app has them", () => {

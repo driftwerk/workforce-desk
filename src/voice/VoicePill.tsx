@@ -18,7 +18,7 @@ import "../styles/voice.css";
  *  switch (Desk's `voice` setting; mount `useVoice` with that setting). A
  *  spoken conversation shows in the title bar's pill (`TalkPill`) instead. */
 export function VoicePill() {
-  const { status, thinking, heardBy, transcript, error } = useVoiceStore();
+  const { status, thinking, heardBy, transcript, error, notice } = useVoiceStore();
   const on = useSettings((s) => s.voice);
   const setSettings = useSettings((s) => s.set);
   // The system keeping the microphone from Desk: said with the setting that
@@ -34,6 +34,7 @@ export function VoicePill() {
   const holderName = useAgentName(holder?.agent ?? null);
   const mic = holder && holderName ? { name: holderName, byName: on, talk: holder.mode === "talk" } : null;
   const view = pillView(status, thinking, heardBy, transcript, { label: shortcutLabel(holdKeys), available: !holdTaken }, mic);
+  const hint = status.state === "listening" && !mic ? notice : null;
   const current = view.step ? STEPS.findIndex((s) => s.step === view.step) : -1;
   const ring = { "--voice-progress": view.progress ?? 0 } as CSSProperties;
 
@@ -49,7 +50,7 @@ export function VoicePill() {
         </span>
         <span className="voice-text">
           <span className="voice-title">{view.title}</span>
-          <span className={error && !micProblem ? "voice-detail voice-error" : "voice-detail"}>{micProblem ? view.detail : (error ?? view.detail)}</span>
+          <span className={error && !micProblem ? "voice-detail voice-error" : "voice-detail"}>{micProblem ? view.detail : (error ?? hint ?? view.detail)}</span>
         </span>
         {status.state === "speaking" && !mic?.talk && (
           <button type="button" className="voice-btn" onClick={() => void stopSpeaking()} aria-label="Stop speaking">

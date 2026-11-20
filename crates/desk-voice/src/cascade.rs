@@ -297,6 +297,7 @@ impl Worker {
             }
             Heard::Transcribing => set_state(state, events, VoiceState::Transcribing),
             Heard::Utterance(u) => events.utterance(&u),
+            Heard::NotToThem(n) => events.notice(&n.message()),
             Heard::Nothing => events.unheard(),
         });
         if barged {
