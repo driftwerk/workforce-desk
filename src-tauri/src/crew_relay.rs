@@ -424,10 +424,24 @@ fn session_of(v: &Value) -> Option<Value> {
         "createdAt": text("createdAt"),
         "lastReply": reply,
     });
-    if let Some(exited) = v.get("exited").filter(|e| e.is_object()) {
-        s["exited"] = exited.clone();
+    if let Some(e) = v.get("exited").filter(|e| e.is_object()) {
+        let field = |k: &str| e.get(k).cloned().unwrap_or(Value::Null);
+        s["exited"] = json!({
+            "code": field("code"),
+            "lastOutput": e.get("lastOutput").and_then(Value::as_str).map(|o| tail_chars(o, MOST_REPLY)),
+            "at": field("at"),
+            "onStart": field("onStart"),
+        });
     }
     Some(s)
+}
+
+/// The last `max` characters of `text`.
+fn tail_chars(text: &str, max: usize) -> &str {
+    let skip = text.chars().count().saturating_sub(max);
+    text.char_indices()
+        .nth(skip)
+        .map_or("", |(at, _)| &text[at..])
 }
 
 /// Why a machine refused one of Desk's own requests, briefly.
@@ -465,8 +479,7 @@ async fn carry_desk<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &
                     };
                 }
                 if let Some(o) = s.pointer("/exited/lastOutput").and_then(Value::as_str) {
-                    let skip = o.chars().count().saturating_sub(most);
-                    s["exited"]["lastOutput"] = o.chars().skip(skip).collect::<String>().into();
+                    s["exited"]["lastOutput"] = tail_chars(o, most).to_string().into();
                 }
             }
             let answer = json!({"status": "ok", "body": listed});
@@ -1958,6 +1971,14 @@ mod tests {
         let said =
             session_of(&json!({"id": SESSION, "state": "interrupted", "exited": exited})).unwrap();
         assert_eq!(said["exited"], exited);
+        // Only what a plan reads of it, its output to its end.
+        let long = format!("{}error: bad flag", "x".repeat(MOST_REPLY));
+        let more = json!({"code": 1, "lastOutput": long, "at": "2026-11-20T09:00:00Z", "onStart": true, "env": "secret-ish"});
+        let capped =
+            session_of(&json!({"id": SESSION, "state": "interrupted", "exited": more})).unwrap();
+        assert!(capped["exited"].get("env").is_none(), "{capped}");
+        let output = capped["exited"]["lastOutput"].as_str().unwrap();
+        assert!(output.chars().count() == MOST_REPLY && output.ends_with("error: bad flag"));
         let older = session_of(&json!({"id": SESSION, "state": "interrupted"})).unwrap();
         assert!(older.get("exited").is_none(), "{older}");
         let none = session_of(&json!({"id": SESSION, "state": "idle", "exited": null})).unwrap();

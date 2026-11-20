@@ -815,6 +815,7 @@ function TicketRow({
   const needs = t.needs.map((n) => all.find((x) => x.id === n)?.key).filter(Boolean);
   const state = STATE_WORD[t.state];
   const who = t.key ?? t.title;
+  const heldBack = ruled(t).heldBack;
   return (
     <div className="pc-tk">
       {t.adopted ? <AdoptedKey t={t} /> : <span className="pc-key">{t.key ?? "·"}</span>}
@@ -846,6 +847,11 @@ function TicketRow({
         {own && <span>· own worktree</span>}
         {t.starting && <span className="state-working">· starting</span>}
         {t.held && <span className="state-blocked">· held: {t.held}</span>}
+        {heldBack && (
+          <span className="state-blocked" title="Move it to Backlog and back to To do, or start it, once what stopped it is fixed">
+            · waits for you: {heldBack}
+          </span>
+        )}
         {state && <span className={state.look}>· {state.word}</span>}
       </span>
       {t.body.trim() && (

@@ -39,6 +39,8 @@ export interface PlanTicket {
   assigned?: boolean;
   /** Its session is being started. */
   starting?: boolean;
+  /** Why it waits in To do for someone to start it: the runner doesn't. */
+  heldBack?: string | null;
 }
 
 /** Its key, or its id where its board has no keys. */
@@ -76,10 +78,11 @@ export const waves = (tickets: readonly PlanTicket[]): string[][] => {
   return left.length > 0 ? [...out, left] : out;
 };
 
-/** Whether `t` may start now: in To do, every need Done (a need not among
- *  `states` holds it back), and no one has it or is starting it. */
+/** Whether `t` may start now: in To do, not held back, every need Done (a
+ *  need not among `states` holds it back), and no one has it or is
+ *  starting it. */
 const startable = (t: PlanTicket, states: ReadonlyMap<string, TicketState>): boolean =>
-  t.state === "todo" && !t.assigned && !t.starting && t.needs.every((n) => states.get(n) === "done");
+  t.state === "todo" && !t.heldBack && !t.assigned && !t.starting && t.needs.every((n) => states.get(n) === "done");
 
 /** Where a plan's tickets stand. */
 export const progress = (tickets: readonly PlanTicket[]): BossPlanProgress => {
@@ -102,7 +105,7 @@ export const progress = (tickets: readonly PlanTicket[]): BossPlanProgress => {
       case "todo":
       case "backlog":
         if (t.state === "todo" && (t.starting || t.assigned)) p.doing++;
-        else if (t.needs.some((n) => states.get(n) === "dropped")) p.blocked++;
+        else if (t.heldBack || t.needs.some((n) => states.get(n) === "dropped")) p.blocked++;
         else if (startable(t, states)) {
           p.ready++;
           next.push(t);
@@ -139,6 +142,8 @@ export const ruled = (t: BossPlanTicket): PlanTicket => ({
   model: t.model ?? null,
   assigned: !!t.assignee,
   starting: t.starting,
+  // Held only while it still waits in To do: the board may have moved it since.
+  heldBack: t.state === "todo" && !t.assignee ? (t.heldBack ?? null) : null,
 });
 
 /** Whether a revision waits on the person: the first, or a change of scope

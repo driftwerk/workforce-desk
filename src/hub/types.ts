@@ -2426,6 +2426,10 @@ export interface BossPlanTicket extends Ticket {
   /** What holds its session while Desk's breaker does: it is blocked on
    *  the person, and nothing starts in its place. */
   held?: string | null;
+  /** Why it waits in To do for someone to start it, its plan not starting
+   *  it by itself (its session ended as it started); absent from an older
+   *  hub. */
+  heldBack?: string | null;
   /** The plan took it on from a board as it was, rather than making it;
    *  absent from an older hub. */
   adopted?: boolean;
