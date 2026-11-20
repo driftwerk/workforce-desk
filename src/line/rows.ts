@@ -165,6 +165,10 @@ export const onThread = (m: LineMessage, sessionId: string): boolean =>
  *  "asking" and no reason at all rank below it. */
 const BELOW_DRIVING: ReadonlySet<LineMessage["waiting"]> = new Set([undefined, "asking"]);
 
+/** Whether `m` answers the question its session's turn ended on, not an
+ *  ask of its own (the hub's `answers_turn`). */
+const answersTurn = (m: LineMessage): boolean => m.kind === "answer" && !m.inReplyTo;
+
 /** `list` once the wheel of `sessionId`, which a boss runs, changed hands,
  *  as the hub's line gate reads it: the boss's tells, and its answers to
  *  the question a turn ended on, still waiting to go in wait on you while
@@ -174,7 +178,7 @@ const BELOW_DRIVING: ReadonlySet<LineMessage["waiting"]> = new Set([undefined, "
 export const withWheel = (list: readonly LineMessage[], sessionId: string, driving: boolean): LineMessage[] => {
   let changed = false;
   const next = list.map((m) => {
-    const held = m.kind === "tell" || (m.kind === "answer" && !m.inReplyTo);
+    const held = m.kind === "tell" || answersTurn(m);
     if (m.delivery !== "queued" || !held || m.from.kind !== "manager" || m.to.kind !== "session" || m.to.id !== sessionId) return m;
     const waiting = driving ? (BELOW_DRIVING.has(m.waiting) ? ("person_driving" as const) : m.waiting) : m.waiting === "person_driving" ? undefined : m.waiting;
     if (waiting === m.waiting) return m;
