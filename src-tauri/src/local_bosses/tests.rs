@@ -181,6 +181,7 @@ fn acme(members: &[&str], level: &str) -> WantedGrant {
         agent: "sarah".into(),
         agent_name: "Sarah".into(),
         agent_since: Some("born-1".into()),
+        plan: None,
         grant: json!({
             "grantVersion": 1, "name": "Acme", "boss": "local:sarah",
             "level": level, "sees": "everything", "recall": false,
@@ -657,6 +658,7 @@ async fn narrowing_reaches_every_machine_before_anything_widens() {
         agent: "tom".into(),
         agent_name: "Tom".into(),
         agent_since: None,
+        plan: None,
         grant: json!({
             "grantVersion": 1, "name": "Globex", "boss": "local:tom",
             "level": "act", "sees": "everything", "recall": false,
@@ -769,6 +771,92 @@ fn only_a_grant_for_a_boss_here_with_nothing_wider_is_carried() {
     assert!(!bad(|g| g.grant["members"] = json!(["../x"])));
     assert!(!bad(|g| g.group = "ungrouped".into()));
     assert!(!bad(|g| g.group = "a/b".into()));
+}
+
+const PLAN: &str = "44444444-4444-4444-8444-444444444444";
+
+/// What the hub says the main overseer's plan should have on a machine.
+fn planned(members: &[&str], level: &str) -> WantedGrant {
+    WantedGrant {
+        group: format!("plan-{PLAN}"),
+        agent: "desk".into(),
+        agent_name: "Desk".into(),
+        agent_since: None,
+        plan: Some(PLAN.into()),
+        grant: json!({
+            "grantVersion": 1, "name": "Speed up recall", "boss": "local:desk",
+            "level": level, "sees": "everything", "recall": false,
+            "folders": [], "repos": [], "members": members,
+            "act": {"nudge": true, "parallel": 4},
+        }),
+    }
+}
+
+#[test]
+fn a_plans_grant_is_carried_only_marked_as_that_plan_s() {
+    assert!(carried(&planned(&[S1], "act")));
+    let bad = |f: fn(&mut WantedGrant)| {
+        let mut g = planned(&[S1], "act");
+        f(&mut g);
+        carried(&g)
+    };
+    assert!(!bad(|g| g.plan = None), "a plan's id unmarked");
+    assert!(!bad(|g| g.plan = Some(S1.into())), "another plan's mark");
+    assert!(
+        !bad(|g| g.group = "acme".into()),
+        "a group marked as a plan"
+    );
+    assert!(!bad(|g| g.grant["folders"] = json!(["/home/dev"])));
+    assert!(!bad(|g| g.grant["boss"] = json!("remote:driftwerk/allan")));
+    // A group's own grant is carried as before, whatever its id says.
+    let mut g = acme(&[S1], "act");
+    g.group = "plan-q3".into();
+    assert!(carried(&g));
+}
+
+#[tokio::test]
+async fn a_plans_grant_is_written_as_the_hub_says_without_asking_and_goes_with_its_sessions() {
+    let f = files();
+    let devbox = Machine::new("devbox");
+    let key = format!("plan-{PLAN}");
+    let w = wanted(&[(
+        "devbox",
+        vec![acme(&[S1], "act"), planned(&[S2], "act")],
+        &[S1, S2],
+    )]);
+    let s = sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    assert_eq!(s.failed, vec![]);
+    let g = devbox.grant(&key).expect("written with no question");
+    assert_eq!(content(&g), content(&planned(&[S2], "act").grant));
+    assert!(devbox.grant("acme").is_none(), "Acme's waits for its yes");
+    // Only the group's boss is asked about; nothing of the plan is kept.
+    let (_, body, _) = say(&f, &w, true).await.expect("asked about Acme");
+    assert!(
+        body.contains("“Acme”") && !body.contains("recall"),
+        "{body}"
+    );
+    assert!(say(&f, &w, true).await.is_none());
+    assert!(!read_kept(&f.kept).groups.contains_key(&key));
+    // Capped as any grant: Act fully only with its budget.
+    let full = wanted(&[("devbox", vec![planned(&[S2], "full")], &[S2])]);
+    sync(&f.bosses, &f.kept, &full, &on(&[&devbox])).await;
+    assert_eq!(devbox.grant(&key).unwrap()["level"], "act");
+    // A stop Desk made of it is never lifted from here.
+    let made = stop("desk", Utc::now());
+    devbox.held.lock().unwrap().grants.get_mut(&key).unwrap()["stopped"] = made.clone();
+    let more = wanted(&[("devbox", vec![planned(&[S2, S3], "act")], &[S2, S3])]);
+    sync(&f.bosses, &f.kept, &more, &on(&[&devbox])).await;
+    let g = devbox.grant(&key).unwrap();
+    assert_eq!((members_of(&g).len(), &g["stopped"]), (2, &made));
+    // The plan has no sessions there any more, or ended: deleted.
+    sync(
+        &f.bosses,
+        &f.kept,
+        &wanted(&[("devbox", vec![], &[S2])]),
+        &on(&[&devbox]),
+    )
+    .await;
+    assert!(devbox.grant(&key).is_none());
 }
 
 #[tokio::test]
