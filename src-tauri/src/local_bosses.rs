@@ -5,8 +5,8 @@
 //! `local:<agent>`. This writes those grants, and only those.
 //!
 //! - **What each grant says comes from this computer's hub**
-//!   (`GET /api/desk/machine-grants`, on [`crate::broker::routes`]'s
-//!   native-only list): the boss's own level, switches and Sees there, and
+//!   ([`WANTED_PATH`], on [`crate::broker::routes`]'s native-only list,
+//!   asking for its plans' grants too, which an older Desk isn't sent): the boss's own level, switches and Sees there, and
 //!   that machine's sessions of the group alone. Same rules, no wider
 //!   powers. Nothing here adds to it; what can't be one of those grants is
 //!   not carried ([`carried`]): a boss on another hub, folders,
@@ -25,6 +25,14 @@
 //!   id is another boss, and is asked again. What is kept
 //!   (`local_bosses.json`, private) is each group's answer, and nothing
 //!   else.
+//! - **A plan's grant is never asked about**: the hub's main overseer runs
+//!   no group, so each of its running plans has a grant of its own on each
+//!   machine its tickets work on (`plan-<plan>`, marked as that plan's),
+//!   from before the first of them starts there, which starts in it run by
+//!   that boss ([`crate::crew_relay`]). The person approved the plan, which
+//!   said where each ticket runs, so it is written as the hub says it,
+//!   capped as any grant is (Act fully with its one budget), and nothing of
+//!   it is kept; a stop Desk made of one is never lifted from here.
 //! - **Never a group bossed from another hub** ([`crate::bosses`]'s): not
 //!   one Desk linked such a boss for, nor one whose grant on the machine
 //!   names such a boss. One boss per group. Only grants naming a boss here
@@ -62,7 +70,7 @@ use zeroize::Zeroizing;
 use crate::bosses::{self, Engine};
 
 /// Where this computer's hub says what each machine should hold.
-pub const WANTED_PATH: &str = "/api/desk/machine-grants";
+pub const WANTED_PATH: &str = "/api/desk/machine-grants?plans=1";
 /// What is kept of the person's answers, under Desk's own folder.
 pub const KEPT_FILE: &str = "local_bosses.json";
 /// The grant shape the engines read.
@@ -91,7 +99,21 @@ pub struct WantedGrant {
     /// the same id is asked about again. None from a hub that can't say.
     #[serde(default)]
     pub agent_since: Option<String>,
+    /// The plan whose ticket sessions it holds, when it is a plan's grant.
+    #[serde(default)]
+    pub plan: Option<String>,
     pub grant: Value,
+}
+
+/// What a plan's grant id starts with.
+const PLAN_KEY: &str = "plan-";
+
+/// The plan `group` is the grant of, when it is a plan's: its id in the
+/// hub's own spelling (lowercase), as the hub reads it.
+pub(crate) fn plan_of(group: &str) -> Option<&str> {
+    group
+        .strip_prefix(PLAN_KEY)
+        .filter(|p| bosses::uuid_ok(p) && *p == p.to_ascii_lowercase())
 }
 
 /// What one machine should hold, and its sessions the sidebar lists.
@@ -108,6 +130,11 @@ pub struct MachineWanted {
 #[serde(rename_all = "camelCase")]
 pub struct Wanted {
     pub grant_version: u64,
+    /// Whether its plans' grants are said ([`WANTED_PATH`] asks for them):
+    /// until they are, those a machine holds are left as they are, but for
+    /// one past its time, which goes.
+    #[serde(default)]
+    pub plans_known: bool,
     #[serde(default)]
     pub machines: BTreeMap<String, MachineWanted>,
 }
@@ -127,9 +154,10 @@ const GRANT_KEYS: [&str; 10] = [
 ];
 
 /// Whether `g` is one of the grants Desk carries: for a group (never
-/// Ungrouped), naming the hub's own agent `local:<agent>`, of the version
-/// the engines read, with no folders, repositories or memory search, its
-/// members sessions' ids, and no field but [`GRANT_KEYS`].
+/// Ungrouped), or a plan's grant marked as that plan's and no other,
+/// naming the hub's own agent `local:<agent>`, of the version the engines
+/// read, with no folders, repositories or memory search, its members
+/// sessions' ids, and no field but [`GRANT_KEYS`].
 pub fn carried(g: &WantedGrant) -> bool {
     let v = &g.grant;
     let Some(o) = v.as_object() else {
@@ -138,6 +166,7 @@ pub fn carried(g: &WantedGrant) -> bool {
     let empty = |k: &str| v[k].as_array().is_some_and(Vec::is_empty);
     bosses::group_id_ok(&g.group)
         && g.group != "ungrouped"
+        && plan_of(&g.group) == g.plan.as_deref()
         && bosses::name_ok(&g.agent)
         && v["boss"].as_str() == Some(format!("local:{}", g.agent).as_str())
         && v["grantVersion"].as_u64() == Some(GRANT_VERSION)
@@ -260,13 +289,16 @@ fn ours(held: &Value) -> bool {
     }
 }
 
+/// When `held` says it was `k` (`issuedAt`, `expiresAt`).
+fn held_at(held: &Value, k: &str) -> Option<DateTime<Utc>> {
+    held[k]
+        .as_str()
+        .and_then(|t| t.parse::<DateTime<Utc>>().ok())
+}
+
 /// Whether `held` is past half its life at `now`, so renewed.
 fn renewal_due(held: &Value, now: DateTime<Utc>) -> bool {
-    let at = |k: &str| {
-        held[k]
-            .as_str()
-            .and_then(|t| t.parse::<DateTime<Utc>>().ok())
-    };
+    let at = |k: &str| held_at(held, k);
     match (at("issuedAt"), at("expiresAt")) {
         (Some(issued), Some(expires)) => expires - now < (expires - issued) / 2,
         _ => true,
@@ -464,7 +496,7 @@ struct Asked {
 fn by_group(wanted: &Wanted) -> BTreeMap<String, Asked> {
     let mut out: BTreeMap<String, Asked> = BTreeMap::new();
     for (m, mw) in &wanted.machines {
-        for g in mw.grants.iter().filter(|g| carried(g)) {
+        for g in mw.grants.iter().filter(|g| carried(g) && g.plan.is_none()) {
             // What the person is asked about is what will be written.
             let grant = capped(g.grant.clone());
             let a = out.entry(g.group.clone()).or_insert_with(|| Asked {
@@ -636,7 +668,8 @@ pub struct Synced {
 enum Step {
     Delete,
     /// A grant to write, and when the person last said yes to it: a stop
-    /// Desk made before then is lifted with it. None for what only narrows.
+    /// Desk made before then is lifted with it. None for what only narrows,
+    /// and for a plan's grant.
     Write(Value, Option<DateTime<Utc>>),
 }
 
@@ -836,7 +869,7 @@ async fn delete(engine: &impl Engine, group: &str) -> Result<bool, String> {
 /// as no more than both first ([`meet`]); then what is wanted.
 fn plan(
     held: &BTreeMap<String, Value>,
-    wanted: &BTreeMap<String, (Value, DateTime<Utc>)>,
+    wanted: &BTreeMap<String, (Value, Option<DateTime<Utc>>)>,
     remote: &BTreeSet<String>,
 ) -> (Steps, Steps) {
     let mut first = Vec::new();
@@ -856,7 +889,7 @@ fn plan(
         .iter()
         .filter(|(g, _)| !remote.contains(*g))
         .filter(|(g, _)| held.get(*g).is_none_or(ours))
-        .map(|(g, (w, yes))| (g.clone(), Step::Write(w.clone(), Some(*yes))))
+        .map(|(g, (w, yes))| (g.clone(), Step::Write(w.clone(), *yes)))
         .collect();
     (first, then)
 }
@@ -908,8 +941,9 @@ async fn run(
 }
 
 /// Brings every machine's grants for this computer's group bosses to what
-/// `wanted` says, as far as the person said yes: narrowing on every
-/// machine first, then the rest (see the module).
+/// `wanted` says, as far as the person said yes, and its plans' grants as
+/// it says them: narrowing on every machine first, then the rest (see the
+/// module).
 pub async fn sync<E: Engine>(
     bosses_at: &Path,
     kept_at: &Path,
@@ -932,23 +966,34 @@ pub async fn sync<E: Engine>(
                 continue;
             }
         };
+        let now = Utc::now();
         let held = match held_on(engine).await {
-            Ok(h) => h,
+            Ok(h) => h
+                .into_iter()
+                .filter(|(g, h)| {
+                    wanted.plans_known
+                        || plan_of(g).is_none()
+                        || held_at(h, "expiresAt").is_some_and(|e| e <= now)
+                })
+                .collect(),
             Err(why) => {
                 out.failed.push((id.clone(), why));
                 continue;
             }
         };
         let mw = wanted.machines.get(id);
-        let desired: BTreeMap<String, (Value, DateTime<Utc>)> = mw
+        let desired: BTreeMap<String, (Value, Option<DateTime<Utc>>)> = mw
             .into_iter()
             .flat_map(|m| m.grants.iter())
             .filter(|g| carried(g))
-            .filter_map(|g| {
-                let a = groups.get(&g.group).filter(|a| a.agent == g.agent)?;
-                let yes = yes_of(&kept, &g.group, a)?;
-                let grant = capped(at_most(g.grant.clone(), &yes.level));
-                Some((g.group.clone(), (grant, yes.at)))
+            .filter_map(|g| match g.plan {
+                Some(_) => Some((g.group.clone(), (capped(g.grant.clone()), None))),
+                None => {
+                    let a = groups.get(&g.group).filter(|a| a.agent == g.agent)?;
+                    let yes = yes_of(&kept, &g.group, a)?;
+                    let grant = capped(at_most(g.grant.clone(), &yes.level));
+                    Some((g.group.clone(), (grant, Some(yes.at))))
+                }
             })
             .collect();
         let listed: BTreeSet<String> = mw
