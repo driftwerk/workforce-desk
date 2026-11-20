@@ -85,7 +85,7 @@ class Notes(unittest.TestCase):
         text = nightly.notes("0.2.11-nightly.20261120.42", A, "Desk 0.2.10", [], B, B, [], "o/r", "bump left out")
         self.assertIn("The same hub as Desk 0.2.10", text)
         self.assertIn("Nothing new in Desk itself", text)
-        self.assertIn("## Left out", text)
+        self.assertIn("## Worth a look", text)
 
     def test_the_bump_commit_reads_as_a_persons(self):
         msg = nightly.bump_message(B, C, ["one", "two"], "https://run")
@@ -143,7 +143,8 @@ class Main(unittest.TestCase):
 
         with mock.patch.object(nightly, "git", git), \
              mock.patch.object(nightly, "wait_for_ci", lambda repo, sha, **kw: runs[sha]), \
-             mock.patch.object(nightly, "newest_green", lambda repo, branch: green):
+             mock.patch.object(nightly, "green_sha", lambda repo, wf, branch: green), \
+             mock.patch.object(nightly, "newer_than_last", lambda sha, last: not (last and last["desk_commit"] in (sha, B))):
             return nightly.settle("o/r", "main", last)
 
     def test_the_tip_that_passed_is_built(self):
@@ -166,6 +167,29 @@ class Main(unittest.TestCase):
         with self.assertRaises(nightly.Skip):
             self.settle([C], {C: None})
 
+    def test_the_newest_green_must_lead_on_from_the_last_nightly(self):
+        def run(cmd, check=True):
+            return mock.Mock(returncode=0 if cmd[-2:] == [A, B] else 1)
+
+        with mock.patch.object(nightly, "run", run):
+            self.assertTrue(nightly.newer_than_last(B, {"desk_commit": A}))
+            self.assertFalse(nightly.newer_than_last(A, {"desk_commit": B}))
+            self.assertFalse(nightly.newer_than_last(B, {"desk_commit": B}))
+            self.assertTrue(nightly.newer_than_last(B, None))
+
+    def test_a_bump_that_runs_out_of_time_is_left_out_not_the_night(self):
+        def once(*a):
+            raise nightly.Skip("ran out of time")
+
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(nightly, "bump_once", once), \
+             mock.patch.object(nightly, "git", lambda *a, **k: ""):
+            old = os.getcwd()
+            os.chdir(d)
+            try:
+                self.assertEqual(nightly.bump("o/r", "main", A, B, [], "https://run"), (None, "ran out of time"))
+            finally:
+                os.chdir(old)
+
     def bump(self, once, fresh="hub"):
         results = iter(once)
         with tempfile.TemporaryDirectory() as d, \
@@ -175,7 +199,7 @@ class Main(unittest.TestCase):
             os.chdir(d)
             try:
                 pathlib.Path("hub.ref").write_text({"hub": A, "taken": C}[fresh] + "\n")
-                return nightly.bump("o/r", A, B, [], "https://run")
+                return nightly.bump("o/r", "main", A, B, [], "https://run")
             finally:
                 os.chdir(old)
 

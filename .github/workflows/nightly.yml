@@ -1,14 +1,14 @@
 name: Nightly
 
-# Each night from 01:30 UTC (GitHub may start a scheduled run hours late), a build of Desk's main for the Desks set to
-# Updates: Nightly (Settings → Help); no one on Stable gets it. It skips a
+# Each night from 01:30 UTC (GitHub may start a scheduled run hours late), a
+# build of Desk's main for the Desks set to Updates: Nightly (Settings → Help); no one on Stable gets it. It skips a
 # night when nothing changed since the last nightly (no new commits on main,
 # no newer hub), while a stable release is running, or when Desk's CI hasn't
 # passed at the exact commit it would build. When the hub (driftwerk/workforce
 # main) has a newer commit whose checks passed, it commits that to hub.ref
 # first, once Desk's CI passes with it (again on the new main if main moved
-# meanwhile; never a reason to skip the night). It builds through release.yml, with
-# channel nightly: a pre-release v<version> that is never the latest, and
+# meanwhile; never a reason to skip the night). It builds through release.yml,
+# with channel nightly: a pre-release v<version> that is never the latest, and
 # latest-nightly.json on the `nightly` release. A failed night opens an
 # issue (label nightly), which the next good night closes. See
 # docs/RELEASING.md, "Nightly".

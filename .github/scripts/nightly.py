@@ -140,7 +140,7 @@ def notes(version, sha, since_label, changes, hub_from, hub_to, hub_commits, rep
         out.append("")
         out += [f"- {subject} ({short(c)})" for c, subject in hub_commits] or ["- (no commits listed)"]
     if attention:
-        out += ["", "## Left out", "", attention]
+        out += ["", "## Worth a look", "", attention]
     out += ["", f"Built from https://github.com/{repo}/commit/{sha}."]
     return "\n".join(out) + "\n"
 
@@ -204,13 +204,16 @@ def release_running(repo):
     return None
 
 
-def hub_green():
-    """The newest hub commit on main whose checks passed."""
-    runs = gh_api(
-        f"repos/{HUB_REPO}/actions/workflows/{HUB_CHECK}/runs?branch=main&event=push&status=success&per_page=1"
-    )
+def green_sha(repo, workflow, branch):
+    """The head of the newest push to `branch` whose `workflow` run passed, or None."""
+    runs = gh_api(f"repos/{repo}/actions/workflows/{workflow}/runs?branch={branch}&event=push&status=success&per_page=1")
     found = (runs or {}).get("workflow_runs") or []
     return found[0]["head_sha"] if found else None
+
+
+def hub_green():
+    """The newest hub commit on main whose checks passed."""
+    return green_sha(HUB_REPO, HUB_CHECK, "main")
 
 
 def hub_compare(base, head):
@@ -228,9 +231,11 @@ def ci_runs(repo, sha, workflow=CI):
 # One deadline for all of tonight's waiting, so a failed bump's wait and the gate after it
 # end inside the job's timeout.
 DEADLINE = time.time() + CI_WAIT_MINUTES * 60
+# The bump's waits end an hour sooner, so a bump that drags on leaves time to build the tip.
+BUMP_DEADLINE = DEADLINE - 3600
 
 
-def wait_for_ci(repo, sha, appear_minutes=15, workflow=CI):
+def wait_for_ci(repo, sha, appear_minutes=15, workflow=CI, deadline=None):
     """`workflow` (Desk's CI) at exactly `sha`, waited for while it runs: its run, or None
     if none came."""
     appear = time.time() + appear_minutes * 60
@@ -240,7 +245,7 @@ def wait_for_ci(repo, sha, appear_minutes=15, workflow=CI):
             return latest
         if not latest and time.time() > appear:
             return None
-        if time.time() > DEADLINE:
+        if time.time() > (deadline or DEADLINE):
             where = latest["html_url"] if latest else "no run yet"
             raise Skip(f"{workflow} at {short(sha)} was still running after {CI_WAIT_MINUTES} minutes: {where}",
                        attention=True)
@@ -257,11 +262,10 @@ def gate(repo, sha):
                    attention=True)
 
 
-def newest_green(repo, branch):
-    """The newest commit pushed to `branch` whose Desk CI passed, or None."""
-    runs = gh_api(f"repos/{repo}/actions/workflows/{CI}/runs?branch={branch}&event=push&status=success&per_page=1")
-    found = (runs or {}).get("workflow_runs") or []
-    return found[0]["head_sha"] if found else None
+def newer_than_last(sha, last):
+    """`sha` is a commit the last nightly's Desk commit leads up to (or there was none)."""
+    base = (last or {}).get("desk_commit")
+    return not base or (base != sha and run(["git", "merge-base", "--is-ancestor", base, sha], check=False).returncode == 0)
 
 
 def settle(repo, branch, last):
@@ -281,32 +285,42 @@ def settle(repo, branch, last):
                        else f"Desk's CI never ran at {short(tip)}")
             break
         problem = f"Desk's CI at {short(tip)} was cancelled: {latest['html_url']}"
-    green = newest_green(repo, branch)
-    if green and green != tip and not (last and last.get("desk_commit") == green):
+    green = green_sha(repo, CI, branch)
+    if green and green != tip and newer_than_last(green, last):
         return green, f"{problem}, so {short(green)}, the newest commit whose CI passed, is built."
     raise Skip(f"{problem}, so it isn't built", attention=True)
 
 
-def bump(repo, hub_from, hub_to, hub_commits, run_url):
-    """Commits hub.ref = `hub_to` on a branch, runs Desk's CI there, and fast-forwards main
-    to it once green. When main moved meanwhile it is done again on the new main, up to
-    BUMP_TRIES times. Returns the new main commit, or (None, why) when the bump is left out
-    (why is empty when main took the hub on its own)."""
+def bump(repo, branch, hub_from, hub_to, hub_commits, run_url):
+    """Commits hub.ref = `hub_to` on a branch, runs Desk's CI there, and fast-forwards `branch`
+    (main) to it once green. When it moved meanwhile this is done again on the new tip, up to
+    BUMP_TRIES times. Returns the new commit, or (None, why) when the bump is left out (why is
+    empty when `branch` took the hub on its own); the checkout is as it was found then."""
+    start = git("rev-parse", "HEAD")
+    sha, why = None, None
     for _ in range(BUMP_TRIES):
-        sha, why = bump_once(repo, hub_from, hub_to, hub_commits, run_url)
+        try:
+            sha, why = bump_once(repo, branch, hub_from, hub_to, hub_commits, run_url)
+        except Skip as e:
+            sha, why = None, str(e)
         if sha or why:
-            return sha, why
-        git("fetch", "-q", "origin", "main")
-        git("reset", "-q", "--hard", "origin/main")
+            break
+        git("fetch", "-q", "origin", branch)
+        git("reset", "-q", "--hard", f"origin/{branch}")
         if pathlib.Path("hub.ref").read_text().strip() != hub_from:
-            return None, ""
-    return None, f"main kept moving while Desk's CI checked the hub bump to {short(hub_to)}; the next nightly takes it"
+            why = ""
+            break
+    else:
+        why = f"{branch} kept moving while Desk's CI checked the hub bump to {short(hub_to)}; the next nightly takes it"
+    if not sha:
+        git("reset", "-q", "--hard", start)
+    return sha, why
 
 
-def bump_once(repo, hub_from, hub_to, hub_commits, run_url):
+def bump_once(repo, branch, hub_from, hub_to, hub_commits, run_url):
     """One try of the bump: (commit, None) when main is at it, (None, why) when it is left
     out, and (None, None) when main moved while its CI ran."""
-    branch = f"nightly/hub-{short(hub_to)}-{os.environ.get('GITHUB_RUN_ID', 'local')}"
+    work = f"nightly/hub-{short(hub_to)}-{os.environ.get('GITHUB_RUN_ID', 'local')}"
     with open("hub.ref", "w") as f:
         f.write(hub_to + "\n")
     git("-c", "user.name=github-actions[bot]",
@@ -316,22 +330,22 @@ def bump_once(repo, hub_from, hub_to, hub_commits, run_url):
     changed = git("diff", "--name-only", "HEAD~1", "HEAD").splitlines()
     if not only_hub_ref(changed):
         raise RuntimeError(f"the hub bump would change {changed}, not hub.ref alone")
-    git("push", "-q", "origin", f"HEAD:refs/heads/{branch}")
+    git("push", "-q", "origin", f"HEAD:refs/heads/{work}")
     try:
         # CI, and the backend's smoke test a person's hub.ref pull request runs too.
         for workflow in (CI, BACKEND):
-            run(["gh", "workflow", "run", workflow, "--repo", repo, "--ref", branch])
+            run(["gh", "workflow", "run", workflow, "--repo", repo, "--ref", work])
         for workflow in (CI, BACKEND):
-            latest = wait_for_ci(repo, sha, workflow=workflow)
+            latest = wait_for_ci(repo, sha, workflow=workflow, deadline=BUMP_DEADLINE)
             if not latest:
                 return None, f"{workflow} didn't start for the hub bump to {short(hub_to)}"
             if latest["conclusion"] != "success":
                 return None, (f"{workflow} failed with hub {short(hub_to)}, so the bump was left out: "
                               f"{latest['html_url']}")
-        pushed = run(["git", "push", "-q", "origin", f"{sha}:refs/heads/main"], check=False)
+        pushed = run(["git", "push", "-q", "origin", f"{sha}:refs/heads/{branch}"], check=False)
         return (sha, None) if pushed.returncode == 0 else (None, None)
     finally:
-        run(["git", "push", "-q", "origin", "--delete", branch], check=False)
+        run(["git", "push", "-q", "origin", "--delete", work], check=False)
 
 
 def output(**kw):
@@ -392,7 +406,7 @@ def plan():
             print(bump_message(hub_now, candidate, [s for _, s in hub_commits], run_url))
             hub_ref, override = candidate, candidate
         else:
-            bumped, why = bump(repo, hub_now, candidate, hub_commits, run_url)
+            bumped, why = bump(repo, default, hub_now, candidate, hub_commits, run_url)
             if bumped:
                 sha, hub_ref = bumped, candidate
             elif why:
