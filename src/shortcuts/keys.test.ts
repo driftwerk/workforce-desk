@@ -38,6 +38,7 @@ describe("shortcut keys on macOS", () => {
       pushToTalk: "Control+Shift+Space",
       holdToTalkHere: "Control+Shift+M",
       talkHere: "Control+Shift+L",
+      muteTalk: "Control+Shift+O",
       newSession: "Primary+N",
       newTerminal: "Primary+T",
       fillPane: "Primary+Shift+Enter",
@@ -56,7 +57,7 @@ describe("shortcut keys on macOS", () => {
     expect(refusal(MAC.pushToTalk, "global", "macos")).toBeNull();
     expect(refusal(MAC.ask, "global", "macos")).toBeNull();
     expect(warning(MAC.ask, "macos")).toBeNull();
-    for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread", "searchMemory", "board", "goTo"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
+    for (const id of ["holdToTalkHere", "talkHere", "muteTalk", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread", "searchMemory", "board", "goTo"] as const) expect(refusal(MAC[id], "app", "macos")).toBeNull();
     expect(new Set(Object.values(MAC)).size).toBe(Object.keys(MAC).length);
   });
 
@@ -224,6 +225,7 @@ describe("shortcut keys on Windows and Linux", () => {
       pushToTalk: "Primary+Shift+Space",
       holdToTalkHere: "Primary+Shift+M",
       talkHere: "Primary+Shift+L",
+      muteTalk: "Primary+Shift+O",
       newSession: "Primary+N",
       newTerminal: "Primary+T",
       fillPane: "Primary+Shift+Enter",
@@ -244,7 +246,7 @@ describe("shortcut keys on Windows and Linux", () => {
       const d = defaultShortcuts(platform);
       expect(refusal(d.ask, "global", platform)).toBeNull();
       expect(refusal(d.pushToTalk, "global", platform)).toBeNull();
-      for (const id of ["holdToTalkHere", "talkHere", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread", "searchMemory", "board"] as const)
+      for (const id of ["holdToTalkHere", "talkHere", "muteTalk", "newSession", "newTerminal", "fillPane", "settings", "reload", "saveFile", "stopAnswer", "jumpNew", "searchRoom", "searchRooms", "unread", "searchMemory", "board"] as const)
         expect(refusal(d[id], "app", platform)).toBeNull();
       expect(new Set(Object.values(d)).size).toBe(Object.keys(d).length);
     }

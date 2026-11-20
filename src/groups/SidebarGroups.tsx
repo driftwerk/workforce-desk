@@ -18,6 +18,7 @@ import type { Session } from "../hub/types";
 import { useOverview } from "../overview/store";
 import { openTarget, targetOfItem } from "../shell/navigate";
 import { AgentMark } from "../ui/Mark";
+import { MicBadge } from "../voice/DmVoice";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { GroupMemoryDialog } from "../memory/GroupMemory";
 import { RenameField } from "../ui/RenameField";
@@ -1200,6 +1201,7 @@ function ItemRowOf({
       <span className="gi-trail">
         {local && <SessionTicketChip session={session.id} still className="gi-ticket" name={name} />}
         <ChargeBadge charge={charge} session={local ? session.id : undefined} short className="gi-charge" />
+        {item.kind === "agent" && <MicBadge agent={agentKey(item.agent)} className="gi-mic" />}
         {says && <InGrid id={markId} says={says} />}
         <Marks badge={badge} />
       </span>

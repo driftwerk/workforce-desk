@@ -49,6 +49,14 @@ export const SHORTCUTS = [
     scope: "app",
     terminal: false,
   },
+  {
+    id: "muteTalk",
+    name: "Mute",
+    about: "Mutes or unmutes your microphone in a spoken conversation, without ending it.",
+    keys: "Control+Shift+O",
+    scope: "app",
+    terminal: false,
+  },
   { id: "newSession", name: "New session", about: "Starts a new session.", keys: "Primary+N", scope: "app" },
   {
     id: "newTerminal",

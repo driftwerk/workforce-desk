@@ -18,6 +18,7 @@ import { setSectionOpen, useSections } from "../shell/SideSection";
 import { LifecycleDialogs } from "../session/LifecycleDialogs";
 import { useMachines } from "../hub/engines";
 import { useMachineSessions } from "./machines";
+import { QUIET, toggleTalk, useMic } from "../voice/mic";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -91,6 +92,17 @@ describe("groups in the sidebar", () => {
     expect(header("Acme").textContent).toContain("2");
     expect(row("web-release").textContent).toContain("needs you");
     expect(row("Ada").textContent).toContain("Office");
+  });
+
+  it("marks the agent you're talking with", () => {
+    groups();
+    const mic = (name: string) => within(row(name)).queryByRole("img", { name: "Has the microphone" });
+    expect(mic("Scout")).toBeNull();
+    act(() => toggleTalk("local/scout"));
+    expect(mic("Scout")).toBeTruthy();
+    expect(mic("Ada")).toBeNull();
+    act(() => useMic.setState(QUIET));
+    expect(mic("Scout")).toBeNull();
   });
 
   it("makes a new group, named in place", () => {

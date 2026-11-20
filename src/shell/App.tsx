@@ -20,7 +20,7 @@ import { useSettings } from "../settings/store";
 import { reloadDesk } from "../shortcuts/reload";
 import { useAppShortcut, useGlobalShortcut, useShortcuts } from "../shortcuts/manager";
 import { useTuple } from "../tuple/useTuple";
-import { useVoice } from "../voice";
+import { TalkPill, useVoice } from "../voice";
 import { useHubLinks } from "../hubs/follow";
 import { forgetHubs, startUnread } from "../unread/summary";
 import { useAppBadge } from "../unread/icon";
@@ -441,7 +441,11 @@ export function App() {
             content), so this strip is what moves it; elsewhere the system's
             title bar does. */}
         {platform === "macos" && <div className="titlebar" onMouseDown={dragWindow} />}
-        <BrowserPill place={platform === "macos" ? "titlebar" : "band"} />
+        <div className="title-slot">
+          <TalkPill />
+          {platform === "macos" && <BrowserPill place="titlebar" />}
+        </div>
+        {platform !== "macos" && <BrowserPill place="band" />}
         {setupOpen && (
           <ErrorBoundary name="setup">
             <WindowsSetup />

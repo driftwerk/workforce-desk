@@ -1,8 +1,8 @@
 import { act, cleanup, render } from "@testing-library/react";
 import { useRef } from "react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { isShown, resetShown, targetDm, useDmPresence } from "./dms";
-import { toggleTalk, useMic } from "./mic";
+import { isShown, resetShown, targetDm, useDmPresence, useDmShown } from "./dms";
+import { QUIET, toggleTalk, useMic } from "./mic";
 
 function Dm({ agent }: { agent: string }) {
   const root = useRef<HTMLElement | null>(null);
@@ -20,7 +20,7 @@ function Dm({ agent }: { agent: string }) {
 
 beforeEach(() => {
   resetShown();
-  useMic.setState({ talk: null, hold: null, pressed: false, replying: 0, problem: null });
+  useMic.setState(QUIET);
 });
 afterEach(cleanup);
 
@@ -45,7 +45,7 @@ describe("which DM a DM shortcut acts on", () => {
     expect(targetDm()).toBe("local/atlas");
   });
 
-  it("lets the microphone go when the last DM showing its agent goes", async () => {
+  it("keeps the spoken conversation when the last DM showing its agent goes", async () => {
     const { rerender } = render(
       <>
         <Dm agent="local/atlas" />
@@ -53,12 +53,35 @@ describe("which DM a DM shortcut acts on", () => {
       </>,
     );
     act(() => toggleTalk("local/atlas"));
-    rerender(<Dm agent="local/atlas" />);
-    await act(async () => undefined);
-    expect(useMic.getState().talk).toBe("local/atlas");
     rerender(<></>);
     await act(async () => undefined);
     expect(isShown("local/atlas")).toBe(false);
-    expect(useMic.getState().talk).toBeNull();
+    expect(useMic.getState().talk).toBe("local/atlas");
+  });
+
+  it("says whether an agent's DM is shown, as it changes", () => {
+    function Shown({ agent }: { agent: string }) {
+      return <output aria-label={`shown ${agent}`}>{String(useDmShown(agent))}</output>;
+    }
+    const shown = () => document.querySelector('[aria-label="shown local/atlas"]')!.textContent;
+    const { rerender } = render(<Shown agent="local/atlas" />);
+    expect(shown()).toBe("false");
+    rerender(
+      <>
+        <Shown agent="local/atlas" />
+        <Dm agent="local/atlas" />
+        <Dm agent="local/atlas" />
+      </>,
+    );
+    expect(shown()).toBe("true");
+    rerender(
+      <>
+        <Shown agent="local/atlas" />
+        <Dm agent="local/atlas" />
+      </>,
+    );
+    expect(shown()).toBe("true");
+    rerender(<Shown agent="local/atlas" />);
+    expect(shown()).toBe("false");
   });
 });

@@ -23,7 +23,7 @@ import {
 } from "./api";
 import { targetDm } from "./dms";
 import { voiceEngine } from "./engines";
-import { claimMode, holdDone, micFailed, owner, pressHold, releaseHold, repliesOver, replyStarted, toggleTalk, useMic } from "./mic";
+import { claimMode, forget, holdDone, micFailed, owner, pressHold, releaseHold, repliesOver, replyStarted, switchTalk, toggleMute, toggleTalk, useMic } from "./mic";
 import type { VoiceSpec } from "../platform";
 import { asked, failureIn, forModel, missingAgent, newAnswers, resolveAgent, saysWhenTurnsEnd, speechOf, turnsOver, voiceFor, voiceRoster, wakeNames } from "./route";
 import { ERROR_IN_CHAT, speakable } from "./speakable";
@@ -145,6 +145,16 @@ export const endConversation = (agent: string): void => {
   void stopSpeaking().catch(failed);
 };
 
+/** Moves the spoken conversation to `agent`: what the one before it was
+ *  saying stops. */
+export const switchConversation = (agent: string): void => {
+  const was = useMic.getState().talk;
+  if (!was || was === agent) return;
+  hushed.add(was);
+  switchTalk(agent);
+  void stopSpeaking().catch(failed);
+};
+
 /** Starts `agent`'s spoken conversation, or ends it. */
 export const talkOrEnd = (agent: string): void => {
   if (useMic.getState().talk === agent) endConversation(agent);
@@ -205,7 +215,8 @@ export class Turns {
     }
     const key = agentKey(agent);
     hushed.delete(key);
-    if (!mic) {
+    if (mic) chat.watchDm(key);
+    else {
       this.current = agent;
       chat.openDm(key);
     }
@@ -342,6 +353,13 @@ export function useVoice(enabled: boolean) {
       onVoiceError((message) => useVoiceStore.setState({ error: message })),
     ];
     const unfollow = followMic();
+    // A talk with an agent that's gone from the roster ends.
+    const unwatchRoster = useChat.subscribe((s, prev) => {
+      if (s.roster === prev.roster || !s.rosterRead) return;
+      const { talk, hold, problem } = useMic.getState();
+      for (const agent of new Set([talk, hold, problem?.agent]))
+        if (agent && !s.roster.some((a) => agentKey(a) === agent)) forget(agent);
+    });
     useVoiceStore.setState({ here: true });
     voiceStatus()
       .then((status) => useVoiceStore.setState({ status }))
@@ -349,6 +367,7 @@ export function useVoice(enabled: boolean) {
     return () => {
       turns.stop();
       unfollow();
+      unwatchRoster();
       useVoiceStore.setState({ here: false });
       for (const stop of stops) void stop.then((f) => f());
     };
@@ -360,11 +379,14 @@ export function useVoice(enabled: boolean) {
     "talkHere",
     () => {
       const dm = targetDm();
+      const talk = useMic.getState().talk;
       if (dm) talkOrEnd(dm);
+      else if (talk) endConversation(talk);
     },
     true,
     { fromFields: false },
   );
+  useAppShortcut("muteTalk", toggleMute, useMic((m) => m.talk !== null), { fromFields: false });
   useAppHold(
     "holdToTalkHere",
     () => {

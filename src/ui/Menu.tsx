@@ -284,3 +284,67 @@ function SubMenu({
     </div>
   );
 }
+
+/** A menu's entries as rows in place, in a popover: a choice runs at once,
+ *  a submenu opens as a menu under its row. */
+export function MenuRows({ label, entries }: { label: string; entries: MenuEntry[] }) {
+  const [open, setOpen] = useState<{ index: number; at: { x: number; y: number }; from: HTMLElement } | null>(null);
+  const sub = open ? entries[open.index] : undefined;
+  return (
+    <div className="menu-rows" role="group" aria-label={label}>
+      {entries.map((entry, i) =>
+        entry.kind === "separator" ? (
+          <div key={i} className="menu-sep" role="separator" />
+        ) : entry.kind === "note" ? (
+          <p key={i} className="menu-note">
+            {entry.text}
+          </p>
+        ) : (
+          <button
+            key={i}
+            type="button"
+            className="menu-item menu-row"
+            aria-pressed={entry.submenu ? undefined : entry.checked}
+            aria-disabled={entry.disabled || undefined}
+            aria-haspopup={entry.submenu ? "menu" : undefined}
+            aria-expanded={entry.submenu ? open?.index === i : undefined}
+            onClick={(e) => {
+              if (entry.disabled) return;
+              if (!entry.submenu) return entry.onSelect?.();
+              const r = e.currentTarget.getBoundingClientRect();
+              setOpen({ index: i, at: { x: r.left, y: r.bottom + 4 }, from: e.currentTarget });
+            }}
+          >
+            <span className="menu-label">
+              {entry.label}
+              {entry.detail && <span className="menu-detail">{entry.detail}</span>}
+            </span>
+            {entry.hint && <span className="menu-hint">{entry.hint}</span>}
+            {entry.kbd && <span className="menu-kbd">{entry.kbd}</span>}
+            {entry.checked && (
+              <span className="menu-kbd" aria-hidden="true">
+                ✓
+              </span>
+            )}
+            {entry.submenu && (
+              <span className="menu-kbd" aria-hidden="true">
+                ▸
+              </span>
+            )}
+          </button>
+        ),
+      )}
+      {open && sub?.kind === "item" && sub.submenu && (
+        <Menu
+          label={sub.label}
+          at={open.at}
+          entries={entriesOf(sub.submenu)}
+          onClose={(refocus) => {
+            setOpen(null);
+            if (refocus) open.from.focus();
+          }}
+        />
+      )}
+    </div>
+  );
+}

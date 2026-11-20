@@ -1,7 +1,24 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { claimMode, endTalk, forget, holdDone, micFailed, owner, pressHold, releaseHold, toggleTalk, useMic, repliesOver, replyStarted } from "./mic";
+import {
+  claimMode,
+  dismissProblem,
+  endTalk,
+  forget,
+  holdDone,
+  micFailed,
+  owner,
+  pressHold,
+  QUIET,
+  releaseHold,
+  switchTalk,
+  toggleMute,
+  toggleTalk,
+  useMic,
+  repliesOver,
+  replyStarted,
+} from "./mic";
 
-beforeEach(() => useMic.setState({ talk: null, hold: null, pressed: false, replying: 0, problem: null }));
+beforeEach(() => useMic.setState(QUIET));
 
 describe("the microphone's owner", () => {
   it("is voice by name until a DM takes it", () => {
@@ -65,12 +82,79 @@ describe("the microphone's owner", () => {
     expect(useMic.getState().problem).toBeNull();
   });
 
-  it("is let go by a DM that isn't shown any more", () => {
+  it("is let go by an agent that's gone from the roster", () => {
     toggleTalk("local/atlas");
     pressHold("local/atlas");
     forget("local/scout");
     expect(owner()?.agent).toBe("local/atlas");
     forget("local/atlas");
-    expect(useMic.getState()).toMatchObject({ talk: null, hold: null, pressed: false });
+    expect(useMic.getState()).toMatchObject({ talk: null, hold: null, pressed: false, muted: false, since: null });
+    micFailed("local/atlas", "no input device");
+    forget("local/atlas");
+    expect(useMic.getState().problem).toBeNull();
+  });
+});
+
+describe("a spoken conversation", () => {
+  it("knows when it started, and in whose DM", () => {
+    toggleTalk("local/atlas");
+    const { since, from } = useMic.getState();
+    expect(since).toBeTypeOf("number");
+    expect(from).toBeNull();
+    toggleTalk("local/atlas");
+    expect(useMic.getState()).toMatchObject({ talk: null, since: null, from: null });
+  });
+
+  it("moves to another agent in one step, never back to voice by name between", () => {
+    const modes: (string | null)[] = [];
+    toggleTalk("local/atlas");
+    const unsubscribe = useMic.subscribe((s) => modes.push(claimMode(s)));
+    switchTalk("local/scout");
+    unsubscribe();
+    expect(modes).toEqual(["open"]);
+    expect(useMic.getState()).toMatchObject({ talk: "local/scout", from: "local/atlas" });
+    switchTalk("local/scout");
+    expect(useMic.getState().from).toBe("local/atlas");
+    useMic.setState(QUIET);
+    switchTalk("local/scout");
+    expect(useMic.getState().talk).toBeNull();
+  });
+
+  it("mutes to hear only what's held, voice by name still paused, without ending", () => {
+    toggleMute();
+    expect(useMic.getState().muted).toBe(false);
+    toggleTalk("local/atlas");
+    toggleMute();
+    expect(useMic.getState()).toMatchObject({ talk: "local/atlas", muted: true });
+    expect(owner()).toEqual({ agent: "local/atlas", mode: "talk" });
+    expect(claimMode()).toBe("held");
+    pressHold("local/atlas");
+    expect(claimMode()).toBe("held");
+    releaseHold();
+    holdDone();
+    toggleMute();
+    expect(claimMode()).toBe("open");
+  });
+
+  it("unmutes whenever it ends, moves or fails", () => {
+    const muted = () => {
+      toggleTalk("local/atlas");
+      toggleMute();
+    };
+    muted();
+    toggleTalk("local/atlas");
+    expect(useMic.getState().muted).toBe(false);
+    muted();
+    switchTalk("local/scout");
+    expect(useMic.getState().muted).toBe(false);
+    useMic.setState(QUIET);
+    muted();
+    endTalk("local/atlas");
+    expect(useMic.getState().muted).toBe(false);
+    muted();
+    micFailed("local/atlas", "no input device");
+    expect(useMic.getState()).toMatchObject({ muted: false, since: null });
+    dismissProblem();
+    expect(useMic.getState().problem).toBeNull();
   });
 });

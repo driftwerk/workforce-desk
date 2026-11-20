@@ -1,16 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
 import { deviceEntries, refreshDevices, useAudioDevices } from "../settings/Audio";
 import { setAudio, useSettings } from "../settings/store";
 import { shortcutLabel } from "../shortcuts/keys";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { stopSpeaking } from "./api";
-import { useMic } from "./mic";
+import { toggleMute, useMic } from "./mic";
 import { useVoiceStore } from "./store";
 import { endConversation, endHold, setReply, startHold, talkOrEnd } from "./useVoice";
 import { dmVoiceView } from "./view";
 import "../styles/voice.css";
 
-function MicIcon() {
+export function MicIcon() {
   return (
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
       <rect x="9" y="3" width="6" height="11" rx="3" />
@@ -29,7 +29,7 @@ function TalkIcon() {
 
 /** The microphone, speaker and echo cancelling, as a menu's entries: to
  *  change them mid-conversation without going to Settings. */
-const useAudioEntries = (): MenuEntry[] => {
+export const useAudioEntries = (): MenuEntry[] => {
   const audio = useSettings((s) => s.audio);
   // Subscribed, so a read made as a submenu opens shows in it at once.
   const devices = useAudioDevices("off");
@@ -47,9 +47,58 @@ const useAudioEntries = (): MenuEntry[] => {
   ];
 };
 
+/** Whether `agent` (`name`) answers what's said aloud or in writing, as a
+ *  menu's entries. */
+export const answerEntries = (agent: string, name: string, written: boolean): MenuEntry[] => [
+  { kind: "item", label: `${name} answers aloud`, checked: !written, onSelect: () => setReply(agent, "spoken") },
+  { kind: "item", label: `${name} answers in writing`, checked: written, onSelect: () => setReply(agent, "written") },
+];
+
 /** Whether voice runs in this window: Desk's main window runs it, a grid in
  *  a window of its own shows none of it. */
-const useVoiceHere = (): boolean => useVoiceStore((s) => s.here);
+export const useVoiceHere = (): boolean => useVoiceStore((s) => s.here);
+
+/** A hold-to-talk button's handlers for `agent`: held while the pointer or
+ *  Space or Enter is down on it, let go however it ends, and let go if the
+ *  button goes while it's held. */
+export const useHoldButton = (agent: string) => {
+  const holding = useRef(false);
+  useEffect(
+    () => () => {
+      if (holding.current) endHold();
+    },
+    [],
+  );
+  const start = () => {
+    holding.current = true;
+    startHold(agent);
+  };
+  const end = () => {
+    holding.current = false;
+    endHold();
+  };
+  return {
+    onPointerDown: (e: PointerEvent<HTMLButtonElement>) => {
+      if (e.button !== 0) return;
+      start();
+      // Let go anywhere, it's still let go here.
+      if ("setPointerCapture" in e.currentTarget) e.currentTarget.setPointerCapture(e.pointerId);
+    },
+    onPointerUp: end,
+    onPointerCancel: end,
+    onLostPointerCapture: end,
+    onKeyDown: (e: KeyboardEvent<HTMLButtonElement>) => {
+      if ((e.key === " " || e.key === "Enter") && !e.repeat) {
+        e.preventDefault();
+        start();
+      }
+    },
+    onKeyUp: (e: KeyboardEvent<HTMLButtonElement>) => {
+      if (e.key === " " || e.key === "Enter") end();
+    },
+    onBlur: end,
+  };
+};
 
 /** A DM's voice controls, beside Send: hold to talk, a spoken conversation
  *  on or off, and whether the agent answers aloud or in writing. */
@@ -63,6 +112,7 @@ export function DmVoiceControls({ agent, name }: { agent: string; name: string }
   const more = useRef<HTMLButtonElement>(null);
   const here = useVoiceHere();
   const audioEntries = useAudioEntries();
+  const hold = useHoldButton(agent);
   // Read when the menu opens, so its submenus have the devices.
   useEffect(() => {
     if (menu) refreshDevices();
@@ -77,25 +127,7 @@ export function DmVoiceControls({ agent, name }: { agent: string; name: string }
         aria-label={`Hold to talk to ${name}`}
         aria-pressed={holding}
         title={`Hold to talk to ${name} (${shortcutLabel(holdKeys)}) · ${answers}`}
-        onPointerDown={(e) => {
-          if (e.button !== 0) return;
-          startHold(agent);
-          // Let go anywhere, it's still let go here.
-          if ("setPointerCapture" in e.currentTarget) e.currentTarget.setPointerCapture(e.pointerId);
-        }}
-        onPointerUp={endHold}
-        onPointerCancel={endHold}
-        onLostPointerCapture={endHold}
-        onKeyDown={(e) => {
-          if ((e.key === " " || e.key === "Enter") && !e.repeat) {
-            e.preventDefault();
-            startHold(agent);
-          }
-        }}
-        onKeyUp={(e) => {
-          if (e.key === " " || e.key === "Enter") endHold();
-        }}
-        onBlur={endHold}
+        {...hold}
       >
         <MicIcon />
       </button>
@@ -129,11 +161,7 @@ export function DmVoiceControls({ agent, name }: { agent: string; name: string }
         <Menu
           label={`How ${name} answers, and the microphone and speaker`}
           at={menu}
-          entries={[
-            { kind: "item", label: `${name} answers aloud`, checked: !written, onSelect: () => setReply(agent, "spoken") },
-            { kind: "item", label: `${name} answers in writing`, checked: written, onSelect: () => setReply(agent, "written") },
-            ...audioEntries,
-          ]}
+          entries={[...answerEntries(agent, name, written), ...audioEntries]}
           onClose={(refocus) => {
             setMenu(null);
             if (refocus) more.current?.focus();
@@ -166,8 +194,7 @@ export function useDmVoiceEntries(agent: string, name: string): MenuEntry[] {
     },
     { kind: "item", label: "Hold to talk", hint: "hold the keys", kbd: shortcutLabel(holdKeys), disabled: true },
     { kind: "separator" },
-    { kind: "item", label: `${name} answers aloud`, checked: !written, onSelect: () => setReply(agent, "spoken") },
-    { kind: "item", label: `${name} answers in writing`, checked: written, onSelect: () => setReply(agent, "written") },
+    ...answerEntries(agent, name, written),
     ...audioEntries,
   ];
 }
@@ -197,20 +224,26 @@ export function DmVoiceBar({ agent, name }: { agent: string; name: string }) {
         </button>
       )}
       {mic.talk === agent && (
-        <button type="button" className="link small" onClick={() => endConversation(agent)}>
-          End
-        </button>
+        <>
+          <button type="button" className="link small" aria-pressed={mic.muted} onClick={toggleMute}>
+            {mic.muted ? "Unmute" : "Mute"}
+          </button>
+          <button type="button" className="link small" onClick={() => endConversation(agent)}>
+            End
+          </button>
+        </>
       )}
     </div>
   );
 }
 
-/** In a grid pane's header: this DM has the microphone. */
-export function MicBadge({ agent }: { agent: string }) {
+/** In a grid pane's header, or on the agent's sidebar row: this DM has the
+ *  microphone. */
+export function MicBadge({ agent, className = "gpane-mic" }: { agent: string; className?: string }) {
   const live = useMic((m) => m.hold === agent || (m.talk === agent && !m.hold));
   if (!live) return null;
   return (
-    <span className="gpane-mic" role="img" aria-label="Has the microphone" title="Has the microphone">
+    <span className={className} role="img" aria-label="Has the microphone" title="Has the microphone">
       <MicIcon />
     </span>
   );
