@@ -14,7 +14,7 @@ use sherpa_onnx::{
 };
 
 use crate::barge::{Barge, Cut, Verdict, judge};
-use crate::conversation::{Conversation, ListenMode, Phase, Timing};
+use crate::conversation::{Conversation, ListenMode, Phase, Timing, Transcript};
 use crate::decode::Audio;
 use crate::directions::without_directions;
 use crate::keywords::{Keywords, SentencePiece, vocabulary};
@@ -45,6 +45,12 @@ pub enum Heard {
     /// A segment is being transcribed.
     Transcribing,
     Utterance(Utterance),
+    /// A name was heard, but what was said with it wasn't for them: the
+    /// person is told, since nothing is sent.
+    NotToThem {
+        name: String,
+        text: String,
+    },
     /// Push-to-talk was let go with nothing said.
     Nothing,
 }
@@ -63,6 +69,20 @@ pub enum Sound {
     SpeechStarted,
     /// A finished stretch of speech, with a little audio from before it.
     Segment(Vec<f32>),
+}
+
+fn heard(transcript: Transcript) -> Heard {
+    match transcript {
+        Transcript::Request(u) => Heard::Utterance(u),
+        Transcript::NotToThem { name, text } => {
+            tracing::info!(
+                name,
+                text,
+                "voice: heard a name, but not said to them; not sent"
+            );
+            Heard::NotToThem { name, text }
+        }
+    }
 }
 
 /// Silero VAD and the keyword spotter over the 16 kHz microphone stream,
@@ -600,8 +620,8 @@ impl Listener {
                 return;
             }
             self.barged(now, out);
-            if let Some(u) = self.conversation.transcript(&text, now) {
-                out(Heard::Utterance(u));
+            if let Some(t) = self.conversation.transcript(&text, now) {
+                out(heard(t));
             }
             return;
         }
@@ -615,8 +635,8 @@ impl Listener {
             tracing::info!("voice: heard our own reply; not sent");
             return;
         }
-        if let Some(u) = self.conversation.transcript(&text, now) {
-            out(Heard::Utterance(u));
+        if let Some(t) = self.conversation.transcript(&text, now) {
+            out(heard(t));
         }
     }
 
@@ -957,6 +977,33 @@ mod tests {
             .push(Sound::Segment(frame(level)));
         listener.feed(&frame(0.05), now, &mut |h| heard.push(h));
         heard
+    }
+
+    /// "Hey Kat" is spotted before voice activity marks speech, so the
+    /// segment transcribed holds only what followed it: that is for Kat.
+    #[test]
+    fn a_name_spotted_before_its_speech_addresses_the_segment() {
+        let told = std::sync::Arc::new(std::sync::Mutex::new(Told::default()));
+        let now = Instant::now();
+        let mut listener =
+            Listener::with_ears(Box::new(ToldEars(told.clone())), Timing::default(), now);
+        let frame = vec![0.1; VAD_WINDOW];
+        let mut heard = Vec::new();
+        let mut hear = |sounds: Vec<Sound>, listener: &mut Listener| {
+            told.lock().unwrap().sounds.extend(sounds);
+            listener.feed(&frame, now, &mut |h| heard.push(h));
+        };
+        told.lock().unwrap().says = "How are you?".into();
+        hear(vec![Sound::Name("Kat".into())], &mut listener);
+        hear(vec![Sound::SpeechStarted], &mut listener);
+        hear(vec![Sound::Segment(frame.clone())], &mut listener);
+        assert_eq!(
+            heard,
+            [
+                Heard::Transcribing,
+                Heard::Utterance(Utterance::new(Some("Kat".into()), "How are you?"))
+            ]
+        );
     }
 
     /// A word or two of the sentence playing: at the playback's level they're

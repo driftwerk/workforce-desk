@@ -297,6 +297,7 @@ impl Worker {
             }
             Heard::Transcribing => set_state(state, events, VoiceState::Transcribing),
             Heard::Utterance(u) => events.utterance(&u),
+            Heard::NotToThem { name, text } => events.error(&not_to_them(&name, &text)),
             Heard::Nothing => events.unheard(),
         });
         if barged {
@@ -337,6 +338,16 @@ fn level(samples: &[f32], rate: u32) {
 }
 
 /// Stops playback and drops whatever was still to be said, saying why.
+/// What the person is told when `name` was heard but what was said with it
+/// (`text`) wasn't sent to them.
+fn not_to_them(name: &str, text: &str) -> String {
+    if text.is_empty() {
+        format!("Heard “{name}”, but not what was said to them.")
+    } else {
+        format!("Heard “{name}”, but “{text}” wasn’t said to them, so it wasn’t sent.")
+    }
+}
+
 fn stop(
     out: &SharedAudioOut,
     generation: &AtomicU64,
