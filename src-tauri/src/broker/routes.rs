@@ -338,7 +338,7 @@ pub fn native_only(method: &str, target: &str) -> bool {
 const NATIVE_LOCAL: &[Route] = &[
     route("POST", "/api/desk/accounts/{}/hand-over"),
     route("GET", "/api/desk/engine-key"),
-    route("GET", "/api/desk/machine-grants"),
+    with_query("GET", "/api/desk/machine-grants", &["plans"]),
 ];
 
 /// `method target` as one of the native side's own requests to this
@@ -1120,6 +1120,7 @@ mod tests {
             assert!(native_boss(method, &target).is_err(), "{method} {target}");
             assert!(relay_machine(method, &target).is_err(), "{method} {target}");
         }
+        assert!(native_local("GET", &format!("{path}?plans=1")).is_ok());
         assert!(native_local("GET", &format!("{path}?token=t")).is_err());
         assert!(native_local("PUT", path).is_err());
         assert!(native_local("GET", &format!("{path}/devbox")).is_err());

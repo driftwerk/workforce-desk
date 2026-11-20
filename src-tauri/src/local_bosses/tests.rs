@@ -194,6 +194,7 @@ fn acme(members: &[&str], level: &str) -> WantedGrant {
 fn wanted(machines: &[(&str, Vec<WantedGrant>, &[&str])]) -> Wanted {
     Wanted {
         grant_version: 1,
+        plans_known: true,
         machines: machines
             .iter()
             .map(|(m, g, listed)| {
@@ -814,6 +815,21 @@ fn a_plans_grant_is_carried_only_marked_as_that_plan_s() {
     assert!(carried(&g));
 }
 
+/// A plan's grant id is its plan's in the hub's own spelling alone.
+#[test]
+fn a_plans_grant_id_is_its_plan_s_in_lowercase_alone() {
+    let plan = "aaaaaaaa-4444-4444-8444-44444444444b";
+    assert_eq!(plan_of(&format!("plan-{plan}")), Some(plan));
+    let upper = plan.to_ascii_uppercase();
+    assert_eq!(plan_of(&format!("plan-{upper}")), None);
+    let mut g = planned(&[S1], "act");
+    (g.group, g.plan) = (format!("plan-{upper}"), Some(upper));
+    assert!(
+        !carried(&g),
+        "an upper-case plan id is never a plan's grant"
+    );
+}
+
 #[tokio::test]
 async fn a_plans_grant_is_written_as_the_hub_says_without_asking_and_goes_with_its_sessions() {
     let f = files();
@@ -869,6 +885,14 @@ async fn a_plans_grant_is_written_as_the_hub_says_without_asking_and_goes_with_i
     sync(&f.bosses, &f.kept, &more, &on(&[&devbox])).await;
     let g = devbox.grant(&key).unwrap();
     assert_eq!((members_of(&g).len(), &g["stopped"]), (2, &made));
+    // A hub that doesn't say its plans' grants yet leaves it as it is.
+    let unknown = Wanted {
+        plans_known: false,
+        ..wanted(&[("devbox", vec![], &[S2])])
+    };
+    let s = sync(&f.bosses, &f.kept, &unknown, &on(&[&devbox])).await;
+    assert_eq!(s.failed, vec![]);
+    assert_eq!(members_of(&devbox.grant(&key).unwrap()).len(), 2);
     // The plan has no sessions there any more, or ended: deleted.
     sync(
         &f.bosses,

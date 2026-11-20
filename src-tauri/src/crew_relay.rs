@@ -353,6 +353,15 @@ fn error_of(reply: &Answer) -> Option<String> {
     Some(e.chars().take(500).collect())
 }
 
+/// The machine's own code for why it refused, when it gives one: a short
+/// word of lowercase letters and underscores, which the hub acts on
+/// (a plan's start that waits for its grant there).
+fn code_of(reply: &Answer) -> Option<String> {
+    let v: Value = serde_json::from_str(&reply.body).ok()?;
+    let c = v.get("code")?.as_str()?;
+    (c.len() <= 64 && c.bytes().all(|b| b.is_ascii_lowercase() || b == b'_')).then(|| c.to_string())
+}
+
 /// Call `call` carried to `machine`, sent again (with its own id) when no
 /// answer came.
 async fn carry<E: Ends>(ends: &E, call: &Call, machine: &MachineId, timing: Timing) -> Outcome {
@@ -433,7 +442,13 @@ fn session_of(v: &Value) -> Option<Value> {
 
 /// Why a machine refused one of Desk's own requests, briefly.
 fn refusal(name: &str, r: &Answer) -> Outcome {
-    refused(error_of(r).unwrap_or_else(|| format!("{name} refused it ({})", r.status)))
+    let why = error_of(r).unwrap_or_else(|| format!("{name} refused it ({})", r.status));
+    match code_of(r) {
+        Some(code) => {
+            Outcome::Answer(json!({"status": "refused", "body": {"error": why, "code": code}}))
+        }
+        None => refused(why),
+    }
 }
 
 /// A plan's call on `machine`'s sessions (`tool`, one of [`SESSIONS`] and
@@ -1910,6 +1925,11 @@ mod tests {
         let (fake, mut rx) = with_desk(
             vec![
                 Does::Says(400, json!({"error": "There's no folder /home/dev/nope."})),
+                Does::Says(
+                    409,
+                    json!({"error": "Not held yet.", "code": "plan_grant_not_held"}),
+                ),
+                Does::Says(409, json!({"error": "Odd.", "code": "Not A Code"})),
                 Does::Fails(Unanswered::MaybeSent("cut off".into())),
                 Does::Says(502, json!({})),
             ],
@@ -1925,6 +1945,24 @@ mod tests {
             )
         );
         let _ = stop.send(true);
+        // The machine's own code for it goes with it; one that isn't a code
+        // doesn't.
+        for (id, body) in [
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302c1",
+                json!({"error": "Not held yet.", "code": "plan_grant_not_held"}),
+            ),
+            (
+                "0f0e0d0c-0b0a-4909-8807-0605040302c2",
+                json!({"error": "Odd."}),
+            ),
+        ] {
+            let stop =
+                start(&fake.polled(vec![desk_call(id, "desk.session_start", input.clone())]));
+            let (_, answer) = next(&mut rx).await;
+            assert_eq!(answer, json!({"status": "refused", "body": body}));
+            let _ = stop.send(true);
+        }
         // Cut off, or a gateway's error: maybe started, so not sent again.
         for _ in 0..2 {
             let stop = start(&fake.polled(vec![desk_call(B, "desk.session_start", input.clone())]));
@@ -1933,7 +1971,7 @@ mod tests {
         }
         // Each start went once, with no plugin folder to give (Codex needs none).
         let sent = fake.desk_sent.lock().unwrap().clone();
-        assert_eq!(sent.len(), 3);
+        assert_eq!(sent.len(), 5);
         assert!(
             sent.iter()
                 .all(|(_, b)| b.as_ref().is_some_and(|b| b.get("env").is_none()))

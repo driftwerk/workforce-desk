@@ -5,8 +5,8 @@
 //! `local:<agent>`. This writes those grants, and only those.
 //!
 //! - **What each grant says comes from this computer's hub**
-//!   (`GET /api/desk/machine-grants`, on [`crate::broker::routes`]'s
-//!   native-only list): the boss's own level, switches and Sees there, and
+//!   ([`WANTED_PATH`], on [`crate::broker::routes`]'s native-only list,
+//!   asking for its plans' grants too, which an older Desk isn't sent): the boss's own level, switches and Sees there, and
 //!   that machine's sessions of the group alone. Same rules, no wider
 //!   powers. Nothing here adds to it; what can't be one of those grants is
 //!   not carried ([`carried`]): a boss on another hub, folders,
@@ -70,7 +70,7 @@ use zeroize::Zeroizing;
 use crate::bosses::{self, Engine};
 
 /// Where this computer's hub says what each machine should hold.
-pub const WANTED_PATH: &str = "/api/desk/machine-grants";
+pub const WANTED_PATH: &str = "/api/desk/machine-grants?plans=1";
 /// What is kept of the person's answers, under Desk's own folder.
 pub const KEPT_FILE: &str = "local_bosses.json";
 /// The grant shape the engines read.
@@ -108,9 +108,12 @@ pub struct WantedGrant {
 /// What a plan's grant id starts with.
 const PLAN_KEY: &str = "plan-";
 
-/// The plan `group` is the grant of, when it is a plan's.
+/// The plan `group` is the grant of, when it is a plan's: its id in the
+/// hub's own spelling (lowercase), as the hub reads it.
 pub(crate) fn plan_of(group: &str) -> Option<&str> {
-    group.strip_prefix(PLAN_KEY).filter(|p| bosses::uuid_ok(p))
+    group
+        .strip_prefix(PLAN_KEY)
+        .filter(|p| bosses::uuid_ok(p) && *p == p.to_ascii_lowercase())
 }
 
 /// What one machine should hold, and its sessions the sidebar lists.
@@ -127,6 +130,10 @@ pub struct MachineWanted {
 #[serde(rename_all = "camelCase")]
 pub struct Wanted {
     pub grant_version: u64,
+    /// Whether its plans' grants are said ([`WANTED_PATH`] asks for them):
+    /// until they are, those a machine holds are left as they are.
+    #[serde(default)]
+    pub plans_known: bool,
     #[serde(default)]
     pub machines: BTreeMap<String, MachineWanted>,
 }
@@ -956,7 +963,10 @@ pub async fn sync<E: Engine>(
             }
         };
         let held = match held_on(engine).await {
-            Ok(h) => h,
+            Ok(h) => h
+                .into_iter()
+                .filter(|(g, _)| wanted.plans_known || plan_of(g).is_none())
+                .collect(),
             Err(why) => {
                 out.failed.push((id.clone(), why));
                 continue;
