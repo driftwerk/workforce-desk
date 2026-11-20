@@ -889,7 +889,10 @@ export type ActivityKind =
   | "ticket_deleted"
   /** Something the boss told you of was settled since: by you, or in its
    *  session. `detail` names it. */
-  | "settled";
+  | "settled"
+  /** The boss's own work on one of the person's machines: a folder made
+   *  there, or a check run there. */
+  | "on_machine";
 
 /** Something that happened on the crew, as the hub recorded it. */
 export interface ActivityEvent {
