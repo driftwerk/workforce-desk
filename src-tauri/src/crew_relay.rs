@@ -32,9 +32,13 @@
 //!   `desk.session_start`, queued by the hub's own plan runner for a plan
 //!   the person approved, never by a boss's tool) go as New session's own
 //!   requests: `GET` and `POST /api/desk/sessions` on that machine, with
-//!   Desk's plugin folder there in the start's environment. A start is sent
-//!   once: when it may have reached the machine but no answer came, its
-//!   outcome isn't known, and the hub finds the session there by its name.
+//!   Desk's plugin folder there in the start's environment. A start the hub
+//!   queued under a plan's grant (`plan-<plan>`) says that grant and the
+//!   call's boss, from the call itself, never its input: the machine starts
+//!   it run by that boss from launch, only while its grant there names that
+//!   boss. A start is sent once: when it may have reached the machine but
+//!   no answer came, its outcome isn't known, and the hub finds the session
+//!   there by its name.
 //!
 //! - **A boss's machine tools** (`desk.machines`, `desk.folders`,
 //!   `desk.folder_make`, `desk.repos` and `desk.run`, queued by the hub's
@@ -423,6 +427,7 @@ fn session_of(v: &Value) -> Option<Value> {
         "state": text("state"),
         "createdAt": text("createdAt"),
         "lastReply": reply,
+        "bossHas": text("bossHas"),
     }))
 }
 
@@ -483,6 +488,15 @@ async fn carry_desk<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &
         .iter()
         .filter_map(|k| given.get(*k).map(|v| ((*k).to_string(), v.clone())))
         .collect();
+    if let (Some(grant), Some(boss)) = (
+        call.group
+            .as_str()
+            .filter(|g| crate::local_bosses::plan_of(g).is_some()),
+        call.boss.as_str(),
+    ) {
+        start.insert("group".into(), grant.into());
+        start.insert("boss".into(), boss.into());
+    }
     // Claude Code without Desk's plugin would tell Desk nothing of its
     // turns: nothing is started until the folder is known.
     let claude = given
@@ -1826,7 +1840,7 @@ mod tests {
             json!({"status": "ok", "body": {
                 "id": SESSION, "name": "VEL-3", "displayName": null,
                 "cwd": "/home/dev/vellev", "state": "starting", "lastReply": null,
-                "createdAt": "2026-11-14T08:00:00Z",
+                "createdAt": "2026-11-14T08:00:00Z", "bossHas": null,
             }})
         );
         let sent = fake.desk_sent.lock().unwrap().clone();
@@ -1844,6 +1858,49 @@ mod tests {
         // Never through the crew's own route.
         assert!(fake.sent().is_empty());
         let _ = stop.send(true);
+    }
+
+    /// A start the hub queued under a plan's grant goes with that grant and
+    /// the call's own boss, whatever its input says, and the machine's word
+    /// of who has it comes back; one under a group's grant says neither.
+    #[tokio::test]
+    async fn a_plans_start_under_its_grant_says_that_grant_and_the_calls_boss_alone() {
+        let plan = "plan-6f9619ff-8b86-4d01-b42d-00cf4fc964ff";
+        let made = json!({"id": SESSION, "name": "VEL-3", "cwd": "/x", "state": "starting",
+                          "bossHas": "desk"});
+        let (fake, mut rx) = with_desk(
+            vec![Does::Says(200, made.clone()), Does::Says(200, made)],
+            None,
+        );
+        let input = json!({"engine": "codex", "name": "VEL-3", "cwd": "/x",
+                           "group": "acme", "boss": "local:mallory"});
+        let mut planned = desk_call(A, "desk.session_start", input.clone());
+        planned["group"] = plan.into();
+        planned["boss"] = "local:desk".into();
+        let mut odd = desk_call(B, "desk.session_start", input);
+        odd["group"] = "plan-not-a-plan".into();
+        let stop = start(&fake.polled(vec![planned]));
+        let (_, answer) = next(&mut rx).await;
+        assert_eq!(answer["body"]["bossHas"], "desk");
+        let _ = stop.send(true);
+        let stop = start(&fake.polled(vec![odd]));
+        next(&mut rx).await;
+        let _ = stop.send(true);
+        let sent: Vec<Value> = fake
+            .desk_sent
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(_, b)| b.clone())
+            .collect();
+        assert_eq!(
+            sent,
+            vec![
+                json!({"engine": "codex", "name": "VEL-3", "cwd": "/x",
+                       "group": plan, "boss": "local:desk"}),
+                json!({"engine": "codex", "name": "VEL-3", "cwd": "/x"}),
+            ]
+        );
     }
 
     /// A start is sent once: refused there, it is said; maybe there but

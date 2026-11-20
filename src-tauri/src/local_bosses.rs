@@ -26,11 +26,13 @@
 //!   (`local_bosses.json`, private) is each group's answer, and nothing
 //!   else.
 //! - **A plan's grant is never asked about**: the hub's main overseer runs
-//!   no group, so each of its plans has a grant of its own on each machine
-//!   its tickets' sessions work on (`plan-<plan>`, marked as that plan's).
-//!   The person approved the plan, which said where each ticket runs, so
-//!   it is written as the hub says it, capped as any grant is, and nothing
-//!   of it is kept; a stop Desk made of one is never lifted from here.
+//!   no group, so each of its running plans has a grant of its own on each
+//!   machine its tickets work on (`plan-<plan>`, marked as that plan's),
+//!   from before the first of them starts there, which starts in it run by
+//!   that boss ([`crate::crew_relay`]). The person approved the plan, which
+//!   said where each ticket runs, so it is written as the hub says it,
+//!   capped as any grant is (Act fully with its one budget), and nothing of
+//!   it is kept; a stop Desk made of one is never lifted from here.
 //! - **Never a group bossed from another hub** ([`crate::bosses`]'s): not
 //!   one Desk linked such a boss for, nor one whose grant on the machine
 //!   names such a boss. One boss per group. Only grants naming a boss here
@@ -107,7 +109,7 @@ pub struct WantedGrant {
 const PLAN_KEY: &str = "plan-";
 
 /// The plan `group` is the grant of, when it is a plan's.
-fn plan_of(group: &str) -> Option<&str> {
+pub(crate) fn plan_of(group: &str) -> Option<&str> {
     group.strip_prefix(PLAN_KEY).filter(|p| bosses::uuid_ok(p))
 }
 

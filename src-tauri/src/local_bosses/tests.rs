@@ -824,6 +824,12 @@ async fn a_plans_grant_is_written_as_the_hub_says_without_asking_and_goes_with_i
         vec![acme(&[S1], "act"), planned(&[S2], "act")],
         &[S1, S2],
     )]);
+    // Before its first ticket starts there: written with no sessions, so
+    // that ticket starts in it.
+    let ahead = wanted(&[("devbox", vec![planned(&[], "act")], &[])]);
+    let s = sync(&f.bosses, &f.kept, &ahead, &on(&[&devbox])).await;
+    assert_eq!(s.failed, vec![]);
+    assert!(members_of(&devbox.grant(&key).expect("written ahead")).is_empty());
     let s = sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
     assert_eq!(s.failed, vec![]);
     let g = devbox.grant(&key).expect("written with no question");
@@ -837,10 +843,25 @@ async fn a_plans_grant_is_written_as_the_hub_says_without_asking_and_goes_with_i
     );
     assert!(say(&f, &w, true).await.is_none());
     assert!(!read_kept(&f.kept).groups.contains_key(&key));
-    // Capped as any grant: Act fully only with its budget.
+    // Capped as any grant: Act fully only with its budget, which the hub
+    // counts once across every grant of its boss.
     let full = wanted(&[("devbox", vec![planned(&[S2], "full")], &[S2])]);
     sync(&f.bosses, &f.kept, &full, &on(&[&devbox])).await;
     assert_eq!(devbox.grant(&key).unwrap()["level"], "act");
+    let mut budgeted = planned(&[S2], "full");
+    budgeted.grant["act"]["budget_usd_per_day"] = json!(40);
+    sync(
+        &f.bosses,
+        &f.kept,
+        &wanted(&[("devbox", vec![budgeted], &[S2])]),
+        &on(&[&devbox]),
+    )
+    .await;
+    let g = devbox.grant(&key).unwrap();
+    assert_eq!(
+        (&g["level"], &g["act"]["budget_usd_per_day"]),
+        (&json!("full"), &json!(40))
+    );
     // A stop Desk made of it is never lifted from here.
     let made = stop("desk", Utc::now());
     devbox.held.lock().unwrap().grants.get_mut(&key).unwrap()["stopped"] = made.clone();
