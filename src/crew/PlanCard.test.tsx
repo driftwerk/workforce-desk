@@ -276,6 +276,14 @@ describe("a running plan", () => {
     await waitFor(() => expect(within(card()).getByText("Dropped")).toBeTruthy());
   });
 
+  it("says why a ticket waits for the person in To do", async () => {
+    plans.holdBack(plans.plan.tickets[0]!, "its session ended as it started (exit 1)");
+    await show();
+    const waits = within(card()).getByText("· waits for you: its session ended as it started (exit 1)");
+    expect(waits.className).toBe("state-blocked");
+    expect(waits.getAttribute("title")).toBe("Move it to Backlog and back to To do, or start it, once what stopped it is fixed");
+  });
+
   it("pauses and resumes", async () => {
     await show();
     await act(async () => fireEvent.click(within(card()).getByRole("button", { name: "Pause" })));

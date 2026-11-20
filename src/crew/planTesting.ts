@@ -173,6 +173,13 @@ export class PlanHub {
     return null;
   }
 
+  /** `t`'s session ended as it started: the hub puts it back in To do, held back. */
+  holdBack(t: BossPlanTicket, why: string) {
+    this.move(t, "todo", { assignee: null });
+    t.heldBack = why;
+    this.touch();
+  }
+
   /** Sarah adds a ticket: a change of scope, said to no one (no event). */
   bossAdds(title: string) {
     const p = this.plan;

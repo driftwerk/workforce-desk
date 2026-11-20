@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PlannedTicket } from "../hub/types";
+import { ticket } from "./planTesting";
 import progressCases from "./fixtures/plan/progress.json";
 import wavesCases from "./fixtures/plan/waves.json";
 import {
@@ -10,6 +11,7 @@ import {
   ownWorktrees,
   progress,
   progressLine,
+  ruled,
   standing,
   waveTitle,
   waves,
@@ -43,6 +45,16 @@ describe("the plan's rules agree with the hub's", () => {
 });
 
 const t = (id: string, needs: string[] = [], over: Partial<PlanTicket> = {}): PlanTicket => ({ id, key: id.toUpperCase(), state: "todo", rank: 0, needs, ...over });
+
+describe("a ticket held back", () => {
+  it("is held only while it still waits in To do with no one on it", () => {
+    const why = "its session ended as it started (exit 1)";
+    expect(ruled(ticket(1, "Fix it", { state: "todo", heldBack: why })).heldBack).toBe(why);
+    expect(ruled(ticket(1, "Fix it", { state: "backlog", heldBack: why })).heldBack).toBeNull();
+    expect(ruled(ticket(1, "Fix it", { state: "todo", heldBack: why, assignee: { kind: "manager", id: "sarah", name: "Sarah" } })).heldBack).toBeNull();
+    expect(ruled(ticket(1, "Fix it", { state: "todo" })).heldBack).toBeNull();
+  });
+});
 
 describe("the plan card's words", () => {
   const tickets = new Map(
