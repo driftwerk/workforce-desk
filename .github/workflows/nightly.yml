@@ -1,6 +1,9 @@
 name: Nightly
 
-# Each night from 01:30 UTC, a build of Desk's main for the Desks set to Updates: Nightly (Settings → Help); no one on Stable gets it. It skips a
+# Each night from 01:30 UTC, a build of Desk's main for the Desks set to
+# Updates: Nightly (Settings → Help); no one on Stable gets it. GitHub starts a
+# scheduled run late or drops it, so the night is tried again at 04:30 and
+# 07:30; a scheduled try skips once tonight's nightly is out. It skips a
 # night when nothing changed since the last nightly (no new commits on main,
 # no newer hub), while a stable release is running, or when Desk's CI hasn't
 # passed at the exact commit it would build. When the hub (driftwerk/workforce
@@ -13,8 +16,6 @@ name: Nightly
 # docs/RELEASING.md, "Nightly".
 
 on:
-  # GitHub starts a scheduled run late or drops it, so the night is tried
-  # again later; a try that finds nothing new since the last nightly skips.
   schedule:
     - cron: "30 1 * * *"
     - cron: "30 4 * * *"
@@ -53,6 +54,7 @@ jobs:
       hub_ref: ${{ steps.plan.outputs.hub_ref }}
       reason: ${{ steps.plan.outputs.reason }}
       attention: ${{ steps.plan.outputs.attention }}
+      again: ${{ steps.plan.outputs.again }}
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
@@ -114,7 +116,11 @@ jobs:
           BUILD: ${{ needs.build.result }}
           VERSION: ${{ needs.plan.outputs.version }}
           ATTENTION: ${{ needs.plan.outputs.attention }}
+          AGAIN: ${{ needs.plan.outputs.again }}
         run: |
+          if [ "$AGAIN" = true ]; then
+            exit 0
+          fi
           if [ "$PLAN" != success ] || [ "$BUILD" = failure ] || [ "$BUILD" = cancelled ]; then
             # Linux or Windows failing leaves the rest published: say which.
             fed=$(curl -fsSL "https://github.com/$RELEASES_REPO/releases/download/nightly/latest-nightly.json" | jq -r .version) || fed=

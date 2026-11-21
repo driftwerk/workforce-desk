@@ -47,15 +47,19 @@ class Version(unittest.TestCase):
         self.assertIsNone(nightly.nightly_key("0.2.11-nightly.020261120.1"))
 
 
-class Decide(unittest.TestCase):
-    last = {"version": "0.2.11-nightly.20261120.42", "desk_commit": A, "hub_ref": B}
-
+class BuiltTonight(unittest.TestCase):
     def test_a_later_try_skips_once_tonights_nightly_is_out(self):
         today = datetime.date(2026, 11, 21)
-        self.assertIsNotNone(nightly.built_tonight({"version": "0.2.12-nightly.20261121.7"}, today))
-        self.assertIsNone(nightly.built_tonight({"version": "0.2.12-nightly.20261120.7"}, today))
+        tonight = nightly.next_version((0, 2, 11), today, 7)
+        yesterday = nightly.next_version((0, 2, 11), today - datetime.timedelta(days=1), 7)
+        self.assertIsNotNone(nightly.built_tonight({"version": tonight}, today))
+        self.assertIsNone(nightly.built_tonight({"version": yesterday}, today))
         self.assertIsNone(nightly.built_tonight(None, today))
         self.assertIsNone(nightly.built_tonight({}, today))
+
+
+class Decide(unittest.TestCase):
+    last = {"version": "0.2.11-nightly.20261120.42", "desk_commit": A, "hub_ref": B}
 
     def test_nothing_changed_is_a_skip(self):
         bump, reason = nightly.decide(A, B, B, False, self.last)

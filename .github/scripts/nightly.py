@@ -54,11 +54,13 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 
 class Skip(Exception):
     """No nightly tonight, and why. `attention`: a person should look (CI red or stuck,
-    main moving under a bump), as against nothing to do (nothing changed, a release running)."""
+    main moving under a bump), as against nothing to do (nothing changed, a release running).
+    `again`: a later try of a night already out, which leaves the night's issue as it is."""
 
-    def __init__(self, reason, attention=False):
+    def __init__(self, reason, attention=False, again=False):
         super().__init__(reason)
         self.attention = attention
+        self.again = again
 
 
 # What a person should look at even when the night goes well: a hub bump
@@ -404,7 +406,7 @@ def plan():
     if os.environ.get("GITHUB_EVENT_NAME") == "schedule":
         done = built_tonight(last, datetime.datetime.now(datetime.timezone.utc).date())
         if done:
-            raise Skip(done)
+            raise Skip(done, again=True)
     head = git("rev-parse", "HEAD")
     hub_now = open("hub.ref").read().strip()
     if not SHA.match(hub_now):
@@ -497,7 +499,8 @@ def main():
     except Skip as e:
         if e.attention:
             ATTENTION.append(f"No nightly tonight: {e}.")
-        output(build="false", version="", ref="", hub_ref="", reason=str(e), attention=" ".join(ATTENTION))
+        output(build="false", version="", ref="", hub_ref="", reason=str(e), attention=" ".join(ATTENTION),
+               again=str(e.again).lower())
         summary(f"### No nightly tonight\n\n{e}.")
         print(f"::notice::No nightly tonight: {e}")
 
