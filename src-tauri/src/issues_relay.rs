@@ -150,15 +150,20 @@ struct Listed(std::sync::Mutex<Option<(Instant, HashMap<String, String>)>>);
 
 impl Listed {
     fn fresh(&self, id: &str) -> Option<String> {
-        let kept = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let kept = self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         kept.as_ref()
             .filter(|(at, _)| at.elapsed() < LISTED_FOR)
             .and_then(|(_, names)| names.get(id).cloned())
     }
 
     fn keep(&self, names: HashMap<String, String>) {
-        *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
-            Some((Instant::now(), names));
+        *self
+            .0
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((Instant::now(), names));
     }
 }
 
@@ -303,7 +308,7 @@ async fn poll<E: Ends>(
     in_flight: Arc<Semaphore>,
 ) {
     let mut backoff = timing.backoff;
-    let listed = Arc::new(Listed::default());
+    let names = Arc::new(Listed::default());
     loop {
         let polled = Instant::now();
         let taken = tokio::select! {
@@ -316,12 +321,12 @@ async fn poll<E: Ends>(
                 for call in listed {
                     let (ends, machine) = (Arc::clone(&ends), machine.clone());
                     let (lanes, in_flight) = (Arc::clone(&lanes), Arc::clone(&in_flight));
-                    let listed = Arc::clone(&listed);
+                    let names = Arc::clone(&names);
                     tokio::spawn(async move {
                         let (id, answer) = match call {
                             Ok(c) => {
                                 let a =
-                                    carry(&*ends, &c, &machine, timing, &lanes, &in_flight, &listed)
+                                    carry(&*ends, &c, &machine, timing, &lanes, &in_flight, &names)
                                         .await;
                                 (c.id, a)
                             }
