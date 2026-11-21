@@ -367,6 +367,13 @@ describe("a running plan", () => {
     expect(within(shown).getByText(/Fix the flaky payment test/).closest("li")!.textContent).toContain("Claude Code in a folder Desk finds");
   });
 
+  it("lists a ticket whose folder is left for Desk to find as one Desk finds", async () => {
+    plans.plan.tickets = plans.plan.tickets.map((t) => (t.id === "t23" ? { ...t, folder: "" } : t));
+    await show();
+    const row = within(card()).getByText("End-to-end refund test in CI").parentElement!;
+    expect(row.querySelector(".pc-sub")!.textContent).toBe("a folder Desk finds· needs ACM-21, ACM-22");
+  });
+
   it("shows a ticket made to start alongside another rather than after it, and one added after another", async () => {
     plans.bossProposes("Moved “Refund from the order page”; added “Fix the flaky payment test”", (ts) => [
       ...ts.map((t) => (t.id === "t22" ? { ...t, needs: [] } : t)),
