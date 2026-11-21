@@ -143,7 +143,7 @@ export type OnItsOwnLevel = "in_folders" | "anywhere";
 
 /** Where a level holds: the whole kind, or one folder (as you read it),
  *  host or site. */
-export type OnItsOwnScope = { kind: "kind" } | { kind: "folder" | "host" | "site"; value: string };
+export type OnItsOwnScope = { kind: "whole" } | { kind: "folder" | "host" | "site"; value: string };
 
 /** One level or override the person set for an agent. */
 export interface OnItsOwnRow {

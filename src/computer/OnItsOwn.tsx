@@ -6,12 +6,9 @@ import { useUi } from "../shell/ui";
 import { plainError } from "../ui/plainError";
 import { pickFolder } from "../platform";
 import { tilde } from "../machines/folders";
-import { ALONE, choicesFor, levelFor, overridesFor, siteText, typedOverride } from "./access";
+import { ALONE, RECENT, choicesFor, levelFor, overridesFor, siteText, typedOverride } from "./access";
 import { ActivityList } from "./Lists";
 import "../styles/computer.css";
-
-/** How many on-its-own rows the tab shows. */
-const RECENT = 10;
 
 const scopeOf = (by: "folder" | "host" | "site", value: string): OnItsOwnScope => ({ kind: by, value });
 
@@ -20,7 +17,19 @@ const scopeOf = (by: "folder" | "host" | "site", value: string): OnItsOwnScope =
  *  "Ask me again", which forgets all of it and every "Always allow".
  *  Only at Full access asking before irreversible things: below it the
  *  levels wait, and "Do anything" already asks nothing. */
-export function OnItsOwn({ agent, applies, home, onAskedAgain }: { agent: Agent; applies: boolean; home: string | null; onAskedAgain: () => void }) {
+export function OnItsOwn({
+  agent,
+  applies,
+  everything,
+  home,
+  onAskedAgain,
+}: {
+  agent: Agent;
+  applies: boolean;
+  everything: boolean;
+  home: string | null;
+  onAskedAgain: () => void;
+}) {
   const hub = useDesk((s) => s.hub);
   const [rows, setRows] = useState<OnItsOwnRow[] | null | "failed" | "old">(null);
   const [done, setDone] = useState<ComputerActivityRow[] | null | "failed">(null);
@@ -73,15 +82,18 @@ export function OnItsOwn({ agent, applies, home, onAskedAgain }: { agent: Agent;
       <section className="agent-section" aria-labelledby="computer-alone-head">
         <div className="ability-head">
           <h2 id="computer-alone-head">What {agent.name} does on its own</h2>
-          <button type="button" className="btn btn-ghost" disabled={busy || !Array.isArray(rows)} onClick={() => void askAgain()}>
+          <button type="button" className="btn" disabled={busy || !Array.isArray(rows)} onClick={() => void askAgain()}>
             Ask me again
           </button>
         </div>
         <p className="small faint">
           On its own, it doesn’t ask you first. Passwords and sign-ins, payments, sending to people and this computer’s own settings always ask. Everything it does is in the audit, and Stop still stops it.
         </p>
-        {!applies && <p className="ability-note small">These apply at Full access, asking only before irreversible things.</p>}
-        {rows === "old" ? (
+        <p className="small faint">Ask me again: Desk asks you about everything again and forgets what is always allowed for {agent.name}.</p>
+        {!applies && !everything && <p className="ability-note small">These apply at Full access, asking only before irreversible things.</p>}
+        {everything ? (
+          <p className="ability-note small">Does everything on its own.</p>
+        ) : rows === "old" ? (
           <p className="small faint">This version of Desk can’t do that yet. Update Desk to use it.</p>
         ) : rows === "failed" ? (
           <p className="small state-blocked">Couldn’t read what {agent.name} does on its own just now.</p>
@@ -97,7 +109,7 @@ export function OnItsOwn({ agent, applies, home, onAskedAgain }: { agent: Agent;
                 overrides={overridesFor(set, k.id)}
                 home={home}
                 disabled={busy || !applies}
-                onLevel={(level) => void change(k.id, { kind: "kind" }, level)}
+                onLevel={(level) => void change(k.id, { kind: "whole" }, level)}
                 onOverride={(value, on) => void change(k.id, scopeOf(k.by, value), on ? "anywhere" : null)}
                 onProblem={setProblem}
               />

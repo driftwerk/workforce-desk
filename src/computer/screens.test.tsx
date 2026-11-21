@@ -313,7 +313,7 @@ describe("what an agent does on its own", () => {
 
   it("shows each kind's level, offering In its folders only where folders mean something", async () => {
     alone = [
-      { kind: "commands", scope: { kind: "kind" }, level: "in_folders", created_at: "" },
+      { kind: "commands", scope: { kind: "whole" }, level: "in_folders", created_at: "" },
       { kind: "network", scope: { kind: "host", value: "devbox" }, level: "anywhere", created_at: "" },
       { kind: "browser", scope: { kind: "site", value: "https://github.com" }, level: "anywhere", created_at: "" },
       { kind: "delete", scope: { kind: "folder", value: "~/dev/acme-web" }, level: "anywhere", created_at: "" },
@@ -336,7 +336,7 @@ describe("what an agent does on its own", () => {
     render(<AgentAccess agent={allan} />);
     await waitFor(() => expect(levels("Run commands").getByRole("radio", { name: "On its own" })).toHaveProperty("disabled", false));
     await act(async () => fireEvent.click(levels("Run commands").getByRole("radio", { name: "On its own" })));
-    expect(hub.setOnItsOwn).toHaveBeenCalledWith("allan", "commands", { kind: "kind" }, "anywhere");
+    expect(hub.setOnItsOwn).toHaveBeenCalledWith("allan", "commands", { kind: "whole" }, "anywhere");
 
     fireEvent.change(region().getByRole("textbox", { name: "A machine it reaches on its own" }), { target: { value: "dev@DevBox" } });
     await act(async () => fireEvent.click(region().getByRole("button", { name: "Add a machine" })));
@@ -385,13 +385,19 @@ describe("what an agent does on its own", () => {
     expect(useUi.getState().settings).toBe("computer");
   });
 
-  it("waits below Full access, and at Do anything", async () => {
-    for (const toml of ['[computer]\naccess = "read_anywhere"\n', '[computer]\nasks = "never"\n']) {
-      setUp(fakeHub(), toml);
-      render(<AgentAccess agent={allan} />);
-      await waitFor(() => expect(region().getByText("These apply at Full access, asking only before irreversible things.")).toBeTruthy());
-      expect(levels("Run commands").getByRole("radio", { name: "On its own" })).toHaveProperty("disabled", true);
-      cleanup();
-    }
+  it("waits below Full access", async () => {
+    setUp(fakeHub(), '[computer]\naccess = "read_anywhere"\n');
+    render(<AgentAccess agent={allan} />);
+    await waitFor(() => expect(region().getByText("These apply at Full access, asking only before irreversible things.")).toBeTruthy());
+    expect(levels("Run commands").getByRole("radio", { name: "On its own" })).toHaveProperty("disabled", true);
+  });
+
+  it("says one line at Do anything, which asks about nothing", async () => {
+    setUp(fakeHub(), '[computer]\nasks = "never"\n');
+    render(<AgentAccess agent={allan} />);
+    await waitFor(() => expect(region().getByText("Does everything on its own.")).toBeTruthy());
+    expect(region().queryByRole("radiogroup", { name: "Run commands: when it asks" })).toBeNull();
+    expect(region().queryByText("These apply at Full access, asking only before irreversible things.")).toBeNull();
+    expect(region().getByRole("button", { name: "Ask me again" }).className).toBe("btn");
   });
 });

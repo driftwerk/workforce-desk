@@ -7,13 +7,12 @@ import { useUi } from "../shell/ui";
 import { plainError } from "../ui/plainError";
 import { tilde } from "../machines/folders";
 import { backendHome, pickFolder } from "../platform";
-import { ASKING, LEVELS, addFolder, askingOf, levelOf, setLevel, setWorksIn, worksInOf, type Asking, type Level } from "./access";
+import { ASKING, LEVELS, RECENT, addFolder, askingOf, levelOf, setLevel, setWorksIn, worksInOf, type Asking, type Level } from "./access";
 import { ActivityList, EMPTY_ACTIVITY, GrantList } from "./Lists";
 import { OnItsOwn } from "./OnItsOwn";
 import "../styles/computer.css";
 
 /** How many of the agent's own rows its tab shows. */
-const RECENT = 20;
 
 /** The home folder, as the backend reads it; `null` until known. */
 function useHome(): string | null {
@@ -143,7 +142,7 @@ export function AgentAccess({ agent }: { agent: Agent }) {
                     </button>
                   ))}
                 </div>
-                <p className="ability-note small">Scheduled jobs and other runs with nobody to ask carry on as before.</p>
+                <p className="ability-note small">Scheduled jobs and other runs with nobody to ask carry on as before, except what always asks.</p>
               </>
             )}
             {problem && (
@@ -156,7 +155,7 @@ export function AgentAccess({ agent }: { agent: Agent }) {
 
         <WorksIn agent={agent} home={home} />
 
-        <OnItsOwn agent={agent} applies={level === "full" && asking === "irreversible"} home={home} onAskedAgain={reload} />
+        <OnItsOwn agent={agent} applies={level === "full" && asking === "irreversible"} everything={level === "full" && asking === "never"} home={home} onAskedAgain={reload} />
 
         <section className="agent-section" aria-labelledby="computer-grants-head">
           <div className="ability-head">

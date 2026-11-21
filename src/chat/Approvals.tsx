@@ -51,15 +51,15 @@ const folderLabel = (folder: string, connector: boolean, irreversible: boolean, 
 const aloneLabel = (kind: OnItsOwnKind, target: string): string => {
   switch (kind) {
     case "commands":
-      return `Always run commands in ${folderName(target)} on its own`;
+      return `Let it run commands in ${folderName(target)} on its own`;
     case "network":
-      return `Always let it reach ${target} on its own`;
+      return `Always let it reach ${target}`;
     case "browser":
-      return `Always use the browser on ${siteOf(`browser:${target}`) ?? target} on its own`;
+      return `Always let it use ${target}`;
     case "files":
-      return `Always change files in ${folderName(target)} on its own`;
+      return `Let it change files in ${folderName(target)} on its own`;
     case "delete":
-      return `Always move to the Trash in ${folderName(target)} on its own`;
+      return `Let it move to the Trash in ${folderName(target)} on its own`;
   }
 };
 

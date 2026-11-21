@@ -89,7 +89,7 @@ describe("the folders an agent works in", () => {
 
 describe("what an agent does on its own", () => {
   const rows: OnItsOwnRow[] = [
-    { kind: "commands", scope: { kind: "kind" }, level: "in_folders", created_at: "" },
+    { kind: "commands", scope: { kind: "whole" }, level: "in_folders", created_at: "" },
     { kind: "network", scope: { kind: "host", value: "devbox" }, level: "anywhere", created_at: "" },
     { kind: "network", scope: { kind: "host", value: "10.0.1.20" }, level: "anywhere", created_at: "" },
   ];
@@ -105,7 +105,8 @@ describe("what an agent does on its own", () => {
 
   it("keeps a typed host or site as the hub does, and says why it can't", () => {
     expect(typedOverride("host", " dev@DevBox ")).toEqual({ value: "devbox", problem: null });
-    expect(typedOverride("host", "::1").value).toBe("::1");
+    expect(typedOverride("host", "::1").value).toBeNull();
+    expect(typedOverride("host", "devbox:22").problem).toBe("devbox:22 isn’t a host name or address.");
     expect(typedOverride("host", "a b").problem).toBe("a b isn’t a host name or address.");
     expect(typedOverride("host", "  ")).toEqual({ value: null, problem: null });
     expect(typedOverride("site", "GitHub.com/acme/web")).toEqual({ value: "https://github.com", problem: null });

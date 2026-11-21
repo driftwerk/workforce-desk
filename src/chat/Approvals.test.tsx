@@ -220,11 +220,11 @@ describe("Desk's own card for a call on this computer", () => {
 
   it("offers letting it do that kind on its own there, as a lasting answer", () => {
     const cases: [import("../hub/client").OnItsOwnKind, string, string, Record<string, string>][] = [
-      ["network", "devbox", "Always let it reach devbox on its own", facts],
-      ["browser", "https://shop.example", "Always use the browser on shop.example on its own", { effect: "connector", connector: "browser:https://shop.example", why: "On a page" }],
-      ["commands", "~/dev/acme-web", "Always run commands in acme-web on its own", facts],
-      ["files", "~/dev", "Always change files in dev on its own", { effect: "write", why: "Can't be undone" }],
-      ["delete", "~/dev", "Always move to the Trash in dev on its own", { effect: "trash", why: "Moves to the Trash" }],
+      ["network", "devbox", "Always let it reach devbox", facts],
+      ["browser", "shop.example", "Always let it use shop.example", { effect: "connector", connector: "chrome-visit:https://shop.example", why: "Opens a new site in your Chrome" }],
+      ["commands", "~/dev/acme-web", "Let it run commands in acme-web on its own", facts],
+      ["files", "~/dev", "Let it change files in dev on its own", { effect: "write", why: "Can't be undone" }],
+      ["delete", "~/dev", "Let it move to the Trash in dev on its own", { effect: "trash", why: "Moves to the Trash" }],
     ];
     for (const [kind, target, label, f] of cases) {
       const onAnswer = vi.fn(() => true);
