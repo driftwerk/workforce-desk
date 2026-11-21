@@ -5,6 +5,7 @@ In order:
   1. Skips while a stable release (release.yml) is running.
   2. Reads the last nightly from the nightly feed (latest-nightly.json on the
      `nightly` release): its version, and the Desk commit and hub ref it was built from.
+     A scheduled try after tonight's nightly is out skips.
   3. Finds the newest hub commit (driftwerk/workforce main) whose checks (pr-check.yml)
      passed. When it is ahead of hub.ref, the bump is committed on a branch, Desk's CI is
      run on it (workflow_dispatch: pushes made with the job's token start no workflow),
@@ -21,7 +22,7 @@ In order:
   7. The notes: the pull requests merged since the last nightly (their squash commits'
      subjects) and the hub commits brought in.
 
-Writes `build`, `version`, `ref`, `hub_ref`, `reason` and `attention` to $GITHUB_OUTPUT, the
+Writes `build`, `version`, `ref`, `hub_ref`, `reason`, `attention` and `again` to $GITHUB_OUTPUT, the
 notes to notes/notes.md, and what it decided to the job summary. A dry run commits and
 pushes nothing: it builds the commit as it is, with the hub it would bump to (`hub_ref`).
 """
@@ -53,11 +54,13 @@ SHA = re.compile(r"^[0-9a-f]{40}$")
 
 class Skip(Exception):
     """No nightly tonight, and why. `attention`: a person should look (CI red or stuck,
-    main moving under a bump), as against nothing to do (nothing changed, a release running)."""
+    main moving under a bump), as against nothing to do (nothing changed, a release running).
+    `again`: a later try of a night already out, which leaves the night's issue as it is."""
 
-    def __init__(self, reason, attention=False):
+    def __init__(self, reason, attention=False, again=False):
         super().__init__(reason)
         self.attention = attention
+        self.again = again
 
 
 # What a person should look at even when the night goes well: a hub bump
@@ -143,6 +146,14 @@ def notes(version, sha, since_label, changes, hub_from, hub_to, hub_commits, rep
         out += ["", "## Worth a look", "", attention]
     out += ["", f"Built from https://github.com/{repo}/commit/{sha}."]
     return "\n".join(out) + "\n"
+
+
+def built_tonight(last, today):
+    """The reason a later scheduled try skips: tonight's nightly is already out."""
+    match = re.search(r"-nightly\.(\d{8})\.", (last or {}).get("version") or "")
+    if match and match.group(1) == f"{today:%Y%m%d}":
+        return f"tonight's nightly, {last['version']}, is already out"
+    return None
 
 
 def decide(head, hub_now, hub_candidate, hub_ahead, last):
@@ -392,6 +403,10 @@ def plan():
     no_release_running(repo)
 
     last = feed(releases_repo)
+    if os.environ.get("GITHUB_EVENT_NAME") == "schedule":
+        done = built_tonight(last, datetime.datetime.now(datetime.timezone.utc).date())
+        if done:
+            raise Skip(done, again=True)
     head = git("rev-parse", "HEAD")
     hub_now = open("hub.ref").read().strip()
     if not SHA.match(hub_now):
@@ -484,7 +499,8 @@ def main():
     except Skip as e:
         if e.attention:
             ATTENTION.append(f"No nightly tonight: {e}.")
-        output(build="false", version="", ref="", hub_ref="", reason=str(e), attention=" ".join(ATTENTION))
+        output(build="false", version="", ref="", hub_ref="", reason=str(e), attention=" ".join(ATTENTION),
+               again=str(e.again).lower())
         summary(f"### No nightly tonight\n\n{e}.")
         print(f"::notice::No nightly tonight: {e}")
 
