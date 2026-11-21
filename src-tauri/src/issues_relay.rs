@@ -14,6 +14,11 @@
 //! - **Nothing is judged here**: the call's body is built again from its
 //!   own fields and the machine's id as Desk knows it, never as the
 //!   machine says it, and the answer posted is `ok` or `error` alone.
+//! - **Only a session Desk lists**: the session the call names must be one
+//!   the machine lists in Desk now, and it is named as Desk names it, so a
+//!   made-up id or name never reaches this computer's hub. A machine is
+//!   one OS account: the sessions on it, of whatever group, share what it
+//!   can do, and this computer's hub gives each the links of its group.
 //! - **Sent once**: a call that may have reached this computer's hub with
 //!   no answer back is never sent again; the session is told it may have
 //!   gone through.
@@ -29,7 +34,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use desk_core::machine::MachineId;
 use serde::Deserialize;
@@ -39,7 +44,8 @@ use tokio::time::Instant;
 
 use crate::broker::{Answer, Unanswered};
 use crate::crew_relay::{
-    Lanes, MOST_BODY, MOST_IN_FLIGHT, Timing, carry_time, error_of, post_with, uuid_ok,
+    Lanes, MOST_BODY, MOST_IN_FLIGHT, MOST_SESSIONS, Timing, carry_time, error_of, post_with,
+    uuid_ok,
 };
 
 /// A machine's queued calls.
@@ -51,8 +57,13 @@ const MOST_POLL: usize = 8 * MOST_BODY + 64 * 1024;
 /// How often the machines Desk reaches are looked at again.
 const LOOK_EVERY: Duration = Duration::from_secs(3);
 /// How long a machine whose Desk doesn't carry these calls yet is left
-/// before it is asked again.
-const OLDER_AGAIN: Duration = Duration::from_secs(10 * 60);
+/// before it is asked again; at once when it connects again or its hub's
+/// version changes.
+const OLDER_AGAIN: Duration = Duration::from_secs(60);
+/// A machine's sessions in Desk.
+const SESSIONS: &str = "/api/desk/sessions";
+/// What a session hears when its answer can't be carried.
+const TOO_LARGE: &str = "That answer is too large to carry; ask for fewer or one issue.";
 /// What a session hears when this computer's hub doesn't run machines'
 /// calls yet.
 const OLDER_HOME: &str =
@@ -60,8 +71,14 @@ const OLDER_HOME: &str =
 
 /// The hubs the courier carries between.
 pub trait Ends: Send + Sync + 'static {
-    /// The machines Desk reaches now.
-    fn machines(&self) -> Vec<MachineId>;
+    /// The machines Desk reaches now, each with what changes when it
+    /// connects again or its hub is updated.
+    fn machines(&self) -> Vec<(MachineId, String)>;
+    /// `machine`'s sessions in Desk.
+    fn sessions(
+        &self,
+        machine: &MachineId,
+    ) -> impl Future<Output = Result<Answer, Unanswered>> + Send;
     /// `machine`'s queued calls: its long poll.
     fn take(&self, machine: &MachineId) -> impl Future<Output = Result<Answer, Unanswered>> + Send;
     /// Call `body` handed to this computer's hub.
@@ -81,27 +98,41 @@ pub trait Ends: Send + Sync + 'static {
 struct Call {
     id: String,
     system: Value,
-    session: Value,
-    session_id: Value,
+    session_id: String,
     #[serde(default)]
     input: Value,
     #[serde(default)]
-    deadline: Option<Value>,
+    left_ms: Option<Value>,
 }
 
 impl Call {
-    /// What this computer's hub takes: the call's own fields, and the
-    /// machine as Desk names it.
-    fn served(&self, machine: &MachineId) -> Value {
+    /// What this computer's hub takes: the call's own fields, the machine
+    /// as Desk names it, and its session as Desk lists it, `named`.
+    fn served(&self, machine: &MachineId, named: &str) -> Value {
         json!({
             "id": self.id,
             "machine": machine.as_str(),
             "system": self.system,
-            "session": self.session,
+            "session": named,
             "sessionId": self.session_id,
             "input": self.input,
         })
     }
+}
+
+/// What Desk names session `id` in `listed`, a machine's sessions: none
+/// when it doesn't list it.
+fn named(listed: &Answer, id: &str) -> Option<String> {
+    let sessions: Vec<Value> = serde_json::from_str(&listed.body).ok()?;
+    let s = sessions
+        .iter()
+        .find(|s| s.get("id").and_then(Value::as_str) == Some(id))?;
+    ["displayName", "name"]
+        .iter()
+        .filter_map(|k| s.get(*k).and_then(Value::as_str))
+        .map(str::trim)
+        .find(|n| !n.is_empty())
+        .map(str::to_string)
 }
 
 fn error(why: impl Into<String>) -> Option<Value> {
@@ -143,21 +174,29 @@ async fn carry<E: Ends>(
     lanes: &Lanes,
     in_flight: &Arc<Semaphore>,
 ) -> Option<Value> {
-    let Some(time) = carry_time(
-        &call.id,
-        call.deadline.as_ref(),
-        timing.carry_for,
-        SystemTime::now(),
-    ) else {
+    let Some(time) = carry_time(&call.id, call.left_ms.as_ref(), timing.carry_for) else {
         return error("There was no time left to carry it; try again.");
     };
-    let Ok(body) = serde_json::to_vec(&call.served(machine)) else {
+    let until = Instant::now() + time;
+    if !uuid_ok(&call.session_id) {
+        return error("Desk couldn't read that call.");
+    }
+    let listed = match tokio::time::timeout_at(until, ends.sessions(machine)).await {
+        Ok(Ok(a)) if a.status == 200 => a,
+        _ => return error("Desk couldn't read this machine's sessions just now; try again."),
+    };
+    let Some(name) = named(&listed, &call.session_id) else {
+        return error(format!(
+            "Desk doesn't list that session on {} now, so it isn't given Linear or Jira.",
+            machine.as_str()
+        ));
+    };
+    let Ok(body) = serde_json::to_vec(&call.served(machine, &name)) else {
         return error("Desk couldn't read that call.");
     };
     if body.len() > MOST_BODY {
         return error("That call is too large to carry; send less in it.");
     }
-    let until = Instant::now() + time;
     let busy = || error("Desk is carrying too many calls just now; try again in a moment.");
     let Ok(Ok(_turn)) = tokio::time::timeout_at(until, lanes.of(machine).acquire_owned()).await
     else {
@@ -171,7 +210,10 @@ async fn carry<E: Ends>(
     let reply = tokio::time::timeout_at(until, ends.serve(body))
         .await
         .ok()?;
-    reply_of(reply).filter(|a| a.to_string().len() <= MOST_BODY)
+    reply_of(reply).map(|a| match a.to_string().len() <= MOST_BODY {
+        true => a,
+        false => json!({ "error": TOO_LARGE }),
+    })
 }
 
 /// The calls in a poll's answer: each readable one, and the ids of those
@@ -258,15 +300,15 @@ async fn poll<E: Ends>(
 pub async fn run<E: Ends>(ends: Arc<E>, mut stop: watch::Receiver<bool>, timing: Timing) {
     let in_flight = Arc::new(Semaphore::new(MOST_IN_FLIGHT));
     let lanes = Arc::new(Lanes::default());
-    let mut polls: HashMap<MachineId, (watch::Sender<bool>, tokio::task::JoinHandle<()>)> =
-        HashMap::new();
+    type Polling = (String, watch::Sender<bool>, tokio::task::JoinHandle<()>);
+    let mut polls: HashMap<MachineId, Polling> = HashMap::new();
     loop {
         if *stop.borrow() {
             break;
         }
-        let reached = ends.machines();
-        polls.retain(|m, (_, task)| reached.contains(m) && !task.is_finished());
-        for machine in reached {
+        let reached: HashMap<MachineId, String> = ends.machines().into_iter().collect();
+        polls.retain(|m, (now, _, task)| reached.get(m) == Some(now) && !task.is_finished());
+        for (machine, now) in reached {
             polls.entry(machine.clone()).or_insert_with(|| {
                 let (tx, rx) = watch::channel(false);
                 let task = tokio::spawn(poll(
@@ -277,7 +319,7 @@ pub async fn run<E: Ends>(ends: Arc<E>, mut stop: watch::Receiver<bool>, timing:
                     Arc::clone(&lanes),
                     Arc::clone(&in_flight),
                 ));
-                (tx, task)
+                (now, tx, task)
             });
         }
         tokio::select! {
@@ -285,7 +327,7 @@ pub async fn run<E: Ends>(ends: Arc<E>, mut stop: watch::Receiver<bool>, timing:
             () = tokio::time::sleep(LOOK_EVERY) => {}
         }
     }
-    for (tx, _) in polls.values() {
+    for (_, tx, _) in polls.values() {
         let _ = tx.send(true);
     }
 }
@@ -323,14 +365,29 @@ impl Desk {
 }
 
 impl Ends for Desk {
-    fn machines(&self) -> Vec<MachineId> {
+    fn machines(&self) -> Vec<(MachineId, String)> {
         use tauri::Manager;
         let io = self.0.state::<crate::machines::MachineIo>();
         io.ids()
             .into_iter()
-            .filter(|id| io.link(id).is_ok_and(|l| l.ready().is_some()))
-            .filter_map(|id| MachineId::new(&id).ok())
+            .filter_map(|id| {
+                let ready = io.link(&id).ok()?.ready()?;
+                let now = format!("{} {:?}", ready.gateway_url, ready.version);
+                Some((MachineId::new(&id).ok()?, now))
+            })
             .collect()
+    }
+
+    fn sessions(
+        &self,
+        machine: &MachineId,
+    ) -> impl Future<Output = Result<Answer, Unanswered>> + Send {
+        let broker = self.machine_broker(machine);
+        async move {
+            broker?
+                .relay_machine("GET", SESSIONS, None, MOST_SESSIONS)
+                .await
+        }
     }
 
     fn take(&self, machine: &MachineId) -> impl Future<Output = Result<Answer, Unanswered>> + Send {

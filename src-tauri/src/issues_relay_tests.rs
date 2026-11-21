@@ -33,21 +33,30 @@ fn devbox() -> MachineId {
     MachineId::new("devbox").unwrap()
 }
 
-/// A call as a machine queues it, `secs` from its deadline.
-fn queued(id: &str, secs: i64) -> Value {
+/// A call as a machine queues it, with `secs` left for it.
+fn queued(id: &str, secs: u64) -> Value {
     json!({
-        "id": id, "system": "linear", "session": "vel-15", "sessionId": SESSION,
+        "id": id, "system": "linear", "session": "a name it chose", "sessionId": SESSION,
         "input": { "action": "get", "key": "VEL-15" },
         "machine": "somewhere-else",
-        "deadline": (chrono::Utc::now() + chrono::Duration::seconds(secs)).to_rfc3339(),
+        "leftMs": secs * 1000,
     })
+}
+
+/// The machine's sessions as Desk lists them.
+fn listed() -> Value {
+    json!([
+        { "id": "5b0c4c8e-0000-4000-8000-000000000001", "name": "other" },
+        { "id": SESSION, "name": "vel-15", "displayName": "VEL-15 fix" },
+    ])
 }
 
 /// Desk's ends: machines that answer their polls in turn (then nothing for
 /// a long while), and a home that answers its calls in turn (then `ok`).
 #[derive(Default)]
 struct Fake {
-    reached: Mutex<Vec<MachineId>>,
+    reached: Mutex<Vec<(MachineId, String)>>,
+    sessions: Mutex<Value>,
     polls: Mutex<VecDeque<Result<Answer, Unanswered>>>,
     takes: Mutex<usize>,
     home: Mutex<VecDeque<Result<Answer, Unanswered>>>,
@@ -65,7 +74,8 @@ impl Fake {
     ) {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         let fake = Fake {
-            reached: Mutex::new(vec![devbox()]),
+            reached: Mutex::new(vec![(devbox(), "1.0".into())]),
+            sessions: Mutex::new(listed()),
             polls: Mutex::new(polls.into()),
             home: Mutex::new(home.into()),
             answered: Some(tx),
@@ -80,8 +90,13 @@ impl Fake {
 }
 
 impl Ends for Fake {
-    fn machines(&self) -> Vec<MachineId> {
+    fn machines(&self) -> Vec<(MachineId, String)> {
         self.reached.lock().unwrap().clone()
+    }
+
+    async fn sessions(&self, _: &MachineId) -> Result<Answer, Unanswered> {
+        let listed = self.sessions.lock().unwrap().clone();
+        says(200, listed)
     }
 
     async fn take(&self, _: &MachineId) -> Result<Answer, Unanswered> {
@@ -137,8 +152,9 @@ async fn next(
         .expect("an answer")
 }
 
-/// A machine's call goes home as that machine's, as Desk names it, with
-/// its own fields alone; home's answer goes back to it, `ok` alone, once.
+/// A machine's call goes home as that machine's and its session's, as Desk
+/// names them, with its own fields alone; home's answer goes back to it,
+/// `ok` alone, once.
 #[tokio::test]
 async fn a_call_is_carried_home_as_its_machines_and_answered_once() {
     let (fake, mut rx) = Fake::with(vec![says(200, json!([queued(A, 30)]))], vec![]);
@@ -149,7 +165,7 @@ async fn a_call_is_carried_home_as_its_machines_and_answered_once() {
     assert_eq!(
         fake.served(),
         vec![json!({
-            "id": A, "machine": "devbox", "system": "linear", "session": "vel-15",
+            "id": A, "machine": "devbox", "system": "linear", "session": "VEL-15 fix",
             "sessionId": SESSION, "input": { "action": "get", "key": "VEL-15" },
         })]
     );
@@ -160,13 +176,24 @@ async fn a_call_is_carried_home_as_its_machines_and_answered_once() {
 }
 
 /// What can't be carried is answered with why, and nothing goes home: an
-/// unreadable call, and one past its deadline.
+/// unreadable call, one with no time left, and one from a session Desk
+/// doesn't list there.
 #[tokio::test]
 async fn what_cant_be_carried_is_answered_and_never_sent() {
+    const C: &str = "0f0e0d0c-0b0a-4909-8807-0605040302cc";
     let unreadable = json!({ "id": B, "session": "vel-15" });
-    let (fake, mut rx) = Fake::with(vec![says(200, json!([unreadable, queued(A, 1)]))], vec![]);
+    let mut made_up = queued(C, 30);
+    made_up["sessionId"] = json!("5b0c4c8e-0000-4000-8000-0000000000ff");
+    let (fake, mut rx) = Fake::with(
+        vec![says(200, json!([unreadable, queued(A, 1), made_up]))],
+        vec![],
+    );
     let stop = running(&fake);
-    let mut said = [next(&mut rx).await, next(&mut rx).await];
+    let mut said = [
+        next(&mut rx).await,
+        next(&mut rx).await,
+        next(&mut rx).await,
+    ];
     said.sort_by(|a, b| a.1.cmp(&b.1));
     assert_eq!(said[0].1, A);
     assert!(
@@ -181,6 +208,13 @@ async fn what_cant_be_carried_is_answered_and_never_sent() {
             .as_str()
             .unwrap()
             .contains("couldn't read")
+    );
+    assert_eq!(said[2].1, C);
+    assert!(
+        said[2].2["error"]
+            .as_str()
+            .unwrap()
+            .contains("Desk doesn't list that session on devbox")
     );
     assert!(fake.served().is_empty());
     stop.send(true).unwrap();
@@ -197,6 +231,10 @@ async fn home_s_refusals_are_said_and_an_unknown_outcome_isnt() {
         (
             says(409, json!({ "error": "that call was served already" })),
             Some("that call was served already".to_string()),
+        ),
+        (
+            says(200, json!({ "ok": "x".repeat(MOST_BODY) })),
+            Some(TOO_LARGE.to_string()),
         ),
         (Err(Unanswered::MaybeSent("cut off".into())), None),
         (says(200, json!({ "neither": true })), None),
@@ -216,13 +254,17 @@ async fn home_s_refusals_are_said_and_an_unknown_outcome_isnt() {
 }
 
 /// A machine whose Desk doesn't carry these calls yet is left alone for a
-/// long while; one that fails is asked again, backing off.
+/// while, and asked again at once when its hub is updated; one that fails
+/// is asked again, backing off.
 #[tokio::test]
-async fn an_older_machine_is_left_alone_and_a_failing_one_asked_again() {
+async fn an_older_machine_is_left_alone_until_updated_and_a_failing_one_asked_again() {
     let (older, _rx) = Fake::with(vec![says(404, json!({})), says(404, json!({}))], vec![]);
     let stop = running(&older);
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(*older.takes.lock().unwrap(), 1);
+    older.reached.lock().unwrap()[0].1 = "1.1".into();
+    tokio::time::sleep(LOOK_EVERY + Duration::from_millis(500)).await;
+    assert_eq!(*older.takes.lock().unwrap(), 2);
     stop.send(true).unwrap();
 
     let failing = vec![
