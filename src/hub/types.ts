@@ -80,7 +80,7 @@ export interface Background {
  *  starts: the command it runs (and the session may run again), and why it
  *  failed or installed none, in Desk's words. */
 export type Deps =
-  | { state: "installing"; command: string; since: string }
+  | { state: "installing"; command: string }
   | { state: "installed"; command: string }
   | { state: "failed"; command: string; why: string }
   | { state: "left"; why: string };

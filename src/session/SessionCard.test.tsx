@@ -308,13 +308,13 @@ describe("a session's card says what Desk does of its folder's dependencies", ()
   const note = (deps: Session["deps"]) => render(<DepsNote session={session({ deps })} />);
 
   it("while they install, the command it runs", () => {
-    note({ state: "installing", command, since: "2026-11-21T08:00:00Z" });
+    note({ state: "installing", command });
     expect(screen.getByRole("status").textContent).toBe(`Installing its dependencies: ${command}`);
   });
 
-  it("when they failed, why and the command to try again", () => {
+  it("when they failed, why and what the session was told to run", () => {
     note({ state: "failed", command, why: "this machine's disk is full" });
-    expect(screen.getByRole("status").textContent).toBe(`Its dependencies didn't install: this machine's disk is full. To try again: ${command}`);
+    expect(screen.getByRole("status").textContent).toBe(`Its dependencies didn't install: this machine's disk is full. The session was told to run ${command}.`);
   });
 
   it("when Desk installed none, why", () => {
