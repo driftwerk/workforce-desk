@@ -434,6 +434,7 @@ it("shows a bank's connections as read only, with nothing to allow writes to", a
   const BANK = svc({
     id: "bank",
     name: "Bank",
+    readsOnly: true,
     connections: [
       pick({ id: "agent~allan~natwest", name: "NatWest", account: "NatWest", level: "agent", picked: true, write: false, default: true }),
       pick({ id: "agent~allan~revolut", name: "Revolut", account: "Revolut", level: "agent", picked: true, write: false }),

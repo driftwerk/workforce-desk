@@ -4,7 +4,6 @@ import { agentKey, type Agent } from "../chat/types";
 import { HubError, type ComputerActivityRow } from "../hub/client";
 import {
   connectionsOf,
-  ONLY_READS,
   SET_UP_BY_AGENT,
   setUpRequest,
   statusLine,
@@ -409,7 +408,7 @@ function ServiceChoice({
               </span>
             </label>
             {p.status !== "connected" && <span className="small state-blocked">{statusLine(p)}</span>}
-            {p.picked && ONLY_READS.has(s.id) ? (
+            {p.picked && s.readsOnly ? (
               <span className="small muted">read only</span>
             ) : p.picked ? (
               <button

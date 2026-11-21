@@ -52,13 +52,39 @@ export interface Connection {
   connectedAt: string | null;
   /** Null: kept before Desk checked it. */
   checkedAt: string | null;
-  /** When the person's approval at the service lapses, for a service whose
-   *  approval does (a bank's, 90 days): renewed there, then Reconnect. */
-  approvedUntil?: string | null;
+  /** About when the person's approval at the service lapses, for a service
+   *  whose approval does (a bank's): renewed there, then Reconnect. */
+  approval?: Approval | null;
   /** The vault tier it is kept at. */
   source: string;
   /** The agents it reaches. */
   usedBy: UsedBy[];
+}
+
+/** About when an approval lapses, as the hub counts it (by the UTC
+ *  calendar, from when the person last said they approved it). */
+export interface Approval {
+  /** The UTC date, `2027-02-19`. */
+  until: string;
+  daysLeft: number;
+  /** It lapses within the week, or has. */
+  due: boolean;
+  /** The service doesn't say: Desk counts from the person's word. */
+  estimated: boolean;
+}
+
+/** How a connector's approval is renewed, in the hub's words. */
+export interface Renewal {
+  /** What the approval is called: "Bank approval". */
+  label: string;
+  /** Where it is renewed. */
+  page: string;
+  /** The button that opens it. */
+  open: string;
+  /** What renewing it takes. */
+  about: string;
+  /** The button that says it was renewed. */
+  done: string;
 }
 
 export interface Connector {
@@ -74,6 +100,10 @@ export interface Connector {
   several: boolean;
   /** What a new connection's name should be, as the form says. */
   nameHint: string;
+  /** Its connections' approval lapses and is renewed at the service. */
+  renewal?: Renewal | null;
+  /** It is only ever read: nothing to allow writes to. */
+  readsOnly?: boolean;
   connections: Connection[];
   usedBy: UsedBy[];
 }
@@ -136,6 +166,8 @@ export interface ServicePicks {
   several: boolean;
   /** Each connection takes writes on its own; otherwise all together. */
   readOnlyEach: boolean;
+  /** It is only ever read (a bank): nothing to allow writes to. */
+  readsOnly?: boolean;
   /** Its connections are chosen one by one already. */
   chosen: boolean;
   connections: Pick[];
@@ -287,23 +319,20 @@ export const agentOnly = (c: Connector): Connection[] => c.connections.filter((x
 /** The services an agent can set up itself, in Desk's own browser. */
 export const SET_UP_BY_AGENT = new Set(["jira", "linear", "datadog", "metabase", "github", "bank"]);
 
-/** The services that can only ever be read: nothing to allow writes to. */
-export const ONLY_READS = new Set(["bank"]);
-
-/** Where a bank's approval is renewed. */
-export const BANKSYNC_APP = "https://app.banksync.io";
-
-/** The days left of an approval lapsing at `until`, from `now`. */
-export const daysLeft = (until: string, now: number = Date.now()): number =>
-  Math.ceil((Date.parse(until) - now) / 86_400_000);
-
-/** What an approval lapsing at `until` reads as. */
-export const approvalLine = (until: string, now: number = Date.now()): string => {
-  const left = daysLeft(until, now);
-  const day = new Date(until).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
-  if (left < 0) return `Approval lapsed ${day}`;
-  if (left === 0) return `Approval lapses today`;
-  return `Approved until ${day} (${left} ${left === 1 ? "day" : "days"})`;
+/** What an approval reads as: always "about", as the hub only estimates
+ *  it. Its day is the hub's UTC date, shown as that date. */
+export const approvalLine = (a: Approval): string => {
+  const day = new Date(`${a.until}T00:00:00Z`).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  const about = a.estimated ? "about " : "";
+  if (a.daysLeft < 0) return `Approval lapsed ${about}${day}`;
+  if (a.daysLeft === 0) return `Approval lapses ${about}today`;
+  const left = `${a.daysLeft} ${a.daysLeft === 1 ? "day" : "days"}`;
+  return `Approved until ${about}${day} (${a.estimated ? "estimated, " : ""}${left})`;
 };
 
 /** What a connection's status reads as. */
@@ -312,7 +341,7 @@ export const statusLine = (x: Pick | Connection): string => {
     case "connected":
       return "Connected";
     case "needs_reconnect":
-      return "approvedUntil" in x && x.approvedUntil ? "Needs renewing" : "Needs signing in again";
+      return "approval" in x && x.approval ? "Needs renewing" : "Needs signing in again";
     case "failing":
       return "Not answering";
   }

@@ -508,26 +508,46 @@ it("won't add or rename a connection to a name the service has already", async (
 });
 
 describe("a bank", () => {
-  const until = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
+  const approval = (daysLeft: number) => ({ until: "2027-02-19", daysLeft, due: daysLeft <= 7, estimated: true });
+  const renewal = {
+    label: "Bank approval",
+    page: "https://app.banksync.io",
+    open: "Open BankSync",
+    about: "Renew the approval in BankSync: it takes you to your bank to approve it again.",
+    done: "I’ve renewed it, check it",
+  };
   const bank = (days: number) =>
     connector({
       id: "bank",
       name: "Bank",
-      connections: [connection({ id: "agent~kat~natwest", name: "NatWest", account: "NatWest", approvedUntil: until(days) })],
+      renewal,
+      readsOnly: true,
+      connections: [connection({ id: "agent~kat~natwest", name: "NatWest", account: "NatWest", approval: approval(days) })],
     });
 
-  it("says when its approval lapses, and marks it in the last week", async () => {
+  it("says about when its approval lapses, on the hub's UTC date, and marks it when due", async () => {
     await show(api([bank(40)]));
     expect(within(service("Bank")).queryByText(/approved until/)).toBeNull();
     fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
     const row = within(service("Bank")).getByLabelText("NatWest");
-    const line = within(row).getByText(/^Approved until .* \(40 days\)$/);
+    expect(within(row).getByText("Bank approval")).toBeTruthy();
+    const line = within(row).getByText(/^Approved until about .*19.* \(estimated, 40 days\)$/);
+    expect(line.textContent).toMatch(/Feb/);
     expect(line.className).not.toContain("state-blocked");
     cleanup();
     await show(api([bank(5)]));
-    expect(within(service("Bank")).getByText(/^\(approved until .* \(5 days\)\)$/).className).toContain("state-blocked");
+    expect(within(service("Bank")).getByText(/^\(approved until about .* \(estimated, 5 days\)\)$/).className).toContain("state-blocked");
     fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
-    expect(within(service("Bank")).getByText(/^Approved until .* \(5 days\)$/).className).toContain("state-blocked");
+    expect(within(service("Bank")).getByText(/^Approved until about .* \(estimated, 5 days\)$/).className).toContain("state-blocked");
+  });
+
+  it("is told apart by the hub's renewal, not by an approval date", async () => {
+    const plain = connector({ id: "jira", name: "Jira", connections: [connection({ id: "all~~acme", name: "Acme" })] });
+    const undated = connector({ ...bank(40), connections: [connection({ id: "agent~kat~natwest", name: "NatWest" })] });
+    await show(api([plain, undated]));
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Reconnect" }));
+    expect(screen.getByLabelText("Reconnect NatWest").textContent).toContain(renewal.about);
   });
 
   it("is reconnected by renewing it in BankSync, then checked, never by typing a key", async () => {
@@ -535,7 +555,7 @@ describe("a bank", () => {
     const renew = vi
       .fn<ConnectionsApi["renew"]>()
       .mockResolvedValueOnce(lapsed)
-      .mockResolvedValueOnce(connection({ id: "agent~kat~natwest", approvedUntil: until(90) }));
+      .mockResolvedValueOnce(connection({ id: "agent~kat~natwest", approval: approval(90) }));
     const a = api([bank(-1)], { renew });
     await show(a);
     fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
