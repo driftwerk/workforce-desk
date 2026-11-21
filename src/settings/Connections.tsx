@@ -3,6 +3,8 @@ import { useChat } from "../chat/store";
 import { ago } from "../crew/files";
 import { HubError } from "../hub/client";
 import {
+  appOf,
+  appWords,
   connectionsOf,
   forWhom,
   names,
@@ -19,7 +21,7 @@ import { useOverview } from "../overview/store";
 import { openUrl } from "../platform";
 import { useUi } from "../shell/ui";
 import "../styles/connections.css";
-import { askDeskTo } from "../ui/askDesk";
+import { askAgent, askDeskTo } from "../ui/askDesk";
 import { useLive } from "../ui/useLive";
 import { CopyOffers } from "./CopyOffers";
 
@@ -144,6 +146,15 @@ const useLocalAgents = (): { id: string; name: string }[] => {
   const hub = useChat((s) => s.hubs.find((h) => h.local));
   const roster = useChat((s) => s.roster);
   return hub ? roster.filter((a) => a.hubId === hub.id).map((a) => ({ id: a.id, name: a.name })) : [];
+};
+
+/** The agent on this computer that sets services up for the person: Desk's
+ *  own, as the roster names it. */
+const useSetUpAgent = (): { id: string; name: string } | null => {
+  const id = useOverview((s) => s.manager?.agentId);
+  const hub = useChat((s) => s.hubs.find((h) => h.local));
+  const name = useChat((s) => s.roster.find((a) => a.id === id && a.hubId === hub?.id)?.name);
+  return id ? { id, name: name ?? "Desk" } : null;
 };
 
 /** Asks Desk's agent to set `c` up (or one the person names), in its
@@ -376,6 +387,7 @@ function ServiceCard({
               api={api}
               connector={c}
               first={count === 0}
+              onAppKept={reload}
               onDone={async () => {
                 setAdding(false);
                 await reload();
@@ -397,12 +409,14 @@ function AddConnection({
   api,
   connector: c,
   first,
+  onAppKept,
   onDone,
   onCancel,
 }: {
   api: ConnectionsApi;
   connector: Connector;
   first: boolean;
+  onAppKept: () => void | Promise<void>;
   onDone: () => void | Promise<void>;
   onCancel: () => void;
 }) {
@@ -455,6 +469,7 @@ function AddConnection({
         name={name}
         label={`Connect ${c.name}`}
         blocked={!!clash}
+        onAppKept={onAppKept}
         onDone={() => onDone()}
         onCancel={onCancel}
         open
@@ -527,6 +542,7 @@ function ConnectionCard({
             setReconnecting(false);
             await reload();
           }}
+          onAppKept={reload}
           onCancel={() => setReconnecting(false)}
           open
         />
@@ -592,10 +608,15 @@ function ConnectionCard({
       {!ok && (
         <p className="small state-blocked conn-fix" role="status">
           {sentence(x.detail ?? (x.status === "failing" ? `${c.name} isn’t answering` : `${c.name} no longer takes this key`))}{" "}
-          {x.status === "failing" ? "Test it again in a moment, or reconnect it." : "Reconnect it to carry on."}
+          {x.status === "failing"
+            ? "Test it again in a moment, or reconnect it."
+            : x.approveAgain
+              ? "Approve it again to carry on."
+              : "Reconnect it to carry on."}
         </p>
       )}
       {x.checkedAt && ok && <p className="small faint">Checked {ago(x.checkedAt)}</p>}
+      {x.approveAgain && <ApproveAgain api={api} connector={c} connection={x} onDone={reload} />}
       {problem && (
         <p className="small state-blocked" role="alert">
           {problem}
@@ -675,6 +696,7 @@ export function Connect({
   label,
   onDone,
   onCancel,
+  onAppKept,
   open: startOpen = false,
   title,
   blocked = false,
@@ -689,6 +711,8 @@ export function Connect({
   label: string;
   onDone: (inPlace?: boolean, account?: string) => void | Promise<void>;
   onCancel?: () => void;
+  /** Told when the person's own app was kept, so the list reads it again. */
+  onAppKept?: () => void | Promise<void>;
   /** Show the form at once, rather than behind the button. */
   open?: boolean;
   title?: string;
@@ -698,8 +722,19 @@ export function Connect({
   const [form, setForm] = useState(startOpen && c.signIn === "fields");
   const [problem, setProblem] = useState<string | null>(null);
 
-  if (c.signIn === "google") {
-    return <GoogleSignIn api={api} connector={c} at={at} name={name} blocked={blocked} onDone={(account) => onDone(false, account)} onCancel={onCancel} />;
+  if (c.signIn === "app") {
+    return (
+      <AppSignIn
+        api={api}
+        connector={c}
+        at={at}
+        name={name}
+        blocked={blocked}
+        onDone={(account) => onDone(false, account)}
+        onAppKept={onAppKept}
+        onCancel={onCancel}
+      />
+    );
   }
   if (c.signIn === "github" && !form) {
     return (
@@ -997,15 +1032,112 @@ function DeviceSignIn({
   );
 }
 
-/** Google's sign-in on the person's own OAuth client: the client first,
- *  once, then the browser. */
-function GoogleSignIn({
+/** A sign-in in the browser, being waited on. */
+function WaitingFor({ service, started, onCancel }: { service: string; started: Started; onCancel: () => void }) {
+  return (
+    <div className="conn-flow" role="status">
+      <p className="small">Finish signing in to {service} in your browser, then come back.</p>
+      <div className="connect-actions">
+        <span className="small faint">Waiting for {service}…</span>
+        <button type="button" className="btn btn-ghost" onClick={onCancel}>
+          Cancel
+        </button>
+        {started.url && (
+          <button type="button" className="btn" onClick={() => openUrl(started.url!)}>
+            Open {service}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** The identifier and secret of the person's own app at a service, kept in
+ *  the hub's vault before anything is signed in to. */
+function AppForm({
+  api,
+  connector: c,
+  onKept,
+  onCancel,
+}: {
+  api: ConnectionsApi;
+  connector: Connector;
+  onKept: () => void | Promise<void>;
+  onCancel?: () => void;
+}) {
+  const words = appWords(c.id);
+  const [app, setApp] = useState({ id: "", secret: "" });
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setBusy(true);
+    setProblem(null);
+    try {
+      await api.saveApp(c.id, app.id.trim(), app.secret.trim());
+      await onKept();
+    } catch (err) {
+      setProblem(message(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <form className="connect-form" onSubmit={save} aria-label={`Your ${c.name} app`}>
+      <label className="field-stack">
+        <span className="field-label">{words.id}</span>
+        <input
+          type="text"
+          autoComplete="off"
+          spellCheck={false}
+          data-autofocus
+          value={app.id}
+          onChange={(e) => setApp((v) => ({ ...v, id: e.target.value }))}
+        />
+      </label>
+      <label className="field-stack">
+        <span className="field-label">{words.secret}</span>
+        <input
+          type="password"
+          autoComplete="off"
+          spellCheck={false}
+          value={app.secret}
+          onChange={(e) => setApp((v) => ({ ...v, secret: e.target.value }))}
+        />
+      </label>
+      {problem && (
+        <p className="small state-blocked" role="alert">
+          {problem}
+        </p>
+      )}
+      <div className="connect-actions">
+        <span className="small faint conn-where">{SAVED_WHERE}</span>
+        {onCancel && (
+          <button type="button" className="btn btn-ghost" onClick={onCancel}>
+            Cancel
+          </button>
+        )}
+        <button type="submit" className="btn btn-signal" disabled={busy || !app.id.trim() || !app.secret.trim()}>
+          {busy ? "Saving…" : "Save app"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+/** A sign-in on the person's own app at the service (Google, FreeAgent):
+ *  the app first, once (made by the agent, or kept from the person), then
+ *  the browser. */
+function AppSignIn({
   api,
   connector: c,
   at,
   name,
   blocked = false,
   onDone,
+  onAppKept,
   onCancel,
 }: {
   api: ConnectionsApi;
@@ -1014,27 +1146,17 @@ function GoogleSignIn({
   name?: string;
   blocked?: boolean;
   onDone: (account?: string) => void | Promise<void>;
+  onAppKept?: () => void | Promise<void>;
   onCancel?: () => void;
 }) {
-  const [ready, setReady] = useState(c.signInReady);
-  const [client, setClient] = useState({ id: "", secret: "" });
+  const agent = useSetUpAgent();
+  const [kept, setKept] = useState(false);
+  const [own, setOwn] = useState(false);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
   const { started, setStarted, said, setSaid, cancel } = useFlow(api, onDone);
-
-  const saveClient = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setProblem(null);
-    try {
-      await api.saveGoogleClient(client.id.trim(), client.secret.trim());
-      setReady(true);
-    } catch (err) {
-      setProblem(message(err));
-    } finally {
-      setBusy(false);
-    }
-  };
+  const state = kept ? "ready" : appOf(c);
+  const words = appWords(c.id);
 
   const begin = async () => {
     setBusy(true);
@@ -1051,74 +1173,60 @@ function GoogleSignIn({
     }
   };
 
-  if (!ready) {
+  const askToSetUp = () => {
+    if (!agent) return;
+    if (askAgent(agent.id, setUpRequest(c.name, "me"))) useUi.getState().closeSettings();
+    else setProblem(`${agent.name} isn’t on this computer to ask. Use an app you have already.`);
+  };
+
+  if (state !== "ready") {
+    if (own || !agent) {
+      return (
+        <AppForm
+          api={api}
+          connector={c}
+          onKept={async () => {
+            setKept(true);
+            await onAppKept?.();
+          }}
+          onCancel={agent ? () => setOwn(false) : onCancel}
+        />
+      );
+    }
     return (
-      <form className="connect-form" onSubmit={saveClient} aria-label="Your Google OAuth client">
+      <div className="connect-form">
         <p className="small muted">
-          Google signs in on your own OAuth client. Create a Desktop app client in Google Cloud Console, then paste its ID and secret here.
+          {state === "moved"
+            ? `Desk’s address changed. Ask ${agent.name} to update your ${c.name} app.`
+            : `${c.name} signs in on an app of your own. ${agent.name} can make it for you.`}
         </p>
-        <label className="field-stack">
-          <span className="field-label">Client ID</span>
-          <input
-            type="text"
-            autoComplete="off"
-            spellCheck={false}
-            data-autofocus
-            value={client.id}
-            onChange={(e) => setClient((v) => ({ ...v, id: e.target.value }))}
-          />
-        </label>
-        <label className="field-stack">
-          <span className="field-label">Client secret</span>
-          <input
-            type="password"
-            autoComplete="off"
-            spellCheck={false}
-            value={client.secret}
-            onChange={(e) => setClient((v) => ({ ...v, secret: e.target.value }))}
-          />
-        </label>
         {problem && (
           <p className="small state-blocked" role="alert">
             {problem}
           </p>
         )}
         <div className="connect-actions">
-          <span className="small faint conn-where">{SAVED_WHERE}</span>
+          <button type="button" className="link small" onClick={() => setOwn(true)}>
+            I have an app already
+          </button>
           {onCancel && (
             <button type="button" className="btn btn-ghost" onClick={onCancel}>
               Cancel
             </button>
           )}
-          <button type="submit" className="btn btn-signal" disabled={busy || !client.id.trim() || !client.secret.trim()}>
-            {busy ? "Saving…" : "Save client"}
+          <button type="button" className="btn btn-signal" onClick={askToSetUp}>
+            Ask {agent.name} to set it up
           </button>
-        </div>
-      </form>
-    );
-  }
-
-  if (started) {
-    return (
-      <div className="conn-flow" role="status">
-        <p className="small">Finish signing in to Google in your browser, then come back.</p>
-        <div className="connect-actions">
-          <span className="small faint">Waiting for Google…</span>
-          <button type="button" className="btn btn-ghost" onClick={() => void cancel()}>
-            Cancel
-          </button>
-          {started.url && (
-            <button type="button" className="btn" onClick={() => openUrl(started.url!)}>
-              Open Google
-            </button>
-          )}
         </div>
       </div>
     );
   }
 
+  if (started) return <WaitingFor service={c.name} started={started} onCancel={() => void cancel()} />;
+
   return (
     <div className="connect-form">
+      {words.signInNote && <p className="small muted">{words.signInNote}</p>}
       {(problem ?? said) && (
         <p className="small state-blocked" role={problem ? "alert" : "status"}>
           {problem ?? said}
@@ -1131,9 +1239,49 @@ function GoogleSignIn({
           </button>
         )}
         <button type="button" className="btn btn-signal" disabled={busy || blocked} onClick={() => void begin()}>
-          {busy ? "Starting…" : "Sign in with Google"}
+          {busy ? "Starting…" : `Sign in with ${c.name}`}
         </button>
       </div>
     </div>
+  );
+}
+
+/** A connection whose sign-in lapsed, or was made on an earlier app: Desk
+ *  is approved on it again, and nothing new is made. */
+function ApproveAgain({ api, connector: c, connection: x, onDone }: { api: ConnectionsApi; connector: Connector; connection: Connection; onDone: () => void | Promise<void> }) {
+  const { started, setStarted, said, setSaid, cancel } = useFlow(api, onDone);
+  const [busy, setBusy] = useState(false);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  const begin = async () => {
+    setBusy(true);
+    setSaid(null);
+    setProblem(null);
+    try {
+      const s = await api.approveAgain(c.id, x.id);
+      setStarted(s);
+      if (s.url) openUrl(s.url);
+    } catch (e) {
+      setProblem(message(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (started) return <WaitingFor service={c.name} started={started} onCancel={() => void cancel()} />;
+  return (
+    <>
+      {(problem ?? said) && (
+        <p className="small state-blocked" role={problem ? "alert" : "status"}>
+          {problem ?? said}
+        </p>
+      )}
+      <div className="prov-actions">
+        <span className="small">Approve Desk on {c.name} again to carry on with {x.name}.</span>
+        <button type="button" className="btn btn-sm btn-signal" disabled={busy} onClick={() => void begin()}>
+          {busy ? "Starting…" : "Approve again"}
+        </button>
+      </div>
+    </>
   );
 }

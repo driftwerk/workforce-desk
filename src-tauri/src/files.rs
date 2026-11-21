@@ -449,6 +449,18 @@ pub fn remove_proposal(dir: &Path, id: &str) -> Result<()> {
     }
 }
 
+/// `path`, resolved, where it lies inside the hub's data folder: the only
+/// place the page may have opened or shown in the file manager.
+pub fn within_hub_data(paths: &Paths, path: &Path) -> Result<std::path::PathBuf> {
+    let root = std::fs::canonicalize(paths.hub_data())?;
+    let found = std::fs::canonicalize(path)
+        .map_err(|_| eyre::eyre!("that folder isn't there on this computer"))?;
+    if !found.starts_with(&root) {
+        eyre::bail!("Desk opens only what its own hub keeps");
+    }
+    Ok(found)
+}
+
 /// Emits `themes-changed` whenever a file in the themes folder changes.
 pub fn watch_themes(app: AppHandle, dir: &Path) -> Result<notify::RecommendedWatcher> {
     std::fs::create_dir_all(dir)?;
@@ -464,6 +476,34 @@ pub fn watch_themes(app: AppHandle, dir: &Path) -> Result<notify::RecommendedWat
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_a_place_inside_the_hubs_data_is_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let documents = paths
+            .hub_data()
+            .join("agents")
+            .join("kat")
+            .join("documents");
+        std::fs::create_dir_all(&documents).unwrap();
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&outside).unwrap();
+        assert_eq!(
+            within_hub_data(&paths, &documents).unwrap(),
+            std::fs::canonicalize(&documents).unwrap()
+        );
+        assert!(within_hub_data(&paths, &outside).is_err());
+        let sneaky = documents
+            .join("..")
+            .join("..")
+            .join("..")
+            .join("..")
+            .join("..")
+            .join("elsewhere");
+        assert!(within_hub_data(&paths, &sneaky).is_err());
+        assert!(within_hub_data(&paths, &documents.join("missing")).is_err());
+    }
 
     #[test]
     fn settings_default_to_following_the_system_theme() {

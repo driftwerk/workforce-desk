@@ -392,6 +392,11 @@
   {
     "kind": "http",
     "method": "GET",
+    "path": "/api/desk/agents/a/documents"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
     "path": "/api/agents/a/heartbeat"
   },
   {

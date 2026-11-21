@@ -119,6 +119,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   handoff: (h) => h.handoff("s1", { engine: "codex", source: "stop", egressConfirmed: true }),
   lineage: (h) => h.lineage("s1"),
   memorySummary: (h) => h.memorySummary("a"),
+  agentDocuments: (h) => h.agentDocuments("a"),
   agentHeartbeat: (h) => h.agentHeartbeat("a"),
   agentConfig: (h) => h.agentConfig("a"),
   saveAgentConfig: (h) => h.saveAgentConfig("a", "x = 1"),

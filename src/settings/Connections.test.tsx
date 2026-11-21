@@ -2,10 +2,18 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { HubError } from "../hub/client";
 import type { Connection, ConnectionsApi, Connector, PicksChange, ServicePicks } from "../hub/connections";
+import { useChat } from "../chat/store";
+import { useOverview } from "../overview/store";
+import { useUi } from "../shell/ui";
 import { Connections } from "./Connections";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 const opened = vi.hoisted(() => [] as string[]);
+const asked = vi.hoisted(() => [] as { agent: string; text: string }[]);
+vi.mock("../ui/askDesk", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../ui/askDesk")>()),
+  askAgent: (agent: string, text: string) => asked.push({ agent, text }) > 0,
+}));
 vi.mock("../platform", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../platform")>()),
   openUrl: (url: string) => opened.push(url),
@@ -15,7 +23,19 @@ afterEach(() => {
   cleanup();
   vi.useRealTimers();
   opened.length = 0;
+  asked.length = 0;
+  useOverview.setState({ manager: null });
+  useChat.setState({ hubs: [], roster: [] });
 });
+
+/** Desk's own agent on this computer, there to ask. */
+const withDeskAgent = () => {
+  useOverview.setState({ manager: { agentId: "desk", level: null } });
+  useChat.setState({
+    hubs: [{ id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" }],
+    roster: [{ hubId: "local", id: "desk", name: "Kat", model: null, provider: null, isDefault: true }],
+  });
+};
 
 const connection = (c: Partial<Connection> = {}): Connection => ({
   id: "all~~default",
@@ -53,8 +73,9 @@ const api = (list: Connector[], over: Partial<ConnectionsApi> = {}): Connections
   rename: vi.fn(async () => connection()),
   test: vi.fn(async () => connection()),
   disconnect: vi.fn(async () => ({ stillKept: null, note: null })),
-  saveGoogleClient: vi.fn(async () => {}),
+  saveApp: vi.fn(async () => {}),
   start: vi.fn(),
+  approveAgain: vi.fn(),
   flow: vi.fn(),
   cancel: vi.fn(async () => {}),
   picks: vi.fn(async () => []),
@@ -63,6 +84,7 @@ const api = (list: Connector[], over: Partial<ConnectionsApi> = {}): Connections
   signedIn: vi.fn(),
   choose: vi.fn(),
   pasteToken: vi.fn(),
+  pasteApp: vi.fn(),
   ...over,
 });
 
@@ -272,28 +294,156 @@ it("signs in to GitHub with a code for a new connection, and says nothing was sa
   expect(screen.getByText("Sign-in was cancelled. Nothing was saved.")).toBeTruthy();
 });
 
-it("asks for the person's own Google client once, then signs in in the browser", async () => {
-  const a = api([connector({ id: "google", name: "Google", signIn: "google", signInReady: false, fields: [] })], {
-    start: vi.fn(async () => ({ flow: "g1", url: "https://accounts.google.com/o/oauth2/auth?x", userCode: null, verificationUri: null, expiresIn: 900 })),
-    flow: vi.fn(async () => ({ state: "waiting" as const })),
+const google = (c: Partial<Connector> = {}) => connector({ id: "google", name: "Google", signIn: "app", app: "ready", fields: [], ...c });
+const freeagent = (c: Partial<Connector> = {}) => connector({ id: "freeagent", name: "FreeAgent", signIn: "app", app: "ready", fields: [], ...c });
+const BROWSER = { flow: "g1", url: "https://accounts.google.com/o/oauth2/auth?x", userCode: null, verificationUri: null, expiresIn: 900 };
+
+describe("signing in on the person's own app", () => {
+  it("signs in in the browser once the app is kept, and says so while it waits", async () => {
+    const a = api([google()], {
+      start: vi.fn(async () => BROWSER),
+      flow: vi.fn(async () => ({ state: "waiting" as const })),
+    });
+    await show(a);
+    fireEvent.click(within(service("Google")).getByRole("button", { name: "Connect" }));
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Sign in with Google" }));
+    });
+    expect(a.start).toHaveBeenCalledWith("google", { level: "all" }, undefined);
+    expect(opened).toEqual([BROWSER.url]);
+    expect(screen.getByText("Waiting for Google…")).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    });
+    expect(a.cancel).toHaveBeenCalledWith("g1");
+    expect(screen.getByText("Sign-in was cancelled. Nothing was saved.")).toBeTruthy();
   });
-  await show(a);
-  fireEvent.click(within(service("Google")).getByRole("button", { name: "Connect" }));
-  fireEvent.change(screen.getByLabelText("Client ID"), { target: { value: "id.apps.googleusercontent.com" } });
-  fireEvent.change(screen.getByLabelText("Client secret"), { target: { value: "s" } });
-  await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Save client" }));
+
+  it("tells FreeAgent's person to choose the business on its page", async () => {
+    await show(api([freeagent()]));
+    fireEvent.click(within(service("FreeAgent")).getByRole("button", { name: "Connect" }));
+    expect(screen.getByText("Choose the business on FreeAgent’s page.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Sign in with FreeAgent" })).toBeTruthy();
+    cleanup();
+    await show(api([google()]));
+    fireEvent.click(within(service("Google")).getByRole("button", { name: "Connect" }));
+    expect(screen.queryByText(/Choose the business/)).toBeNull();
   });
-  expect(a.saveGoogleClient).toHaveBeenCalledWith("id.apps.googleusercontent.com", "s");
-  await act(async () => {
-    fireEvent.click(screen.getByRole("button", { name: "Sign in with Google" }));
+
+  it("asks the agent to set the app up when there is none, and leaves the page", async () => {
+    withDeskAgent();
+    const closed = vi.spyOn(useUi.getState(), "closeSettings");
+    await show(api([google({ app: "missing", signInReady: false })]));
+    fireEvent.click(within(service("Google")).getByRole("button", { name: "Connect" }));
+    expect(screen.queryByRole("button", { name: "Sign in with Google" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Ask Kat to set it up" }));
+    expect(asked).toEqual([
+      { agent: "desk", text: "Set up Google for yourself: make the key in your browser and keep it in the vault. I’ll sign in when you ask." },
+    ]);
+    expect(closed).toHaveBeenCalled();
   });
-  expect(opened).toEqual(["https://accounts.google.com/o/oauth2/auth?x"]);
-  await act(async () => {
+
+  it("keeps an app the person already has, then signs in", async () => {
+    withDeskAgent();
+    const a = api([freeagent({ app: "missing", signInReady: false })], {
+      start: vi.fn(async () => ({ ...BROWSER, url: "https://api.freeagent.com/v2/approve_app?x" })),
+      flow: vi.fn(async () => ({ state: "waiting" as const })),
+    });
+    await show(a);
+    fireEvent.click(within(service("FreeAgent")).getByRole("button", { name: "Connect" }));
+    fireEvent.click(screen.getByRole("button", { name: "I have an app already" }));
+    fireEvent.change(screen.getByLabelText("OAuth identifier"), { target: { value: " id-1 " } });
+    fireEvent.change(screen.getByLabelText("OAuth secret"), { target: { value: " s-1 " } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save app" }));
+    });
+    expect(a.saveApp).toHaveBeenCalledWith("freeagent", "id-1", "s-1");
+    expect(a.list).toHaveBeenCalledTimes(2);
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Sign in with FreeAgent" }));
+    });
+    expect(opened).toEqual(["https://api.freeagent.com/v2/approve_app?x"]);
+  });
+
+  it("goes back from the app form to the choices, and says what the hub refused", async () => {
+    withDeskAgent();
+    const a = api([google({ app: "missing", signInReady: false })], {
+      saveApp: vi.fn(async () => Promise.reject(new HubError(422, "That client id isn’t one of Google’s"))),
+    });
+    await show(a);
+    fireEvent.click(within(service("Google")).getByRole("button", { name: "Connect" }));
+    fireEvent.click(screen.getByRole("button", { name: "I have an app already" }));
+    expect((screen.getByRole("button", { name: "Save app" }) as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.change(screen.getByLabelText("Client ID"), { target: { value: "x" } });
+    fireEvent.change(screen.getByLabelText("Client secret"), { target: { value: "y" } });
+    await act(async () => {
+      fireEvent.click(screen.getByRole("button", { name: "Save app" }));
+    });
+    expect(screen.getByRole("alert").textContent).toBe("That client id isn’t one of Google’s");
     fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.getByRole("button", { name: "Ask Kat to set it up" })).toBeTruthy();
   });
-  expect(a.cancel).toHaveBeenCalledWith("g1");
-  expect(screen.getByText("Sign-in was cancelled. Nothing was saved.")).toBeTruthy();
+
+  it("says Desk's address changed when FreeAgent's app was made for an older one", async () => {
+    withDeskAgent();
+    await show(api([freeagent({ app: "moved", signInReady: false })]));
+    fireEvent.click(within(service("FreeAgent")).getByRole("button", { name: "Connect" }));
+    expect(screen.getByText("Desk’s address changed. Ask Kat to update your FreeAgent app.")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Ask Kat to set it up" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "I have an app already" })).toBeTruthy();
+  });
+
+  it("shows only the form where there is no agent to ask", async () => {
+    await show(api([google({ app: "missing", signInReady: false })]));
+    fireEvent.click(within(service("Google")).getByRole("button", { name: "Connect" }));
+    expect(screen.getByLabelText("Client ID")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /to set it up/ })).toBeNull();
+  });
+
+  it("asks again for a connection whose sign-in lapsed, as a new sign-in is waited on, and reads the list after", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const lapsed = connection({ id: "all~~acme", name: "Acme Ltd", account: "Acme Ltd", status: "needs_reconnect", approveAgain: true });
+    const a = api([freeagent({ connections: [lapsed] })], {
+      approveAgain: vi.fn(async () => ({ ...BROWSER, url: "https://api.freeagent.com/v2/approve_app?y" })),
+      flow: vi.fn(async () => ({ state: "connected" as const, account: "Acme Ltd" })),
+    });
+    await show(a);
+    fireEvent.click(within(service("FreeAgent")).getByRole("button", { name: "Manage" }));
+    const card = within(service("FreeAgent")).getByLabelText("Acme Ltd");
+    expect(within(card).getByText("Approve it again to carry on.", { exact: false })).toBeTruthy();
+    await act(async () => {
+      fireEvent.click(within(card).getByRole("button", { name: "Approve again" }));
+    });
+    expect(a.approveAgain).toHaveBeenCalledWith("freeagent", "all~~acme");
+    expect(opened).toEqual(["https://api.freeagent.com/v2/approve_app?y"]);
+    expect(a.start).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(2000);
+    });
+    expect(a.flow).toHaveBeenCalledWith("g1");
+    expect(a.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers no approving again to a connection that doesn't need it", async () => {
+    await show(api([freeagent({ connections: [connection({ id: "all~~acme", name: "Acme Ltd" })] })]));
+    fireEvent.click(within(service("FreeAgent")).getByRole("button", { name: "Manage" }));
+    expect(screen.queryByRole("button", { name: "Approve again" })).toBeNull();
+  });
+
+  it("lists several FreeAgent connections by name, each with its company", async () => {
+    const fa = freeagent({
+      connections: [
+        connection({ id: "all~~acme", name: "Acme", account: "Acme Ltd" }),
+        connection({ id: "all~~globex", name: "Globex", account: "Globex Trading", level: "agent", agent: "kat", agentName: "Kat" }),
+      ],
+    });
+    await show(api([fa]));
+    const card = service("FreeAgent");
+    expect(within(card).getByText("2 connections")).toBeTruthy();
+    expect(within(within(card).getByLabelText("Acme")).getByText("Acme Ltd")).toBeTruthy();
+    expect(within(within(card).getByLabelText("Globex")).getByText("Globex Trading")).toBeTruthy();
+    expect(within(card).getByRole("button", { name: "+ Add another FreeAgent" })).toBeTruthy();
+  });
 });
 
 it("says when Desk couldn't read the connections, and asks again", async () => {
@@ -323,7 +473,7 @@ describe("reconnecting a connection made by signing in", () => {
     ],
   });
   const personal = connection({ id: "all~~personal", name: "Personal" });
-  const google = connector({ id: "google", name: "Google", signIn: "google", fields: [], connections: [work, personal] });
+  const google = connector({ id: "google", name: "Google", signIn: "app", app: "ready", fields: [], connections: [work, personal] });
   // Another sign-in, of someone else's account, made just before.
   const other = connection({ id: "all~~work-3", name: "Work", account: "kim@acme.example" });
   const fresh = connection({ id: "all~~work-2", name: "Work", account: "sam@acme.example", connectedAt: new Date().toISOString() });

@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
+import { useChat } from "../chat/store";
 import { agentKey, type Agent } from "../chat/types";
 import { HubError, type DeskHub, type Revision } from "../hub/client";
 import { useDesk } from "../hub/store";
+import { revealWords } from "../machines/words";
+import { openHubPath, revealHubPath } from "../platform";
 import { useSettings } from "../settings/store";
 import { matches, shortcutLabel } from "../shortcuts/keys";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
 import { withKeptChanges } from "../restore/drafts";
+import { useHost } from "../shell/host";
 import { useUi } from "../shell/ui";
 import {
   AGENT_FILES,
@@ -51,6 +55,51 @@ export const discardDrafts = (agent: Agent): void => {
   const { drafts, put } = useDrafts.getState();
   for (const file of dirtyFiles(drafts, key)) put(key, file, discarded(draftOf(drafts, key, file)!));
 };
+
+/** The folder an agent keeps what it makes or downloads for you, where it
+ *  is on this computer: opened, or shown in the file manager. */
+function DocumentsRow({ hub, agent }: { hub: DeskHub | null; agent: Agent }) {
+  const here = useChat((s) => s.hubs.find((h) => h.local)?.id === agent.hubId);
+  const inDistro = useHost((h) => h.host?.kind === "wsl");
+  const platform = useHost((h) => h.platform);
+  const [path, setPath] = useState<string | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPath(null);
+    if (!hub || !here || inDistro) return;
+    let stop = false;
+    hub.agentDocuments(agent.id).then(
+      (p) => !stop && setPath(p),
+      () => undefined,
+    );
+    return () => {
+      stop = true;
+    };
+  }, [hub, here, inDistro, agent.id]);
+
+  if (!path) return null;
+  const go = (act: (path: string) => Promise<void>) => () => {
+    setProblem(null);
+    act(path).catch((e: unknown) => setProblem(plainError(e)));
+  };
+  return (
+    <div className="file-row" role="group" aria-label="Documents">
+      <span className="file-name">Documents</span>
+      <span>{agent.name}’s documents — invoices, statements and files it makes or downloads for you.</span>
+      <span className="mono conn-site">{path}</span>
+      {problem && <span className="small state-blocked">{problem}</span>}
+      <div className="prov-actions">
+        <button type="button" className="btn btn-sm" onClick={go(openHubPath)}>
+          Open
+        </button>
+        <button type="button" className="btn btn-sm" onClick={go(revealHubPath)}>
+          {revealWords(platform)}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 /** The agent's Files tab: the files that shape them, edited in place, with
  *  every saved version kept. */
@@ -128,6 +177,7 @@ export function AgentFiles({ agent }: { agent: Agent }) {
             </button>
           );
         })}
+        <DocumentsRow hub={hub} agent={agent} />
         <p className="files-note">Every save is kept. Open History to see or restore an earlier version.</p>
       </nav>
       <section className="files-editor" aria-label={file}>

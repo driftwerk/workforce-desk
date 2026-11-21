@@ -59,8 +59,9 @@ const api = (services: ServicePicks[], over: Partial<ConnectionsApi> = {}): Conn
   rename: vi.fn(),
   test: vi.fn(),
   disconnect: vi.fn(),
-  saveGoogleClient: vi.fn(),
+  saveApp: vi.fn(),
   start: vi.fn(),
+  approveAgain: vi.fn(),
   flow: vi.fn(),
   cancel: vi.fn(),
   picks: vi.fn(async () => services),
@@ -69,6 +70,7 @@ const api = (services: ServicePicks[], over: Partial<ConnectionsApi> = {}): Conn
   signedIn: vi.fn(),
   choose: vi.fn(),
   pasteToken: vi.fn(),
+  pasteApp: vi.fn(),
   ...over,
 });
 
@@ -173,6 +175,46 @@ it("asks the agent to set up a service it has no connection to, or offers to con
   expect(within(dd).getByRole("button", { name: "Connect myself" })).toBeTruthy();
   // Slack the person connects.
   expect(within(box("Slack")).queryByRole("button", { name: "Ask Allan to set it up" })).toBeNull();
+});
+
+it("offers both ways to connect Google and FreeAgent when the agent has none", async () => {
+  const asked: string[] = [];
+  await show(api([svc({ id: "google", name: "Google" }), svc({ id: "freeagent", name: "FreeAgent" })]), (_a, s) => {
+    asked.push(s);
+    return true;
+  });
+  for (const name of ["Google", "FreeAgent"]) {
+    const empty = box(name);
+    fireEvent.click(within(empty).getByRole("button", { name: "Ask Allan to set it up" }));
+    expect(within(empty).getByRole("button", { name: "Connect myself" })).toBeTruthy();
+  }
+  expect(asked).toEqual(["Google", "FreeAgent"]);
+});
+
+it("shows several FreeAgent connections by company, with the default to change", async () => {
+  const a = api([
+    svc({
+      id: "freeagent",
+      name: "FreeAgent",
+      connections: [
+        pick({ id: "all~~acme", name: "Acme", account: "Acme Ltd", picked: true, default: true, write: false }),
+        pick({ id: "all~~globex", name: "Globex", account: "Globex Trading", picked: true, write: false }),
+      ],
+    }),
+  ]);
+  await show(a);
+  const fa = box("FreeAgent");
+  expect(within(fa).getByText("Acme Ltd")).toBeTruthy();
+  expect(within(fa).getByText("Globex Trading")).toBeTruthy();
+  expect(within(fa).getByText("Acme", { selector: ".conn-pick-default-name" })).toBeTruthy();
+  fireEvent.click(within(fa).getByRole("button", { name: "change" }));
+  await act(async () => {
+    fireEvent.change(within(fa).getByLabelText("FreeAgent default"), { target: { value: "all~~globex" } });
+  });
+  expect(a.setPicks).toHaveBeenCalledWith(
+    "allan",
+    expect.objectContaining({ service: "freeagent", default: "all~~globex" }),
+  );
 });
 
 it("turns Slack's one connection on through the agent's own settings", async () => {

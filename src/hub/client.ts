@@ -648,6 +648,10 @@ export class DeskHub {
       throw e;
     }
   };
+  /** The folder an agent keeps the files it makes or downloads for you,
+   *  on the computer its hub runs on. */
+  agentDocuments = async (id: string): Promise<string> =>
+    (await this.desk<{ path: string }>("GET", `/api/desk/agents/${encodeURIComponent(id)}/documents`)).path;
   saveIdentityFile = (id: string, file: string, text: string): Promise<void> =>
     this.putText(`/api/agents/${encodeURIComponent(id)}/identity/${file}`, text);
   /** Every saved version of an identity file, newest first. */

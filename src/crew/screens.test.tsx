@@ -21,8 +21,11 @@ vi.mock("../chat/store", async (original) => ({
   agentIdsOn: () => listed.ids(),
 }));
 
+const folder = vi.hoisted(() => ({ open: vi.fn(() => Promise.resolve()), reveal: vi.fn(() => Promise.resolve()) }));
 vi.mock("../platform", async (original) => ({
   ...(await original<typeof import("../platform")>()),
+  openHubPath: folder.open,
+  revealHubPath: folder.reveal,
   onLoginProgress: () => Promise.resolve(() => {}),
   startLogin: vi.fn(() => Promise.resolve()),
   invoke: vi.fn(() => Promise.resolve()),
@@ -232,6 +235,43 @@ describe("Files", () => {
     expect(screen.getByRole("status").textContent).toBe("Saved");
     fireEvent.click(screen.getByRole("button", { name: /SOUL\.md/ }));
     expect((screen.getByLabelText("SOUL.md", { selector: "textarea" }) as HTMLTextAreaElement).value).toBe("draft");
+  });
+
+  describe("Documents", () => {
+    const PATH = "/Users/k/Library/Application Support/Desk/hub/data/agents/ledger/documents";
+    const local = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" };
+    const remote = { ...local, id: "dw", local: false };
+
+    it("shows the folder with Open and Show in Finder, and says if the computer refuses", async () => {
+      useChat.setState({ hubs: [local] });
+      useDesk.setState({ hub: fakeHub({ agentDocuments: vi.fn(() => Promise.resolve(PATH)) } as Partial<DeskHub>) });
+      render(<AgentFiles agent={agent} />);
+      const row = await screen.findByRole("group", { name: "Documents" });
+      expect(within(row).getByText("Ledger’s documents — invoices, statements and files it makes or downloads for you.")).toBeTruthy();
+      expect(within(row).getByText(PATH)).toBeTruthy();
+      fireEvent.click(within(row).getByRole("button", { name: "Open" }));
+      expect(folder.open).toHaveBeenCalledWith(PATH);
+      folder.reveal.mockRejectedValueOnce(new Error("that folder isn't there on this computer"));
+      await act(async () => fireEvent.click(within(row).getByRole("button", { name: "Show in Finder" })));
+      expect(folder.reveal).toHaveBeenCalledWith(PATH);
+      expect(within(row).getByText(/isn't there on this computer/)).toBeTruthy();
+    });
+
+    it("is left out for a hub that doesn't say, and for an agent on another computer", async () => {
+      useChat.setState({ hubs: [local] });
+      useDesk.setState({ hub: fakeHub({ agentDocuments: vi.fn(() => Promise.reject(new HubError(404, "Not Found"))) } as Partial<DeskHub>) });
+      render(<AgentFiles agent={agent} />);
+      await screen.findByDisplayValue("# Soul");
+      expect(screen.queryByRole("group", { name: "Documents" })).toBeNull();
+      cleanup();
+      const agentDocuments = vi.fn(() => Promise.resolve(PATH));
+      useChat.setState({ hubs: [remote] });
+      useDesk.setState({ hub: fakeHub({ agentDocuments } as Partial<DeskHub>) });
+      render(<AgentFiles agent={agent} />);
+      await screen.findByDisplayValue("# Soul");
+      expect(screen.queryByRole("group", { name: "Documents" })).toBeNull();
+      expect(agentDocuments).not.toHaveBeenCalled();
+    });
   });
 
   it("says plainly when there's no history to go back to", async () => {
