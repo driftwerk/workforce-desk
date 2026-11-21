@@ -312,7 +312,10 @@ async fn a_machines_sessions_are_read_again_only_for_one_not_read() {
     }
     assert_eq!(*fake.listings.lock().unwrap(), 1);
     let unknown = "5b0c4c8e-0000-4000-8000-0000000000ff";
-    assert_eq!(name_of(&*fake, &devbox(), &listed, unknown, until).await, Ok(None));
+    assert_eq!(
+        name_of(&*fake, &devbox(), &listed, unknown, until).await,
+        Ok(None)
+    );
     assert_eq!(*fake.listings.lock().unwrap(), 2);
     let other = "5b0c4c8e-0000-4000-8000-000000000001";
     assert_eq!(
