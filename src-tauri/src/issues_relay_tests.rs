@@ -233,6 +233,13 @@ async fn home_s_refusals_are_said_and_an_unknown_outcome_isnt() {
             Some("that call was served already".to_string()),
         ),
         (
+            says(
+                429,
+                json!({ "error": "too many machines' calls were served lately" }),
+            ),
+            Some("too many machines' calls were served lately".to_string()),
+        ),
+        (
             says(200, json!({ "ok": "x".repeat(MOST_BODY) })),
             Some(TOO_LARGE.to_string()),
         ),

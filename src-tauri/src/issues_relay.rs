@@ -152,6 +152,12 @@ fn reply_of(r: Result<Answer, Unanswered>) -> Option<Value> {
             }
         }
         Ok(a) if matches!(a.status, 404 | 405) => error(OLDER_HOME),
+        // Turned away before anything ran.
+        Ok(a) if a.status == 429 => {
+            error(error_of(&a).unwrap_or_else(|| {
+                "Desk on the person's Mac is busy; try again in a moment.".into()
+            }))
+        }
         Ok(a) if (400..500).contains(&a.status) && !matches!(a.status, 408 | 429) => error(
             error_of(&a)
                 .unwrap_or_else(|| format!("Desk on the person's Mac refused it ({}).", a.status)),
