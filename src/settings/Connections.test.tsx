@@ -52,6 +52,7 @@ const api = (list: Connector[], over: Partial<ConnectionsApi> = {}): Connections
   reconnect: vi.fn(async () => connection()),
   rename: vi.fn(async () => connection()),
   test: vi.fn(async () => connection()),
+  renew: vi.fn(async () => connection()),
   disconnect: vi.fn(async () => ({ stillKept: null, note: null })),
   saveGoogleClient: vi.fn(async () => {}),
   start: vi.fn(),
@@ -504,4 +505,55 @@ it("won't add or rename a connection to a name the service has already", async (
   // Its own name, in other letters, is fine.
   fireEvent.change(within(acme).getByLabelText("New name for Acme"), { target: { value: "ACME" } });
   expect(within(acme).queryByRole("alert")).toBeNull();
+});
+
+describe("a bank", () => {
+  const until = (days: number) => new Date(Date.now() + days * 86_400_000).toISOString();
+  const bank = (days: number) =>
+    connector({
+      id: "bank",
+      name: "Bank",
+      connections: [connection({ id: "agent~kat~natwest", name: "NatWest", account: "NatWest", approvedUntil: until(days) })],
+    });
+
+  it("says when its approval lapses, and marks it in the last week", async () => {
+    await show(api([bank(40)]));
+    expect(within(service("Bank")).queryByText(/approved until/)).toBeNull();
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
+    const row = within(service("Bank")).getByLabelText("NatWest");
+    const line = within(row).getByText(/^Approved until .* \(40 days\)$/);
+    expect(line.className).not.toContain("state-blocked");
+    cleanup();
+    await show(api([bank(5)]));
+    expect(within(service("Bank")).getByText(/^\(approved until .* \(5 days\)\)$/).className).toContain("state-blocked");
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
+    expect(within(service("Bank")).getByText(/^Approved until .* \(5 days\)$/).className).toContain("state-blocked");
+  });
+
+  it("is reconnected by renewing it in BankSync, then checked, never by typing a key", async () => {
+    const lapsed = connection({ id: "agent~kat~natwest", name: "NatWest", status: "needs_reconnect", detail: "Approval lapsed" });
+    const renew = vi
+      .fn<ConnectionsApi["renew"]>()
+      .mockResolvedValueOnce(lapsed)
+      .mockResolvedValueOnce(connection({ id: "agent~kat~natwest", approvedUntil: until(90) }));
+    const a = api([bank(-1)], { renew });
+    await show(a);
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Reconnect" }));
+    const card = screen.getByLabelText("Reconnect NatWest");
+    expect(within(card).queryByLabelText("API key")).toBeNull();
+    fireEvent.click(within(card).getByRole("button", { name: "Open BankSync" }));
+    expect(opened).toEqual(["https://app.banksync.io"]);
+
+    await act(async () => {
+      fireEvent.click(within(card).getByRole("button", { name: "I’ve renewed it, check it" }));
+    });
+    expect(within(card).getByRole("alert").textContent).toBe("Approval lapsed.");
+    await act(async () => {
+      fireEvent.click(within(card).getByRole("button", { name: "I’ve renewed it, check it" }));
+    });
+    expect(renew).toHaveBeenCalledWith("bank", "agent~kat~natwest");
+    expect(screen.queryByLabelText("Reconnect NatWest")).toBeNull();
+    expect(a.reconnect).not.toHaveBeenCalled();
+  });
 });

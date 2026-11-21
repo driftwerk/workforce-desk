@@ -3,7 +3,10 @@ import { useChat } from "../chat/store";
 import { ago } from "../crew/files";
 import { HubError } from "../hub/client";
 import {
+  approvalLine,
+  BANKSYNC_APP,
   connectionsOf,
+  daysLeft,
   forWhom,
   names,
   SET_UP_BY_AGENT,
@@ -300,8 +303,11 @@ function ServiceCard({
           <span key={x.id}>
             {i > 0 && " · "}
             {x.name}
-            {x.status !== "connected" && (
-              <span className="state-blocked"> ({x.status === "failing" ? "not answering" : "needs signing in again"})</span>
+            {x.status !== "connected" ? (
+              <span className="state-blocked"> ({x.status === "failing" ? "not answering" : statusLine(x).toLowerCase()})</span>
+            ) : (
+              x.approvedUntil &&
+              daysLeft(x.approvedUntil) <= 7 && <span className="state-blocked"> ({approvalLine(x.approvedUntil).toLowerCase()})</span>
             )}
           </span>
         ))}
@@ -482,6 +488,8 @@ function ConnectionCard({
   const [problem, setProblem] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
+  /** Its approval is being renewed at the service: a bank's. */
+  const [renewing, setRenewing] = useState(false);
   const [renaming, setRenaming] = useState<string | null>(null);
   /** When the reconnect began: its sign-in's connection is newer. */
   const [since, setSince] = useState(0);
@@ -506,6 +514,38 @@ function ConnectionCard({
 
   const at: At = x.level === "all" ? { level: "all" } : { level: "agent", agent: x.agent ?? "" };
   const clash = renaming !== null ? nameTaken(c, renaming, x.id) : null;
+
+  if (renewing) {
+    const renew = () =>
+      void run("test", async () => {
+        const got = await api.renew(c.id, x.id);
+        if (got.status !== "connected") throw new Error(sentence(got.detail ?? `BankSync still says ${x.name} isn’t approved`));
+      }).then((done) => done && setRenewing(false));
+    return (
+      <div className="conn-card" aria-label={`Reconnect ${x.name}`}>
+        <b>Reconnect {x.name}</b>
+        <p className="small">
+          Renew {x.account ?? x.name}’s approval in BankSync: it takes you to your bank to approve it again. Then come back and check it here.
+        </p>
+        {problem && (
+          <p className="small state-blocked" role="alert">
+            {problem}
+          </p>
+        )}
+        <div className="prov-actions conn-actions">
+          <button type="button" className="btn btn-sm" onClick={() => openUrl(BANKSYNC_APP)}>
+            Open BankSync
+          </button>
+          <button type="button" className="btn btn-sm btn-signal" disabled={busy !== null} onClick={renew}>
+            {busy === "test" ? "Checking…" : "I’ve renewed it, check it"}
+          </button>
+          <button type="button" className="btn btn-sm btn-ghost" disabled={busy !== null} onClick={() => (setProblem(null), setRenewing(false))}>
+            Cancel
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   if (reconnecting) {
     return (
@@ -588,6 +628,12 @@ function ConnectionCard({
           <dt>Used by</dt>
           <dd>{losing.length ? names(losing) : "No agent yet"}</dd>
         </div>
+        {x.approvedUntil && (
+          <div>
+            <dt>Bank approval</dt>
+            <dd className={daysLeft(x.approvedUntil) <= 7 ? "state-blocked" : undefined}>{approvalLine(x.approvedUntil)}</dd>
+          </div>
+        )}
       </dl>
       {!ok && (
         <p className="small state-blocked conn-fix" role="status">
@@ -653,7 +699,12 @@ function ConnectionCard({
               Rename
             </button>
           )}
-          <button type="button" className={`btn btn-sm ${ok ? "" : "btn-signal"}`} disabled={busy !== null} onClick={() => (setSince(Date.now()), setReconnecting(true))}>
+          <button
+            type="button"
+            className={`btn btn-sm ${ok && !(x.approvedUntil && daysLeft(x.approvedUntil) <= 7) ? "" : "btn-signal"}`}
+            disabled={busy !== null}
+            onClick={() => (x.approvedUntil ? setRenewing(true) : (setSince(Date.now()), setReconnecting(true)))}
+          >
             Reconnect
           </button>
           <button type="button" className="btn btn-sm btn-ghost conn-disconnect" disabled={busy !== null} onClick={() => setConfirming(true)}>
