@@ -202,6 +202,7 @@ const HTTP: &[Route] = &[
     // Agents.
     route("POST", "/api/agents"),
     route("PATCH", "/api/agents/{}"),
+    with_query("GET", "/api/agents/{}/mentions", &["name"]),
     route("DELETE", "/api/agents/{}"),
     route("PUT", "/api/agents/{}/picture"),
     route("DELETE", "/api/agents/{}/picture"),
