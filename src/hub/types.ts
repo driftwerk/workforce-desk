@@ -76,6 +76,15 @@ export interface Background {
   since: string;
 }
 
+/** Its folder's dependencies, as Desk installs them when a plan's ticket
+ *  starts: the command it runs (and the session may run again), and why it
+ *  failed or installed none, in Desk's words. */
+export type Deps =
+  | { state: "installing"; command: string; since: string }
+  | { state: "installed"; command: string }
+  | { state: "failed"; command: string; why: string }
+  | { state: "left"; why: string };
+
 /** A session restarted with work of its own running, which the restart
  *  stopped: Desk told it, and it re-checks that work. */
 export interface Restarted {
@@ -186,6 +195,9 @@ export interface Session {
    *  for the person's attention: shown calm, "Desk has it"; absent from
    *  older hubs. */
   bossHas?: string;
+  /** Its folder's dependencies, when Desk installs them as it starts;
+   *  absent otherwise, and from older hubs. */
+  deps?: Deps | null;
   createdAt: string;
   updatedAt: string;
 }
