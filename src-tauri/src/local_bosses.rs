@@ -6,7 +6,8 @@
 //!
 //! - **What each grant says comes from this computer's hub**
 //!   ([`WANTED_PATH`], on [`crate::broker::routes`]'s native-only list,
-//!   asking for its plans' grants too, which an older Desk isn't sent): the boss's own level, switches and Sees there, and
+//!   asking for its plans' grants and machines' Ungrouped grants too, which
+//!   an older Desk isn't sent): the boss's own level, switches and Sees there, and
 //!   that machine's sessions of the group alone. Same rules, no wider
 //!   powers. Nothing here adds to it; what can't be one of those grants is
 //!   not carried ([`carried`]): a boss on another hub, folders,
@@ -70,7 +71,7 @@ use zeroize::Zeroizing;
 use crate::bosses::{self, Engine};
 
 /// Where this computer's hub says what each machine should hold.
-pub const WANTED_PATH: &str = "/api/desk/machine-grants?plans=1";
+pub const WANTED_PATH: &str = "/api/desk/machine-grants?plans=1&ungrouped=1";
 /// What is kept of the person's answers, under Desk's own folder.
 pub const KEPT_FILE: &str = "local_bosses.json";
 /// The grant shape the engines read.
@@ -104,6 +105,9 @@ pub struct WantedGrant {
     pub plan: Option<String>,
     pub grant: Value,
 }
+
+/// The sidebar's sessions in no group: the main overseer's, on machines too.
+const UNGROUPED: &str = "ungrouped";
 
 /// What a plan's grant id starts with.
 const PLAN_KEY: &str = "plan-";
@@ -153,8 +157,8 @@ const GRANT_KEYS: [&str; 10] = [
     "act",
 ];
 
-/// Whether `g` is one of the grants Desk carries: for a group (never
-/// Ungrouped), or a plan's grant marked as that plan's and no other,
+/// Whether `g` is one of the grants Desk carries: for a group (Ungrouped's
+/// too, the main overseer's), or a plan's grant marked as that plan's and no other,
 /// naming the hub's own agent `local:<agent>`, of the version the engines
 /// read, with no folders, repositories or memory search, its members
 /// sessions' ids, and no field but [`GRANT_KEYS`].
@@ -165,7 +169,6 @@ pub fn carried(g: &WantedGrant) -> bool {
     };
     let empty = |k: &str| v[k].as_array().is_some_and(Vec::is_empty);
     bosses::group_id_ok(&g.group)
-        && g.group != "ungrouped"
         && plan_of(&g.group) == g.plan.as_deref()
         && bosses::name_ok(&g.agent)
         && v["boss"].as_str() == Some(format!("local:{}", g.agent).as_str())
@@ -484,6 +487,7 @@ fn at_most(mut grant: Value, said: &str) -> Value {
 /// sessions by machine.
 #[derive(Debug, Clone, PartialEq)]
 struct Asked {
+    group: String,
     agent: String,
     agent_name: String,
     group_name: String,
@@ -500,6 +504,7 @@ fn by_group(wanted: &Wanted) -> BTreeMap<String, Asked> {
             // What the person is asked about is what will be written.
             let grant = capped(g.grant.clone());
             let a = out.entry(g.group.clone()).or_insert_with(|| Asked {
+                group: g.group.clone(),
                 agent: g.agent.clone(),
                 agent_name: g.agent_name.clone(),
                 group_name: grant["name"].as_str().unwrap_or(&g.group).to_string(),
@@ -575,9 +580,12 @@ fn question(a: &Asked, names: &BTreeMap<String, String>) -> (String, String, Str
         .collect();
     let wheres: Vec<&str> = wheres.iter().map(String::as_str).collect();
     let sessions = if n == 1 { "session" } else { "sessions" };
+    let oversees = match a.group.as_str() {
+        UNGROUPED => "your ungrouped sessions".to_string(),
+        _ => bosses::quoted(&a.group_name),
+    };
     let body = format!(
-        "{boss} oversees {} on this computer. Let {boss} run its {n} {sessions} on {} too, as {boss} runs its sessions here: {}, seeing everything, terminals included?\n\n{boss}'s calls reach them through Desk while this computer is awake and Desk is open, and each machine decides each one at no more than {boss}'s settings here. Stop overseeing ends it there too.",
-        bosses::quoted(&a.group_name),
+        "{boss} oversees {oversees} on this computer. Let {boss} run its {n} {sessions} on {} too, as {boss} runs its sessions here: {}, seeing everything, terminals included?\n\n{boss}'s calls reach them through Desk while this computer is awake and Desk is open, and each machine decides each one at no more than {boss}'s settings here. Stop overseeing ends it there too.",
         bosses::and(&wheres),
         how_words(a),
     );

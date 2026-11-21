@@ -1,3 +1,4 @@
+import { renderHook } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useChat } from "../chat/store";
 import { announce, useDesk } from "../hub/store";
@@ -5,7 +6,9 @@ import type { ChargeView, DeskEvent, LineMessage } from "../hub/types";
 import { useLine } from "../line/store";
 import { DESK, S1, msg } from "../line/testing";
 import { badgeOf, called, chargeChoices } from "./charge";
-import { useCharges } from "./chargeStore";
+import { useBossOf, useCharges } from "./chargeStore";
+import { useHubLayout } from "../groups/store";
+import { useOverview } from "../overview/store";
 import { lined } from "../line/testing";
 
 const charge = (more: Partial<ChargeView> = {}): ChargeView => ({
@@ -153,5 +156,34 @@ describe("a session's thread, read", () => {
     await loading;
     expect(lineThread).toHaveBeenCalledTimes(2);
     expect(useLine.getState().threads.s1?.[0]?.delivery).toBe("delivered");
+  });
+});
+
+describe("who a machine's session is handed to", () => {
+  afterEach(() => {
+    useHubLayout.setState({ layout: null });
+    useOverview.setState({ manager: null });
+  });
+
+  it("is this computer's boss of its group, as the machine's grant names it", () => {
+    useChat.setState({
+      roster: [
+        { hubId: "local", id: "desk", name: "Desk", model: null, provider: null, isDefault: true },
+        { hubId: "local", id: "sarah", name: "Sarah", model: null, provider: null, isDefault: false },
+      ],
+    });
+    useOverview.setState({ manager: { agentId: "desk", level: "act", bosses: [{ agentId: "sarah", name: "Sarah", group: "acme", level: "suggest" }] } });
+    useHubLayout.setState({
+      layout: { groups: [{ id: "acme", name: "Acme", collapsed: false, items: ["session:devbox/s2"] }], ungrouped: { collapsed: false, items: ["session:devbox/s1"] } },
+    });
+    const of = (id: string) => renderHook(() => useBossOf({ id, machine: "devbox" })).result.current;
+    expect(of("s1")).toEqual({ id: "home/desk", name: "Desk", level: "act", served: true });
+    expect(of("s2")).toEqual({ id: "home/sarah", name: "Sarah", level: "suggest", served: true });
+    expect(renderHook(() => useBossOf({ id: "s1" })).result.current).toEqual({ id: "desk", name: "Desk", level: "act" });
+  });
+
+  it("is no one while this computer has no boss for its group", () => {
+    useOverview.setState({ manager: { agentId: null, level: null } });
+    expect(renderHook(() => useBossOf({ id: "s1", machine: "devbox" })).result.current).toBeNull();
   });
 });

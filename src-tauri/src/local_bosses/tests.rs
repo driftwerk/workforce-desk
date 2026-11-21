@@ -260,6 +260,32 @@ impl Engine for &Machine {
 }
 
 #[tokio::test]
+async fn the_main_overseer_is_asked_once_for_a_machine_s_ungrouped_sessions() {
+    let f = files();
+    let devbox = Machine::new("devbox");
+    let mut g = acme(&[S1], "act");
+    g.group = "ungrouped".into();
+    g.agent = "desk".into();
+    g.agent_name = "Desk".into();
+    g.grant["boss"] = json!("local:desk");
+    g.grant["name"] = json!("Ungrouped");
+    let w = wanted(&[("devbox", vec![g.clone()], &[S1])]);
+    let (title, body, _) = say(&f, &w, true).await.expect("asked");
+    assert!(title.contains("“Desk”"), "{title}");
+    assert!(
+        body.starts_with("“Desk” oversees your ungrouped sessions on this computer"),
+        "{body}"
+    );
+    assert!(body.contains("1 session on “devbox”"), "{body}");
+    let s = sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    assert_eq!(s.failed, vec![]);
+    assert_eq!(
+        content(&devbox.grant("ungrouped").unwrap()),
+        content(&g.grant)
+    );
+}
+
+#[tokio::test]
 async fn nothing_is_written_until_the_person_says_yes_and_then_exactly_what_the_hub_says() {
     let f = files();
     let devbox = Machine::new("devbox");
@@ -770,8 +796,12 @@ fn only_a_grant_for_a_boss_here_with_nothing_wider_is_carried() {
     assert!(!bad(|g| g.grant["grantVersion"] = json!(2)));
     assert!(!bad(|g| g.grant["level"] = json!("root")));
     assert!(!bad(|g| g.grant["members"] = json!(["../x"])));
-    assert!(!bad(|g| g.group = "ungrouped".into()));
     assert!(!bad(|g| g.group = "a/b".into()));
+    let mut ungrouped = acme(&[S1], "act");
+    ungrouped.group = "ungrouped".into();
+    assert!(carried(&ungrouped), "Ungrouped's, the main overseer's");
+    ungrouped.plan = Some(PLAN.into());
+    assert!(!carried(&ungrouped), "never marked as a plan's");
 }
 
 const PLAN: &str = "44444444-4444-4444-8444-444444444444";
