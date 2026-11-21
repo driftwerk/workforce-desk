@@ -22,7 +22,7 @@ In order:
   7. The notes: the pull requests merged since the last nightly (their squash commits'
      subjects) and the hub commits brought in.
 
-Writes `build`, `version`, `ref`, `hub_ref`, `reason` and `attention` to $GITHUB_OUTPUT, the
+Writes `build`, `version`, `ref`, `hub_ref`, `reason`, `attention` and `again` to $GITHUB_OUTPUT, the
 notes to notes/notes.md, and what it decided to the job summary. A dry run commits and
 pushes nothing: it builds the commit as it is, with the hub it would bump to (`hub_ref`).
 """
