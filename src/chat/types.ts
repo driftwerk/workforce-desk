@@ -1,5 +1,6 @@
 import type { DeskExtras, Step } from "../hub/types";
 import type { Picture } from "../pictures/pictures";
+import type { OnItsOwnKind } from "../hub/client";
 
 /** A hub Desk talks to: the local one, or a remote hub paired as a device. */
 export interface HubAccount {
@@ -415,6 +416,9 @@ export interface PromptOptions {
   allow_session?: boolean;
   /** "Always allow in …": the folder as you read it, or the connector. */
   allow_in_folder?: string | null;
+  /** Set when that answer lets the agent do a kind of action on its own
+   *  there: `allow_in_folder` is then the folder, host or site. */
+  allow_scope?: OnItsOwnKind | null;
   /** On a call on this computer: what it would do. */
   facts?: ComputerFacts | null;
 }

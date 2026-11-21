@@ -1,6 +1,7 @@
 import { parse } from "smol-toml";
 import { describe, expect, it } from "vitest";
-import { addFolder, askingOf, grantText, levelLabel, levelOf, outcomeOf, withLevel, withWorksIn, worksInOf } from "./access";
+import { addFolder, askingOf, choicesFor, grantText, levelFor, levelLabel, levelOf, outcomeOf, overridesFor, siteText, typedOverride, withLevel, withWorksIn, worksInOf } from "./access";
+import type { OnItsOwnRow } from "../hub/client";
 import type { ComputerActivityRow } from "../hub/client";
 
 describe("an agent's level on this computer", () => {
@@ -45,6 +46,7 @@ describe("what's shown of grants and activity", () => {
   it("chips each outcome in plain words", () => {
     expect(outcomeOf(row("ran"))).toEqual({ text: "Ran", tone: "done" });
     expect(outcomeOf(row("ran", "grant"))).toEqual({ text: "Always allowed", tone: "done" });
+    expect(outcomeOf(row("ran", "on_its_own"))).toEqual({ text: "On its own", tone: "done" });
     expect(outcomeOf(row("allowed", "person")).text).toBe("You allowed");
     expect(outcomeOf(row("declined", "person")).text).toBe("Declined");
     expect(outcomeOf(row("not_answered", "person")).text).toBe("Not answered");
@@ -82,5 +84,35 @@ describe("the folders an agent works in", () => {
     for (const wide of ["/", "/Users", "/Users/me", "/Users/me/"]) {
       expect(addFolder([], wide, "/Users/me").problem).toMatch(/inside your home/);
     }
+  });
+});
+
+describe("what an agent does on its own", () => {
+  const rows: OnItsOwnRow[] = [
+    { kind: "commands", scope: { kind: "whole" }, level: "in_folders", created_at: "" },
+    { kind: "network", scope: { kind: "host", value: "devbox" }, level: "anywhere", created_at: "" },
+    { kind: "network", scope: { kind: "host", value: "10.0.1.20" }, level: "anywhere", created_at: "" },
+  ];
+
+  it("reads each kind's level and overrides", () => {
+    expect(levelFor(rows, "commands")).toBe("in_folders");
+    expect(levelFor(rows, "network")).toBeNull();
+    expect(overridesFor(rows, "network")).toEqual(["devbox", "10.0.1.20"]);
+    expect(overridesFor(rows, "commands")).toEqual([]);
+    expect(choicesFor("host").map((c) => c.id)).toEqual([null, "anywhere"]);
+    expect(choicesFor("folder").map((c) => c.id)).toEqual([null, "in_folders", "anywhere"]);
+  });
+
+  it("keeps a typed host or site as the hub does, and says why it can't", () => {
+    expect(typedOverride("host", " dev@DevBox ")).toEqual({ value: "devbox", problem: null });
+    expect(typedOverride("host", "::1").value).toBeNull();
+    expect(typedOverride("host", "devbox:22").problem).toBe("devbox:22 isn’t a host name or address.");
+    expect(typedOverride("host", "a b").problem).toBe("a b isn’t a host name or address.");
+    expect(typedOverride("host", "  ")).toEqual({ value: null, problem: null });
+    expect(typedOverride("site", "GitHub.com/acme/web")).toEqual({ value: "https://github.com", problem: null });
+    expect(typedOverride("site", "http://localhost:3000/x").value).toBe("http://localhost:3000");
+    expect(typedOverride("site", "ftp://x.example").problem).toBe("ftp://x.example isn’t a website.");
+    expect(siteText("https://github.com")).toBe("github.com");
+    expect(siteText("http://localhost:3000")).toBe("http://localhost:3000");
   });
 });

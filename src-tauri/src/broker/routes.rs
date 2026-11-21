@@ -224,9 +224,13 @@ const HTTP: &[Route] = &[
     with_query(
         "GET",
         "/api/desk/computer/activity",
-        &["agent", "kind", "before"],
+        &["agent", "kind", "decided_by", "before"],
     ),
     route("GET", "/api/desk/computer/disk-access"),
+    // What an agent does on its own here.
+    with_query("GET", "/api/desk/computer/on-its-own", &["agent"]),
+    route("PUT", "/api/desk/computer/on-its-own"),
+    route("POST", "/api/desk/computer/on-its-own/ask-again"),
     // The providers agents think with.
     route("GET", "/api/desk/providers"),
     route("POST", "/api/desk/providers/{}/connect"),

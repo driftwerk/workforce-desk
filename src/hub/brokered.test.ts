@@ -93,7 +93,15 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   computerGrants: (h) => Promise.all([h.computerGrants(), h.computerGrants("allan")]),
   revokeGrant: (h) => h.revokeGrant("g 1"),
   forgetSession: (h) => h.forgetSession("desk:allan"),
-  computerActivity: (h) => Promise.all([h.computerActivity(), h.computerActivity({ agent: "allan", kind: "exec", before: "1~a" })]),
+  computerActivity: (h) =>
+    Promise.all([
+      h.computerActivity(),
+      h.computerActivity({ agent: "allan", kind: "exec", before: "1~a" }),
+      h.computerActivity({ agent: "allan", decided_by: "on_its_own" }),
+    ]),
+  onItsOwn: (h) => h.onItsOwn("allan"),
+  setOnItsOwn: (h) => h.setOnItsOwn("allan", "network", { kind: "host", value: "devbox" }, "anywhere"),
+  askAgain: (h) => h.askAgain("allan"),
   diskAccess: (h) => h.diskAccess(),
   vaultPaths: (h) => h.vaultPaths(),
   saveVault: (h) => h.saveVault("speech/openai/api_key", "k"),
