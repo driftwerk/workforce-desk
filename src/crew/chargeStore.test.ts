@@ -6,7 +6,7 @@ import type { ChargeView, DeskEvent, LineMessage } from "../hub/types";
 import { useLine } from "../line/store";
 import { DESK, S1, msg } from "../line/testing";
 import { badgeOf, called, chargeChoices } from "./charge";
-import { useBossOf, useCharges } from "./chargeStore";
+import { useBossOf, useCharges, useHomeGrants } from "./chargeStore";
 import { useHubLayout } from "../groups/store";
 import { useOverview } from "../overview/store";
 import { lined } from "../line/testing";
@@ -160,9 +160,13 @@ describe("a session's thread, read", () => {
 });
 
 describe("who a machine's session is handed to", () => {
+  beforeEach(() => {
+    useHomeGrants.setState({ byMachine: { devbox: { ungrouped: "desk", acme: "sarah" } }, readAt: Date.now() });
+  });
   afterEach(() => {
     useHubLayout.setState({ layout: null });
     useOverview.setState({ manager: null });
+    useHomeGrants.setState({ byMachine: {}, readAt: 0 });
   });
 
   it("is this computer's boss of its group, as the machine's grant names it", () => {
@@ -180,6 +184,20 @@ describe("who a machine's session is handed to", () => {
     expect(of("s1")).toEqual({ id: "home/desk", name: "Desk", level: "act", served: true });
     expect(of("s2")).toEqual({ id: "home/sarah", name: "Sarah", level: "suggest", served: true });
     expect(renderHook(() => useBossOf({ id: "s1" })).result.current).toEqual({ id: "desk", name: "Desk", level: "act" });
+  });
+
+  it("is no one while the machine holds no grant for that boss of its group", () => {
+    useChat.setState({ roster: [] });
+    useOverview.setState({ manager: { agentId: "desk", level: "act", bosses: [{ agentId: "sarah", name: "Sarah", group: "acme", level: "suggest" }] } });
+    useHubLayout.setState({
+      layout: { groups: [{ id: "acme", name: "Acme", collapsed: false, items: ["session:devbox/s2", "session:atlas/s3"] }], ungrouped: { collapsed: false, items: [] } },
+    });
+    const of = (id: string, machine: string) => renderHook(() => useBossOf({ id, machine })).result.current;
+    // Named by its group's boss's own name while the roster hasn't it.
+    expect(of("s2", "devbox")).toEqual({ id: "home/sarah", name: "Sarah", level: "suggest", served: true });
+    expect(of("s3", "atlas"), "atlas holds no grant for it").toBeNull();
+    useHomeGrants.setState({ byMachine: { devbox: { acme: "tom" } } });
+    expect(of("s2", "devbox"), "held for another boss").toBeNull();
   });
 
   it("is no one while this computer has no boss for its group", () => {

@@ -283,6 +283,11 @@ async fn the_main_overseer_is_asked_once_for_a_machine_s_ungrouped_sessions() {
         content(&devbox.grant("ungrouped").unwrap()),
         content(&g.grant)
     );
+    // What the page hands devbox's ungrouped sessions to.
+    assert_eq!(
+        s.carried["devbox"],
+        BTreeMap::from([("ungrouped".to_string(), "desk".to_string())])
+    );
 }
 
 #[tokio::test]
@@ -442,6 +447,10 @@ async fn a_boss_taken_off_has_its_grant_deleted_and_a_machine_s_stop_is_never_li
     assert!(
         s.stopped_there
             .contains(&("devbox".to_string(), "acme".to_string()))
+    );
+    assert!(
+        s.carried["devbox"].is_empty(),
+        "stopped there: no one's to hand to"
     );
     assert!(
         devbox
@@ -756,17 +765,21 @@ async fn narrowing_reaches_every_machine_before_anything_widens() {
 fn a_meet_is_no_more_than_either_side() {
     let held = json!({"grantVersion": 1, "name": "Acme", "boss": "local:sarah", "level": "full",
         "sees": "replies", "recall": false, "folders": [], "repos": [], "members": [S1, S2],
-        "act": {"nudge": true, "interrupt": false, "parallel": 6, "budget_usd_per_day": 25.0}});
+        "act": {"nudge": true, "interrupt": false, "parallel": 6, "budget_usd_per_day": 25.0,
+                "hold_minutes": 2, "answer_after_minutes": 30}});
     let wanted = json!({"grantVersion": 1, "name": "Acme", "boss": "local:sarah", "level": "act",
         "sees": "everything", "recall": false, "folders": [], "repos": [], "members": [S2, S3],
-        "act": {"nudge": true, "interrupt": true, "parallel": 4}});
+        "act": {"nudge": true, "interrupt": true, "parallel": 4,
+                "hold_minutes": 5, "answer_after_minutes": 10}});
     let m = meet(&held, &wanted);
     assert_eq!(m["level"], "act");
     assert_eq!(m["sees"], "replies");
     assert_eq!(m["members"], json!([S2]));
+    // The person's input holds a session the longer of the two.
     assert_eq!(
         m["act"],
-        json!({"nudge": true, "interrupt": false, "parallel": 4})
+        json!({"nudge": true, "interrupt": false, "parallel": 4,
+               "hold_minutes": 5, "answer_after_minutes": 30})
     );
     assert_eq!(m["boss"], "local:sarah");
     let mut other = wanted.clone();

@@ -1387,6 +1387,7 @@ pub fn run() {
             bosses::boss_retry,
             bosses::boss_unpause_engine,
             bosses::boss_layout_changed,
+            local_bosses::local_boss_grants,
             knows_machines::knows_machines,
             hub_io::hub_socket_open,
             hub_io::pair_request,

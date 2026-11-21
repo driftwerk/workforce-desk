@@ -439,6 +439,7 @@ fn session_of(v: &Value) -> Option<Value> {
         "createdAt": text("createdAt"),
         "lastReply": reply,
         "bossHas": text("bossHas"),
+        "bossAnswers": v.get("bossAnswers").filter(|b| b.is_boolean()).cloned().unwrap_or(Value::Null),
     });
     if let Some(e) = v.get("exited").filter(|e| e.is_object()) {
         let field = |k: &str| e.get(k).cloned().unwrap_or(Value::Null);
@@ -1885,7 +1886,7 @@ mod tests {
             json!({"status": "ok", "body": {
                 "id": SESSION, "name": "VEL-3", "displayName": null,
                 "cwd": "/home/dev/vellev", "state": "starting", "lastReply": null,
-                "createdAt": "2026-11-14T08:00:00Z", "bossHas": null,
+                "createdAt": "2026-11-14T08:00:00Z", "bossHas": null, "bossAnswers": null,
             }})
         );
         let sent = fake.desk_sent.lock().unwrap().clone();
@@ -1912,7 +1913,7 @@ mod tests {
     async fn a_plans_start_under_its_grant_says_that_grant_and_the_calls_boss_alone() {
         let plan = "plan-6f9619ff-8b86-4d01-b42d-00cf4fc964ff";
         let made = json!({"id": SESSION, "name": "VEL-3", "cwd": "/x", "state": "starting",
-                          "bossHas": "desk"});
+                          "bossHas": "desk", "bossAnswers": true});
         let (fake, mut rx) = with_desk(
             vec![Does::Says(200, made.clone()), Does::Says(200, made)],
             None,
@@ -1927,6 +1928,10 @@ mod tests {
         let stop = start(&fake.polled(vec![planned]));
         let (_, answer) = next(&mut rx).await;
         assert_eq!(answer["body"]["bossHas"], "desk");
+        assert_eq!(
+            answer["body"]["bossAnswers"], true,
+            "its answerer's word comes back"
+        );
         let _ = stop.send(true);
         let stop = start(&fake.polled(vec![odd]));
         next(&mut rx).await;

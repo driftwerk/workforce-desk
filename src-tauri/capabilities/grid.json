@@ -113,6 +113,7 @@
     "allow-voice-audio-level",
     "allow-voice-audio-meter",
     "allow-voice-audio-test",
-    "allow-boss-status"
+    "allow-boss-status",
+    "allow-local-boss-grants"
   ]
 }

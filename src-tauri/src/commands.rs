@@ -50,6 +50,7 @@ pub const COMMANDS: &[&str] = &[
     "key_copies_kept",
     "boss_offer",
     "boss_status",
+    "local_boss_grants",
     "boss_link",
     "boss_set",
     "boss_pause",
