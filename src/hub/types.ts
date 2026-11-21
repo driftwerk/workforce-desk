@@ -995,6 +995,16 @@ export interface Handled {
   personFirst: number;
 }
 
+/** A line that still calls an agent by a name it had: the person's words,
+ *  which a rename leaves for them to change. */
+export interface NameMention {
+  /** The agent whose text it is, by id. */
+  agent: string;
+  /** Where in it: a file ("SOUL.md"), "its instructions", or a job. */
+  place: string;
+  line: string;
+}
+
 /** A sidebar group's boss: an agent of this computer's hub that oversees
  *  only that group. */
 export interface GroupBoss {

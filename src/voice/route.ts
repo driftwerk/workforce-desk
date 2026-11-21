@@ -3,13 +3,15 @@ import { finishedSpeech } from "../chat/conversation";
 import { agentKey, FEATURES, type Agent, type ChatMessage } from "../chat/types";
 import type { VoiceSpec } from "../platform";
 import type { RosterMember } from "./api";
+import { formerNamesOf } from "../rooms/mentions";
 import { speakable } from "./speakable";
 
 /** The roster names to wake on, each once. */
 export const wakeNames = (roster: Agent[]): string[] => [...new Set(roster.map((a) => a.name))];
 
 /** Who an utterance is for: the agent it named (local first when two hubs
- *  share a name), else the one already being talked to, else the open DM. */
+ *  share a name; a name one had before while no one has it now), else the
+ *  one already being talked to, else the open DM. */
 export const resolveAgent = (
   named: string | null,
   roster: Agent[],
@@ -17,7 +19,8 @@ export const resolveAgent = (
   activeKey: string | null,
 ): Agent | null => {
   if (named) {
-    const matches = roster.filter((a) => a.name === named);
+    const now = roster.filter((a) => a.name === named);
+    const matches = now.length ? now : roster.filter((a) => formerNamesOf(a).includes(named));
     return matches.find((a) => a.hubId === "local") ?? matches.find((a) => current && agentKey(a) === agentKey(current)) ?? matches[0] ?? null;
   }
   return current ?? roster.find((a) => agentKey(a) === activeKey) ?? null;

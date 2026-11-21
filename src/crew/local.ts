@@ -1,4 +1,5 @@
 import { HubError, type DeskHub } from "../hub/client";
+import type { NameMention } from "../hub/types";
 import { withAnotherProvider, withBackground, withBrain, withConversation, withDeskSettings, type Brain, type Work } from "./brain";
 import { withVoice } from "./voice";
 import { withDeskWelcome } from "./welcome";
@@ -29,6 +30,15 @@ const asRead = (name: string) => name.normalize("NFKC").trim().replace(/\s+/g, "
 export const nameTaken = (name: string, roster: readonly { hubId: string; id: string; name?: string }[], hubId: string, self?: string): boolean => {
   const said = asRead(name);
   return !!said && roster.some((a) => a.hubId === hubId && a.id !== self && asRead(a.name ?? "") === said);
+};
+
+/** Where a mention of an old name is, as the person reads it: "SOUL.md",
+ *  "Their instructions", "Job “Nightly”" for the renamed agent's own;
+ *  "Scout’s SOUL.md", "Scout’s instructions" for another's. */
+export const mentionPlace = (m: NameMention, self: string, nameOf: (id: string) => string): string => {
+  const own = m.agent === self;
+  const place = m.place === "its instructions" ? (own ? "Their instructions" : "instructions") : own ? m.place.replace(/^job /, "Job ") : m.place;
+  return own ? place : `${nameOf(m.agent)}’s ${place}`;
 };
 
 /** The instructions an agent starts with: its name and the person's own

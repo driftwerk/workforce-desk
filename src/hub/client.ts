@@ -30,6 +30,7 @@ import type {
   BreakerRules,
   BreakerView,
   LedgerPage,
+  NameMention,
   NewBudget,
   OnExceed,
   DeskEvent,
@@ -626,6 +627,10 @@ export class DeskHub {
   /** A new name and, for agents Desk made, the instructions that say it. */
   renameAgent = (id: string, name: string, systemPrompt?: string): Promise<unknown> =>
     this.call("PATCH", `/api/agents/${encodeURIComponent(id)}`, systemPrompt === undefined ? { name } : { name, system_prompt: systemPrompt });
+  /** Where this hub's agents still call agent `id` by `name`, a name it had:
+   *  lines in their own files, instructions and jobs that a rename leaves. */
+  oldNameMentions = async (id: string, name: string): Promise<NameMention[]> =>
+    (await this.call<{ mentions: NameMention[] }>("GET", `/api/agents/${encodeURIComponent(id)}/mentions?name=${encodeURIComponent(name)}`)).mentions;
   /** Chooses a picture for an agent here (null: none); the one it shows after. */
   setAgentPicture = (id: string, image: Blob | null): Promise<Picture | null> => pictureVia(this.t, agentPicturePath(id), image);
   /** What agents on this computer can think with, connected or not. */

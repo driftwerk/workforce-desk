@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Agent } from "../chat/types";
+import { setFormerly } from "../rooms/mentions";
 import { parseAsk } from "./QuickAsk";
 
 const roster: Agent[] = [
@@ -19,5 +20,15 @@ describe("parseAsk", () => {
     expect(parseAsk("@atl hi", roster).agent?.id).toBe("atlas");
     expect(parseAsk("@a hi", roster).agent).toBeNull();
     expect(parseAsk("@a hi", roster).matches).toHaveLength(2);
+  });
+
+  it("finds an agent by a name it had before, unless someone has it now", () => {
+    setFormerly((a) => (a.id === "lara" ? ["desk", "allan"] : []));
+    try {
+      expect(parseAsk("@desk hi", roster).agent?.id).toBe("lara");
+      expect(parseAsk("@allan hi", roster).agent?.id).toBe("allan");
+    } finally {
+      setFormerly(() => []);
+    }
   });
 });

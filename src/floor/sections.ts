@@ -14,6 +14,7 @@
 //
 // Pure: the hook and the drawing are in FloorSection.tsx.
 
+import type { Agent } from "../chat/types";
 import { groupOf, UNGROUPED, type ItemKey, type Layout } from "../groups/model";
 import type { ActivityEvent, BossView, Engine, FloorView, PlanProgress, Who } from "../hub/types";
 import type { FloorNeed, FloorWork, Merged, Tagged } from "./merge";
@@ -38,6 +39,16 @@ export const NO_OVERSIGHT: Oversight = { bosses: [], sealed: [], plans: [] };
 
 export const oversightOf = (view: FloorView | null | undefined): Oversight =>
   view ? { bosses: view.bosses ?? [], sealed: view.sealed ?? [], plans: view.plans ?? [] } : NO_OVERSIGHT;
+
+/** `o` with each boss called by its name in the roster now, which a rename
+ *  changes before the hub's floor is read again. */
+export const namedBosses = (o: Oversight, roster: readonly Agent[], localHub: string | null): Oversight => ({
+  ...o,
+  bosses: o.bosses.map((b) => {
+    const name = roster.find((a) => a.hubId === localHub && a.id === b.agent)?.name;
+    return name && name !== b.name ? { ...b, name } : b;
+  }),
+});
 
 export type SectionKind = "group" | "main" | "sealed";
 

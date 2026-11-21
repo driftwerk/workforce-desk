@@ -13,7 +13,7 @@ import { useOverview } from "../overview/store";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { AgentMark } from "../ui/Mark";
 import { plainError } from "../ui/plainError";
-import { bossOfGroup, isSealed } from "./bosses";
+import { bossNameOf, bossOfGroup, isSealed } from "./bosses";
 import { UNGROUPED } from "./model";
 import { afterMove, FIRST_CHOICES, hubGroup, itemOf, localAccount, scopeBoss, scopeOf, useMove, type MoveAsk } from "./move";
 import { useLayout } from "./store";
@@ -119,17 +119,10 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
   const [bossCanRun, setBossCanRun] = useState(() => !!ask.preview?.effects.some((e) => e.kind === "charge_to"));
 
   const isLocal = (hubId: string) => !!hubs.find((h) => h.id === hubId)?.local;
+  const localHub = hubs.find((h) => h.local)?.id;
   const mainBoss = manager?.agentId ?? null;
   /** A boss by its agent id, by name: never the id. */
-  const bossName = (id: string | null | undefined): string => {
-    const who = id ?? mainBoss;
-    if (!who) return "Desk";
-    return (
-      roster.find((a) => a.id === who && isLocal(a.hubId))?.name ??
-      manager?.bosses?.find((b) => b.agentId === who)?.name ??
-      (who === "desk" ? "Desk" : who === mainBoss ? "the main boss" : "its boss")
-    );
-  };
+  const bossName = (id: string | null | undefined): string => bossNameOf(roster, localHub, manager, id);
   const groupName = (id: string | null | undefined): string =>
     !id || id === UNGROUPED ? "Ungrouped" : (layout.groups.find((g) => g.id === id)?.name ?? "another group");
   /** Who runs what is in `group`, as its option says. */

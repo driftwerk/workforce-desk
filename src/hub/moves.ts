@@ -51,9 +51,10 @@ export interface MoveEffect {
     | "tell"
     | "refused";
   text: string;
-  /** `handover`: the boss (agent id) it is from (`desk` for Desk's facts)
-   *  and to; `charge_to`, `replaces`, `asks_to_replace`: the boss. */
-  from?: string;
+  /** `handover`: the boss (agent id) it is from (null when no boss oversaw
+   *  it and Desk writes it from the facts) and to; `charge_to`, `replaces`,
+   *  `asks_to_replace`: the boss. */
+  from?: string | null;
   to?: string;
   boss?: string;
   synced?: boolean;

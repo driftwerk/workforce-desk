@@ -13,9 +13,10 @@ import { useAgentBrain, useAgentConfigs } from "./agentBrain";
 import { backgroundOf, conversationOf, effortShort, isDefaultEffort, isDefaultModel, modelName, modelOf, SAME_AS_CHAT, type Work } from "./brain";
 import { Failover } from "./Failover";
 import { AGENT_FILES, ago, useDrafts } from "./files";
-import { NAME_TAKEN, nameTaken, purposeOf, renameLocalAgent, setAgentBackground, setAgentBrain, setAgentConversation, setAgentPurpose, setAgentVoice } from "./local";
+import { mentionPlace, NAME_TAKEN, nameTaken, purposeOf, renameLocalAgent, setAgentBackground, setAgentBrain, setAgentConversation, setAgentPurpose, setAgentVoice } from "./local";
 import { tickFloor, useFloor } from "../floor/store";
-import type { Choice, Need } from "../hub/types";
+import type { Choice, NameMention, Need } from "../hub/types";
+import { useOverview } from "../overview/store";
 import { useUi } from "../shell/ui";
 import { PictureField } from "../pictures/PictureField";
 import { useAgentImage } from "../pictures/who";
@@ -125,12 +126,16 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
   const [name, setName] = useState(agent.name);
   const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
   const [problem, setProblem] = useState<string | null>(null);
+  // After a rename: where the person's own words still say the old name.
+  const [stillSaid, setStillSaid] = useState<{ was: string; mentions: NameMention[] } | null>(null);
+  const loadManager = useOverview((s) => s.loadManager);
 
   useEffect(() => {
     setSavedName(agent.name);
     setName(agent.name);
     setState("idle");
     setProblem(null);
+    setStillSaid(null);
     // A new agent, not a new name: the roster renames during a save.
   }, [agent.hubId, agent.id]);
 
@@ -164,6 +169,7 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
     const purposeChanged = saved !== null && purpose.trim() !== saved;
     setState("saving");
     setProblem(null);
+    setStillSaid(null);
     // A new name or new instructions build the agent again on its hub: until
     // it serves, the roster keeps it, so it stays where it is shown.
     settle(key, true);
@@ -184,6 +190,11 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
         }
         setSavedName(nextName);
         setName(nextName);
+        void loadManager();
+        desk.oldNameMentions(agent.id, was).then(
+          (mentions) => setStillSaid(mentions.length ? { was, mentions } : null),
+          () => setStillSaid(null),
+        );
       } else if (purposeChanged) {
         try {
           served = await setAgentPurpose(desk, agent.id, agent.name, purpose, listed);
@@ -293,6 +304,20 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
             <span className="small state-done">{starting ? `Saved into their files. ${savedName} is still starting: they’ll be back in a moment.` : "Saved into their files."}</span>
           )}
           {problem && <span className="small state-blocked">{problem}</span>}
+        </div>
+      )}
+      {stillSaid && (
+        <div className="field-stack" role="note" aria-label={`Still says ${stillSaid.was}`}>
+          <span className="field-label">These still say “{stillSaid.was}”, in words Desk didn’t write: change them if you want.</span>
+          <div className="think-rows">
+            {stillSaid.mentions.map((m, i) => (
+              <div key={`${m.agent}-${m.place}-${i}`} className="think-row">
+                <span>{mentionPlace(m, agent.id, (id) => roster.find((a) => a.hubId === agent.hubId && a.id === id)?.name ?? "Another agent")}</span>
+                <span>{m.line}</span>
+                <span />
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </section>

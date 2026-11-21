@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { useDesk } from "../hub/store";
+import { formerNamesOf } from "../rooms/mentions";
 import { AgentMark } from "../ui/Mark";
 
 /** `@name message` — resolves the name against everyone on every hub and
@@ -10,8 +11,10 @@ export const parseAsk = (input: string, roster: Agent[]): { agent: Agent | null;
   const m = /^@?(\S*)\s*([\s\S]*)$/.exec(input.trim());
   const name = (m?.[1] ?? "").toLowerCase();
   const text = m?.[2] ?? "";
-  const matches = roster.filter((a) => a.name.toLowerCase().startsWith(name) || a.id.toLowerCase().startsWith(name));
-  const exact = roster.filter((a) => a.name.toLowerCase() === name || a.id.toLowerCase() === name);
+  const now = roster.filter((a) => a.name.toLowerCase().startsWith(name) || a.id.toLowerCase().startsWith(name));
+  // A name an agent had before is theirs while no one has it now.
+  const matches = now.length ? now : roster.filter((a) => formerNamesOf(a).some((was) => was.toLowerCase() === name));
+  const exact = matches.filter((a) => a.name.toLowerCase() === name || a.id.toLowerCase() === name);
   return { agent: exact.length === 1 ? exact[0]! : matches.length === 1 ? matches[0]! : null, text, matches };
 };
 

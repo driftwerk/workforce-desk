@@ -22,7 +22,7 @@ import { continuedFrom, fromShort } from "../handoff/words";
 import { below, MoreIcon } from "../groups/rows";
 import { Menu } from "../ui/Menu";
 import type { BossView, Handled, Manager, PlanProgress } from "../hub/types";
-import { localKey, openLocalDm } from "../overview/people";
+import { localKey, openLocalDm, useLocalAgent } from "../overview/people";
 import { useSessionName } from "../groups/names";
 import { Mark } from "../ui/Mark";
 import { openTarget } from "../shell/navigate";
@@ -39,6 +39,7 @@ import { useFloor, useMerged } from "./store";
 import {
   doneIn,
   floorSections,
+  namedBosses,
   oversightOf,
   placer,
   sectionDomId,
@@ -59,10 +60,14 @@ import { useSubHeading } from "./FloorShell";
 export const useSections = (desk: readonly DeskItem[] = NO_DESK): FloorLayout => {
   const merged = useMerged();
   const localId = useChat((s) => s.hubs.find((h) => h.local)?.id ?? null);
+  const roster = useChat((s) => s.roster);
   const local = useFloor((s) => (localId ? s.hubs[localId]?.floor : null));
   const layout = useLayout();
   const day = useFloor((s) => s.day);
-  return useMemo(() => floorSections(merged, oversightOf(local), layout, { day, desk, localHub: localId }), [merged, local, layout, day, desk, localId]);
+  return useMemo(
+    () => floorSections(merged, namedBosses(oversightOf(local), roster, localId), layout, { day, desk, localHub: localId }),
+    [merged, local, roster, layout, day, desk, localId],
+  );
 };
 
 const NO_DESK: readonly DeskItem[] = [];
@@ -306,7 +311,8 @@ const DESK_STATE: Record<DeskItem["look"], { text: string; tone: string }> = {
  *  all the same, saying so when it is blocked with nothing asked. */
 export function DeskTile({ item, chip }: { item: DeskItem; chip: { id: string; name: string } | null }) {
   const named = useSessionName(item.who.kind === "session" ? item.who.id : null, item.name);
-  const name = item.who.kind === "session" ? named : item.name;
+  const agent = useLocalAgent(item.who.kind === "agent" ? item.who.id : null);
+  const name = item.who.kind === "session" ? named : (agent?.name ?? item.name);
   const localId = useChat((s) => s.hubs.find((h) => h.local)?.id ?? null);
   const charge = useCharge(item.who.kind === "session" ? item.who.id : null);
   const back = useTakenBack(item.who.kind === "session" ? item.who.id : null);

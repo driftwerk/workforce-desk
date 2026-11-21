@@ -1,6 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { emptyConversation, type ConversationState, type Turn } from "../chat/conversation";
-import type { Agent, ChatMessage } from "../chat/types";
+import { agentKey, type Agent, type ChatMessage } from "../chat/types";
+import { setFormerly } from "../rooms/mentions";
 import { asked, failureIn, forModel, missingAgent, newAnswers, resolveAgent, turnsOver, voiceFor, voiceRoster, wakeNames } from "./route";
 
 const roster: Agent[] = [
@@ -29,6 +30,20 @@ describe("voice routing", () => {
     expect(resolveAgent("Atlas", roster, null, null)?.id).toBe("atlas-l");
     expect(resolveAgent("allan", roster, roster[0]!, null)?.id).toBe("allan");
     expect(resolveAgent("nobody", roster, roster[0]!, null)).toBeNull();
+  });
+
+  describe("after a rename", () => {
+    afterEach(() => setFormerly(() => []));
+    const kat: Agent = { hubId: "local", id: "desk", name: "Kat", model: null, provider: null, isDefault: true };
+
+    it("wakes on the new name, and the old one still reaches them while no one has it", () => {
+      const renamed = [...roster, kat];
+      setFormerly((a) => (agentKey(a) === agentKey(kat) ? ["Desk", "Atlas"] : []));
+      expect(wakeNames(renamed)).toEqual(["Atlas", "allan", "Kat"]);
+      expect(resolveAgent("Kat", renamed, null, null)?.id).toBe("desk");
+      expect(resolveAgent("Desk", renamed, null, null)?.id).toBe("desk");
+      expect(resolveAgent("Atlas", renamed, null, null)?.id).toBe("atlas-l");
+    });
   });
 
   it("sends a follow-up to whoever is being talked to, else the open DM", () => {
