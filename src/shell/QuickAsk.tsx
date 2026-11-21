@@ -6,8 +6,8 @@ import { formerNamesOf } from "../rooms/mentions";
 import { AgentMark } from "../ui/Mark";
 
 /** `@name message`, sent as a DM (a bare name opens it). A name or id
- *  matches as typed so far; an old name only whole, while no one has it,
- *  and is said beside theirs (`formerly`). */
+ *  matches as typed so far; an old name only whole, when no name or id
+ *  matches, and is said beside theirs (`formerly`). */
 export const parseAsk = (
   input: string,
   roster: Agent[],
@@ -17,13 +17,12 @@ export const parseAsk = (
   const name = (m?.[1] ?? "").toLowerCase();
   const text = m?.[2] ?? "";
   const now = roster.filter((a) => a.name.toLowerCase().startsWith(name) || a.id.toLowerCase().startsWith(name));
-  const held = roster.some((a) => a.name.toLowerCase() === name);
   const formerly = Object.fromEntries(
-    held || !name
+    now.length || !name
       ? []
       : roster.flatMap((a) => {
           const was = former(a).find((w) => w.toLowerCase() === name);
-          return was && !now.includes(a) ? [[agentKey(a), was] as const] : [];
+          return was ? [[agentKey(a), was] as const] : [];
         }),
   );
   const matches = [...now, ...roster.filter((a) => agentKey(a) in formerly)];

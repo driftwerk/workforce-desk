@@ -32,10 +32,11 @@ describe("parseAsk", () => {
     expect(allan.formerly).toEqual({});
   });
 
-  it("lists an agent by a whole old name beside one whose name starts with it, and picks the whole one", () => {
-    const withMaxine = [...roster, { hubId: "dw", id: "maxine", name: "maxine", model: null, provider: null, isDefault: false }];
-    const p = parseAsk("@max hi", withMaxine, (a) => (a.id === "lara" ? ["Max"] : []));
-    expect(p.matches.map((a) => a.id)).toEqual(["maxine", "lara"]);
-    expect(p.agent?.id).toBe("lara");
+  it("never takes an old name over a name or id that starts with it", () => {
+    const withMaxwell = [...roster, { hubId: "dw", id: "maxwell", name: "Maxwell", model: null, provider: null, isDefault: false }];
+    const p = parseAsk("@max hi", withMaxwell, (a) => (a.id === "lara" ? ["Max"] : []));
+    expect(p.agent?.id).toBe("maxwell");
+    expect(p.matches.map((a) => a.id)).toEqual(["maxwell"]);
+    expect(p.formerly).toEqual({});
   });
 });
