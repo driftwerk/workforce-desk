@@ -32,9 +32,7 @@ export const nameTaken = (name: string, roster: readonly { hubId: string; id: st
   return !!said && roster.some((a) => a.hubId === hubId && a.id !== self && asRead(a.name ?? "") === said);
 };
 
-/** Where a mention of an old name is, as the person reads it: "SOUL.md",
- *  "Their instructions", "Job “Nightly”" for the renamed agent's own;
- *  "Scout’s SOUL.md", "Scout’s instructions" for another's. */
+/** Where a mention is, as the person reads it: "SOUL.md", or "Scout’s SOUL.md" for another agent's. */
 export const mentionPlace = (m: NameMention, self: string, nameOf: (id: string) => string): string => {
   const own = m.agent === self;
   const place = m.place === "its instructions" ? (own ? "Their instructions" : "instructions") : own ? m.place.replace(/^job /, "Job ") : m.place;

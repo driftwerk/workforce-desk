@@ -21,10 +21,8 @@ export const saysBosses = (manager: Manager | null): boolean => !!manager?.bosse
 export const bossOfGroup = (manager: Manager | null, group: string): GroupBoss | null =>
   manager?.bosses?.find((b) => b.group === group) ?? null;
 
-/** What the person calls boss `id`, an agent of this computer's hub (the
- *  main boss when none is said): its name in the roster now, which a rename
- *  changes at once, else as the hub last listed it; "Desk" when there is no
- *  boss. */
+/** Boss `id` (default: the main boss) by its roster name, else as the hub
+ *  listed it; "Desk" when there is no boss. */
 export const bossNameOf = (
   roster: readonly Agent[],
   localHub: string | null | undefined,

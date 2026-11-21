@@ -191,8 +191,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   const manager = useOverview((s) => s.manager);
   const managerId = manager?.agentId ?? null;
   const localHubId = hubs.find((h) => h.local)?.id;
-  // Each group's boss by its name now: a rename shows before the hub's
-  // next list of bosses.
+  // Named from the roster: a rename shows before the hub lists bosses again.
   const groupBosses = useMemo(
     () => new Map((manager?.bosses ?? []).map((b) => [b.group, { ...b, name: bossNameOf(roster, localHubId, manager, b.agentId) }])),
     [manager, roster, localHubId],

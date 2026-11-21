@@ -309,7 +309,7 @@ describe("Renaming in Settings", () => {
     const note = await screen.findByRole("note", { name: "Still says Desk" });
     expect(hub.oldNameMentions).toHaveBeenCalledWith("desk", "Desk");
     expect(hub.manager).toHaveBeenCalled();
-    expect([...note.querySelectorAll(".think-row")].map((r) => r.textContent)).toEqual([
+    expect([...note.querySelectorAll(".mention-row")].map((r) => r.textContent)).toEqual([
       "SOUL.mdSign every update as Desk.",
       "Scout’s instructionsAsk Desk before you deploy.",
     ]);
@@ -320,6 +320,20 @@ describe("Renaming in Settings", () => {
     await screen.findByText("Saved into their files.");
     expect(useChat.getState().roster.find((a) => a.id === "desk")!.name).toBe("Desk");
     expect(screen.queryByRole("note", { name: /Still says/ })).toBeNull();
+  });
+
+  it("says quietly when it couldn't check where the old name is still said", async () => {
+    const hub = fakeHub({
+      renameAgent: vi.fn(() => Promise.resolve({})),
+      oldNameMentions: vi.fn(() => Promise.reject(new HubError(404, "Not Found"))),
+    } as Partial<DeskHub>);
+    renderSettings(hub);
+    const name = (await screen.findByDisplayValue("Ledger")) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Penny" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    expect(await screen.findByText("Desk couldn’t check where “Ledger” is still said.")).toBeTruthy();
+    expect(screen.queryByRole("note", { name: /Still says/ })).toBeNull();
+    await screen.findByText("Saved into their files.", undefined, { timeout: 3000 });
   });
 
   it("puts the name back and says why when the hub can't rename yet", async () => {

@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import type { Agent } from "../chat/types";
-import { setFormerly } from "../rooms/mentions";
 import { parseAsk } from "./QuickAsk";
 
 const roster: Agent[] = [
@@ -22,13 +21,21 @@ describe("parseAsk", () => {
     expect(parseAsk("@a hi", roster).matches).toHaveLength(2);
   });
 
-  it("finds an agent by a name it had before, unless someone has it now", () => {
-    setFormerly((a) => (a.id === "lara" ? ["desk", "allan"] : []));
-    try {
-      expect(parseAsk("@desk hi", roster).agent?.id).toBe("lara");
-      expect(parseAsk("@allan hi", roster).agent?.id).toBe("allan");
-    } finally {
-      setFormerly(() => []);
-    }
+  it("finds an agent by a whole name it had before while no one has it now, and says so", () => {
+    const former = (a: Agent) => (a.id === "lara" ? ["Max", "allan"] : []);
+    const max = parseAsk("@max hi", roster, former);
+    expect(max.agent?.id).toBe("lara");
+    expect(max.formerly).toEqual({ "dw/lara": "Max" });
+    expect(parseAsk("@ma hi", roster, former).formerly).toEqual({});
+    const allan = parseAsk("@allan hi", roster, former);
+    expect(allan.agent?.id).toBe("allan");
+    expect(allan.formerly).toEqual({});
+  });
+
+  it("lists an agent by a whole old name beside one whose name starts with it, and picks the whole one", () => {
+    const withMaxine = [...roster, { hubId: "dw", id: "maxine", name: "maxine", model: null, provider: null, isDefault: false }];
+    const p = parseAsk("@max hi", withMaxine, (a) => (a.id === "lara" ? ["Max"] : []));
+    expect(p.matches.map((a) => a.id)).toEqual(["maxine", "lara"]);
+    expect(p.agent?.id).toBe("lara");
   });
 });

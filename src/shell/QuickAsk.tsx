@@ -5,17 +5,30 @@ import { useDesk } from "../hub/store";
 import { formerNamesOf } from "../rooms/mentions";
 import { AgentMark } from "../ui/Mark";
 
-/** `@name message` — resolves the name against everyone on every hub and
- *  sends the message as a DM. A bare name just opens the DM. */
-export const parseAsk = (input: string, roster: Agent[]): { agent: Agent | null; text: string; matches: Agent[] } => {
+/** `@name message`, sent as a DM (a bare name opens it). A name or id
+ *  matches as typed so far; an old name only whole, while no one has it,
+ *  and is said beside theirs (`formerly`). */
+export const parseAsk = (
+  input: string,
+  roster: Agent[],
+  former: (a: Agent) => readonly string[] = formerNamesOf,
+): { agent: Agent | null; text: string; matches: Agent[]; formerly: Record<string, string> } => {
   const m = /^@?(\S*)\s*([\s\S]*)$/.exec(input.trim());
   const name = (m?.[1] ?? "").toLowerCase();
   const text = m?.[2] ?? "";
   const now = roster.filter((a) => a.name.toLowerCase().startsWith(name) || a.id.toLowerCase().startsWith(name));
-  // A name an agent had before is theirs while no one has it now.
-  const matches = now.length ? now : roster.filter((a) => formerNamesOf(a).some((was) => was.toLowerCase() === name));
-  const exact = matches.filter((a) => a.name.toLowerCase() === name || a.id.toLowerCase() === name);
-  return { agent: exact.length === 1 ? exact[0]! : matches.length === 1 ? matches[0]! : null, text, matches };
+  const held = roster.some((a) => a.name.toLowerCase() === name);
+  const formerly = Object.fromEntries(
+    held || !name
+      ? []
+      : roster.flatMap((a) => {
+          const was = former(a).find((w) => w.toLowerCase() === name);
+          return was && !now.includes(a) ? [[agentKey(a), was] as const] : [];
+        }),
+  );
+  const matches = [...now, ...roster.filter((a) => agentKey(a) in formerly)];
+  const exact = matches.filter((a) => a.name.toLowerCase() === name || a.id.toLowerCase() === name || agentKey(a) in formerly);
+  return { agent: exact.length === 1 ? exact[0]! : matches.length === 1 ? matches[0]! : null, text, matches, formerly };
 };
 
 export function QuickAsk({ onClose }: { onClose: () => void }) {
@@ -67,7 +80,10 @@ export function QuickAsk({ onClose }: { onClose: () => void }) {
           {parsed.matches.slice(0, 6).map((a) => (
             <button key={agentKey(a)} type="button" className={`side-row ${parsed.agent === a ? "on" : ""}`} onClick={() => go(a)}>
               <AgentMark agent={agentKey(a)} name={a.name} size="sm" />
-              <span className="display crew-name">{a.name}</span>
+              <span className="display crew-name">
+                {a.name}
+                {parsed.formerly[agentKey(a)] && <span className="faint"> (formerly {parsed.formerly[agentKey(a)]})</span>}
+              </span>
               <span className="faint small">{describeAgent(a, hubs.find((h) => h.id === a.hubId)?.label ?? a.hubId)}</span>
             </button>
           ))}

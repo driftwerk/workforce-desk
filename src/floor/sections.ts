@@ -40,8 +40,7 @@ export const NO_OVERSIGHT: Oversight = { bosses: [], sealed: [], plans: [] };
 export const oversightOf = (view: FloorView | null | undefined): Oversight =>
   view ? { bosses: view.bosses ?? [], sealed: view.sealed ?? [], plans: view.plans ?? [] } : NO_OVERSIGHT;
 
-/** `o` with each boss called by its name in the roster now, which a rename
- *  changes before the hub's floor is read again. */
+/** `o` with each local boss called by its roster name now. */
 export const namedBosses = (o: Oversight, roster: readonly Agent[], localHub: string | null): Oversight => ({
   ...o,
   bosses: o.bosses.map((b) => {

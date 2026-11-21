@@ -6,21 +6,35 @@ import type { RosterMember } from "./api";
 import { formerNamesOf } from "../rooms/mentions";
 import { speakable } from "./speakable";
 
-/** The roster names to wake on, each once. */
-export const wakeNames = (roster: Agent[]): string[] => [...new Set(roster.map((a) => a.name))];
+/** The names each agent had before, newest first. */
+export type Former = (a: Agent) => readonly string[];
 
-/** Who an utterance is for: the agent it named (local first when two hubs
- *  share a name; a name one had before while no one has it now), else the
- *  one already being talked to, else the open DM. */
+const same = (a: string, b: string) => a.toLocaleLowerCase() === b.toLocaleLowerCase();
+
+/** Who `name` reaches, whole: those called it now, else those once called it. */
+const calledBy = (name: string, roster: readonly Agent[], former: Former): Agent[] => {
+  const now = roster.filter((a) => same(a.name, name));
+  return now.length ? now : roster.filter((a) => former(a).some((was) => same(was, name)));
+};
+
+/** The names to wake on, each once: the roster's, then old names no one has now. */
+export const wakeNames = (roster: Agent[], former: Former = formerNamesOf): string[] => {
+  const now = roster.map((a) => a.name);
+  const before = roster.flatMap((a) => former(a)).filter((was) => !now.some((n) => same(n, was)));
+  return [...new Set([...now, ...before])];
+};
+
+/** Who an utterance is for: the agent it named (local first), else the
+ *  one being talked to, else the open DM. */
 export const resolveAgent = (
   named: string | null,
   roster: Agent[],
   current: Agent | null,
   activeKey: string | null,
+  former: Former = formerNamesOf,
 ): Agent | null => {
   if (named) {
-    const now = roster.filter((a) => a.name === named);
-    const matches = now.length ? now : roster.filter((a) => formerNamesOf(a).includes(named));
+    const matches = calledBy(named, roster, former);
     return matches.find((a) => a.hubId === "local") ?? matches.find((a) => current && agentKey(a) === agentKey(current)) ?? matches[0] ?? null;
   }
   return current ?? roster.find((a) => agentKey(a) === activeKey) ?? null;
@@ -90,10 +104,9 @@ export const voiceFor = (agent: Agent, agentVoices: Record<string, VoiceSpec>, d
 };
 
 /** Who to wake on, each name once, with the live voice its agent has. */
-export const voiceRoster = (roster: Agent[], agentVoices: Record<string, VoiceSpec>): RosterMember[] =>
-  wakeNames(roster).map((name) => {
-    const voice = roster
-      .filter((a) => a.name === name)
+export const voiceRoster = (roster: Agent[], agentVoices: Record<string, VoiceSpec>, former: Former = formerNamesOf): RosterMember[] =>
+  wakeNames(roster, former).map((name) => {
+    const voice = calledBy(name, roster, former)
       .map((a) => agentVoices[agentKey(a)])
       .find((v) => v && LIVE.has(v.provider));
     return voice ? { name, voice } : { name };

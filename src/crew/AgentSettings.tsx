@@ -126,8 +126,8 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
   const [name, setName] = useState(agent.name);
   const [state, setState] = useState<"idle" | "saving" | "saved">("idle");
   const [problem, setProblem] = useState<string | null>(null);
-  // After a rename: where the person's own words still say the old name.
-  const [stillSaid, setStillSaid] = useState<{ was: string; mentions: NameMention[] } | null>(null);
+  // Where the old name is still said after a rename; null: couldn't check.
+  const [stillSaid, setStillSaid] = useState<{ was: string; mentions: NameMention[] | null } | null>(null);
   const loadManager = useOverview((s) => s.loadManager);
 
   useEffect(() => {
@@ -193,7 +193,7 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
         void loadManager();
         desk.oldNameMentions(agent.id, was).then(
           (mentions) => setStillSaid(mentions.length ? { was, mentions } : null),
-          () => setStillSaid(null),
+          () => setStillSaid({ was, mentions: null }),
         );
       } else if (purposeChanged) {
         try {
@@ -306,15 +306,15 @@ function About({ agent, hub, local }: { agent: Agent; hub: HubAccount | undefine
           {problem && <span className="small state-blocked">{problem}</span>}
         </div>
       )}
-      {stillSaid && (
+      {stillSaid?.mentions === null && <span className="small faint">Desk couldn’t check where “{stillSaid.was}” is still said.</span>}
+      {stillSaid?.mentions && (
         <div className="field-stack" role="note" aria-label={`Still says ${stillSaid.was}`}>
           <span className="field-label">These still say “{stillSaid.was}”, in words Desk didn’t write: change them if you want.</span>
           <div className="think-rows">
             {stillSaid.mentions.map((m, i) => (
-              <div key={`${m.agent}-${m.place}-${i}`} className="think-row">
+              <div key={`${m.agent}-${m.place}-${i}`} className="mention-row">
                 <span>{mentionPlace(m, agent.id, (id) => roster.find((a) => a.hubId === agent.hubId && a.id === id)?.name ?? "Another agent")}</span>
-                <span>{m.line}</span>
-                <span />
+                <span className="mention-line">{m.line}</span>
               </div>
             ))}
           </div>

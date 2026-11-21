@@ -995,12 +995,11 @@ export interface Handled {
   personFirst: number;
 }
 
-/** A line that still calls an agent by a name it had: the person's words,
- *  which a rename leaves for them to change. */
+/** A line, in the person's words, that still calls an agent by an old name. */
 export interface NameMention {
   /** The agent whose text it is, by id. */
   agent: string;
-  /** Where in it: a file ("SOUL.md"), "its instructions", or a job. */
+  /** A file ("SOUL.md"), "its instructions", or `job “<name>”`. */
   place: string;
   line: string;
 }
