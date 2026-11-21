@@ -230,7 +230,7 @@ export function LinkBoardDialog({ board, tickets = 0, onClose, onMade }: { board
     if (!sync) return;
     setInWorkspace((p) => ({ ...p, [wsKey]: { state: "checking" } }));
     void sync
-      .check({ system, via, workspace })
+      .check({ system, via, ...(sent ? { workspace: sent } : {}) })
       .then(probeOf)
       .catch((e: unknown): Probe => ({ state: "no", error: saidOf(e), noToken: false, noAgent: false }))
       .then((said) => setInWorkspace((p) => ({ ...p, [wsKey]: said })));
@@ -652,11 +652,15 @@ export function LinkBoardDialog({ board, tickets = 0, onClose, onMade }: { board
             <div className="move-opts" role="radiogroup" aria-label={WORKSPACE[system]}>
               {pickFrom.map((w) => (
                 <label key={w} className="move-opt">
-                  <input type="radio" name={`${ids}-workspace`} checked={shown === w} disabled={busy} onChange={() => pickWorkspace(w)} />
+                  <input type="radio" name={`${ids}-workspace`} checked={(system === "github" ? sent : workspace) === w} disabled={busy} onChange={() => pickWorkspace(w)} />
                   <span className="move-opt-main">
                     <span>{w}</span>
                     <span className="move-opt-sub">
-                      {probe?.state === "offered" && probe.workspace === w ? `Where your ${SYSTEM_TITLE[system]} calls on ${viaMid} go when none is named` : `Your ${WORKSPACE[system]} ${w} on ${viaMid}`}
+                      {system === "github" && !sent && shown === w
+                        ? `The one this link goes through unless you pick one`
+                        : probe?.state === "offered" && probe.workspace === w
+                          ? `Where your ${SYSTEM_TITLE[system]} calls on ${viaMid} go when none is named`
+                          : `Your ${WORKSPACE[system]} ${w} on ${viaMid}`}
                     </span>
                   </span>
                 </label>

@@ -760,9 +760,12 @@ describe("the link dialog", () => {
       };
       await open();
       const picker = within(await screen.findByRole("radiogroup", { name: "GitHub connection" }));
-      expect((picker.getByRole("radio", { name: /^mantis/ }) as HTMLInputElement).checked).toBe(true);
+      const radio = (name: string) => picker.getByRole("radio", { name: new RegExp(`^${name}`) }) as HTMLInputElement;
+      // The hub's choice is said, not checked, so it can be picked to keep.
+      expect(picker.getAllByRole("radio").every((r) => !(r as HTMLInputElement).checked)).toBe(true);
+      expect(radio("mantis").closest("label")!.textContent).toMatch(/The one this link goes through/);
       fireEvent.change(await screen.findByLabelText("Owner"), { target: { value: "acme" } });
-      await waitFor(() => expect((picker.getByRole("radio", { name: /^driftwerk/ }) as HTMLInputElement).checked).toBe(true));
+      await waitFor(() => expect(radio("driftwerk").closest("label")!.textContent).toMatch(/The one this link goes through/));
       expect((screen.getByLabelText("Owner") as HTMLInputElement).value).toBe("acme");
       fireEvent.change(await screen.findByLabelText("acme’s GitHub project"), { target: { value: "acme/projects/7" } });
       await screen.findByText("9 open issues", undefined, { timeout: 2000 });
@@ -770,9 +773,13 @@ describe("the link dialog", () => {
       // Not picked: the hub finds the connection, so none is named.
       expect(checks().at(-1)!.body).toMatchObject({ owner: "acme" });
       expect(checks().every((a) => a.body?.workspace === undefined)).toBe(true);
-      fireEvent.click(picker.getByRole("radio", { name: /^patchwork/ }));
+      // The hub's own choice is picked to keep it, and another to change it.
+      fireEvent.click(radio("driftwerk"));
+      await waitFor(() => expect(checks().at(-1)!.body).toMatchObject({ owner: "acme", workspace: "driftwerk" }), { timeout: 2000 });
+      expect(radio("driftwerk").checked).toBe(true);
+      fireEvent.click(radio("patchwork"));
       await waitFor(() => expect(checks().at(-1)!.body).toMatchObject({ owner: "acme", workspace: "patchwork" }), { timeout: 2000 });
-      expect((picker.getByRole("radio", { name: /^patchwork/ }) as HTMLInputElement).checked).toBe(true);
+      expect(radio("patchwork").checked).toBe(true);
     });
 
     it("asks which connection where several reach the project, from those only", async () => {
