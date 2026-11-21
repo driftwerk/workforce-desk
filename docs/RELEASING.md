@@ -148,7 +148,8 @@ out of disk, move the job to a larger macOS runner.
 
 ## Nightly
 
-`.github/workflows/nightly.yml` builds `main` every night at about 01:30 UTC
+`.github/workflows/nightly.yml` builds `main` every night from 01:30 UTC, trying again at 04:30 and 07:30
+UTC when GitHub drops or delays the first start,
 for the Desks set to **Updates: Nightly** (Settings → Help). Everyone else
 stays on Stable and never sees a nightly.
 

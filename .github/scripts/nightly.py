@@ -5,6 +5,7 @@ In order:
   1. Skips while a stable release (release.yml) is running.
   2. Reads the last nightly from the nightly feed (latest-nightly.json on the
      `nightly` release): its version, and the Desk commit and hub ref it was built from.
+     A scheduled try after tonight's nightly is out skips.
   3. Finds the newest hub commit (driftwerk/workforce main) whose checks (pr-check.yml)
      passed. When it is ahead of hub.ref, the bump is committed on a branch, Desk's CI is
      run on it (workflow_dispatch: pushes made with the job's token start no workflow),
@@ -143,6 +144,14 @@ def notes(version, sha, since_label, changes, hub_from, hub_to, hub_commits, rep
         out += ["", "## Worth a look", "", attention]
     out += ["", f"Built from https://github.com/{repo}/commit/{sha}."]
     return "\n".join(out) + "\n"
+
+
+def built_tonight(last, today):
+    """The reason a later scheduled try skips: tonight's nightly is already out."""
+    match = re.search(r"-nightly\.(\d{8})\.", (last or {}).get("version") or "")
+    if match and match.group(1) == f"{today:%Y%m%d}":
+        return f"tonight's nightly, {last['version']}, is already out"
+    return None
 
 
 def decide(head, hub_now, hub_candidate, hub_ahead, last):
@@ -392,6 +401,10 @@ def plan():
     no_release_running(repo)
 
     last = feed(releases_repo)
+    if os.environ.get("GITHUB_EVENT_NAME") == "schedule":
+        done = built_tonight(last, datetime.datetime.now(datetime.timezone.utc).date())
+        if done:
+            raise Skip(done)
     head = git("rev-parse", "HEAD")
     hub_now = open("hub.ref").read().strip()
     if not SHA.match(hub_now):

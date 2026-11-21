@@ -1,7 +1,6 @@
 name: Nightly
 
-# Each night from 01:30 UTC (GitHub may start a scheduled run hours late), a
-# build of Desk's main for the Desks set to Updates: Nightly (Settings → Help); no one on Stable gets it. It skips a
+# Each night from 01:30 UTC, a build of Desk's main for the Desks set to Updates: Nightly (Settings → Help); no one on Stable gets it. It skips a
 # night when nothing changed since the last nightly (no new commits on main,
 # no newer hub), while a stable release is running, or when Desk's CI hasn't
 # passed at the exact commit it would build. When the hub (driftwerk/workforce
@@ -14,8 +13,12 @@ name: Nightly
 # docs/RELEASING.md, "Nightly".
 
 on:
+  # GitHub starts a scheduled run late or drops it, so the night is tried
+  # again later; a try that finds nothing new since the last nightly skips.
   schedule:
     - cron: "30 1 * * *"
+    - cron: "30 4 * * *"
+    - cron: "30 7 * * *"
   workflow_dispatch:
     inputs:
       dry_run:
