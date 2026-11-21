@@ -148,9 +148,14 @@ out of disk, move the job to a larger macOS runner.
 
 ## Nightly
 
-`.github/workflows/nightly.yml` builds `main` every night at about 01:30 UTC
+`.github/workflows/nightly.yml` builds `main` every night from 01:30 UTC
 for the Desks set to **Updates: Nightly** (Settings → Help). Everyone else
-stays on Stable and never sees a nightly.
+stays on Stable and never sees a nightly. GitHub starts scheduled runs late or
+drops them, so the night is tried again at 04:30 and 07:30 UTC. A scheduled try
+once tonight's nightly is out skips and leaves the night's issue as it is; a
+night that skips for CI repeats its comment on the issue at each try. GitHub
+keeps one waiting run per group, so a manual run queued behind a running
+nightly can be replaced by the next scheduled try.
 
 **Switching a Desk to Nightly.** Settings → Help → Updates → **Nightly**. Desk
 checks at once and installs the newest nightly the way it installs any update,

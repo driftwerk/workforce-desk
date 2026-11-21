@@ -23,6 +23,8 @@ import {
   changesBetween,
   defaultOf,
   draftOf,
+  FOLDER_LEFT,
+  folderShown,
   modelOn,
   liveCard,
   liveTickets,
@@ -680,10 +682,15 @@ const BUSY: Record<Exclude<Asking, null>, string> = {
   model: "Saving the model…",
 };
 
+/** A ticket's folder, or that it is left for Desk to find. */
+function FolderText({ folder }: { folder: string }) {
+  const shown = folderShown(folder);
+  return shown ? <span className="mono">{shown}</span> : <>{FOLDER_LEFT}</>;
+}
+
 /** A change of scope in full: what approving it would approve. */
 function ChangeDetails({ changes, names }: { changes: PlanChanges; names: ReadonlyMap<string, string> }) {
   const machineName = useMachineName();
-  const where = (t: { engine: Engine; folder: string }) => `${ENGINE_TITLE[t.engine]} in ${homeShort(t.folder)}`;
   const named = (ids: readonly string[]) => ids.map((id) => names.get(id) ?? "a ticket").join(", ");
   return (
     <ul className="pc-changes" aria-label="What approving it changes">
@@ -719,7 +726,7 @@ function ChangeDetails({ changes, names }: { changes: PlanChanges; names: Readon
       {changes.added.map((t) => (
         <li key={t.id}>
           <span>
-            <b>Adds</b> {t.title} · <span className="mono">{where(t)}</span>
+            <b>Adds</b> {t.title} · {ENGINE_TITLE[t.engine]} in <FolderText folder={t.folder} />
             {t.view && <span className="mono"> · {t.view} view</span>}
           </span>
           <span className="small">{t.needs.length > 0 ? `Starts after ${named(t.needs)}` : "Starts at once, alongside the others ready"}</span>
@@ -744,8 +751,8 @@ function ChangeDetails({ changes, names }: { changes: PlanChanges; names: Readon
             </span>
           )}
           {c.folder && (
-            <span className="small mono">
-              Folder: {homeShort(c.folder.from)} → {homeShort(c.folder.to)}
+            <span className="small">
+              Folder: <FolderText folder={c.folder.from} /> → <FolderText folder={c.folder.to} />
             </span>
           )}
           {c.view && (
@@ -845,7 +852,7 @@ function TicketRow({
       </span>
       <span className="pc-sub">
         {t.adopted && <TakenOn t={t} />}
-        {t.folder && <span className="mono">{homeShort(t.folder)}</span>}
+        {t.folder !== null && <FolderText folder={t.folder} />}
         {needs.length > 0 && <span>· needs {needs.join(", ")}</span>}
         {own && <span>· own worktree</span>}
         {t.starting && <span className="state-working">· starting</span>}

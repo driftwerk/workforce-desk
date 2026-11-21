@@ -7,6 +7,7 @@ import {
   awaiting,
   changesBetween,
   draftOf,
+  folderShown,
   needChoices,
   ownWorktrees,
   progress,
@@ -136,6 +137,13 @@ describe("what a change of scope changes", () => {
       ["a", undefined, { from: null, to: "terminal" }],
       ["b", { added: ["c"], dropped: ["a"] }, undefined],
     ]);
+  });
+  it("says a folder left for Desk to find as none, and a folder changed only in its spaces as no change", () => {
+    expect(folderShown("  ")).toBeNull();
+    expect(folderShown(" /x ")).toBe("/x");
+    expect(folderShown("/Users/sam/code/acme")).toBe("~/code/acme");
+    const c = changesBetween(snap([planned("a")]), snap([planned("a", [], { folder: " /w " })]));
+    expect(c.changed.find((x) => x.ticket.id === "a")?.folder).toBeUndefined();
   });
   it("says a budget raised or taken off", () => {
     const cap = (amount: number) => ({ amount, unit: "usd" as const, period: "total" as const, warnAt: 0.8, onExceed: "pause" as const });
