@@ -371,7 +371,7 @@ describe("a running plan", () => {
     plans.plan.tickets = plans.plan.tickets.map((t) => (t.id === "t23" ? { ...t, folder: "" } : t));
     await show();
     const row = within(card()).getByText("End-to-end refund test in CI").parentElement!;
-    expect(row.querySelector(".pc-sub")!.textContent).toBe("a folder Desk finds· needs ACM-21, ACM-22");
+    expect([...row.querySelector(".pc-sub")!.childNodes].map((n) => n.textContent)).toEqual(["a folder Desk finds", "· needs ACM-21, ACM-22"]);
   });
 
   it("shows a ticket made to start alongside another rather than after it, and one added after another", async () => {
