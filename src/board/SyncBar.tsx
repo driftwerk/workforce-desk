@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import { useChat } from "../chat/store";
-import { fixOf, linkedTo, matchedBy, SYSTEM_TITLE, syncStatus, targetWords, vouched } from "../hub/boardSync";
+import { fixOf, inSentence, linkedTo, matchedBy, SYSTEM_TITLE, syncStatus, targetWords, vouched } from "../hub/boardSync";
 import { ChooseMe } from "./ChooseMe";
 import { openSettingsAt } from "../ui/problem";
 import { plainError } from "../ui/plainError";
@@ -165,7 +165,7 @@ export function SyncBar({
             {fix.label}
           </button>
         )}
-        <button type="button" className="btn btn-sm" disabled={!!busy || paused} title={`Ask ${hub} again who you are on ${SYSTEM_TITLE[sync.system]}`} onClick={() => void recheck()}>
+        <button type="button" className="btn btn-sm" disabled={!!busy || paused} title={`Ask ${inSentence(hub)} again who you are on ${SYSTEM_TITLE[sync.system]}`} onClick={() => void recheck()}>
           {busy === "me" ? "Checking…" : vouched(sync.meSource) ? "Check again" : "Check who you are"}
         </button>
         {/* A shared key: they say who they are there, or change it. */}

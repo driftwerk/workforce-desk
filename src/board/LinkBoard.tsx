@@ -3,7 +3,7 @@ import { useChat } from "../chat/store";
 import { openSettingsAt } from "../ui/problem";
 import { HubError } from "../hub/client";
 import { useDesk } from "../hub/store";
-import { isGithubProject, looksLikeToken, mintSyncToken, ownerOk, SYSTEM_TITLE, targetOk, targetWords, type Checked } from "../hub/boardSync";
+import { inSentence, isGithubProject, looksLikeToken, mintSyncToken, ownerOk, SYSTEM_TITLE, targetOk, targetWords, THIS_COMPUTER, type Checked } from "../hub/boardSync";
 import type { Board, LinkCheck, SyncAssignee, SyncFilter, SyncSystem, SyncVia, TicketState } from "../hub/types";
 import { openUrl, reportOpenFailure } from "../platform";
 import { CloseButton, Dialog } from "../ui/Dialog";
@@ -66,7 +66,7 @@ const githubLogin = (s: string): boolean => /^[A-Za-z0-9](?:[A-Za-z0-9]|-(?=[A-Z
 const MAPPED: TicketState[] = ["backlog", "todo", "doing", "review", "done", "dropped"];
 
 /** What a person's several instances of a system are called. */
-const WORKSPACE: Record<SyncSystem, string> = { jira: "Jira site", linear: "Linear workspace", github: "GitHub account" };
+const WORKSPACE: Record<SyncSystem, string> = { jira: "Jira site", linear: "Linear workspace", github: "GitHub connection" };
 
 /** A check's answer as a probe says it. */
 const probeOf = (r: Checked): Probe =>
@@ -203,7 +203,8 @@ export function LinkBoardDialog({ board, tickets = 0, onClose, onMade }: { board
   const probe = viaKey ? probes[viaKey] : undefined;
   const offered = probe?.state === "offered";
   const hubOffers = choices.find((c) => probes[c.id]?.state === "offered");
-  const viaName = viaKey === THIS ? "This computer" : (choice?.name ?? "");
+  const viaName = viaKey === THIS ? THIS_COMPUTER : (choice?.name ?? "");
+  const viaMid = inSentence(viaName);
 
   // ── Which of the person's workspaces there ──────────────────────────────
   // Where they have several Jira sites or Linear workspaces on the hub, one
@@ -264,7 +265,8 @@ export function LinkBoardDialog({ board, tickets = 0, onClose, onMade }: { board
   const pickWorkspace = (w: string) => {
     if (!viaKey) return;
     setWorkspaceFor((m) => ({ ...m, [pickKey]: w }));
-    setTarget("");
+    // A GitHub target is named the same through every connection.
+    if (system !== "github") setTarget("");
     setTeamId("");
     setMe("");
     setNotMe(false);
@@ -371,6 +373,13 @@ export function LinkBoardDialog({ board, tickets = 0, onClose, onMade }: { board
     if (found?.targetId && targetKey) setResolved({ target: targetKey, id: found.targetId });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [found]);
+  /** GitHub: the connection the hub found reaching the owner or target
+   *  named becomes the one picked, keeping what was typed. */
+  const reachedBy = system === "github" ? (found?.workspace ?? (ownerProbe?.state === "offered" ? ownerProbe.workspace : null)) : null;
+  useEffect(() => {
+    if (viaKey && reachedBy && reachedBy !== workspace && workspaces.includes(reachedBy)) setWorkspaceFor((m) => ({ ...m, [pickKey]: reachedBy }));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reachedBy]);
   const remoteStates = found?.states ?? null;
   // The state map starts from what the hub's states mean, once per target.
   useEffect(() => {
@@ -393,19 +402,19 @@ export function LinkBoardDialog({ board, tickets = 0, onClose, onMade }: { board
     if (!localSync()) return { words: "Desk isn’t ready yet, so nothing can be checked or linked. Try again in a moment.", failed: true };
     if (!via) return { words: `Pick where ${SYSTEM_TITLE[system]} is reached through.`, failed: false };
     if (!offered) {
-      if (!probe || probe.state === "checking") return { words: `Waiting for ${viaName} to say whether it offers ${SYSTEM_TITLE[system]}…`, failed: false };
+      if (!probe || probe.state === "checking") return { words: `Waiting for ${viaMid} to say whether it offers ${SYSTEM_TITLE[system]}…`, failed: false };
       if (probe.state === "needsToken") return { words: `${viaName} needs a token first.`, failed: false };
       if (probe.state === "no") return { words: probe.noToken ? `${viaName} needs a new token.` : probe.error, failed: true };
     }
     if (several && !workspace) return { words: (probe?.state === "offered" && probe.why) || `Pick which ${WORKSPACE[system]}.`, failed: false };
     if (several && workspace) {
-      if (!wsProbe || wsProbe.state === "checking") return { words: `Asking ${viaName} for ${workspace}’s ${system === "jira" ? "projects" : system === "github" ? "projects and repositories" : "teams"}…`, failed: false };
+      if (!wsProbe || wsProbe.state === "checking") return { words: `Asking ${viaMid} for ${workspace}’s ${system === "jira" ? "projects" : system === "github" ? "projects and repositories" : "teams"}…`, failed: false };
       if (wsProbe.state === "no") return { words: wsProbe.error, failed: true };
       if (wsProbe.state === "offered" && wsProbe.why) return { words: wsProbe.why, failed: true };
     }
     // What the hub says stops the list, whatever it is.
     if (listed?.state === "offered" && listed.why) return { words: listed.why, failed: true };
-    if (system === "github" && ownerAsk && (!ownerProbe || ownerProbe.state === "checking")) return { words: `Asking ${viaName} for ${ownerAsk}’s projects and repositories…`, failed: false };
+    if (system === "github" && ownerAsk && (!ownerProbe || ownerProbe.state === "checking")) return { words: `Asking ${viaMid} for ${ownerAsk}’s projects and repositories…`, failed: false };
     if (system === "github" && ownerProbe?.state === "no") return { words: "Pick another owner.", failed: true };
     if (ownerInvalid) return { words: "Enter a GitHub login for the owner.", failed: true };
     if (!targetGood)
@@ -429,6 +438,7 @@ export function LinkBoardDialog({ board, tickets = 0, onClose, onMade }: { board
     if (!filterReady) return { words: meNeeded ? (system === "github" ? "Enter your GitHub login." : "Enter your Linear member id.") : "Say what to import.", failed: false };
     if (!now) return { words: "Waiting for the match count…", failed: false };
     if (!now.ok) return { words: `The match check failed: ${plainLinkError(now.error)}`, failed: true };
+    if (now.check.workspaceWhy) return { words: now.check.workspaceWhy, failed: false };
     if (now.check.matches === undefined) return { words: "Waiting for the match count…", failed: false };
     return null;
   })();
@@ -643,7 +653,7 @@ export function LinkBoardDialog({ board, tickets = 0, onClose, onMade }: { board
                   <span className="move-opt-main">
                     <span>{w}</span>
                     <span className="move-opt-sub">
-                      {probe?.state === "offered" && probe.workspace === w ? `Where your ${SYSTEM_TITLE[system]} calls on ${viaName} go when none is named` : `Your ${WORKSPACE[system]} ${w} on ${viaName}`}
+                      {probe?.state === "offered" && probe.workspace === w ? `Where your ${SYSTEM_TITLE[system]} calls on ${viaMid} go when none is named` : `Your ${WORKSPACE[system]} ${w} on ${viaMid}`}
                     </span>
                   </span>
                 </label>
@@ -783,7 +793,7 @@ export function LinkBoardDialog({ board, tickets = 0, onClose, onMade }: { board
             )}
             {system === "github" && ownerAsk && ownerProbe?.state === "checking" && (
               <span className="move-opt-sub" role="status">
-                Asking {viaName} for {ownerAsk}’s projects and repositories…
+                Asking {viaMid} for {ownerAsk}’s projects and repositories…
               </span>
             )}
             {ownerProbe?.state === "no" && (
@@ -958,7 +968,7 @@ export function LinkBoardDialog({ board, tickets = 0, onClose, onMade }: { board
             {(notMe || (heard && heard.me === null)) && (
               <span className="move-opt-sub sync-me">
                 {notMe
-                  ? `Desk won’t go by ${viaName}’s answer: Take it waits until you check who you are on the board.`
+                  ? `Desk won’t go by ${viaMid}’s answer: Take it waits until you check who you are on the board.`
                   : (heard?.why ?? `${viaName} can’t say who you are on ${SYSTEM_TITLE[system]}.`)}{" "}
                 {!notMe && heard?.why && /shared/.test(heard.why) && (
                   <>

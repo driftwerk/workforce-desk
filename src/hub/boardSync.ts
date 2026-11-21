@@ -149,8 +149,15 @@ const hhmm = (iso: string): string => {
   return Number.isNaN(d.getTime()) ? "" : `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 };
 
+/** What a board calls this computer, as a hub's name. */
+export const THIS_COMPUTER = "This computer";
+
+/** A hub's name as it reads mid-sentence: "on this computer", "on Atlas". */
+export const inSentence = (hub: string): string => (hub === THIS_COMPUTER ? "this computer" : hub);
+
 /** What a paused board says, as the hub's `Paused::say` words it. */
 export const pausedWords = (p: SyncPaused, hub: string): string => {
+  const mid = inSentence(hub);
   switch (p.kind) {
     case "byYou":
       return "Paused by you; changes go out when you resume it.";
@@ -161,7 +168,7 @@ export const pausedWords = (p: SyncPaused, hub: string): string => {
     case "noToken":
       return `Paused: ${hub} needs a new token.`;
     case "missing":
-      return `Paused: no agent on ${hub} you can reach has ${systemOfTools(p.tools)} switched on any more.`;
+      return `Paused: no agent on ${mid} you can reach has ${systemOfTools(p.tools)} switched on any more.`;
     case "refused":
       return `Paused: ${hub} refused: ${p.reason}`;
     case "leftGroup":
@@ -169,7 +176,7 @@ export const pausedWords = (p: SyncPaused, hub: string): string => {
     case "workspace": {
       const names = orList(p.names ?? []);
       if (!names) return `Paused: ${hub} has no ${p.what} of yours set up any more.`;
-      return p.asked ? `Paused: ${hub} has no ${p.what} ${p.asked} of yours any more; yours there are ${names}.` : `Paused: you have more than one ${p.what} on ${hub} (${names}), and this link doesn't say which.`;
+      return p.asked ? `Paused: ${hub} has no ${p.what} ${p.asked} of yours any more; yours there are ${names}.` : `Paused: you have more than one ${p.what} on ${mid} (${names}), and this link doesn't say which.`;
     }
   }
 };
@@ -240,8 +247,8 @@ export const linkedTo = (b: Board, hub: string): string | null => {
   // "Linear · mantiscrm · MAN": the workspace, where the person has several.
   const target = targetWords(s.system, s.target);
   const head = s.workspace ? `${SYSTEM_TITLE[s.system]} · ${s.workspace} · ${target}` : `${SYSTEM_TITLE[s.system]} ${target}`;
-  if (s.via.kind !== "hub") return `${head} with this computer's keys`;
-  return s.agent ? `${head} through ${agentTitle(s.agent)} on ${hub}` : `${head} via ${hub}`;
+  if (s.agent) return `${head} through ${agentTitle(s.agent)} on ${inSentence(hub)}`;
+  return s.via.kind === "hub" ? `${head} via ${hub}` : `${head} with this computer's keys`;
 };
 
 /** Which system a set of sync tools belongs to, by the first one's name:
