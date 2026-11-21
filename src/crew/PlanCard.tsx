@@ -490,6 +490,7 @@ function WholePlan({ detail, plan, onBoard }: { detail: BossPlanDetail; plan: Bo
                   <TicketRow
                     key={tid}
                     t={t}
+                    heldBack={byId.get(tid)?.heldBack ?? null}
                     all={tickets}
                     own={own.has(tid)}
                     choices={plan.state === "proposed" && !started(t) ? choices : null}
@@ -797,6 +798,7 @@ const STATE_WORD: Partial<Record<BossPlanTicket["state"], { word: string; look: 
  *  needs, and where it stands. */
 function TicketRow({
   t,
+  heldBack,
   all,
   own,
   choices,
@@ -805,6 +807,8 @@ function TicketRow({
   onModel,
 }: {
   t: BossPlanTicket;
+  /** Why it waits in To do for the person, as the plan's rules read it. */
+  heldBack: string | null;
   all: readonly BossPlanTicket[];
   own: boolean;
   choices: EngineChoice[] | null;
@@ -847,6 +851,11 @@ function TicketRow({
         {own && <span>· own worktree</span>}
         {t.starting && <span className="state-working">· starting</span>}
         {t.held && <span className="state-blocked">· held: {t.held}</span>}
+        {heldBack && (
+          <span className="state-blocked" title="Move it to Backlog and back to To do, or start it, once what stopped it is fixed">
+            · waits for you: {heldBack}
+          </span>
+        )}
         {state && <span className={state.look}>· {state.word}</span>}
       </span>
       {t.body.trim() && (
