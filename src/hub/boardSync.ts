@@ -166,7 +166,7 @@ export const pausedWords = (p: SyncPaused, hub: string): string => {
     case "hubUnpaired":
       return `Paused: ${hub} isn't linked any more.`;
     case "noToken":
-      return `Paused: ${hub} needs a new token.`;
+      return `Paused: paste a new token for ${mid}.`;
     case "missing":
       return `Paused: no agent on ${mid} you can reach has ${systemOfTools(p.tools)} switched on any more.`;
     case "refused":
