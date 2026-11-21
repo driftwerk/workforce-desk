@@ -9,13 +9,29 @@ import { tilde } from "../machines/folders";
 import { backendHome, pickFolder } from "../platform";
 import { ASKING, LEVELS, addFolder, askingOf, levelOf, setLevel, setWorksIn, worksInOf, type Asking, type Level } from "./access";
 import { ActivityList, EMPTY_ACTIVITY, GrantList } from "./Lists";
+import { OnItsOwn } from "./OnItsOwn";
 import "../styles/computer.css";
 
 /** How many of the agent's own rows its tab shows. */
 const RECENT = 20;
 
-/** A local agent's "This computer" tab: how far it reaches, what is always
- *  allowed for it, and what it did here lately. */
+/** The home folder, as the backend reads it; `null` until known. */
+function useHome(): string | null {
+  const [home, setHome] = useState<string | null>(null);
+  useEffect(() => {
+    let live = true;
+    backendHome()
+      .then((h) => live && setHome(h))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
+  return home;
+}
+
+/** A local agent's "This computer" tab: how far it reaches, what it does
+ *  on its own, what is always allowed for it, and what it did here lately. */
 export function AgentAccess({ agent }: { agent: Agent }) {
   const hub = useDesk((s) => s.hub);
   const key = agentKey(agent);
@@ -25,6 +41,7 @@ export function AgentAccess({ agent }: { agent: Agent }) {
   const [grants, setGrants] = useState<ComputerGrant[] | null | "failed" | "old">(null);
   const [rows, setRows] = useState<ComputerActivityRow[] | null | "failed">(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const home = useHome();
 
   useEffect(() => {
     if (hub) void useAgentConfigs.getState().load(hub, agent);
@@ -137,7 +154,9 @@ export function AgentAccess({ agent }: { agent: Agent }) {
           </div>
         </section>
 
-        <WorksIn agent={agent} />
+        <WorksIn agent={agent} home={home} />
+
+        <OnItsOwn agent={agent} applies={level === "full" && asking === "irreversible"} home={home} onAskedAgain={reload} />
 
         <section className="agent-section" aria-labelledby="computer-grants-head">
           <div className="ability-head">
@@ -181,22 +200,12 @@ export function AgentAccess({ agent }: { agent: Agent }) {
 /** The folders the person gives the agent to work in beside its own: a repo
  *  cloned into a folder, say. Picked with the folder picker, listed, and
  *  removed one at a time; only the person changes them. */
-function WorksIn({ agent }: { agent: Agent }) {
+function WorksIn({ agent, home }: { agent: Agent; home: string | null }) {
   const hub = useDesk((s) => s.hub);
   const key = agentKey(agent);
   const config = useAgentConfigs((s) => s.configs[key]);
-  const [home, setHome] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  useEffect(() => {
-    let live = true;
-    backendHome()
-      .then((h) => live && setHome(h))
-      .catch(() => undefined);
-    return () => {
-      live = false;
-    };
-  }, []);
   const folders = config === undefined ? null : worksInOf(config);
 
   const write = async (change: (folders: string[]) => string[]) => {

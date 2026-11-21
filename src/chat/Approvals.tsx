@@ -5,6 +5,7 @@ import "../styles/computer.css";
 import type { Prompt } from "./conversation";
 import { useChat } from "./store";
 import type { ComputerFacts, PermissionChoice } from "./types";
+import type { OnItsOwnKind } from "../hub/client";
 import { allowedBefore, LEARN_AFTER, learnable, remember, toolWants } from "./approvalMemory";
 import { openSettingsAt } from "../ui/problem";
 
@@ -15,6 +16,7 @@ const DOING: Record<string, string> = {
   delete: "Wants to delete",
   exec: "Wants to run a command",
   session: "Wants to start a session",
+  trash: "Wants to move to the Trash",
   connector: "Wants to change something in a connected service",
 };
 
@@ -43,6 +45,23 @@ const folderLabel = (folder: string, connector: boolean, irreversible: boolean, 
         exec
         ? `Allow every command in ${folderName(folder)}`
         : `Always allow in ${folderName(folder)}`;
+
+/** What letting the agent do a kind of action on its own in `target` (a
+ *  folder as you read it, a host or a site) says. */
+const aloneLabel = (kind: OnItsOwnKind, target: string): string => {
+  switch (kind) {
+    case "commands":
+      return `Always run commands in ${folderName(target)} on its own`;
+    case "network":
+      return `Always let it reach ${target} on its own`;
+    case "browser":
+      return `Always use the browser on ${siteOf(`browser:${target}`) ?? target} on its own`;
+    case "files":
+      return `Always change files in ${folderName(target)} on its own`;
+    case "delete":
+      return `Always move to the Trash in ${folderName(target)} on its own`;
+  }
+};
 
 /** The hub's facts about a call on this computer: the command and where it
  *  runs, or the paths, and why it asks. */
@@ -174,7 +193,7 @@ export function PromptCard({
         )}
         {folder && (
           <button type="button" className="btn" onClick={() => answer("allow_in_folder")}>
-            {folderLabel(folder, connector, irreversible, facts?.effect === "exec")}
+            {options.allow_scope ? aloneLabel(options.allow_scope, folder) : folderLabel(folder, connector, irreversible, facts?.effect === "exec")}
           </button>
         )}
         {options.allow_always && (

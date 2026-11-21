@@ -5,7 +5,7 @@ import { RichMarkdown } from "@workforce/rich";
 import { useChat } from "../chat/store";
 import type { Agent } from "../chat/types";
 import { useAgentConfigs } from "../crew/agentBrain";
-import type { ComputerActivityRow, ComputerGrant, DeskHub } from "../hub/client";
+import type { ComputerActivityRow, ComputerGrant, DeskHub, OnItsOwnRow } from "../hub/client";
 import { useDesk } from "../hub/store";
 import { useUi } from "../shell/ui";
 import { Computer } from "../settings/Computer";
@@ -53,6 +53,8 @@ const row = (over: Partial<ComputerActivityRow> = {}): ComputerActivityRow => ({
 });
 
 let file = "";
+/** What the fake hub says the agent does on its own. */
+let alone: OnItsOwnRow[] = [];
 const fakeHub = (over: Partial<DeskHub> = {}): DeskHub =>
   ({
     agentConfig: vi.fn(() => Promise.resolve(file)),
@@ -67,6 +69,9 @@ const fakeHub = (over: Partial<DeskHub> = {}): DeskHub =>
     forgetSession: vi.fn(() => Promise.resolve()),
     computerActivity: vi.fn(() => Promise.resolve({ rows: [row(), row({ id: "r2", kind: "write", doing: "change ~/notes.md", outcome: { outcome: "ran" }, decided_by: "rule" })], next: null })),
     diskAccess: vi.fn(() => Promise.resolve("missing" as const)),
+    onItsOwn: vi.fn(() => Promise.resolve(alone)),
+    setOnItsOwn: vi.fn(() => Promise.resolve()),
+    askAgain: vi.fn(() => Promise.resolve(3)),
     ...over,
   }) as unknown as DeskHub;
 
@@ -77,7 +82,10 @@ const setUp = (hub: DeskHub, toml = "") => {
   useAgentConfigs.setState({ configs: { "local/allan": toml } });
 };
 
-beforeEach(() => useUi.setState({ settings: "computer", agentTabs: {} }));
+beforeEach(() => {
+  useUi.setState({ settings: "computer", agentTabs: {} });
+  alone = [];
+});
 afterEach(cleanup);
 
 describe("Settings → This computer", () => {
@@ -296,5 +304,94 @@ describe("the folders an agent works in", () => {
     await act(async () => fireEvent.click(section.getByRole("button", { name: "Add a folder…" })));
     await waitFor(() => expect(section.getByRole("alert").textContent).toMatch(/no agent works in/));
     expect(section.getByText(/Only its own folder/)).toBeTruthy();
+  });
+});
+
+describe("what an agent does on its own", () => {
+  const region = () => within(screen.getByRole("region", { name: "What Allan does on its own" }));
+  const levels = (kind: string) => within(region().getByRole("radiogroup", { name: `${kind}: when it asks` }));
+
+  it("shows each kind's level, offering In its folders only where folders mean something", async () => {
+    alone = [
+      { kind: "commands", scope: { kind: "kind" }, level: "in_folders", created_at: "" },
+      { kind: "network", scope: { kind: "host", value: "devbox" }, level: "anywhere", created_at: "" },
+      { kind: "browser", scope: { kind: "site", value: "https://github.com" }, level: "anywhere", created_at: "" },
+      { kind: "delete", scope: { kind: "folder", value: "~/dev/acme-web" }, level: "anywhere", created_at: "" },
+    ];
+    setUp(fakeHub());
+    render(<AgentAccess agent={allan} />);
+    await waitFor(() => expect(region().getByText("devbox")).toBeTruthy());
+    const commands = levels("Run commands").getAllByRole("radio");
+    expect(commands.map((r) => r.textContent)).toEqual(["Ask each time", "In its folders", "On its own"]);
+    expect(commands[1]!.getAttribute("aria-checked")).toBe("true");
+    expect(levels("Other machines").getAllByRole("radio").map((r) => r.textContent)).toEqual(["Ask each time", "On its own"]);
+    expect(levels("Other machines").getByRole("radio", { name: "Ask each time" }).getAttribute("aria-checked")).toBe("true");
+    expect(region().getByText("github.com")).toBeTruthy();
+    expect(region().getByText("~/dev/acme-web")).toBeTruthy();
+  });
+
+  it("sets a level, adds and removes a machine, a site and a folder", async () => {
+    const hub = fakeHub();
+    setUp(hub);
+    render(<AgentAccess agent={allan} />);
+    await waitFor(() => expect(levels("Run commands").getByRole("radio", { name: "On its own" })).toHaveProperty("disabled", false));
+    await act(async () => fireEvent.click(levels("Run commands").getByRole("radio", { name: "On its own" })));
+    expect(hub.setOnItsOwn).toHaveBeenCalledWith("allan", "commands", { kind: "kind" }, "anywhere");
+
+    fireEvent.change(region().getByRole("textbox", { name: "A machine it reaches on its own" }), { target: { value: "dev@DevBox" } });
+    await act(async () => fireEvent.click(region().getByRole("button", { name: "Add a machine" })));
+    expect(hub.setOnItsOwn).toHaveBeenLastCalledWith("allan", "network", { kind: "host", value: "devbox" }, "anywhere");
+
+    fireEvent.change(region().getByRole("textbox", { name: "A site it uses on its own" }), { target: { value: "github.com/acme" } });
+    await act(async () => fireEvent.click(region().getByRole("button", { name: "Add a site" })));
+    expect(hub.setOnItsOwn).toHaveBeenLastCalledWith("allan", "browser", { kind: "site", value: "https://github.com" }, "anywhere");
+
+    picked = "/Users/me/dev/acme-web";
+    await act(async () => fireEvent.click(region().getAllByRole("button", { name: "Add a folder…" })[2]!));
+    expect(hub.setOnItsOwn).toHaveBeenLastCalledWith("allan", "delete", { kind: "folder", value: "/Users/me/dev/acme-web" }, "anywhere");
+
+    fireEvent.change(region().getByRole("textbox", { name: "A machine it reaches on its own" }), { target: { value: "not a host!" } });
+    await act(async () => fireEvent.click(region().getByRole("button", { name: "Add a machine" })));
+    expect(region().getByRole("alert").textContent).toBe("not a host! isn’t a host name or address.");
+  });
+
+  it("asks again for one override", async () => {
+    alone = [{ kind: "network", scope: { kind: "host", value: "devbox" }, level: "anywhere", created_at: "" }];
+    const hub = fakeHub();
+    setUp(hub);
+    render(<AgentAccess agent={allan} />);
+    const again = await screen.findByRole("button", { name: "Ask again for devbox" });
+    await act(async () => fireEvent.click(again));
+    expect(hub.setOnItsOwn).toHaveBeenCalledWith("allan", "network", { kind: "host", value: "devbox" }, null);
+  });
+
+  it("lists what it did on its own with the full audit, and asks again about everything", async () => {
+    const hub = fakeHub({
+      computerActivity: vi.fn((f?: { decided_by?: string }) =>
+        Promise.resolve({ rows: f?.decided_by ? [row({ id: "r9", doing: "run `ssh devbox ls`", decided_by: "on_its_own", outcome: { outcome: "ran" } })] : [], next: null }),
+      ),
+    });
+    setUp(hub);
+    render(<AgentAccess agent={allan} />);
+    const done = await screen.findByRole("list", { name: "What Allan did on its own" });
+    expect(within(done).getByText("On its own")).toBeTruthy();
+    expect(hub.computerActivity).toHaveBeenCalledWith({ agent: "allan", decided_by: "on_its_own" });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Ask me again" })));
+    expect(hub.askAgain).toHaveBeenCalledWith("allan");
+    // What's allowed is read again: "Ask me again" forgot it too.
+    expect(hub.computerGrants).toHaveBeenCalledTimes(2);
+    useUi.setState({ settings: null });
+    fireEvent.click(screen.getByRole("button", { name: "See full audit" }));
+    expect(useUi.getState().settings).toBe("computer");
+  });
+
+  it("waits below Full access, and at Do anything", async () => {
+    for (const toml of ['[computer]\naccess = "read_anywhere"\n', '[computer]\nasks = "never"\n']) {
+      setUp(fakeHub(), toml);
+      render(<AgentAccess agent={allan} />);
+      await waitFor(() => expect(region().getByText("These apply at Full access, asking only before irreversible things.")).toBeTruthy());
+      expect(levels("Run commands").getByRole("radio", { name: "On its own" })).toHaveProperty("disabled", true);
+      cleanup();
+    }
   });
 });

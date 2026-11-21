@@ -1,5 +1,5 @@
 import { parse, stringify } from "smol-toml";
-import type { ComputerActivityRow, ComputerGrant, DeskHub } from "../hub/client";
+import type { ComputerActivityRow, ComputerGrant, DeskHub, OnItsOwnKind, OnItsOwnLevel, OnItsOwnRow } from "../hub/client";
 
 /** How far an agent reaches on this computer: its `[computer] access`. An
  *  agent whose file says nothing is at Full access, asking only before
@@ -155,9 +155,11 @@ export const grantText = (g: ComputerGrant): string =>
 export const outcomeOf = (row: ComputerActivityRow): { text: string; tone: "done" | "blocked" | "" } => {
   switch (row.outcome.outcome) {
     case "ran":
-      return row.decided_by === "grant" || row.decided_by === "session"
-        ? { text: "Always allowed", tone: "done" }
-        : { text: "Ran", tone: "done" };
+      return row.decided_by === "on_its_own"
+        ? { text: "On its own", tone: "done" }
+        : row.decided_by === "grant" || row.decided_by === "session"
+          ? { text: "Always allowed", tone: "done" }
+          : { text: "Ran", tone: "done" };
     case "allowed":
       return { text: "You allowed", tone: "done" };
     case "declined":
@@ -187,3 +189,49 @@ export const KINDS: { id: string; label: string; kinds: string[] }[] = [
   { id: "connectors", label: "Connectors", kinds: ["connector"] },
   { id: "browser", label: "Browser", kinds: ["browser"] },
 ];
+
+/** What each kind of action covers, and the override it takes: a folder,
+ *  another machine or a site. */
+export const ALONE: { id: OnItsOwnKind; title: string; line: string; by: "folder" | "host" | "site" }[] = [
+  { id: "commands", title: "Run commands", line: "Force pushes, hard resets and commands Desk can’t read.", by: "folder" },
+  { id: "network", title: "Other machines", line: "ssh, scp and rsync to another computer.", by: "host" },
+  { id: "browser", title: "The browser", line: "Visiting, clicking and typing on pages in your Chrome.", by: "site" },
+  { id: "files", title: "Files outside its folders", line: "Writing over and moving your files.", by: "folder" },
+  { id: "delete", title: "Delete", line: "Always to the Trash, where you can put things back.", by: "folder" },
+];
+
+/** A kind's level choices: "In its folders" only where folders mean something. */
+export const choicesFor = (by: "folder" | "host" | "site"): { id: OnItsOwnLevel | null; label: string }[] => [
+  { id: null, label: "Ask each time" },
+  ...(by === "folder" ? [{ id: "in_folders" as const, label: "In its folders" }] : []),
+  { id: "anywhere", label: "On its own" },
+];
+
+/** The level set for `kind` as a whole; `null` asks each time. */
+export const levelFor = (rows: OnItsOwnRow[], kind: OnItsOwnKind): OnItsOwnLevel | null =>
+  rows.find((r) => r.kind === kind && r.scope.kind === "kind")?.level ?? null;
+
+/** The folders, hosts or sites `kind` runs on its own in. */
+export const overridesFor = (rows: OnItsOwnRow[], kind: OnItsOwnKind): string[] =>
+  rows.flatMap((r) => (r.kind === kind && r.scope.kind !== "kind" ? [r.scope.value] : []));
+
+/** A host or site as typed, as the hub keeps it; and why it can't be. */
+export const typedOverride = (by: "host" | "site", typed: string): { value: string | null; problem: string | null } => {
+  const t = typed.trim();
+  if (!t) return { value: null, problem: null };
+  if (by === "host") {
+    const host = (t.split("@").pop() ?? t).toLowerCase();
+    return /^[a-z0-9._:-]{1,253}$/.test(host) ? { value: host, problem: null } : { value: null, problem: `${t} isn’t a host name or address.` };
+  }
+  try {
+    const url = new URL(/^[a-z]+:\/\//i.test(t) ? t : `https://${t}`);
+    return (url.protocol === "https:" || url.protocol === "http:") && url.hostname
+      ? { value: url.origin, problem: null }
+      : { value: null, problem: `${t} isn’t a website.` };
+  } catch {
+    return { value: null, problem: `${t} isn’t a website.` };
+  }
+};
+
+/** A site's origin as the person reads it: `github.com`. */
+export const siteText = (origin: string): string => origin.replace(/^https:\/\//, "");
