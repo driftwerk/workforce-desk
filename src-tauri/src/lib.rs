@@ -14,6 +14,7 @@ mod grid_windows;
 mod helper;
 mod hub_io;
 mod hubs;
+mod issues_relay;
 mod key_copies;
 mod knows_machines;
 mod links;
@@ -1287,6 +1288,9 @@ pub fn run() {
             // A local boss's calls on its group's machine sessions, carried
             // to each machine while Desk is open.
             app.manage(crew_relay::start(app.handle().clone()));
+            // The machines' sessions' Linear and Jira calls, carried to this
+            // computer's hub, which holds the boards' links.
+            app.manage(issues_relay::start(app.handle().clone()));
             app.manage(App {
                 paths,
                 backend,
@@ -1505,6 +1509,11 @@ pub fn run() {
             }
             if let tauri::RunEvent::Exit = event
                 && let Some(relay) = app.try_state::<crew_relay::Stop>()
+            {
+                relay.stop();
+            }
+            if let tauri::RunEvent::Exit = event
+                && let Some(relay) = app.try_state::<issues_relay::Stop>()
             {
                 relay.stop();
             }

@@ -248,28 +248,37 @@ impl Call {
         })
     }
 
-    /// How long it may be carried from `now`: until the hub's deadline less
-    /// [`MARGIN`], at most `carry_for`; `None` when too little is left to
-    /// send it at all.
     fn time(&self, carry_for: Duration, now: SystemTime) -> Option<Duration> {
-        let deadline = match &self.deadline {
-            None | Some(Value::Null) => return Some(carry_for),
-            Some(d) => d.as_str(),
-        };
-        let Some(at) = deadline.and_then(|d| chrono::DateTime::parse_from_rfc3339(d).ok()) else {
-            tracing::warn!(id = %self.id, "a relayed call's deadline couldn't be read");
-            return Some(carry_for);
-        };
-        // In chrono's own terms, which hold any date (`SystemTime` may not
-        // on every platform).
-        let left = at
-            .with_timezone(&chrono::Utc)
-            .signed_duration_since(chrono::DateTime::<chrono::Utc>::from(now))
-            .to_std()
-            .unwrap_or_default();
-        // Never past `carry_for`, whatever this computer's clock does.
-        (left >= LEAST_LEFT).then(|| (left - MARGIN).min(carry_for))
+        carry_time(&self.id, self.deadline.as_ref(), carry_for, now)
     }
+}
+
+/// How long call `id` may be carried from `now`: until the hub's
+/// `deadline` for it less [`MARGIN`], at most `carry_for`; `None` when too
+/// little is left to send it at all.
+pub(crate) fn carry_time(
+    id: &str,
+    deadline: Option<&Value>,
+    carry_for: Duration,
+    now: SystemTime,
+) -> Option<Duration> {
+    let deadline = match deadline {
+        None | Some(Value::Null) => return Some(carry_for),
+        Some(d) => d.as_str(),
+    };
+    let Some(at) = deadline.and_then(|d| chrono::DateTime::parse_from_rfc3339(d).ok()) else {
+        tracing::warn!(id, "a relayed call's deadline couldn't be read");
+        return Some(carry_for);
+    };
+    // In chrono's own terms, which hold any date (`SystemTime` may not on
+    // every platform).
+    let left = at
+        .with_timezone(&chrono::Utc)
+        .signed_duration_since(chrono::DateTime::<chrono::Utc>::from(now))
+        .to_std()
+        .unwrap_or_default();
+    // Never past `carry_for`, whatever this computer's clock does.
+    (left >= LEAST_LEFT).then(|| (left - MARGIN).min(carry_for))
 }
 
 /// What became of one call.
@@ -290,7 +299,7 @@ fn unreached(machine: &str) -> Outcome {
 }
 
 /// Whether `id` is a call's id as the hub gives them (a UUID).
-fn uuid_ok(id: &str) -> bool {
+pub(crate) fn uuid_ok(id: &str) -> bool {
     id.len() == 36
         && id.chars().enumerate().all(|(i, c)| {
             if [8, 13, 18, 23].contains(&i) {
@@ -349,7 +358,7 @@ fn read_reply(machine: &str, reply: &Answer) -> Result<Value, String> {
 }
 
 /// The error a hub's refusal says, briefly.
-fn error_of(reply: &Answer) -> Option<String> {
+pub(crate) fn error_of(reply: &Answer) -> Option<String> {
     let v: Value = serde_json::from_str(&reply.body).ok()?;
     let e = v.get("error")?.as_str()?;
     Some(e.chars().take(500).collect())
@@ -778,9 +787,18 @@ async fn carry_machine<E: Ends>(
     }
 }
 
-/// `answer` posted for call `id`: until it is taken, or no one waits for
-/// it, each post within `post_try` and all within `post_for`.
+/// `answer` posted for call `id` to this computer's hub.
 async fn post<E: Ends>(ends: &E, id: &str, answer: &Value, timing: Timing) {
+    post_with(|body| ends.answer(id, body), id, answer, timing).await;
+}
+
+/// `answer` posted for call `id` by `send`: until it is taken, or no one
+/// waits for it, each post within `post_try` and all within `post_for`.
+pub(crate) async fn post_with<F, Fut>(send: F, id: &str, answer: &Value, timing: Timing)
+where
+    F: Fn(Vec<u8>) -> Fut,
+    Fut: Future<Output = Result<Answer, Unanswered>>,
+{
     let body = answer.to_string().into_bytes();
     if body.len() > MOST_BODY {
         tracing::warn!(id, "a relayed answer is too large to post");
@@ -791,7 +809,7 @@ async fn post<E: Ends>(ends: &E, id: &str, answer: &Value, timing: Timing) {
             if attempt > 0 {
                 tokio::time::sleep(timing.again_after[attempt - 1]).await;
             }
-            match tokio::time::timeout(timing.post_try, ends.answer(id, body.clone())).await {
+            match tokio::time::timeout(timing.post_try, send(body.clone())).await {
                 Ok(Ok(r)) if r.status < 300 => return true,
                 Ok(Ok(r)) if r.status == 410 => {
                     tracing::info!(id, "a relayed answer came after no one waited for it");
@@ -817,10 +835,10 @@ async fn post<E: Ends>(ends: &E, id: &str, answer: &Value, timing: Timing) {
 
 /// Each of Desk's machines' turns: [`MOST_PER_MACHINE`] calls at once.
 #[derive(Default)]
-struct Lanes(Mutex<HashMap<MachineId, Arc<Semaphore>>>);
+pub(crate) struct Lanes(Mutex<HashMap<MachineId, Arc<Semaphore>>>);
 
 impl Lanes {
-    fn of(&self, machine: &MachineId) -> Arc<Semaphore> {
+    pub(crate) fn of(&self, machine: &MachineId) -> Arc<Semaphore> {
         let mut m = self.0.lock().unwrap_or_else(|e| e.into_inner());
         Arc::clone(
             m.entry(machine.clone())
