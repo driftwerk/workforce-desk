@@ -7,8 +7,11 @@ import { withWheel } from "../line/rows";
 import { useLine } from "../line/store";
 import { useOverview } from "../overview/store";
 import { useLocalAgent } from "../overview/people";
+import { bossOfGroup } from "../groups/bosses";
+import { UNGROUPED } from "../groups/model";
+import { useLayout } from "../groups/store";
 import { takenBack, type Boss, type ChargeVerb } from "./charge";
-import { isServed, useGrantBossOf } from "./grantBoss";
+import { groupOfSession, isServed, useGrantBossOf } from "./grantBoss";
 
 interface ChargeState {
   /** The sessions a boss runs now, by session key (see `keyOf`): each
@@ -143,16 +146,32 @@ export const useTakenBack = (sessionId: string | null | undefined): ChargeView |
 
 /** The boss session `s` can be handed to: the one its group's grant names
  *  on another hub, wherever the session runs (machines' sessions too); else
- *  this computer's, for its own sessions. A machine has no boss of its own
- *  (its hub serves no agents), so its other sessions are handed to none
- *  and ask the person. */
+ *  this computer's, for its own sessions and a machine's alike. A machine
+ *  has no boss of its own (its hub serves no agents): its sessions go to
+ *  the boss here of their group, which the machine's grant names. */
 export const useBossOf = (s: { id: string; machine?: MachineId | null } | null | undefined): Boss | null => {
   const local = useBoss();
+  const home = useHomeBossOf(s);
   const granted = useGrantBossOf(s);
   if (granted.boss) return granted.boss;
   // Linked to a boss on another hub that doesn't run sessions now: no one.
   if (granted.bossed) return null;
-  return machineOf(s) === LOCAL ? local : null;
+  return machineOf(s) === LOCAL ? local : home;
+};
+
+/** What a machine's grant names this computer's boss as. */
+export const HOME = "home";
+
+/** The boss here of `s`'s group (the main overseer for Ungrouped), as a
+ *  machine's grant for that group names it there (`home/<agent>`). */
+const useHomeBossOf = (s: { id: string; machine?: MachineId | null } | null | undefined): Boss | null => {
+  const layout = useLayout();
+  const manager = useOverview((st) => st.manager);
+  const group = s ? groupOfSession(layout, s) : UNGROUPED;
+  const own = group === UNGROUPED ? manager : bossOfGroup(manager, group);
+  const agent = useLocalAgent(own?.agentId);
+  if (!own?.agentId) return null;
+  return { id: `${HOME}/${own.agentId}`, name: agent?.name ?? "", level: own.level, served: true };
 };
 
 /** The boss sessions can be handed to: the overseer, by its name. */
