@@ -5,6 +5,7 @@
 // they move, which the hub announces one ticket at a time.
 
 import { ENGINE_MODELS } from "../engines/engines";
+import { homeShort } from "../ui/paths";
 import { amountText } from "../spend/budgets";
 import type {
   BossPlan,
@@ -336,6 +337,13 @@ export interface PlanChanges {
   changed: TicketChange[];
 }
 
+/** A ticket's folder as a plan shows it; none when it is left for Desk to
+ *  find, or clone, as the ticket starts. */
+export const folderShown = (folder: string): string | null => (folder.trim() ? homeShort(folder.trim()) : null);
+
+/** How a plan says a folder left for Desk to find. */
+export const FOLDER_LEFT = "a folder Desk finds";
+
 export const changesBetween = (before: PlanSnapshot, after: PlanSnapshot): PlanChanges => {
   const was = new Map(before.tickets.map((t) => [t.id, t]));
   const now = new Set(after.tickets.map((t) => t.id));
@@ -347,7 +355,7 @@ export const changesBetween = (before: PlanSnapshot, after: PlanSnapshot): PlanC
     if (w.title !== t.title) c.title = { from: w.title, to: t.title };
     if (w.body !== t.body) c.body = { from: w.body, to: t.body };
     if (w.engine !== t.engine) c.engine = { from: w.engine, to: t.engine };
-    if (w.folder !== t.folder) c.folder = { from: w.folder, to: t.folder };
+    if (w.folder.trim() !== t.folder.trim()) c.folder = { from: w.folder, to: t.folder };
     if ((w.view ?? null) !== (t.view ?? null)) c.view = { from: w.view ?? null, to: t.view ?? null };
     if ((w.machine ?? null) !== (t.machine ?? null)) c.machine = { from: w.machine ?? null, to: t.machine ?? null };
     if ((w.model ?? null) !== (t.model ?? null)) c.model = { from: w.model ?? null, to: t.model ?? null };
