@@ -82,6 +82,7 @@ struct Call {
     id: String,
     system: Value,
     session: Value,
+    session_id: Value,
     #[serde(default)]
     input: Value,
     #[serde(default)]
@@ -97,6 +98,7 @@ impl Call {
             "machine": machine.as_str(),
             "system": self.system,
             "session": self.session,
+            "sessionId": self.session_id,
             "input": self.input,
         })
     }

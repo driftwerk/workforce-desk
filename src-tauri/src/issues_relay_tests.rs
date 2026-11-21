@@ -27,6 +27,8 @@ fn says(status: u16, body: Value) -> Result<Answer, Unanswered> {
     })
 }
 
+const SESSION: &str = "5b0c4c8e-0000-4000-8000-000000000015";
+
 fn devbox() -> MachineId {
     MachineId::new("devbox").unwrap()
 }
@@ -34,7 +36,7 @@ fn devbox() -> MachineId {
 /// A call as a machine queues it, `secs` from its deadline.
 fn queued(id: &str, secs: i64) -> Value {
     json!({
-        "id": id, "system": "linear", "session": "vel-15",
+        "id": id, "system": "linear", "session": "vel-15", "sessionId": SESSION,
         "input": { "action": "get", "key": "VEL-15" },
         "machine": "somewhere-else",
         "deadline": (chrono::Utc::now() + chrono::Duration::seconds(secs)).to_rfc3339(),
@@ -148,7 +150,7 @@ async fn a_call_is_carried_home_as_its_machines_and_answered_once() {
         fake.served(),
         vec![json!({
             "id": A, "machine": "devbox", "system": "linear", "session": "vel-15",
-            "input": { "action": "get", "key": "VEL-15" },
+            "sessionId": SESSION, "input": { "action": "get", "key": "VEL-15" },
         })]
     );
     tokio::time::sleep(Duration::from_millis(100)).await;
