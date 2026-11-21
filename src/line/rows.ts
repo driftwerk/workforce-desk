@@ -160,10 +160,11 @@ export const onThread = (m: LineMessage, sessionId: string): boolean =>
   (m.from.kind === "session" && m.from.id === sessionId) || (m.to.kind === "session" && m.to.id === sessionId);
 
 /** Why a boss's message waits that holds whoever drives: the hub's
- *  reasons it can't go in at all (stopped, the person typing, a turn it
- *  can't be typed into) and Desk's breaker come before the wheel. Only
- *  "asking" and no reason at all rank below it. */
-const BELOW_DRIVING: ReadonlySet<LineMessage["waiting"]> = new Set([undefined, "asking"]);
+ *  reasons it can't go in at all (stopped, the person typing, a dialog)
+ *  and Desk's breaker come before the wheel. A running turn, "asking" and
+ *  no reason at all rank below it: the hub says "you're driving" over a
+ *  turn that runs. */
+const BELOW_DRIVING: ReadonlySet<LineMessage["waiting"]> = new Set([undefined, "asking", "working"]);
 
 /** Whether `m` answers the question its session's turn ended on, not an
  *  ask of its own (the hub's `answers_turn`). */

@@ -26,7 +26,7 @@ describe("a line's rows", () => {
     expect(deliveryText(msg(), NOW)).toBeNull();
   });
 
-  it("hold only the boss's tells for the wheel, and never over a reason the hub ranks first", () => {
+  it("hold only the boss's tells for the wheel, over a running turn too, and never over a reason the hub ranks first", () => {
     const tell = (id: string, more: Parameters<typeof msg>[0] = {}) =>
       msg({ id, from: DESK, to: S1, kind: "tell", asked: null, delivery: "queued", deliveredAt: null, ...more });
     const list = [
@@ -52,7 +52,7 @@ describe("a line's rows", () => {
       paused: "paused",
       typing: "typing",
       stopped: "stopped",
-      working: "working",
+      working: "person_driving",
       ask: undefined,
       answer: undefined,
       turnAnswer: "person_driving",
@@ -62,7 +62,7 @@ describe("a line's rows", () => {
       other: undefined,
     });
     const back = withWheel(driven, "s1", false);
-    expect(waits(back)).toEqual({ ...waits(list), plain: undefined, asking: undefined, turnAnswer: undefined });
+    expect(waits(back)).toEqual({ ...waits(list), plain: undefined, asking: undefined, working: undefined, turnAnswer: undefined });
     expect(withWheel(list, "s1", false)).toBe(list);
   });
 
