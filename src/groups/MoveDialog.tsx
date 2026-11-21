@@ -13,7 +13,7 @@ import { useOverview } from "../overview/store";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { AgentMark } from "../ui/Mark";
 import { plainError } from "../ui/plainError";
-import { bossOfGroup, isSealed } from "./bosses";
+import { bossNameOf, bossOfGroup, isSealed } from "./bosses";
 import { UNGROUPED } from "./model";
 import { afterMove, FIRST_CHOICES, hubGroup, itemOf, localAccount, scopeBoss, scopeOf, useMove, type MoveAsk } from "./move";
 import { useLayout } from "./store";
@@ -119,17 +119,12 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
   const [bossCanRun, setBossCanRun] = useState(() => !!ask.preview?.effects.some((e) => e.kind === "charge_to"));
 
   const isLocal = (hubId: string) => !!hubs.find((h) => h.id === hubId)?.local;
+  const localHub = hubs.find((h) => h.local)?.id;
   const mainBoss = manager?.agentId ?? null;
   /** A boss by its agent id, by name: never the id. */
-  const bossName = (id: string | null | undefined): string => {
-    const who = id ?? mainBoss;
-    if (!who) return "Desk";
-    return (
-      roster.find((a) => a.id === who && isLocal(a.hubId))?.name ??
-      manager?.bosses?.find((b) => b.agentId === who)?.name ??
-      (who === "desk" ? "Desk" : who === mainBoss ? "the main boss" : "its boss")
-    );
-  };
+  const bossName = (id: string | null | undefined): string => bossNameOf(roster, localHub, manager, id);
+  /** Who a handover is from: its boss, or Desk, from the facts, when none oversaw it. */
+  const fromName = (h: Handover): string => (h.fromBoss ? bossName(h.fromBoss) : "Desk");
   const groupName = (id: string | null | undefined): string =>
     !id || id === UNGROUPED ? "Ungrouped" : (layout.groups.find((g) => g.id === id)?.name ?? "another group");
   /** Who runs what is in `group`, as its option says. */
@@ -332,9 +327,9 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
   };
   const drafter = (h: Handover, n: Note | undefined): string => {
     if (n?.edited) return "Edited by you";
-    if (h.drafting && !n?.stopped) return `${bossName(h.fromBoss)} is writing a draft; this is what Desk knows meanwhile`;
+    if (h.drafting && !n?.stopped) return `${fromName(h)} is writing a draft; this is what Desk knows meanwhile`;
     if ((n?.by ?? (h.draftedBy.kind === "desk" ? "desk" : "boss")) === "desk") return "Written by Desk from what it knows";
-    return `Drafted by ${bossName(h.fromBoss)}`;
+    return `Drafted by ${fromName(h)}`;
   };
 
   const now = subject.from;
@@ -525,13 +520,13 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
                 )}
                 {n?.arrived && (
                   <span className="small move-note-meta">
-                    <span>{bossName(h.fromBoss)}’s draft is ready.</span>
+                    <span>{fromName(h)}’s draft is ready.</span>
                     <button
                       type="button"
                       className="link small"
                       onClick={() => setNotes((was) => ({ ...was, [h.id]: { ...n, text: n.draft, edited: false, by: "boss", arrived: false } }))}
                     >
-                      Use {bossName(h.fromBoss)}’s draft
+                      Use {fromName(h)}’s draft
                     </button>
                   </span>
                 )}
@@ -565,7 +560,7 @@ function MoveDialogFor({ ask, onClose }: { ask: MoveAsk; onClose: () => void }) 
             {sendProblem}
           </span>
         ) : (
-          <span className="dialog-foot-note faint">Waiting for {bossName(waiting[0]!.fromBoss)}’s draft…</span>
+          <span className="dialog-foot-note faint">Waiting for {fromName(waiting[0]!)}’s draft…</span>
         )}
         <button type="button" className="btn btn-ghost" data-autofocus onClick={onClose}>
           Cancel

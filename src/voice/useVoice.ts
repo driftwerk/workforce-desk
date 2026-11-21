@@ -215,7 +215,7 @@ export class Turns {
     const reply = u.callId ? toModel(u.callId) : written ? inWriting : aloud(agent ? agentKey(agent) : null, agent ? voiceOf(agent) : undefined, !!mic);
     useVoiceStore.setState({ transcript: u.text, heardBy: agent?.name ?? null, error: null, notice: null });
     if (!agent) {
-      reply.answer(missingAgent(u.agent, wakeNames(chat.roster)));
+      reply.answer(missingAgent(u.agent, wakeNames(chat.roster, () => [])));
       return;
     }
     const key = agentKey(agent);
@@ -330,7 +330,8 @@ export function useVoice(enabled: boolean) {
   const engine = voiceEngine(useSettings((s) => s.voiceEngine)).id;
   const roster = useChat((s) => s.roster);
   const agentVoices = useSettings((s) => s.agentVoices);
-  const members = voiceRoster(roster, agentVoices);
+  const formerNames = useSettings((s) => s.formerNames);
+  const members = voiceRoster(roster, agentVoices, (a) => formerNames[agentKey(a)] ?? []);
   const membersKey = JSON.stringify(members);
 
   useEffect(() => {

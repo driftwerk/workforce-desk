@@ -188,6 +188,7 @@ export const unreadRows = (s: RowSources): UnreadRow[] => {
   const inDm = !!overseer && !!s.local?.brief && !!overseer.at && instant(overseer.at) >= instant(s.local.brief);
   if (overseer && inDm) overseer.where = `Desk report · ${overseer.where}`;
   if (s.local?.brief && s.brief && !inDm) {
+    const by = s.roster.find((a) => a.hubId === local?.id && a.id === s.brief!.by.id)?.name ?? s.brief.by.name;
     rows.push({
       key: "brief",
       place: { kind: "brief" },
@@ -195,7 +196,7 @@ export const unreadRows = (s: RowSources): UnreadRow[] => {
       count: 1,
       at: s.local.brief,
       title: "Desk report",
-      where: s.brief.by.name && s.brief.by.name !== "Desk" ? `From ${s.brief.by.name}` : "On the Floor",
+      where: by && by !== "Desk" ? `From ${by}` : "On the Floor",
       line: firstLine(s.brief.text),
       mark: { kind: "desk" },
       open: null,
