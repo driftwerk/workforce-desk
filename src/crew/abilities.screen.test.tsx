@@ -186,6 +186,7 @@ describe("The Settings tab", () => {
       "How they remember",
       "How they work",
       "What they see",
+      "Mail sorting",
       "Checking in",
       "Fine-tuning",
     ]);

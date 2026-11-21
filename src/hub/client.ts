@@ -348,6 +348,30 @@ export const hubRequest = async <T>(hub: HubRef, method: string, path: string, b
 export const hubCall = async <T>(hub: HubRef, method: string, path: string, body?: unknown): Promise<T> =>
   (await hubRequest<T>(hub, method, path, body)).body;
 
+/** One of the person's standing rules for sorting new mail, as its hub
+ *  keeps it: a monitor that moves, archives, marks read or flags what
+ *  matches. `says` is the rule in a sentence; `watched_by` names the other
+ *  monitors that read the same mail. */
+export interface SortRule {
+  rule_id: string;
+  owner: string | null;
+  says: string;
+  enabled: boolean;
+  watched_by: string[];
+}
+
+const sortRulePath = (rule: Pick<SortRule, "rule_id" | "owner">, rest = ""): string =>
+  `/api/monitors/${encodeURIComponent(rule.rule_id)}${rest}${rule.owner === null ? "" : `?owner=${encodeURIComponent(rule.owner)}`}`;
+
+/** The person's mail sorting rules on hub `hub`. */
+export const sortRulesOf = (hub: HubRef) => ({
+  list: async (): Promise<SortRule[]> => (await hubCall<{ rules?: SortRule[] }>(hub, "GET", "/api/monitors/sort-rules")).rules ?? [],
+  setEnabled: (rule: SortRule, enabled: boolean): Promise<unknown> => hubCall(hub, "PUT", sortRulePath(rule, "/enabled"), { enabled }),
+  remove: (rule: SortRule): Promise<unknown> => hubCall(hub, "DELETE", sortRulePath(rule)),
+});
+
+export type SortRulesApi = ReturnType<typeof sortRulesOf>;
+
 /** A Desk route; in the browser preview, the dev bridge answers the ones
  *  the running hub doesn't have yet. */
 export const deskCall = <T>(hub: HubRef, method: string, path: string, body?: unknown): Promise<T> =>

@@ -23,6 +23,7 @@ import { CheckingIn, HowTheyRemember, HowTheyWork } from "./AgentAbilities";
 import { BossPlans } from "./PlanRow";
 import { UpdatesSettings } from "./Updates";
 import { OverseesTheCrew } from "./OverseesTheCrew";
+import { MailSorting } from "./MailSorting";
 import { WhatTheySee } from "./WhatTheySee";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
 import { AgentRoute } from "../hubs/RunMyWorkOn";
@@ -57,6 +58,7 @@ export function AgentSettings({ agent, hub, onOpenFiles }: { agent: Agent; hub: 
         {local && <HowTheyRemember agent={agent} ago={ago} />}
         {local && <HowTheyWork agent={agent} />}
         <WhatTheySee agent={agent} hub={hub} />
+        <MailSorting agent={agent} hub={hub} />
         {local && (
           <CheckingIn
             agent={agent}
@@ -87,6 +89,7 @@ const SECTIONS: { id: string; name: string }[] = [
   { id: "remember", name: "How they remember" },
   { id: "work", name: "How they work" },
   { id: "sees", name: "What they see" },
+  { id: "mail", name: "Mail sorting" },
   { id: "checkin", name: "Checking in" },
   { id: "tune", name: "Fine-tuning" },
 ];
