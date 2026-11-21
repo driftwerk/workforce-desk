@@ -96,8 +96,8 @@ const START_FIELDS: &[&str] = &[
     "engine", "name", "cwd", "goal", "prompt", "view", "worktree", "model", "id",
 ];
 /// Whether the machine installs the start's folder's dependencies as it
-/// starts (a plan's ticket): forwarded when `true`, beside
-/// [`START_FIELDS`]; anything else is as if absent.
+/// starts (a plan's ticket): a boolean, beside [`START_FIELDS`], forwarded
+/// when `true`.
 const START_DEPS: &str = "deps";
 /// The person's machines, as Desk has them: answered here.
 const MACHINES: &str = "desk.machines";
@@ -533,11 +533,16 @@ async fn carry_desk<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &
     {
         return refused("That start's id couldn't be read.".to_string());
     }
+    let deps = match given.get(START_DEPS) {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return refused(format!("That start's {START_DEPS} couldn't be read.")),
+    };
     let mut start: serde_json::Map<String, Value> = START_FIELDS
         .iter()
         .filter_map(|k| given.get(*k).map(|v| ((*k).to_string(), v.clone())))
         .collect();
-    if let Some(Value::Bool(true)) = given.get(START_DEPS) {
+    if deps {
         start.insert(START_DEPS.into(), true.into());
     }
     if let (Some(grant), Some(boss)) = (
@@ -1912,12 +1917,12 @@ mod tests {
         let _ = stop.send(true);
     }
 
-    /// A start's `deps` is forwarded only when it is `true`.
+    /// A start's `deps` that is `false` or `null` is forwarded as absent.
     #[tokio::test]
-    async fn a_starts_deps_other_than_true_is_forwarded_as_absent() {
+    async fn a_starts_deps_false_or_null_is_forwarded_as_absent() {
         let made = json!({"id": SESSION, "name": "VEL-3", "cwd": "/x", "state": "starting"});
-        let (fake, mut rx) = with_desk(vec![Does::Says(200, made); 3], None);
-        let calls: Vec<Value> = [(A, json!(false)), (B, Value::Null), (SESSION, json!("yes"))]
+        let (fake, mut rx) = with_desk(vec![Does::Says(200, made); 2], None);
+        let calls: Vec<Value> = [(A, json!(false)), (B, Value::Null)]
             .into_iter()
             .map(|(id, deps)| {
                 desk_call(
@@ -1928,11 +1933,11 @@ mod tests {
             })
             .collect();
         let stop = start(&fake.polled(calls));
-        for _ in 0..3 {
+        for _ in 0..2 {
             assert_eq!(next(&mut rx).await.1["status"], "ok");
         }
         let sent = fake.desk_sent.lock().unwrap().clone();
-        assert_eq!(sent.len(), 3);
+        assert_eq!(sent.len(), 2);
         assert!(
             sent.iter()
                 .all(|(_, b)| b == &Some(json!({"engine": "codex", "name": "VEL-3", "cwd": "/x"}))),
@@ -2065,8 +2070,14 @@ mod tests {
                 "desk.session_start",
                 json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "id": "not-a-uuid"}),
             ),
+            desk_call(
+                "0f0e0d0c-0b0a-4909-8807-0605040302dd",
+                "desk.session_start",
+                json!({"engine": "codex", "name": "VEL-4", "cwd": "/x", "deps": "yes"}),
+            ),
         ]));
         let mut got = [
+            next(&mut rx).await,
             next(&mut rx).await,
             next(&mut rx).await,
             next(&mut rx).await,
@@ -2086,6 +2097,10 @@ mod tests {
         );
         assert_eq!(
             got[2].1,
+            json!({"status": "refused", "body": {"error": "That start's deps couldn't be read."}})
+        );
+        assert_eq!(
+            got[3].1,
             json!({"status": "refused", "body": {"error": "That start's id couldn't be read."}})
         );
         assert!(fake.desk_sent.lock().unwrap().is_empty());
