@@ -207,6 +207,19 @@ export interface Removed {
   transcripts: number;
 }
 
+/** What ending a session would leave, as its hub reads it. */
+export interface Closing {
+  folder: string;
+  /** Its turn under way, or what it waits on you for. */
+  work: string | null;
+  /** Its folder's uncommitted or unpushed work. */
+  changes: string | null;
+  /** Its pull requests still open, by number. */
+  pulls: number[];
+  /** Its tickets still open, by key. */
+  tickets: string[];
+}
+
 export interface NewSession {
   engine: Engine;
   view?: View;

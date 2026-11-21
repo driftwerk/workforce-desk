@@ -197,6 +197,11 @@
   {
     "kind": "http",
     "method": "GET",
+    "path": "/api/desk/sessions/s1/closing"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
     "path": "/api/desk/sessions/closed"
   },
   {

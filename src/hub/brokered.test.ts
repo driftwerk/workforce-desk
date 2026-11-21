@@ -80,6 +80,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   setTerminalColors: (h) => h.setTerminalColors({ foreground: "#000000", background: "#FFFFFF", cursor: "#000000", ansi: [], ground: "light" }),
   remove: (h) => h.remove("s1", true),
   end: (h) => h.end("s1"),
+  closing: (h) => h.closing("s1"),
   closedSessions: (h) => h.closedSessions(),
   hiddenSessions: (h) => h.hiddenSessions(),
   trackAgain: (h) => h.trackAgain({ engine: "claude", cliSessionId: "a/b c" } as never),

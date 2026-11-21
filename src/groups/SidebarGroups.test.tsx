@@ -19,6 +19,10 @@ import { LifecycleDialogs } from "../session/LifecycleDialogs";
 import { useMachines } from "../hub/engines";
 import { useMachineSessions } from "./machines";
 import { QUIET, toggleTalk, useMic } from "../voice/mic";
+import { clearSelection, useSelection } from "./selection";
+import { DEFAULT_HOST, useHost } from "../shell/host";
+import type { Closing } from "../hub/types";
+import { plainError } from "../ui/plainError";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -189,7 +193,7 @@ describe("groups in the sidebar", () => {
     groups();
     fireEvent.keyDown(row("web-release"), { key: "F10", shiftKey: true });
     const menu = screen.getByRole("menu", { name: "web-release options" });
-    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["RenameF2", "Move to group▸", "Add to grid▸", "Open", "Continue in…", "End session…", "Remove…⌫"]);
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["RenameF2", "Move to group▸", "Add to grid▸", "Open", "Continue in…", "Select", "End session…", "Remove…⌫"]);
     expect(document.activeElement?.textContent).toBe("RenameF2");
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
@@ -262,11 +266,11 @@ describe("groups in the sidebar", () => {
     expect(vi.mocked(invoke)).toHaveBeenCalledWith("boss_status", { group: "acme" });
   });
 
-  it("Ungrouped has no handle or rename, and its options only clear finished sessions", () => {
+  it("Ungrouped has no handle or rename, and its options only select sessions or clear finished ones", () => {
     groups();
     fireEvent.click(screen.getByRole("button", { name: "Ungrouped options" }));
     const menu = screen.getByRole("menu", { name: "Ungrouped options" });
-    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Clear finished sessions…"]);
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Select sessions", "Clear finished sessions…"]);
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     fireEvent.keyDown(header("Ungrouped"), { key: "F2" });
     expect(screen.queryByRole("textbox")).toBeNull();
@@ -573,5 +577,126 @@ describe("a machine's sessions, in the same groups", () => {
     expect(rows("Acme")).toEqual(["Scout", "api-e7", "acme-web"]);
     act(() => useMachines.setState({ machines: [] }));
     expect(rows("Acme")).toEqual(["Scout", "api-e7"]);
+  });
+});
+
+describe("picking sessions to close together", () => {
+  const devbox = { id: "devbox", name: "devbox", target: "devbox", version: null, state: { kind: "ready" } } as never;
+  const nothing: Closing = { folder: "/tmp", work: null, changes: null, pulls: [], tickets: [] };
+  const here = {
+    end: vi.fn((id: string) => Promise.resolve(session(id, id, { state: "closed" }))),
+    closing: vi.fn((id: string): Promise<Closing> =>
+      Promise.resolve(
+        id === "s1"
+          ? { folder: "/Users/kings/dev/api", work: "it's working", changes: "2 uncommitted files", pulls: [12], tickets: ["MAN-491"] }
+          : nothing,
+      ),
+    ),
+  };
+  const unreachable = new Error("devbox didn't answer");
+  const there = {
+    end: vi.fn(() => Promise.reject(unreachable)),
+    closing: vi.fn(() => Promise.reject(new Error("an older Desk"))),
+  };
+  const picked = () => [...useSelection.getState().keys];
+  const bar = () => screen.queryByRole("toolbar", { name: "Selected sessions" });
+
+  beforeEach(() => {
+    Object.values(here).forEach((f) => f.mockClear());
+    Object.values(there).forEach((f) => f.mockClear());
+    useMachines.setState({ machines: [devbox], listed: true });
+    useMachineSessions.setState({ seen: {}, merged: [] });
+    useDesk.setState({
+      hub: here as never,
+      sessions: { ...useDesk.getState().sessions, "devbox/d1": { ...session("d1", "acme-web"), machine: "devbox" } },
+      engines: { devbox: { hub: there as never, connected: true, loaded: true, error: null } },
+    });
+    useSettings.setState({ groups: [{ ...ACME, items: [...ACME.items, "session:devbox/d1"] }, BETA] });
+  });
+  afterEach(() => {
+    clearSelection();
+    useHost.setState(DEFAULT_HOST);
+    useMachines.setState({ machines: [], listed: false });
+    useDesk.setState({ engines: {}, hub: null });
+  });
+
+  it("picks one with cmd-click and a range with shift-click, in the order shown, opening none; Escape lets go", () => {
+    groups();
+    fireEvent.click(row("api-e7"), { metaKey: true });
+    expect(row("api-e7").className).toContain("selected");
+    expect(row("api-e7").getAttribute("aria-pressed")).toBe("true");
+    expect(bar()?.textContent).toContain("1 selected");
+    fireEvent.click(row("web-release"), { shiftKey: true });
+    expect(picked()).toEqual(["session:s1", "session:devbox/d1", "session:s2"]);
+    expect(bar()?.textContent).toContain("3 selected");
+    fireEvent.click(row("acme-web"), { metaKey: true });
+    expect(picked()).toEqual(["session:s1", "session:s2"]);
+    expect(row("acme-web").getAttribute("aria-pressed")).toBe("false");
+    // Ctrl on a Mac isn't the pick: only ⌘ is.
+    fireEvent.click(row("acme-web"), { ctrlKey: true });
+    expect(picked()).toHaveLength(2);
+    expect(useDesk.getState().openId).toBe("devbox/d1");
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(bar()).toBeNull();
+    expect(row("api-e7").className).not.toContain("selected");
+    expect(row("api-e7").hasAttribute("aria-pressed")).toBe(false);
+  });
+
+  it("picks with Ctrl on Windows, keeps the picks as the sidebar is drawn again, and lets go of one that leaves it", () => {
+    useHost.setState({ platform: "windows" });
+    const { unmount } = groups();
+    fireEvent.click(row("api-e7"), { ctrlKey: true });
+    fireEvent.click(row("web-release"), { ctrlKey: true });
+    act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s1: { ...s.sessions.s1!, state: "working" } } })));
+    expect(bar()?.textContent).toContain("2 selected");
+    unmount();
+    groups();
+    expect(row("web-release").className).toContain("selected");
+    act(() =>
+      useDesk.setState((s) => {
+        const { s2: _closed, ...rest } = s.sessions;
+        return { sessions: rest };
+      }),
+    );
+    expect(picked()).toEqual(["session:s1"]);
+    expect(bar()?.textContent).toContain("1 selected");
+  });
+
+  it("is reachable without a keyboard: Select sessions from a group's menu, then a click picks", () => {
+    groups();
+    fireEvent.click(screen.getByRole("button", { name: "Ungrouped options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Select sessions" }));
+    expect(bar()?.textContent).toContain("0 selected");
+    expect(within(bar()!).getByRole("button", { name: "Close" })).toHaveProperty("disabled", true);
+    fireEvent.click(row("web-release"));
+    expect(useDesk.getState().openId).toBeNull();
+    expect(bar()?.textContent).toContain("1 selected");
+    fireEvent.contextMenu(row("api-e7"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Select" }));
+    expect(picked()).toEqual(["session:s2", "session:s1"]);
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Clear" }));
+    expect(bar()).toBeNull();
+  });
+
+  it("closes them in one confirm that says what each would leave, as End session does, and keeps the refused saying why", async () => {
+    groups();
+    for (const name of ["api-e7", "acme-web", "web-release"]) fireEvent.click(row(name), { metaKey: true });
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Close" }));
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("heading").textContent).toBe("Close 3 sessions?");
+    expect(await within(dialog).findByText("it's working · 2 uncommitted files · PR #12 still open · MAN-491 still open")).toBeTruthy();
+    expect(within(dialog).getByText("~/dev/api")).toBeTruthy();
+    expect(await within(dialog).findByText("Nothing left behind.")).toBeTruthy();
+    expect(await within(dialog).findByText("What it would leave couldn’t be checked.")).toBeTruthy();
+    expect(here.closing.mock.calls.map(([id]) => id).sort()).toEqual(["s1", "s2"]);
+    expect(there.closing).toHaveBeenCalledWith("d1");
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "Close 3" }));
+    expect(await within(screen.getByRole("dialog")).findByText(plainError(unreachable))).toBeTruthy();
+    expect(here.end.mock.calls.map(([id]) => id).sort()).toEqual(["s1", "s2"]);
+    expect(there.end).toHaveBeenCalledWith("d1");
+    expect(picked()).toEqual(["session:devbox/d1"]);
+    expect(screen.getByRole("dialog").textContent).toContain("1 of 3 weren’t closed");
+    expect(within(screen.getByRole("dialog")).getByRole("heading").textContent).toBe("Close 1 session?");
   });
 });
