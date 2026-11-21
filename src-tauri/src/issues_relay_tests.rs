@@ -57,6 +57,7 @@ fn listed() -> Value {
 struct Fake {
     reached: Mutex<Vec<(MachineId, String)>>,
     sessions: Mutex<Value>,
+    listings: Mutex<usize>,
     polls: Mutex<VecDeque<Result<Answer, Unanswered>>>,
     takes: Mutex<usize>,
     home: Mutex<VecDeque<Result<Answer, Unanswered>>>,
@@ -95,6 +96,7 @@ impl Ends for Fake {
     }
 
     async fn sessions(&self, _: &MachineId) -> Result<Answer, Unanswered> {
+        *self.listings.lock().unwrap() += 1;
         let listed = self.sessions.lock().unwrap().clone();
         says(200, listed)
     }
@@ -295,4 +297,27 @@ async fn a_machine_desk_no_longer_reaches_isnt_polled() {
     tokio::time::sleep(Duration::from_millis(200)).await;
     assert_eq!(*fake.takes.lock().unwrap(), 0);
     stop.send(true).unwrap();
+}
+
+/// A machine's sessions are read once for the calls of a few seconds, and
+/// again when a call names one not in what was read.
+#[tokio::test]
+async fn a_machines_sessions_are_read_again_only_for_one_not_read() {
+    let (fake, _rx) = Fake::with(vec![], vec![]);
+    let listed = Listed::default();
+    let until = Instant::now() + Duration::from_secs(5);
+    for _ in 0..2 {
+        let name = name_of(&*fake, &devbox(), &listed, SESSION, until).await;
+        assert_eq!(name, Ok(Some("VEL-15 fix".into())));
+    }
+    assert_eq!(*fake.listings.lock().unwrap(), 1);
+    let unknown = "5b0c4c8e-0000-4000-8000-0000000000ff";
+    assert_eq!(name_of(&*fake, &devbox(), &listed, unknown, until).await, Ok(None));
+    assert_eq!(*fake.listings.lock().unwrap(), 2);
+    let other = "5b0c4c8e-0000-4000-8000-000000000001";
+    assert_eq!(
+        name_of(&*fake, &devbox(), &listed, other, until).await,
+        Ok(Some("other".into()))
+    );
+    assert_eq!(*fake.listings.lock().unwrap(), 2);
 }

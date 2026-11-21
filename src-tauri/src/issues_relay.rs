@@ -15,10 +15,13 @@
 //!   own fields and the machine's id as Desk knows it, never as the
 //!   machine says it, and the answer posted is `ok` or `error` alone.
 //! - **Only a session Desk lists**: the session the call names must be one
-//!   the machine lists in Desk now, and it is named as Desk names it, so a
-//!   made-up id or name never reaches this computer's hub. A machine is
-//!   one OS account: the sessions on it, of whatever group, share what it
-//!   can do, and this computer's hub gives each the links of its group.
+//!   the machine lists in Desk now (read again when a call names one not
+//!   in what was read a few seconds ago), and it is named as the sidebar
+//!   names it: the name the person gave it, which a machine's hub keeps
+//!   for Desk, else the machine's own. A made-up id or name never reaches
+//!   this computer's hub. A machine is one OS account: the sessions on it,
+//!   of whatever group, share what it can do, and this computer's hub
+//!   gives them links only while they are one client's.
 //! - **Sent once**: a call that may have reached this computer's hub with
 //!   no answer back is never sent again; the session is told it may have
 //!   gone through.
@@ -62,6 +65,8 @@ const LOOK_EVERY: Duration = Duration::from_secs(3);
 const OLDER_AGAIN: Duration = Duration::from_secs(60);
 /// A machine's sessions in Desk.
 const SESSIONS: &str = "/api/desk/sessions";
+/// How long a machine's sessions as read are taken as its sessions now.
+const LISTED_FOR: Duration = Duration::from_secs(5);
 /// What a session hears when its answer can't be carried.
 const TOO_LARGE: &str = "That answer is too large to carry; ask for fewer or one issue.";
 /// What a session hears when this computer's hub doesn't run machines'
@@ -120,19 +125,64 @@ impl Call {
     }
 }
 
-/// What Desk names session `id` in `listed`, a machine's sessions: none
-/// when it doesn't list it.
-fn named(listed: &Answer, id: &str) -> Option<String> {
-    let sessions: Vec<Value> = serde_json::from_str(&listed.body).ok()?;
-    let s = sessions
+/// The sessions in `listed`, a machine's sessions in Desk, each one's name
+/// by its id: the name the person gave it, else the machine's own.
+fn names_of(listed: &Answer) -> HashMap<String, String> {
+    let sessions: Vec<Value> = serde_json::from_str(&listed.body).unwrap_or_default();
+    sessions
         .iter()
-        .find(|s| s.get("id").and_then(Value::as_str) == Some(id))?;
-    ["displayName", "name"]
-        .iter()
-        .filter_map(|k| s.get(*k).and_then(Value::as_str))
-        .map(str::trim)
-        .find(|n| !n.is_empty())
-        .map(str::to_string)
+        .filter_map(|s| {
+            let id = s.get("id").and_then(Value::as_str)?;
+            let name = ["displayName", "name"]
+                .iter()
+                .filter_map(|k| s.get(*k).and_then(Value::as_str))
+                .map(str::trim)
+                .find(|n| !n.is_empty())
+                .unwrap_or("a session");
+            Some((id.to_string(), name.to_string()))
+        })
+        .collect()
+}
+
+/// A machine's sessions' names as last read, and when.
+#[derive(Default)]
+struct Listed(std::sync::Mutex<Option<(Instant, HashMap<String, String>)>>);
+
+impl Listed {
+    fn fresh(&self, id: &str) -> Option<String> {
+        let kept = self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        kept.as_ref()
+            .filter(|(at, _)| at.elapsed() < LISTED_FOR)
+            .and_then(|(_, names)| names.get(id).cloned())
+    }
+
+    fn keep(&self, names: HashMap<String, String>) {
+        *self.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner) =
+            Some((Instant::now(), names));
+    }
+}
+
+/// What Desk names session `id` on `machine`, read by `until`: from what
+/// was read of its sessions in the last few seconds, else read again;
+/// `Ok(None)` when Desk doesn't list it there.
+async fn name_of<E: Ends>(
+    ends: &E,
+    machine: &MachineId,
+    listed: &Listed,
+    id: &str,
+    until: Instant,
+) -> Result<Option<String>, ()> {
+    if let Some(name) = listed.fresh(id) {
+        return Ok(Some(name));
+    }
+    let read = match tokio::time::timeout_at(until, ends.sessions(machine)).await {
+        Ok(Ok(a)) if a.status == 200 => a,
+        _ => return Err(()),
+    };
+    let names = names_of(&read);
+    let name = names.get(id).cloned();
+    listed.keep(names);
+    Ok(name)
 }
 
 fn error(why: impl Into<String>) -> Option<Value> {
@@ -158,7 +208,7 @@ fn reply_of(r: Result<Answer, Unanswered>) -> Option<Value> {
                 "Desk on the person's Mac is busy; try again in a moment.".into()
             }))
         }
-        Ok(a) if (400..500).contains(&a.status) && !matches!(a.status, 408 | 429) => error(
+        Ok(a) if (400..500).contains(&a.status) && a.status != 408 => error(
             error_of(&a)
                 .unwrap_or_else(|| format!("Desk on the person's Mac refused it ({}).", a.status)),
         ),
@@ -179,6 +229,7 @@ async fn carry<E: Ends>(
     timing: Timing,
     lanes: &Lanes,
     in_flight: &Arc<Semaphore>,
+    listed: &Listed,
 ) -> Option<Value> {
     let Some(time) = carry_time(&call.id, call.left_ms.as_ref(), timing.carry_for) else {
         return error("There was no time left to carry it; try again.");
@@ -187,15 +238,15 @@ async fn carry<E: Ends>(
     if !uuid_ok(&call.session_id) {
         return error("Desk couldn't read that call.");
     }
-    let listed = match tokio::time::timeout_at(until, ends.sessions(machine)).await {
-        Ok(Ok(a)) if a.status == 200 => a,
-        _ => return error("Desk couldn't read this machine's sessions just now; try again."),
-    };
-    let Some(name) = named(&listed, &call.session_id) else {
-        return error(format!(
-            "Desk doesn't list that session on {} now, so it isn't given Linear or Jira.",
-            machine.as_str()
-        ));
+    let name = match name_of(ends, machine, listed, &call.session_id, until).await {
+        Ok(Some(name)) => name,
+        Ok(None) => {
+            return error(format!(
+                "Desk doesn't list that session on {} now, so it isn't given Linear or Jira.",
+                machine.as_str()
+            ));
+        }
+        Err(()) => return error("Desk couldn't read this machine's sessions just now; try again."),
     };
     let Ok(body) = serde_json::to_vec(&call.served(machine, &name)) else {
         return error("Desk couldn't read that call.");
@@ -252,6 +303,7 @@ async fn poll<E: Ends>(
     in_flight: Arc<Semaphore>,
 ) {
     let mut backoff = timing.backoff;
+    let listed = Arc::new(Listed::default());
     loop {
         let polled = Instant::now();
         let taken = tokio::select! {
@@ -264,11 +316,13 @@ async fn poll<E: Ends>(
                 for call in listed {
                     let (ends, machine) = (Arc::clone(&ends), machine.clone());
                     let (lanes, in_flight) = (Arc::clone(&lanes), Arc::clone(&in_flight));
+                    let listed = Arc::clone(&listed);
                     tokio::spawn(async move {
                         let (id, answer) = match call {
                             Ok(c) => {
                                 let a =
-                                    carry(&*ends, &c, &machine, timing, &lanes, &in_flight).await;
+                                    carry(&*ends, &c, &machine, timing, &lanes, &in_flight, &listed)
+                                        .await;
                                 (c.id, a)
                             }
                             Err(id) => (id, error("Desk couldn't read that call.")),
