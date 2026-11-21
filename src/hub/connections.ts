@@ -52,6 +52,9 @@ export interface Connection {
   connectedAt: string | null;
   /** Null: kept before Desk checked it. */
   checkedAt: string | null;
+  /** When the person's approval at the service lapses, for a service whose
+   *  approval does (a bank's, 90 days): renewed there, then Reconnect. */
+  approvedUntil?: string | null;
   /** The vault tier it is kept at. */
   source: string;
   /** The agents it reaches. */
@@ -211,6 +214,9 @@ export interface ConnectionsApi {
   reconnect(id: string, connection: string, fields: Record<string, string>): Promise<Connection>;
   rename(id: string, connection: string, name: string): Promise<Connection>;
   test(id: string, connection: string): Promise<Connection>;
+  /** The person renewed its approval at the service: Desk checks it, and
+   *  only on a pass keeps that it was approved now. */
+  renew(id: string, connection: string): Promise<Connection>;
   disconnect(id: string, connection: string): Promise<Disconnected>;
   saveGoogleClient(clientId: string, clientSecret: string): Promise<void>;
   start(id: string, at: At, name?: string): Promise<Started>;
@@ -243,6 +249,8 @@ export const connectionsOf = (hub: HubRef): ConnectionsApi => ({
     (await hubCall<{ connection: Connection }>(hub, "PATCH", path(id, connection), { name })).connection,
   test: async (id, connection) =>
     (await hubCall<{ connection: Connection }>(hub, "POST", `${path(id, connection)}/test`, {})).connection,
+  renew: async (id, connection) =>
+    (await hubCall<{ connection: Connection }>(hub, "POST", `${path(id, connection)}/test?renewed=true`, {})).connection,
   disconnect: async (id, connection) =>
     (await hubCall<Disconnected | undefined>(hub, "DELETE", path(id, connection))) ?? { stillKept: null, note: null },
   saveGoogleClient: (clientId, clientSecret) =>
@@ -277,7 +285,26 @@ export const forAll = (c: Connector): Connection[] => c.connections.filter((x) =
 export const agentOnly = (c: Connector): Connection[] => c.connections.filter((x) => x.level === "agent");
 
 /** The services an agent can set up itself, in Desk's own browser. */
-export const SET_UP_BY_AGENT = new Set(["jira", "linear", "datadog", "metabase", "github"]);
+export const SET_UP_BY_AGENT = new Set(["jira", "linear", "datadog", "metabase", "github", "bank"]);
+
+/** The services that can only ever be read: nothing to allow writes to. */
+export const ONLY_READS = new Set(["bank"]);
+
+/** Where a bank's approval is renewed. */
+export const BANKSYNC_APP = "https://app.banksync.io";
+
+/** The days left of an approval lapsing at `until`, from `now`. */
+export const daysLeft = (until: string, now: number = Date.now()): number =>
+  Math.ceil((Date.parse(until) - now) / 86_400_000);
+
+/** What an approval lapsing at `until` reads as. */
+export const approvalLine = (until: string, now: number = Date.now()): string => {
+  const left = daysLeft(until, now);
+  const day = new Date(until).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+  if (left < 0) return `Approval lapsed ${day}`;
+  if (left === 0) return `Approval lapses today`;
+  return `Approved until ${day} (${left} ${left === 1 ? "day" : "days"})`;
+};
 
 /** What a connection's status reads as. */
 export const statusLine = (x: Pick | Connection): string => {
@@ -285,7 +312,7 @@ export const statusLine = (x: Pick | Connection): string => {
     case "connected":
       return "Connected";
     case "needs_reconnect":
-      return "Needs signing in again";
+      return "approvedUntil" in x && x.approvedUntil ? "Needs renewing" : "Needs signing in again";
     case "failing":
       return "Not answering";
   }
