@@ -69,6 +69,10 @@ const BGE_SCORE_MAP: [[f64; 2]; 8] = [
     [1.0, 1.0],
 ];
 
+/// The tools every local agent keeps loaded, never left to be searched for:
+/// reading what the person attached, and reminding them in their chat.
+const RESIDENT_TOOLS: [&str; 2] = ["view_attachment", "reminder"];
+
 /// The read-only tools a chained-tools program may call: reading files,
 /// code, code knowledge and the web, never anything that writes. (Memory
 /// is one tool whose actions write too, so it is not among them.)
@@ -371,13 +375,16 @@ fn learning(doc: &mut Table, ports: &HubPorts, memories: Memories) {
     );
     doc.insert(
         "tools".into(),
-        table(&[(
-            "programs",
-            table(&[
-                ("mode", s("on")),
-                ("read_tools", strings(&PROGRAM_READ_TOOLS)),
-            ]),
-        )]),
+        table(&[
+            (
+                "programs",
+                table(&[
+                    ("mode", s("on")),
+                    ("read_tools", strings(&PROGRAM_READ_TOOLS)),
+                ]),
+            ),
+            ("loading", table(&[("always", strings(&RESIDENT_TOOLS))])),
+        ]),
     );
     // Code knowledge stays off until the person gives an agent a folder,
     // which its own `[knowledge]` turns on.
@@ -1047,6 +1054,21 @@ mod tests {
             for name in ["gpt-", "haiku", "sonnet", "opus", "gemini", "llama"] {
                 assert!(!text.contains(name), "{name}");
             }
+        }
+    }
+
+    #[test]
+    fn local_agents_keep_view_attachment_and_reminder_resident() {
+        for memories in [Memories::Sqlite, Memories::Store] {
+            let doc = rendered(memories);
+            let always: Vec<&str> = doc["tools"]["loading"]["always"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|t| t.as_str().unwrap())
+                .collect();
+            assert_eq!(always, ["view_attachment", "reminder"]);
+            assert_eq!(doc["tools"]["programs"]["mode"].as_str(), Some("on"));
         }
     }
 
