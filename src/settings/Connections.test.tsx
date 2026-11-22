@@ -72,6 +72,7 @@ const api = (list: Connector[], over: Partial<ConnectionsApi> = {}): Connections
   reconnect: vi.fn(async () => connection()),
   rename: vi.fn(async () => connection()),
   test: vi.fn(async () => connection()),
+  renew: vi.fn(async () => connection()),
   disconnect: vi.fn(async () => ({ stillKept: null, note: null })),
   saveApp: vi.fn(async () => {}),
   start: vi.fn(),
@@ -669,4 +670,92 @@ it("won't add or rename a connection to a name the service has already", async (
   // Its own name, in other letters, is fine.
   fireEvent.change(within(acme).getByLabelText("New name for Acme"), { target: { value: "ACME" } });
   expect(within(acme).queryByRole("alert")).toBeNull();
+});
+
+describe("a bank", () => {
+  const approval = (daysLeft: number) => ({ until: "2027-02-19", daysLeft, due: daysLeft <= 7, estimated: true });
+  const renewal = {
+    service: "BankSync",
+    label: "Bank approval",
+    page: "https://app.banksync.io",
+    open: "Open BankSync",
+    about: "Renew the approval in BankSync: it takes you to your bank to approve it again.",
+    done: "I’ve renewed it, check it",
+  };
+  const bank = (days: number) =>
+    connector({
+      id: "bank",
+      name: "Bank",
+      renewal,
+      readsOnly: true,
+      connections: [connection({ id: "agent~kat~natwest", name: "NatWest", account: "NatWest", approval: approval(days) })],
+    });
+
+  it("says about when its approval lapses, on the hub's UTC date, and marks it when due", async () => {
+    await show(api([bank(40)]));
+    expect(within(service("Bank")).queryByText(/approved until/)).toBeNull();
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
+    const row = within(service("Bank")).getByLabelText("NatWest");
+    expect(within(row).getByText("Bank approval")).toBeTruthy();
+    const line = within(row).getByText(/^Approved until about .*19.* \(40 days\)$/);
+    expect(line.textContent).toMatch(/Feb/);
+    expect(line.textContent?.match(/about|estimated/g)).toHaveLength(1);
+    expect(line.className).not.toContain("state-blocked");
+    cleanup();
+    await show(api([bank(5)]));
+    expect(within(service("Bank")).getByText(/^\(approved until about .* \(5 days\)\)$/).className).toContain("state-blocked");
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
+    expect(within(service("Bank")).getByText(/^Approved until about .* \(5 days\)$/).className).toContain("state-blocked");
+  });
+
+  it("is told apart by the hub's renewal, not by an approval date", async () => {
+    const plain = connector({ id: "jira", name: "Jira", connections: [connection({ id: "all~~acme", name: "Acme" })] });
+    const undated = connector({ ...bank(40), connections: [connection({ id: "agent~kat~natwest", name: "NatWest" })] });
+    await show(api([plain, undated]));
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Reconnect" }));
+    expect(screen.getByLabelText("Reconnect NatWest").textContent).toContain(renewal.about);
+  });
+
+  it("says a lapsed one needs renewing, and what BankSync still says when it isn't", async () => {
+    const lapsed = (detail: string | null) =>
+      connection({ id: "agent~kat~natwest", name: "NatWest", status: "needs_reconnect", detail, approval: approval(-1) });
+    const renew = vi.fn<ConnectionsApi["renew"]>().mockResolvedValue(lapsed(null));
+    await show(api([{ ...bank(-1), connections: [lapsed("Approval lapsed")] }], { renew }));
+    expect(within(service("Bank")).getByText(/needs renewing/)).toBeTruthy();
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Reconnect" }));
+    const card = screen.getByLabelText("Reconnect NatWest");
+    await act(async () => {
+      fireEvent.click(within(card).getByRole("button", { name: renewal.done }));
+    });
+    expect(within(card).getByRole("alert").textContent).toBe("BankSync still says NatWest isn’t approved.");
+  });
+
+  it("is reconnected by renewing it in BankSync, then checked, never by typing a key", async () => {
+    const lapsed = connection({ id: "agent~kat~natwest", name: "NatWest", status: "needs_reconnect", detail: "Approval lapsed" });
+    const renew = vi
+      .fn<ConnectionsApi["renew"]>()
+      .mockResolvedValueOnce(lapsed)
+      .mockResolvedValueOnce(connection({ id: "agent~kat~natwest", approval: approval(90) }));
+    const a = api([bank(-1)], { renew });
+    await show(a);
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Reconnect" }));
+    const card = screen.getByLabelText("Reconnect NatWest");
+    expect(within(card).queryByLabelText("API key")).toBeNull();
+    fireEvent.click(within(card).getByRole("button", { name: "Open BankSync" }));
+    expect(opened).toEqual(["https://app.banksync.io"]);
+
+    await act(async () => {
+      fireEvent.click(within(card).getByRole("button", { name: "I’ve renewed it, check it" }));
+    });
+    expect(within(card).getByRole("alert").textContent).toBe("Approval lapsed.");
+    await act(async () => {
+      fireEvent.click(within(card).getByRole("button", { name: "I’ve renewed it, check it" }));
+    });
+    expect(renew).toHaveBeenCalledWith("bank", "agent~kat~natwest");
+    expect(screen.queryByLabelText("Reconnect NatWest")).toBeNull();
+    expect(a.reconnect).not.toHaveBeenCalled();
+  });
 });
