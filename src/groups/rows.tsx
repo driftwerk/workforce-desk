@@ -5,7 +5,7 @@
 
 import { Accessibility, defaultPreset, PointerSensor } from "@dnd-kit/dom";
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/react";
-import { useRef, useState, type ComponentProps, type KeyboardEvent, type ReactNode } from "react";
+import { useRef, useState, type ComponentProps, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
 import type { PaneContent } from "../grids/engine";
 
@@ -88,6 +88,8 @@ export function SortRow({
   wrap,
   data,
   register,
+  selected,
+  onPick,
   onOpen,
   onStartRename,
   onNudge,
@@ -120,6 +122,11 @@ export function SortRow({
   /** Attributes for the row's button. */
   data?: Record<`data-${string}`, string>;
   register: (el: HTMLElement | null) => void;
+  /** Picked to act on with others; undefined where rows aren't picked. */
+  selected?: boolean;
+  /** A click it takes to pick rows instead of opening this one: whether
+   *  it did. */
+  onPick?: (e: MouseEvent) => boolean;
   onOpen: () => void;
   onStartRename?: () => void;
   onNudge: (by: -1 | 1) => void;
@@ -151,12 +158,13 @@ export function SortRow({
               register(el);
             }}
             type="button"
-            className={`gi ${on ? "on" : ""} ${className}`}
+            className={`gi ${on ? "on" : ""} ${selected ? "selected" : ""} ${className}`}
             title={title}
             aria-describedby={describedBy}
             aria-current={on ? "true" : undefined}
+            aria-pressed={selected}
             {...data}
-            onClick={onOpen}
+            onClick={(e) => onPick?.(e) || onOpen()}
             onPointerEnter={() => onHover?.(true)}
             onPointerLeave={() => onHover?.(false)}
             onDoubleClick={(e) => {
