@@ -397,7 +397,8 @@
   text-decoration: underline;
   text-underline-offset: 2px;
 }
-.setup-paste {
+.setup-paste,
+.setup-paste-field {
   display: flex;
   flex-direction: column;
   gap: 6px;

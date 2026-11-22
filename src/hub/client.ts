@@ -57,6 +57,7 @@ import type {
   RoomMessage,
   SearchHit,
   Removed,
+  Closing,
   Session,
   Suggestion,
   TerminalInfo,
@@ -80,6 +81,15 @@ import type {
 import { pairedHub, type HubRef } from "./net";
 import type { Body, DeskSocket, DeskTransport } from "./transport";
 import { agentPicturePath, pictureOf, type Picture } from "../pictures/pictures";
+
+/** Where an agent's documents folder stands: made; missing until the agent
+ *  is next equipped; or not a folder (a link or a file), which Desk never uses. */
+export type DocumentsState = "made" | "missing" | "not_a_folder";
+export interface AgentDocuments {
+  path: string;
+  exists: boolean;
+  state: DocumentsState;
+}
 
 /** A hub and the token to reach it with, outside the app: the browser
  *  preview's local hub and its admin token. In the app every hub is reached
@@ -570,6 +580,9 @@ export class DeskHub {
   /** Stops it if it runs here and closes it: it leaves the sidebar and
    *  stays resumable from Settings → Sessions. */
   end = (id: string): Promise<Session> => this.call("POST", `/api/desk/sessions/${id}/end`);
+  /** What ending it would leave: its turn, its folder's work, its open
+   *  pull requests and tickets, and its folder. */
+  closing = (id: string): Promise<Closing> => this.call("GET", `/api/desk/sessions/${id}/closing`);
   /** The most recently closed sessions, newest first. */
   closedSessions = (): Promise<Session[]> => this.call("GET", "/api/desk/sessions/closed");
   /** Sessions removed from Desk, which it no longer tracks. */
@@ -651,6 +664,16 @@ export class DeskHub {
       if (e instanceof HubError && e.status === 404) return "";
       throw e;
     }
+  };
+  /** The folder an agent keeps the files it makes or downloads for you,
+   *  on the computer its hub runs on, and whether it is made yet (the hub
+   *  makes it when the agent is equipped, never on asking). */
+  agentDocuments = async (id: string): Promise<AgentDocuments> => {
+    const r = await this.desk<{ path: string; exists: boolean; state?: DocumentsState }>(
+      "GET",
+      `/api/desk/agents/${encodeURIComponent(id)}/documents`,
+    );
+    return { path: r.path, exists: r.exists, state: r.state ?? (r.exists ? "made" : "missing") };
   };
   saveIdentityFile = (id: string, file: string, text: string): Promise<void> =>
     this.putText(`/api/agents/${encodeURIComponent(id)}/identity/${file}`, text);

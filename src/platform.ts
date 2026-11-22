@@ -191,6 +191,12 @@ export const removeProposal = (id: string): Promise<void> => invoke("themes_prop
 
 export const revealThemes = (): Promise<void> => invoke("themes_reveal");
 
+/** Opens a folder the local hub keeps in the system's file manager. */
+export const openHubPath = (path: string): Promise<void> => invoke("hub_path_open", { path });
+
+/** Shows a place the local hub keeps in the system's file manager. */
+export const revealHubPath = (path: string): Promise<void> => invoke("hub_path_reveal", { path });
+
 export const onThemesChanged = (f: () => void): Promise<() => void> => listen("themes-changed", f);
 
 /** A folder for the backend to work in, as the backend names it (on

@@ -38,6 +38,8 @@ export interface PlanTicket {
   model?: string | null;
   /** A session or an agent has it. */
   assigned?: boolean;
+  /** The session that has it, until that is closed or removed. */
+  session?: string | null;
   /** Its session is being started. */
   starting?: boolean;
   /** Why it waits in To do for someone to start it: the runner doesn't. */
@@ -88,7 +90,7 @@ const startable = (t: PlanTicket, states: ReadonlyMap<string, TicketState>): boo
 /** Where a plan's tickets stand. */
 export const progress = (tickets: readonly PlanTicket[]): BossPlanProgress => {
   const states = new Map(tickets.map((t) => [t.id, t.state]));
-  const p: BossPlanProgress = { done: 0, doing: 0, review: 0, ready: 0, blocked: 0, waiting: 0, total: 0, next: [] };
+  const p: BossPlanProgress = { done: 0, doing: 0, review: 0, ready: 0, blocked: 0, waiting: 0, total: 0, next: [], holding: [] };
   const next: PlanTicket[] = [];
   for (const t of tickets) {
     switch (t.state) {
@@ -116,7 +118,21 @@ export const progress = (tickets: readonly PlanTicket[]): BossPlanProgress => {
     p.total++;
   }
   p.next = byRank(next).map(nameOf);
+  p.holding = holding(tickets).map(nameOf);
   return p;
+};
+
+/** The tickets of the sessions a plan holds, one each in order: every
+ *  session its tickets in Doing or Review are on until it is closed, and
+ *  every start under way (the hub's `plan::holding`). */
+export const holding = (tickets: readonly PlanTicket[]): PlanTicket[] => {
+  const seen = new Set<string>();
+  return tickets.filter((t) => {
+    const on = t.session && (t.starting || t.state === "doing" || t.state === "review") ? t.session : t.starting ? t.id : null;
+    if (on === null || seen.has(on)) return false;
+    seen.add(on);
+    return true;
+  });
 };
 
 // ── The card ────────────────────────────────────────────────────────────
@@ -142,6 +158,7 @@ export const ruled = (t: BossPlanTicket): PlanTicket => ({
   machine: t.machine ?? null,
   model: t.model ?? null,
   assigned: !!t.assignee,
+  session: t.assignee?.kind === "session" && !t.sessionClosed ? t.assignee.id : null,
   starting: t.starting,
   // Held only while it still waits in To do: the board may have moved it since.
   heldBack: t.state === "todo" && !t.assignee ? (t.heldBack ?? null) : null,
@@ -230,16 +247,29 @@ export const ownWorktrees = (all: readonly (readonly string[])[], tickets: Reado
   return own;
 };
 
-/** "3 of 8 done · 3 running · next ACM-16 when a slot frees". */
-export const progressLine = (p: BossPlanProgress): string =>
-  [
+/** "holds 4 of 4 sessions: ACM-1, ACM-2, ACM-3, ACM-4" while a plan holds
+ *  as many sessions as it may run at once (`cap`), so it starts no more
+ *  (the hub's `plan::full`); null while it may. */
+export const full = (p: BossPlanProgress, cap: number | null): string | null => {
+  const held = p.holding ?? [];
+  if (!cap || held.length < cap) return null;
+  return `holds ${held.length} of ${cap} ${cap === 1 ? "session" : "sessions"}: ${held.join(", ")}`;
+};
+
+/** "3 of 8 done · 3 running · next ACM-16 when a slot frees", or, while it
+ *  holds all it may run at once (`cap`), what holds them. */
+export const progressLine = (p: BossPlanProgress, cap: number | null = null): string => {
+  const held = full(p, cap);
+  return [
     `${p.done} of ${p.total} done`,
     p.doing > 0 ? `${p.doing} running` : null,
     p.review > 0 ? `${p.review} in review` : null,
-    p.next.length > 0 ? `next ${p.next.slice(0, 3).join(", ")} when a slot frees` : null,
+    held ? `${held}: the next starts when one is closed or its ticket moves on` : null,
+    !held && p.next.length > 0 ? `next ${p.next.slice(0, 3).join(", ")} when a slot frees` : null,
   ]
     .filter(Boolean)
     .join(" · ");
+};
 
 /** The bar's segments, in order, with how many each is; none of none. */
 export const segments = (p: BossPlanProgress): { kind: "done" | "doing" | "review" | "ready" | "blocked" | "waiting"; n: number }[] =>

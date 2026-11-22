@@ -7,6 +7,7 @@ import {
   SET_UP_BY_AGENT,
   setUpRequest,
   statusLine,
+  type Connector,
   type ConnectionsApi,
   type Pick,
   type ServicePicks,
@@ -15,6 +16,7 @@ import { useDesk } from "../hub/store";
 import { useUi } from "../shell/ui";
 import { askAgent } from "../ui/askDesk";
 import { useAgentConfigs } from "./agentBrain";
+import { ApproveAgain } from "../connections/ApproveAgain";
 import { ago } from "./files";
 import "../styles/connections.css";
 import { allowWrites, choose, setAgentConnectors, todayOf, writesOf, type Writes } from "./connectors";
@@ -115,6 +117,9 @@ export function AgentConnectors({
   const put = useAgentConfigs((s) => s.put);
   const [api] = useState<ConnectionsApi | null>(() => given ?? localApi());
   const [services, setServices] = useState<ServicePicks[] | null>(null);
+  /** The connectors as the hub lists them: which connection can be approved
+   *  again, and whether the app it needs is kept. */
+  const [connectors, setConnectors] = useState<Connector[]>([]);
   const [problem, setProblem] = useState<string | null>(null);
   const [saving, setSaving] = useState<Saving>({ state: "idle" });
   const [calls, setCalls] = useState<ComputerActivityRow[] | null>(null);
@@ -150,6 +155,15 @@ export function AgentConnectors({
       if (shownFor.current !== agent.id) return;
       latest.current = got;
       setServices(got);
+      // Not shown when the hub can't list them: only "Approve again" waits on it.
+      void (async () => {
+        try {
+          const l = await api.list();
+          if (shownFor.current === agent.id) setConnectors(l?.connectors ?? []);
+        } catch {
+          /* only "Approve again" waits on it */
+        }
+      })();
     } catch (e) {
       setProblem(
         e instanceof HubError && e.status === 404
@@ -300,6 +314,10 @@ export function AgentConnectors({
                   onChange={(c) => make(s.id, c)}
                   onAsk={SET_UP_BY_AGENT.has(s.id) ? () => ask(agent, s.name) : undefined}
                   onConnect={() => openSettings("connections")}
+                  connector={connectors.find((c) => c.id === s.id)}
+                  api={api}
+                  onApproved={load}
+                  onAskApp={() => ask(agent, s.name)}
                 />
               ))}
             </div>
@@ -356,12 +374,20 @@ function ServiceChoice({
   onChange,
   onAsk,
   onConnect,
+  connector,
+  api,
+  onApproved,
+  onAskApp,
 }: {
   agent: Agent;
   service: ServicePicks;
   onChange: (change: Change) => void;
   onAsk?: () => void;
   onConnect: () => void;
+  connector?: Connector;
+  api: ConnectionsApi | null;
+  onApproved: () => void | Promise<void>;
+  onAskApp: () => boolean;
 }) {
   const [changing, setChanging] = useState(false);
   const picked = s.connections.filter((p) => p.picked);
@@ -407,8 +433,10 @@ function ServiceChoice({
                 {p.level === "agent" && <span className="conn-tag">its own</span>}
               </span>
             </label>
-            {p.status !== "connected" && <span className="small state-blocked">{statusLine(p)}</span>}
-            {p.picked ? (
+            {p.status !== "connected" && <span className="small state-blocked">{statusLine(p, !!s.renewable)}</span>}
+            {p.picked && s.readsOnly ? (
+              <span className="small muted">read only</span>
+            ) : p.picked ? (
               <button
                 type="button"
                 className="link small conn-pick-write"
@@ -419,6 +447,16 @@ function ServiceChoice({
               </button>
             ) : (
               <span className="small faint">off</span>
+            )}
+            {api && connector && connector.connections?.find((x) => x.id === p.id)?.approveAgain && (
+              <ApproveAgain
+                api={api}
+                connector={connector}
+                connection={p}
+                onDone={onApproved}
+                agent={{ id: agent.id, name: agent.name }}
+                onAsk={onAskApp}
+              />
             )}
           </div>
         ))}
