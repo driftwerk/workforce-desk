@@ -7,7 +7,7 @@ import { MAIN_GRID } from "../grids/model";
 import type { GridStorage } from "../grids/storage";
 import { createGrid, deliver, layOut, renameGrid, setActive, startGrids, useGrids } from "../grids/store";
 import { useTerminals } from "../grids/terminals";
-import { SessionCard } from "./SessionCard";
+import { DepsNote, SessionCard } from "./SessionCard";
 import { bandOf } from "./SessionChrome";
 import { useCharges } from "../crew/chargeStore";
 import { useOverview } from "../overview/store";
@@ -300,5 +300,37 @@ describe("the chrome by width, and from the keyboard", () => {
     expect(screen.queryByRole("menu")).toBeNull();
     fireEvent.contextMenu(head.querySelector(".sc-name")!);
     expect(screen.getByRole("menu", { name: "api-e7 options" })).toBeTruthy();
+  });
+});
+
+describe("a session's card says what Desk does of its folder's dependencies", () => {
+  const command = "npx --yes --package=pnpm@9.15.9 -- pnpm install --frozen-lockfile";
+  const note = (deps: Session["deps"]) => render(<DepsNote session={session({ deps })} />);
+
+  it("while they install, the command it runs", () => {
+    note({ state: "installing", command });
+    expect(screen.getByRole("status").textContent).toBe(`Installing its dependencies: ${command}`);
+  });
+
+  it("when they failed, why and what the session was told to run", () => {
+    note({ state: "failed", command, why: "this machine's disk is full" });
+    expect(screen.getByRole("status").textContent).toBe(`Its dependencies didn't install: this machine's disk is full. The session was told to run ${command}.`);
+  });
+
+  it("when Desk installed none, why", () => {
+    note({ state: "left", why: "it has no lockfile" });
+    expect(screen.getByRole("status").textContent).toBe("Desk didn't install its dependencies: it has no lockfile.");
+  });
+
+  it("nothing once they're in, or when Desk doesn't install them", () => {
+    note({ state: "installed", command });
+    note(undefined);
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("on the card itself", () => {
+    useDesk.setState({ sessions: { s1: session({ deps: { state: "left", why: "it has no lockfile" } }) } });
+    card();
+    expect(screen.getByText("Desk didn't install its dependencies: it has no lockfile.")).toBeTruthy();
   });
 });
