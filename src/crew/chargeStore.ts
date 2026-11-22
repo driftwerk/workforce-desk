@@ -165,7 +165,7 @@ export const useBossOf = (s: { id: string; machine?: MachineId | null } | null |
 const HOME = "home";
 
 /** How long what Desk keeps on the machines, as read, is taken as still so. */
-const CARRIED_FRESH_MS = 25_000;
+export const CARRIED_FRESH_MS = 25_000;
 
 interface HomeGrantsState {
   /** Each machine's groups whose grant Desk keeps there for a boss on this
@@ -205,9 +205,14 @@ const useHomeBossOf = (s: { id: string; machine?: MachineId | null } | null | un
   const machine = machineOf(s);
   const own = group === UNGROUPED ? manager : bossOfGroup(manager, group);
   const carried = useHomeGrants((st) => st.byMachine[machine]?.[group]);
+  // Read while shown, and again as what was read goes stale.
   useEffect(() => {
-    if (machine !== LOCAL) useHomeGrants.getState().ensure();
-  }, [machine, group]);
+    if (machine === LOCAL) return;
+    const { ensure } = useHomeGrants.getState();
+    ensure();
+    const again = setInterval(ensure, CARRIED_FRESH_MS);
+    return () => clearInterval(again);
+  }, [machine]);
   const agent = useLocalAgent(own?.agentId);
   if (!own?.agentId || machine === LOCAL || carried !== own.agentId) return null;
   const name = agent?.name ?? ("name" in own ? own.name : null) ?? own.agentId;

@@ -688,6 +688,9 @@ pub struct Synced {
     /// Each machine brought up to date: the groups whose grant it holds
     /// for a boss on this computer, with that boss's agent.
     pub carried: BTreeMap<String, BTreeMap<String, String>>,
+    /// Each machine's groups whose grant there is this computer's after
+    /// this sync wrote or read it.
+    holding: BTreeSet<(String, String)>,
 }
 
 /// One step on one machine.
@@ -775,6 +778,8 @@ fn lifted(stop: &Value, yes: Option<DateTime<Utc>>) -> bool {
 #[derive(Debug, Default, PartialEq)]
 struct Wrote {
     written: bool,
+    /// The grant there is this computer's, as written or as it was.
+    ours: bool,
     /// The machine itself stopped the grant: it stays stopped.
     stopped_there: bool,
     /// When Desk stopped it, after the person's yes: asked again.
@@ -826,6 +831,7 @@ async fn write(
         if same && !renewal_due(&held, Utc::now()) {
             return Ok(Wrote {
                 written: false,
+                ours: true,
                 stopped_there,
                 stopped_since_yes,
             });
@@ -853,6 +859,7 @@ async fn write(
             }
             return Ok(Wrote {
                 written: true,
+                ours: true,
                 stopped_there,
                 stopped_since_yes,
             });
@@ -948,6 +955,11 @@ async fn run(
                 ..Wrote::default()
             }),
         };
+        let key = (engine.id().to_string(), group.clone());
+        match (&done, step) {
+            (Ok(w), Step::Write(..)) if w.ours && !remote => out.holding.insert(key),
+            _ => out.holding.remove(&key),
+        };
         match done {
             Ok(w) => {
                 if w.stopped_there {
@@ -1042,13 +1054,13 @@ pub async fn sync<E: Engine>(
     for (engine, listed, _, then) in &plans {
         run(bosses_at, *engine, then, listed, &mut out, false).await;
     }
-    for (machine, _) in &out.failed {
-        out.carried.remove(machine);
-    }
-    for (machine, group) in &out.stopped_there {
-        if let Some(c) = out.carried.get_mut(machine) {
-            c.remove(group);
-        }
+    // What the machine holds as this computer's now, and isn't stopped
+    // there: whom the page hands its sessions to.
+    for (machine, c) in &mut out.carried {
+        c.retain(|group, _| {
+            let key = (machine.clone(), group.clone());
+            out.holding.contains(&key) && !out.stopped_there.contains(&key)
+        });
     }
     for (group, at) in &out.stopped_since_yes {
         if let Err(why) = ask_again(kept_at, group, *at).await {
@@ -1172,7 +1184,9 @@ async fn once(app: &tauri::AppHandle, woken: bool) {
         {
             let mut carried = CARRIED.lock().unwrap_or_else(|e| e.into_inner());
             carried.retain(|m, _| ids.contains(m));
-            for id in &due {
+            // A machine a change under way kept from being looked at whole
+            // keeps what was last known of it.
+            for id in due.iter().filter(|id| !synced.waiting.contains(*id)) {
                 match synced.carried.get(id) {
                     Some(c) => carried.insert(id.clone(), c.clone()),
                     None => carried.remove(id),

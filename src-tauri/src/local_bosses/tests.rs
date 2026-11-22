@@ -385,8 +385,12 @@ async fn a_group_bossed_from_another_hub_is_never_written() {
                        "level": "suggest", "sees": "replies", "recall": false, "folders": [], "repos": [],
                        "members": [S1], "act": {}});
     devbox.hold("acme", allan.clone(), Value::Null);
-    sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    let s = sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
     assert!(devbox.writes().is_empty(), "{:?}", devbox.writes());
+    assert!(
+        s.carried["devbox"].is_empty(),
+        "not this computer's to hand to"
+    );
     assert_eq!(
         devbox.grant("acme").unwrap()["boss"],
         "remote:driftwerk/allan"
@@ -423,6 +427,25 @@ async fn a_group_bossed_from_another_hub_is_never_written() {
     })
     .await;
     assert_eq!(asked, Ok(false));
+}
+
+/// A grant the machine wouldn't take is never one the page hands its
+/// sessions to.
+#[tokio::test]
+async fn a_grant_the_machine_refused_hands_it_nothing() {
+    let f = files();
+    let devbox = Machine::new("devbox");
+    let w = wanted(&[("devbox", vec![acme(&[S1], "act")], &[S1])]);
+    say(&f, &w, true).await;
+    // Another home's grant there holds S1: Acme's is refused whole.
+    let globex = json!({"grantVersion": 1, "revision": 1, "name": "Globex", "boss": "remote:driftwerk/allan",
+                        "level": "suggest", "sees": "replies", "recall": false, "folders": [], "repos": [],
+                        "members": [S1], "act": {}});
+    devbox.hold("globex", globex, Value::Null);
+    let s = sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    assert_eq!(s.failed.len(), 1, "{:?}", s.failed);
+    assert!(devbox.grant("acme").is_none());
+    assert!(s.carried["devbox"].is_empty(), "{:?}", s.carried);
 }
 
 fn stop(from: &str, at: DateTime<Utc>) -> Value {
