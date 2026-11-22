@@ -216,6 +216,29 @@ fn themes_reveal(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult
         .map_err(text)
 }
 
+/// Opens a folder the local hub keeps, such as an agent's documents, in the
+/// system's file manager.
+#[tauri::command]
+fn hub_path_open(
+    handle: tauri::AppHandle,
+    app: State<'_, App>,
+    path: PathBuf,
+) -> CommandResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let path = files::within_hub_data(&app.paths, &path).map_err(text)?;
+    handle
+        .opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(text)
+}
+
+/// Shows a place the local hub keeps in the system's file manager.
+#[tauri::command]
+fn hub_path_reveal(app: State<'_, App>, path: PathBuf) -> CommandResult<()> {
+    let path = files::within_hub_data(&app.paths, &path).map_err(text)?;
+    tauri_plugin_opener::reveal_item_in_dir(path).map_err(text)
+}
+
 /// Shows Desk's own log on this computer in the system's file manager.
 #[tauri::command]
 fn machine_reveal_log(app: State<'_, App>) -> CommandResult<()> {
@@ -1407,6 +1430,8 @@ pub fn run() {
             themes_propose,
             themes_proposal_remove,
             themes_reveal,
+            hub_path_open,
+            hub_path_reveal,
             hubs_list,
             hubs_remove,
             hubs_rename,

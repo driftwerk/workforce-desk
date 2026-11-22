@@ -213,6 +213,7 @@ const HTTP: &[Route] = &[
     route("GET", "/api/agents/{}/identity/{}/revisions/{}"),
     route("POST", "/api/agents/{}/identity/{}/revisions/{}/restore"),
     route("GET", "/api/agents/{}/memory/summary"),
+    route("GET", "/api/desk/agents/{}/documents"),
     route("GET", "/api/agents/{}/heartbeat"),
     route("GET", "/api/agents/{}/config"),
     route("PUT", "/api/agents/{}/config"),

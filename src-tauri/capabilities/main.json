@@ -99,6 +99,8 @@
     "allow-themes-propose",
     "allow-themes-proposal-remove",
     "allow-themes-reveal",
+    "allow-hub-path-open",
+    "allow-hub-path-reveal",
     "allow-hubs-list",
     "allow-hubs-remove",
     "allow-hubs-rename",
