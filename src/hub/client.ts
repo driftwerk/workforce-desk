@@ -57,6 +57,7 @@ import type {
   RoomMessage,
   SearchHit,
   Removed,
+  Closing,
   Session,
   Suggestion,
   TerminalInfo,
@@ -579,6 +580,9 @@ export class DeskHub {
   /** Stops it if it runs here and closes it: it leaves the sidebar and
    *  stays resumable from Settings → Sessions. */
   end = (id: string): Promise<Session> => this.call("POST", `/api/desk/sessions/${id}/end`);
+  /** What ending it would leave: its turn, its folder's work, its open
+   *  pull requests and tickets, and its folder. */
+  closing = (id: string): Promise<Closing> => this.call("GET", `/api/desk/sessions/${id}/closing`);
   /** The most recently closed sessions, newest first. */
   closedSessions = (): Promise<Session[]> => this.call("GET", "/api/desk/sessions/closed");
   /** Sessions removed from Desk, which it no longer tracks. */

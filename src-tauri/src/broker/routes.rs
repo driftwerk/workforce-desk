@@ -59,6 +59,7 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/sessions/{}/restart"),
     route("POST", "/api/desk/sessions/{}/remove"),
     route("POST", "/api/desk/sessions/{}/end"),
+    route("GET", "/api/desk/sessions/{}/closing"),
     route("POST", "/api/desk/sessions/{}/approvals/{}"),
     // The colours its terminals are drawn in.
     route("PUT", "/api/desk/terminal/colors"),

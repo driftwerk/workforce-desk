@@ -86,11 +86,35 @@ export function SessionCard({ session }: { session: Session }) {
         {/* Only what waits on you gets a bar of its own. */}
         <BreakerBanner sessionId={key} />
         <DriverBar session={session} />
+        <DepsNote session={session} />
         <SessionBody session={session} />
       </div>
       <Approval session={session} />
       <LinePanel session={session} />
     </SidePanel>
+  );
+}
+
+/** What Desk is doing of its folder's dependencies, while that is worth
+ *  saying: installing, failed (with the command to try again), or left. */
+export function DepsNote({ session }: { session: Session }) {
+  const deps = session.deps;
+  if (!deps || deps.state === "installed") return null;
+  return (
+    <div className="session-note small" role="status">
+      {deps.state === "installing" ? (
+        <span className="muted">
+          Installing its dependencies: <code>{deps.command}</code>
+        </span>
+      ) : deps.state === "failed" ? (
+        <span className="muted">
+          Its dependencies didn't install: {deps.why}. The session was told to run{" "}
+          <code>{deps.command}</code>.
+        </span>
+      ) : (
+        <span className="muted">Desk didn't install its dependencies: {deps.why}.</span>
+      )}
+    </div>
   );
 }
 
@@ -113,7 +137,7 @@ function RestartForColors({ session }: { session: Session }) {
   };
   const working = session.state === "working";
   return (
-    <div className="session-recolor small" role="status">
+    <div className="session-note small" role="status">
       {asking ? (
         <>
           <span className="muted">It is working: restarting stops this turn, and the conversation resumes.</span>
