@@ -218,13 +218,20 @@ export const levelFor = (rows: OnItsOwnRow[], kind: OnItsOwnKind): OnItsOwnLevel
 export const overridesFor = (rows: OnItsOwnRow[], kind: OnItsOwnKind): string[] =>
   rows.flatMap((r) => (r.kind === kind && r.scope.kind !== "whole" ? [r.scope.value] : []));
 
-/** Whether `host` is an IPv6 address, as a URL would read it. */
-const isIpv6 = (host: string): boolean => {
-  if (!host.includes(":") || !/^[0-9a-f:.]+$/.test(host)) return false;
+/**
+ * `host` as an IPv6 address in its one standard form, as the hub spells it
+ * (`0:0::1` is `::1`, an IPv4-mapped one dotted); `null` when it isn't one.
+ */
+const ipv6 = (host: string): string | null => {
+  if (!host.includes(":") || !/^[0-9a-f:.]+$/.test(host)) return null;
   try {
-    return new URL(`http://[${host}]/`).hostname.length > 2;
+    const spelled = new URL(`http://[${host}]/`).hostname.slice(1, -1);
+    const mapped = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(spelled);
+    if (!mapped) return spelled || null;
+    const [a, b] = [parseInt(mapped[1] ?? "0", 16), parseInt(mapped[2] ?? "0", 16)];
+    return `::ffff:${a >> 8}.${a & 255}.${b >> 8}.${b & 255}`;
   } catch {
-    return false;
+    return null;
   }
 };
 
@@ -234,7 +241,9 @@ export const typedOverride = (by: "host" | "site", typed: string): { value: stri
   if (!t) return { value: null, problem: null };
   if (by === "host") {
     const host = (t.split("@").pop() ?? t).toLowerCase().replace(/^\[(.*)\]$/, "$1");
-    return /^[a-z0-9._-]{1,253}$/.test(host) || isIpv6(host)
+    const v6 = ipv6(host);
+    if (v6) return { value: v6, problem: null };
+    return /^[a-z0-9._-]{1,253}$/.test(host)
       ? { value: host, problem: null }
       : { value: null, problem: `${t} isn’t a host name or address.` };
   }

@@ -108,6 +108,11 @@ describe("what an agent does on its own", () => {
     expect(typedOverride("host", "::1").value).toBe("::1");
     expect(typedOverride("host", "[FE80::1]").value).toBe("fe80::1");
     expect(typedOverride("host", "fe80:::1:").value).toBeNull();
+    // In the one standard form the hub keeps, however it is written.
+    expect(typedOverride("host", "[FE80:0:0::0001]").value).toBe("fe80::1");
+    expect(typedOverride("host", "0:0:0:0:0:0:0:1").value).toBe("::1");
+    expect(typedOverride("host", "::ffff:102:304").value).toBe("::ffff:1.2.3.4");
+    expect(typedOverride("host", "2001:db8:0:0:1:0:0:1").value).toBe("2001:db8::1:0:0:1");
     expect(typedOverride("host", "devbox:22").problem).toBe("devbox:22 isn’t a host name or address.");
     expect(typedOverride("host", "a b").problem).toBe("a b isn’t a host name or address.");
     expect(typedOverride("host", "  ")).toEqual({ value: null, problem: null });
