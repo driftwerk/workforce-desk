@@ -32,7 +32,7 @@ export const between = (order: readonly ItemKey[], anchor: ItemKey | null, key: 
 };
 
 /** What a click does to the selection: shift picks a range, the
- *  platform's own modifier (⌘ on a Mac, Ctrl elsewhere) one row, and in
+ *  platform's own modifier (⌘ or Ctrl) one row, and in
  *  select mode so does a plain click; null opens the row as always. */
 export const pickOf = (
   e: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean },
