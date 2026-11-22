@@ -13,7 +13,7 @@
 //!
 //! - **Nothing is judged here.** Every call goes as the hub queued it,
 //!   whatever its tool: the machine decides. Its body is built again from
-//!   the call's own fields (all but `machine` and `deadline`), and so is
+//!   the call's own fields (all but `machine` and `leftMs`), and so is
 //!   the answer posted (`status` and `body` alone).
 //! - **Refused only when nothing reached the machine:** it isn't one of
 //!   Desk's, it can't be reached, Desk was too busy to send it in time, it
@@ -25,7 +25,8 @@
 //! - **Bounded:** at most [`MOST_IN_FLIGHT`] calls at once, and
 //!   [`MOST_PER_MACHINE`] to one machine, so a slow one never holds up the
 //!   others. A call waits for its turn within its time: until the hub's
-//!   `deadline` for it, less a margin, or [`Timing::carry_for`].
+//!   time left for it (`leftMs`, as it was taken), less a margin, or
+//!   [`Timing::carry_for`].
 //! - **Capped:** a call or an answer over [`MOST_BODY`] is never carried.
 //!
 //! - **A plan's sessions on a machine** (`desk.sessions`,
@@ -58,7 +59,7 @@
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime};
+use std::time::Duration;
 
 use desk_core::machine::MachineId;
 use serde::Deserialize;
@@ -77,7 +78,8 @@ pub const MOST_PER_MACHINE: usize = 3;
 pub const MOST_BODY: usize = 256 * 1024;
 /// The largest poll read: the hub hands out at most 16 calls at a time.
 const MOST_POLL: usize = 16 * MOST_BODY + 64 * 1024;
-/// With less than this left before the hub's deadline, a call isn't sent.
+/// With less than this left before the hub stops waiting, a call isn't
+/// sent.
 const LEAST_LEFT: Duration = Duration::from_secs(3);
 /// What is kept back of the time left, to post the answer in.
 const MARGIN: Duration = Duration::from_secs(2);
@@ -95,6 +97,10 @@ const SESSION_START: &str = "desk.session_start";
 const START_FIELDS: &[&str] = &[
     "engine", "name", "cwd", "goal", "prompt", "view", "worktree", "model", "id",
 ];
+/// Whether the machine installs the start's folder's dependencies as it
+/// starts (a plan's ticket): a boolean, beside [`START_FIELDS`], forwarded
+/// when `true`.
+const START_DEPS: &str = "deps";
 /// The person's machines, as Desk has them: answered here.
 const MACHINES: &str = "desk.machines";
 /// The folders in a folder on a machine (`path`), as the folder picker
@@ -130,13 +136,13 @@ const MOST_REPLY: usize = 2000;
 /// SSH once).
 const PLUGIN_FOR: Duration = Duration::from_secs(8);
 /// The largest list of a machine's sessions read.
-const MOST_SESSIONS: usize = 8 * 1024 * 1024;
+pub(crate) const MOST_SESSIONS: usize = 8 * 1024 * 1024;
 
 /// How long things take.
 #[derive(Debug, Clone, Copy)]
 pub struct Timing {
     /// How long one call is carried, its wait for its turn and sends again
-    /// included, when the hub gives no deadline: less than the hub waits
+    /// included, when the hub gives no time left: less than the hub waits
     /// for its answer (30 s).
     pub carry_for: Duration,
     /// The waits before each send again.
@@ -211,7 +217,7 @@ pub trait Ends: Send + Sync + 'static {
 }
 
 /// One call as this computer's hub queued it. All but `id`, `machine` and
-/// `deadline` go to the machine as they came.
+/// `leftMs` go to the machine as they came.
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Call {
@@ -226,11 +232,11 @@ struct Call {
     level: Value,
     #[serde(default)]
     act: Value,
-    /// When the hub stops waiting for its answer (RFC 3339), when it says;
-    /// kept as it came, so one that isn't a time is said, not a call that
-    /// can't be read.
+    /// How long the hub still waits for its answer, in milliseconds as it
+    /// was taken, when it says; kept as it came, so one that isn't a count
+    /// is said, not a call that can't be read.
     #[serde(default)]
-    deadline: Option<Value>,
+    left_ms: Option<Value>,
 }
 
 impl Call {
@@ -248,28 +254,29 @@ impl Call {
         })
     }
 
-    /// How long it may be carried from `now`: until the hub's deadline less
-    /// [`MARGIN`], at most `carry_for`; `None` when too little is left to
-    /// send it at all.
-    fn time(&self, carry_for: Duration, now: SystemTime) -> Option<Duration> {
-        let deadline = match &self.deadline {
-            None | Some(Value::Null) => return Some(carry_for),
-            Some(d) => d.as_str(),
-        };
-        let Some(at) = deadline.and_then(|d| chrono::DateTime::parse_from_rfc3339(d).ok()) else {
-            tracing::warn!(id = %self.id, "a relayed call's deadline couldn't be read");
-            return Some(carry_for);
-        };
-        // In chrono's own terms, which hold any date (`SystemTime` may not
-        // on every platform).
-        let left = at
-            .with_timezone(&chrono::Utc)
-            .signed_duration_since(chrono::DateTime::<chrono::Utc>::from(now))
-            .to_std()
-            .unwrap_or_default();
-        // Never past `carry_for`, whatever this computer's clock does.
-        (left >= LEAST_LEFT).then(|| (left - MARGIN).min(carry_for))
+    fn time(&self, carry_for: Duration) -> Option<Duration> {
+        carry_time(&self.id, self.left_ms.as_ref(), carry_for)
     }
+}
+
+/// How long call `id` may be carried: the time its hub said it still
+/// waits (`left_ms`, a duration, so neither computer's clock matters) less
+/// [`MARGIN`], at most `carry_for`; `None` when too little is left to send
+/// it at all.
+pub(crate) fn carry_time(
+    id: &str,
+    left_ms: Option<&Value>,
+    carry_for: Duration,
+) -> Option<Duration> {
+    let left = match left_ms {
+        None | Some(Value::Null) => return Some(carry_for),
+        Some(l) => l.as_u64().map(Duration::from_millis),
+    };
+    let Some(left) = left else {
+        tracing::warn!(id, "a relayed call's time left couldn't be read");
+        return Some(carry_for);
+    };
+    (left >= LEAST_LEFT).then(|| (left - MARGIN).min(carry_for))
 }
 
 /// What became of one call.
@@ -290,7 +297,7 @@ fn unreached(machine: &str) -> Outcome {
 }
 
 /// Whether `id` is a call's id as the hub gives them (a UUID).
-fn uuid_ok(id: &str) -> bool {
+pub(crate) fn uuid_ok(id: &str) -> bool {
     id.len() == 36
         && id.chars().enumerate().all(|(i, c)| {
             if [8, 13, 18, 23].contains(&i) {
@@ -349,7 +356,7 @@ fn read_reply(machine: &str, reply: &Answer) -> Result<Value, String> {
 }
 
 /// The error a hub's refusal says, briefly.
-fn error_of(reply: &Answer) -> Option<String> {
+pub(crate) fn error_of(reply: &Answer) -> Option<String> {
     let v: Value = serde_json::from_str(&reply.body).ok()?;
     let e = v.get("error")?.as_str()?;
     Some(e.chars().take(500).collect())
@@ -529,10 +536,18 @@ async fn carry_desk<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &
     {
         return refused("That start's id couldn't be read.".to_string());
     }
+    let deps = match given.get(START_DEPS) {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(b)) => *b,
+        Some(_) => return refused(format!("That start's {START_DEPS} couldn't be read.")),
+    };
     let mut start: serde_json::Map<String, Value> = START_FIELDS
         .iter()
         .filter_map(|k| given.get(*k).map(|v| ((*k).to_string(), v.clone())))
         .collect();
+    if deps {
+        start.insert(START_DEPS.into(), true.into());
+    }
     if let (Some(grant), Some(boss)) = (
         call.group
             .as_str()
@@ -778,9 +793,18 @@ async fn carry_machine<E: Ends>(
     }
 }
 
-/// `answer` posted for call `id`: until it is taken, or no one waits for
-/// it, each post within `post_try` and all within `post_for`.
+/// `answer` posted for call `id` to this computer's hub.
 async fn post<E: Ends>(ends: &E, id: &str, answer: &Value, timing: Timing) {
+    post_with(|body| ends.answer(id, body), id, answer, timing).await;
+}
+
+/// `answer` posted for call `id` by `send`: until it is taken, or no one
+/// waits for it, each post within `post_try` and all within `post_for`.
+pub(crate) async fn post_with<F, Fut>(send: F, id: &str, answer: &Value, timing: Timing)
+where
+    F: Fn(Vec<u8>) -> Fut,
+    Fut: Future<Output = Result<Answer, Unanswered>>,
+{
     let body = answer.to_string().into_bytes();
     if body.len() > MOST_BODY {
         tracing::warn!(id, "a relayed answer is too large to post");
@@ -791,7 +815,7 @@ async fn post<E: Ends>(ends: &E, id: &str, answer: &Value, timing: Timing) {
             if attempt > 0 {
                 tokio::time::sleep(timing.again_after[attempt - 1]).await;
             }
-            match tokio::time::timeout(timing.post_try, ends.answer(id, body.clone())).await {
+            match tokio::time::timeout(timing.post_try, send(body.clone())).await {
                 Ok(Ok(r)) if r.status < 300 => return true,
                 Ok(Ok(r)) if r.status == 410 => {
                     tracing::info!(id, "a relayed answer came after no one waited for it");
@@ -817,10 +841,10 @@ async fn post<E: Ends>(ends: &E, id: &str, answer: &Value, timing: Timing) {
 
 /// Each of Desk's machines' turns: [`MOST_PER_MACHINE`] calls at once.
 #[derive(Default)]
-struct Lanes(Mutex<HashMap<MachineId, Arc<Semaphore>>>);
+pub(crate) struct Lanes(Mutex<HashMap<MachineId, Arc<Semaphore>>>);
 
 impl Lanes {
-    fn of(&self, machine: &MachineId) -> Arc<Semaphore> {
+    pub(crate) fn of(&self, machine: &MachineId) -> Arc<Semaphore> {
         let mut m = self.0.lock().unwrap_or_else(|e| e.into_inner());
         Arc::clone(
             m.entry(machine.clone())
@@ -924,7 +948,7 @@ pub async fn run<E: Ends>(ends: Arc<E>, mut stop: watch::Receiver<bool>, timing:
                         return;
                     }
                 };
-                let outcome = match call.time(timing.carry_for, SystemTime::now()) {
+                let outcome = match call.time(timing.carry_for) {
                     // The machines Desk has: no machine's to send it to.
                     Some(_) if call.tool.as_str() == Some(MACHINES) => Outcome::Answer(
                         json!({"status": "ok", "body": {"machines": ends.machines()}}),
@@ -1874,7 +1898,7 @@ mod tests {
         );
         let input = json!({
             "engine": "claude", "name": "VEL-3", "cwd": "/home/dev/vellev", "goal": "g",
-            "prompt": "p", "model": "opus", "worktree": "vel-3",
+            "prompt": "p", "model": "opus", "worktree": "vel-3", "deps": true,
             "env": {"EVIL": "1"}, "account": null, "group": "g1",
         });
         let stop = start(&fake.polled(vec![desk_call(A, "desk.session_start", input)]));
@@ -1895,13 +1919,42 @@ mod tests {
                 "devbox".to_string(),
                 Some(json!({
                     "engine": "claude", "name": "VEL-3", "cwd": "/home/dev/vellev", "goal": "g",
-                    "prompt": "p", "model": "opus", "worktree": "vel-3",
+                    "prompt": "p", "model": "opus", "worktree": "vel-3", "deps": true,
                     "env": {"CLAUDE_CODE_PLUGIN_DIRS": "/home/dev/.local/share/Desk/bin/current/claude-plugin"},
                 }))
             )]
         );
         // Never through the crew's own route.
         assert!(fake.sent().is_empty());
+        let _ = stop.send(true);
+    }
+
+    /// A start's `deps` that is `false` or `null` is forwarded as absent.
+    #[tokio::test]
+    async fn a_starts_deps_false_or_null_is_forwarded_as_absent() {
+        let made = json!({"id": SESSION, "name": "VEL-3", "cwd": "/x", "state": "starting"});
+        let (fake, mut rx) = with_desk(vec![Does::Says(200, made); 2], None);
+        let calls: Vec<Value> = [(A, json!(false)), (B, Value::Null)]
+            .into_iter()
+            .map(|(id, deps)| {
+                desk_call(
+                    id,
+                    "desk.session_start",
+                    json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "deps": deps}),
+                )
+            })
+            .collect();
+        let stop = start(&fake.polled(calls));
+        for _ in 0..2 {
+            assert_eq!(next(&mut rx).await.1["status"], "ok");
+        }
+        let sent = fake.desk_sent.lock().unwrap().clone();
+        assert_eq!(sent.len(), 2);
+        assert!(
+            sent.iter()
+                .all(|(_, b)| b == &Some(json!({"engine": "codex", "name": "VEL-3", "cwd": "/x"}))),
+            "{sent:?}"
+        );
         let _ = stop.send(true);
     }
 
@@ -2029,8 +2082,14 @@ mod tests {
                 "desk.session_start",
                 json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "id": "not-a-uuid"}),
             ),
+            desk_call(
+                "0f0e0d0c-0b0a-4909-8807-0605040302dd",
+                "desk.session_start",
+                json!({"engine": "codex", "name": "VEL-4", "cwd": "/x", "deps": "yes"}),
+            ),
         ]));
         let mut got = [
+            next(&mut rx).await,
             next(&mut rx).await,
             next(&mut rx).await,
             next(&mut rx).await,
@@ -2050,6 +2109,10 @@ mod tests {
         );
         assert_eq!(
             got[2].1,
+            json!({"status": "refused", "body": {"error": "That start's deps couldn't be read."}})
+        );
+        assert_eq!(
+            got[3].1,
             json!({"status": "refused", "body": {"error": "That start's id couldn't be read."}})
         );
         assert!(fake.desk_sent.lock().unwrap().is_empty());
@@ -2161,10 +2224,9 @@ mod tests {
         })
     }
 
-    /// RFC 3339, `secs` from now.
-    fn in_secs(secs: u64) -> String {
-        chrono::DateTime::<chrono::Utc>::from(SystemTime::now() + Duration::from_secs(secs))
-            .to_rfc3339()
+    /// `secs` left, in milliseconds.
+    fn in_secs(secs: u64) -> Value {
+        json!(secs * 1000)
     }
 
     fn says(body: Value) -> Does {
@@ -2181,7 +2243,7 @@ mod tests {
         tx
     }
 
-    /// Calls carried for 4 s, and the time of one with [`waits`]' deadline
+    /// Calls carried for 4 s, and the time of one with [`waits`]' time left
     /// (2.2 s): one waiting runs out well before those it waits on.
     fn longer() -> Timing {
         Timing {
@@ -2190,9 +2252,8 @@ mod tests {
         }
     }
 
-    fn waits() -> String {
-        chrono::DateTime::<chrono::Utc>::from(SystemTime::now() + Duration::from_millis(4200))
-            .to_rfc3339()
+    fn waits() -> Value {
+        json!(4200)
     }
 
     async fn next(
@@ -2235,7 +2296,7 @@ mod tests {
             ),
         ]);
         let mut a = call(A, "devbox");
-        a["deadline"] = json!(in_secs(20));
+        a["leftMs"] = in_secs(20);
         let stop = start(&fake.polled(vec![a, call(B, "laptop")]));
         let mut got = [next(&mut rx).await, next(&mut rx).await];
         got.sort_by(|a, b| a.0.cmp(&b.0));
@@ -2444,7 +2505,7 @@ mod tests {
             .map(|(i, id)| {
                 let mut c = call(id, "slow");
                 if i >= MOST_PER_MACHINE {
-                    c["deadline"] = json!(waits());
+                    c["leftMs"] = waits();
                 }
                 c
             })
@@ -2495,7 +2556,7 @@ mod tests {
                 let mut c = call(&id, &format!("m{}", i % 3 + 1));
                 // The last runs out of time before those it waits on.
                 if i >= MOST_IN_FLIGHT {
-                    c["deadline"] = json!(waits());
+                    c["leftMs"] = waits();
                 }
                 c
             })
@@ -2568,16 +2629,16 @@ mod tests {
         assert_eq!(fake.sent().len(), 1);
     }
 
-    /// `deadline`, when the hub gives one, bounds a call: too little left
+    /// The time left, when the hub gives it, bounds a call: too little left
     /// and it isn't sent; else it is given up on before the hub stops
     /// waiting, posting nothing.
     #[tokio::test]
-    async fn the_hubs_deadline_bounds_a_call() {
+    async fn the_hubs_time_left_bounds_a_call() {
         let (fake, mut rx) = Fake::with(&[("devbox", vec![Does::Hangs])]);
         let mut late = call(A, "devbox");
-        late["deadline"] = json!(in_secs(1));
+        late["leftMs"] = in_secs(1);
         let mut soon = call(B, "devbox");
-        soon["deadline"] = json!(in_secs(6));
+        soon["leftMs"] = in_secs(6);
         let _stop = start(&fake.polled(vec![late, soon]));
         let (id, a) = next(&mut rx).await;
         assert_eq!(id, A);
@@ -2588,62 +2649,38 @@ mod tests {
                 .unwrap()
                 .contains("no time left")
         );
-        // B's time is its deadline less the margin (about 4 s), held to
+        // B's time is its time left less the margin (4 s), held to
         // `carry_for` (1 s).
         tokio::time::sleep(Duration::from_millis(1300)).await;
         assert_eq!(fake.sent().len(), 1, "only B was sent");
         assert_eq!(fake.sent()[0].1["id"], B);
-        assert!(fake.sent()[0].1.get("deadline").is_none());
+        assert!(fake.sent()[0].1.get("leftMs").is_none());
         none_in(&mut rx, 1500).await;
     }
 
     #[test]
-    fn a_calls_time_is_the_hubs_deadline_less_the_margin_or_carry_for() {
-        let now = SystemTime::now();
-        let with = |d: Option<&str>| Call {
-            deadline: d.map(|d| json!(d)),
-            ..serde_json::from_value::<Call>(call(A, "devbox")).unwrap()
+    fn a_calls_time_is_the_hubs_time_left_less_the_margin_or_carry_for() {
+        let with = |left: Value| {
+            let mut c = call(A, "devbox");
+            c["leftMs"] = left;
+            serde_json::from_value::<Call>(c).unwrap()
         };
         let carry_for = Duration::from_secs(25);
-        assert_eq!(with(None).time(carry_for, now), Some(carry_for));
+        let plain: Call = serde_json::from_value(call(A, "devbox")).unwrap();
+        assert_eq!(plain.time(carry_for), Some(carry_for));
+        assert_eq!(with(Value::Null).time(carry_for), Some(carry_for));
         assert_eq!(
-            with(Some("not a time")).time(carry_for, now),
-            Some(carry_for)
-        );
-        let in10 =
-            chrono::DateTime::<chrono::Utc>::from(now + Duration::from_secs(10)).to_rfc3339();
-        assert_eq!(
-            with(Some(&in10)).time(carry_for, now),
+            with(json!(10_000)).time(carry_for),
             Some(Duration::from_secs(8))
         );
-        // Far off, or this computer's clock stepped back: held to
-        // `carry_for`.
-        let far =
-            chrono::DateTime::<chrono::Utc>::from(now + Duration::from_secs(3600)).to_rfc3339();
-        assert_eq!(with(Some(&far)).time(carry_for, now), Some(carry_for));
-        let in2 = chrono::DateTime::<chrono::Utc>::from(now + Duration::from_secs(2)).to_rfc3339();
-        assert_eq!(with(Some(&in2)).time(carry_for, now), None);
-        let past = chrono::DateTime::<chrono::Utc>::from(now - Duration::from_secs(5)).to_rfc3339();
-        assert_eq!(with(Some(&past)).time(carry_for, now), None);
-        // Any date at all, however far back.
-        assert_eq!(
-            with(Some("0001-01-01T00:00:00Z")).time(carry_for, now),
-            None
-        );
-        assert_eq!(
-            with(Some("9999-12-31T23:59:59Z")).time(carry_for, now),
-            Some(carry_for)
-        );
-        // A deadline that isn't a time, or isn't a string, is said and
-        // `carry_for` used; the call is still read.
-        let mut odd = call(A, "devbox");
-        odd["deadline"] = json!(5);
-        let odd: Call = serde_json::from_value(odd).unwrap();
-        assert_eq!(odd.time(carry_for, now), Some(carry_for));
-        let mut null = call(A, "devbox");
-        null["deadline"] = Value::Null;
-        let null: Call = serde_json::from_value(null).unwrap();
-        assert_eq!(null.time(carry_for, now), Some(carry_for));
+        // Far off: held to `carry_for`.
+        assert_eq!(with(json!(3_600_000)).time(carry_for), Some(carry_for));
+        assert_eq!(with(json!(2_000)).time(carry_for), None);
+        assert_eq!(with(json!(0)).time(carry_for), None);
+        // Time left that isn't a count is said and `carry_for` used; the
+        // call is still read.
+        assert_eq!(with(json!("soon")).time(carry_for), Some(carry_for));
+        assert_eq!(with(json!(-5)).time(carry_for), Some(carry_for));
     }
 
     /// A refusal after a send that may have reached the machine isn't

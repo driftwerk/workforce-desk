@@ -48,6 +48,15 @@ describe("the Unread page's rows", () => {
     expect(rows["session:s1"]).toMatchObject({ title: "acme-web", where: "Session · finished", line: "Finished, ready for you to look over.", unread: { message: null } });
   });
 
+  it("says the report is from the boss by its name now, a rename's at once", () => {
+    const local = { id: "local", label: "This computer", url: "", local: true, revision: "" };
+    const kat = { hubId: "local", id: "desk", name: "Kat", model: null, provider: null, isDefault: true };
+    const where = (over: Partial<RowSources>) => unreadRows({ ...base, hubs: [...(base.hubs ?? []), local], ...over }).find((r) => r.key === "brief")!.where;
+    expect(where({})).toBe("On the Floor");
+    expect(where({ roster: [...base.roster, kat] })).toBe("From Kat");
+    expect(where({ roster: [...base.roster, { ...kat, name: "Desk" }], brief: { ...base.brief!, by: { id: "desk", name: "Kat" } } })).toBe("On the Floor");
+  });
+
   it("leaves out an update already seen", () => {
     expect(unreadRows({ ...base, ready: "1.3.0" }).some((r) => r.key === "update")).toBe(false);
   });
