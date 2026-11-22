@@ -56,6 +56,9 @@ export interface Connection {
   connectedAt: string | null;
   /** Null: kept before Desk checked it. */
   checkedAt: string | null;
+  /** About when the person's approval at the service lapses, for a service
+   *  whose approval does (a bank's): renewed there, then Reconnect. */
+  approval?: Approval | null;
   /** The vault tier it is kept at. */
   source: string;
   /** The agents it reaches. */
@@ -63,6 +66,34 @@ export interface Connection {
   /** Its sign-in lapsed, or was made on an earlier app: it is approved
    *  again, without making a new connection. */
   approveAgain?: boolean;
+}
+
+/** About when an approval lapses, as the hub counts it (by the UTC
+ *  calendar, from when the person last said they approved it). */
+export interface Approval {
+  /** The UTC date, `2027-02-19`. */
+  until: string;
+  daysLeft: number;
+  /** It lapses within the week, or has. */
+  due: boolean;
+  /** The service doesn't say: Desk counts from the person's word. */
+  estimated: boolean;
+}
+
+/** How a connector's approval is renewed, in the hub's words. */
+export interface Renewal {
+  /** Who holds the approval: "BankSync". */
+  service: string;
+  /** What the approval is called: "Bank approval". */
+  label: string;
+  /** Where it is renewed. */
+  page: string;
+  /** The button that opens it. */
+  open: string;
+  /** What renewing it takes. */
+  about: string;
+  /** The button that says it was renewed. */
+  done: string;
 }
 
 export interface Connector {
@@ -79,6 +110,10 @@ export interface Connector {
   several: boolean;
   /** What a new connection's name should be, as the form says. */
   nameHint: string;
+  /** Its connections' approval lapses and is renewed at the service. */
+  renewal?: Renewal | null;
+  /** It is only ever read: nothing to allow writes to. */
+  readsOnly?: boolean;
   connections: Connection[];
   usedBy: UsedBy[];
 }
@@ -141,6 +176,10 @@ export interface ServicePicks {
   several: boolean;
   /** Each connection takes writes on its own; otherwise all together. */
   readOnlyEach: boolean;
+  /** It is only ever read (a bank): nothing to allow writes to. */
+  readsOnly?: boolean;
+  /** Its approval lapses at the service and is renewed there. */
+  renewable?: boolean;
   /** Its connections are chosen one by one already. */
   chosen: boolean;
   connections: Pick[];
@@ -233,6 +272,9 @@ export interface ConnectionsApi {
   reconnect(id: string, connection: string, fields: Record<string, string>): Promise<Connection>;
   rename(id: string, connection: string, name: string): Promise<Connection>;
   test(id: string, connection: string): Promise<Connection>;
+  /** The person renewed its approval at the service: Desk checks it, and
+   *  only on a pass keeps that it was approved now. */
+  renew(id: string, connection: string): Promise<Connection>;
   disconnect(id: string, connection: string): Promise<Disconnected>;
   /** Keeps the person's own app at a service: its identifier and secret. */
   saveApp(id: string, clientId: string, clientSecret: string): Promise<void>;
@@ -271,6 +313,8 @@ export const connectionsOf = (hub: HubRef): ConnectionsApi => ({
     (await hubCall<{ connection: Connection }>(hub, "PATCH", path(id, connection), { name })).connection,
   test: async (id, connection) =>
     (await hubCall<{ connection: Connection }>(hub, "POST", `${path(id, connection)}/test`, {})).connection,
+  renew: async (id, connection) =>
+    (await hubCall<{ connection: Connection }>(hub, "POST", `${path(id, connection)}/test?renewed=true`, {})).connection,
   disconnect: async (id, connection) =>
     (await hubCall<Disconnected | undefined>(hub, "DELETE", path(id, connection))) ?? { stillKept: null, note: null },
   saveApp: (id, clientId, clientSecret) =>
@@ -313,7 +357,7 @@ export const forAll = (c: Connector): Connection[] => c.connections.filter((x) =
 export const agentOnly = (c: Connector): Connection[] => c.connections.filter((x) => x.level === "agent");
 
 /** The services an agent can set up itself, in Desk's own browser. */
-export const SET_UP_BY_AGENT = new Set(["jira", "linear", "datadog", "metabase", "github", "google", "freeagent"]);
+export const SET_UP_BY_AGENT = new Set(["jira", "linear", "datadog", "metabase", "github", "google", "freeagent", "bank"]);
 
 /** The app's own words at a service: what its identifier and secret are
  *  called there, and what its sign-in page asks of the person. */
@@ -332,13 +376,29 @@ export const appWords = (service: string): AppWords => APP_WORDS[service] ?? { i
 /** Where an app stands: older hubs said only whether its sign-in could start. */
 export const appOf = (c: Connector): AppState => c.app ?? (c.signInReady ? "ready" : "missing");
 
-/** What a connection's status reads as. */
-export const statusLine = (x: Pick | Connection): string => {
+/** What an approval reads as: always "about", as the hub only estimates
+ *  it. Its day is the hub's UTC date, shown as that date. */
+export const approvalLine = (a: Approval): string => {
+  const day = new Date(`${a.until}T00:00:00Z`).toLocaleDateString(undefined, {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+  const about = a.estimated ? "about " : "";
+  if (a.daysLeft < 0) return `Approval lapsed ${about}${day}`;
+  if (a.daysLeft === 0) return `Approval lapses ${about}today`;
+  return `Approved until ${about}${day} (${a.daysLeft} ${a.daysLeft === 1 ? "day" : "days"})`;
+};
+
+/** What a connection's status reads as: one whose approval lapses at the
+ *  service (`renewable`, the hub's renewal) needs renewing there. */
+export const statusLine = (x: Pick | Connection, renewable = false): string => {
   switch (x.status) {
     case "connected":
       return "Connected";
     case "needs_reconnect":
-      return "Needs signing in again";
+      return renewable ? "Needs renewing" : "Needs signing in again";
     case "failing":
       return "Not answering";
   }
