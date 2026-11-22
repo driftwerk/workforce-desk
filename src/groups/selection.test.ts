@@ -26,6 +26,17 @@ describe("picking sessions in the sidebar", () => {
     expect(picked().sort()).toEqual(["session:a", "session:b", "session:d", "session:devbox/c"]);
   });
 
+  it("redraws the range from the anchor on each shift-click, so it shrinks as well as grows", () => {
+    toggle("session:a");
+    toggle("session:devbox/c");
+    extend(ORDER, "session:e");
+    expect(picked().sort()).toEqual(["session:a", "session:d", "session:devbox/c", "session:e"]);
+    extend(ORDER, "session:d");
+    expect(picked().sort()).toEqual(["session:a", "session:d", "session:devbox/c"]);
+    extend(ORDER, "session:b");
+    expect(picked().sort()).toEqual(["session:a", "session:b", "session:devbox/c"]);
+  });
+
   it("takes shift for a range and the platform's own modifier for one row, a plain click only in select mode", () => {
     const click = (m: Partial<{ shiftKey: boolean; metaKey: boolean; ctrlKey: boolean }>) => ({ shiftKey: false, metaKey: false, ctrlKey: false, ...m });
     expect(pickOf(click({ shiftKey: true }), "macos", false)).toBe("range");

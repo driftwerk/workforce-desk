@@ -662,6 +662,17 @@ describe("picking sessions to close together", () => {
     expect(bar()?.textContent).toContain("1 selected");
   });
 
+  it("never picks a session whose machine can't be reached, as it can't be removed", () => {
+    useMachines.setState({ machines: [{ ...(devbox as object), state: { kind: "unreachable" } } as never] });
+    groups();
+    fireEvent.click(row("api-e7"), { metaKey: true });
+    fireEvent.click(row("acme-web"), { metaKey: true });
+    fireEvent.click(row("web-release"), { shiftKey: true });
+    expect(picked()).toEqual(["session:s1", "session:s2"]);
+    expect(row("acme-web").hasAttribute("aria-pressed")).toBe(false);
+    expect(bar()?.textContent).toContain("2 selected");
+  });
+
   it("is reachable without a keyboard: Select sessions from a group's menu, then a click picks", () => {
     groups();
     fireEvent.click(screen.getByRole("button", { name: "Ungrouped options" }));

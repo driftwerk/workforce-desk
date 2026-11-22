@@ -252,8 +252,20 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   }
   const present = [...items.keys()];
   const shown = resolve(layout, present);
+  /** Why a machine's session's row can't say how it is: its machine can't
+   *  be reached (or isn't yet); null for one whose machine can be. */
+  const awayWord = (machine: MachineId): string | null => {
+    if (machine === LOCAL) return null;
+    const m = machines.find((x) => x.id === machine);
+    return (m && offlineWord(m.state)) ?? (engines[machine]?.loaded ? null : "connecting");
+  };
+
+  /** Whether `item` can be picked to close: a session whose machine can be
+   *  reached, as one can be removed. */
+  const closable = (item: Item | undefined): item is Extract<Item, { kind: "session" }> =>
+    item?.kind === "session" && !awayWord(machineOf(item.session));
   /** The rows that can be picked, in the order the sidebar shows them. */
-  const pickable = shown.filter((g) => !g.collapsed).flatMap((g) => g.items.filter((key) => items.get(key)?.kind === "session"));
+  const pickable = shown.filter((g) => !g.collapsed).flatMap((g) => g.items.filter((key) => closable(items.get(key))));
   const sessionRows = present.filter((key) => items.get(key)?.kind === "session").join("\n");
   // A picked session gone from the sidebar (closed, removed) is no longer.
   useEffect(() => {
@@ -287,9 +299,9 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
           ? item.seen.displayName || item.seen.name
           : (names[sessionKey(item.session)] ?? item.session.name);
   const groupName = (id: string) => shown.find((g) => g.id === id)?.name ?? "";
-  const closables: Closable[] = present.flatMap((key) => {
+  const closables: Closable[] = pickable.flatMap((key) => {
     const item = items.get(key);
-    return item?.kind === "session" && picked.has(key) ? [{ key, session: item.session, name: nameOf(item) }] : [];
+    return closable(item) && picked.has(key) ? [{ key, session: item.session, name: nameOf(item) }] : [];
   });
 
   const register = useCallback((id: string, el: HTMLElement | null) => {
@@ -509,14 +521,6 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
 
   const startRename = (item: Item) => item.kind === "session" && setEditing({ kind: "session", key: item.key });
 
-  /** Why a machine's session's row can't say how it is: its machine can't
-   *  be reached (or isn't yet); null for one whose machine can be. */
-  const awayWord = (machine: MachineId): string | null => {
-    if (machine === LOCAL) return null;
-    const m = machines.find((x) => x.id === machine);
-    return (m && offlineWord(m.state)) ?? (engines[machine]?.loaded ? null : "connecting");
-  };
-
   /** The groups the agent's row is the boss of: as this computer's hub says,
    *  or, for one on another hub, as the groups' grants name it. */
   const bossGroupsOf = (item: Item): string[] => {
@@ -590,7 +594,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
       },
       hover: (key, over) => hover(over ? key : null),
       pick: (key, e) => {
-        const how = items.get(key)?.kind === "session" ? pickOf(e, useHost.getState().platform, useSelection.getState().selecting) : null;
+        const how = closable(items.get(key)) ? pickOf(e, useHost.getState().platform, useSelection.getState().selecting) : null;
         if (how === "range") extend(pickable, key);
         if (how === "toggle") toggle(key);
         return how !== null;
@@ -895,8 +899,8 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
                   editing={editing?.kind === "session" && editing.key === key}
                   register={register}
                   actions={rowActions}
-                  removable={item.kind === "session" && !awayWord(machineOf(item.session))}
-                  selected={item.kind === "session" && picking ? picked.has(key) : undefined}
+                  removable={closable(item)}
+                  selected={closable(item) && picking ? picked.has(key) : undefined}
                 />
               );
             })}

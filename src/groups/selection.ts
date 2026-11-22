@@ -8,13 +8,16 @@ import type { ItemKey } from "./model";
  *  each time the sidebar is drawn. */
 interface Selection {
   keys: ReadonlySet<ItemKey>;
-  /** Where the next range starts: the last row picked. */
+  /** Where the next range starts: the last row picked one at a time. */
   anchor: ItemKey | null;
+  /** What was picked before the range from the anchor: a shift-click
+   *  redraws that range, so it shrinks as well as grows. */
+  base: ReadonlySet<ItemKey>;
   /** Select mode: a plain click picks, as for a pointer with no keyboard. */
   selecting: boolean;
 }
 
-const none: Selection = { keys: new Set(), anchor: null, selecting: false };
+const none: Selection = { keys: new Set(), anchor: null, base: new Set(), selecting: false };
 
 export const useSelection = create<Selection>(() => none);
 
@@ -46,12 +49,16 @@ export const toggle = (key: ItemKey): void =>
   useSelection.setState((s) => {
     const keys = new Set(s.keys);
     if (!keys.delete(key)) keys.add(key);
-    return { keys, anchor: key };
+    return { keys, anchor: key, base: keys };
   });
 
-/** Picks the rows from the anchor to `key`, as `order` shows them. */
+/** Picks the rows from the anchor to `key`, as `order` shows them, in place
+ *  of the range picked from it before. */
 export const extend = (order: readonly ItemKey[], key: ItemKey): void =>
-  useSelection.setState((s) => ({ keys: new Set([...s.keys, ...between(order, s.anchor, key)]), anchor: s.anchor ?? key }));
+  useSelection.setState((s) => {
+    const base = s.anchor === null ? s.keys : s.base;
+    return { keys: new Set([...base, ...between(order, s.anchor, key)]), anchor: s.anchor ?? key, base };
+  });
 
 export const startSelecting = (): void => useSelection.setState({ selecting: true });
 
@@ -62,7 +69,8 @@ export const clearSelection = (): void => useSelection.setState(none);
 export const keepOnly = (keep: (key: ItemKey) => boolean): void =>
   useSelection.setState((s) => {
     const left = [...s.keys].filter(keep);
-    return left.length === s.keys.size ? s : { keys: new Set(left), anchor: s.anchor !== null && keep(s.anchor) ? s.anchor : null };
+    if (left.length === s.keys.size) return s;
+    return { keys: new Set(left), anchor: s.anchor !== null && keep(s.anchor) ? s.anchor : null, base: new Set([...s.base].filter(keep)) };
   });
 
 /** Whether a key pressed at `target` is the person's typing or a dialog's:

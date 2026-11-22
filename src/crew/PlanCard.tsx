@@ -429,7 +429,7 @@ function WholePlan({ detail, plan, onBoard }: { detail: BossPlanDetail; plan: Bo
       {(plan.state === "running" || plan.state === "paused" || plan.state === "done") && (
         <div className="pc-progress">
           <span className="muted small">
-            {progressLine(now)}
+            {progressLine(now, plan.parallel)}
             {plan.state === "paused" && plan.paused && <span className="pc-paused"> · new starts paused: {pausedWhy(plan)}</span>}
           </span>
           {detail.spend && (

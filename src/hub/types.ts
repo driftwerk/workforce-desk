@@ -1721,6 +1721,10 @@ export interface PlanTally {
   total: number;
   /** The tickets that start next as slots free, by key, in order. */
   next: string[];
+  /** The tickets of the sessions it holds, one each, by key: every session
+   *  its tickets in Doing or Review are on until it is closed, and every
+   *  start under way. Absent from an older hub. */
+  holding?: string[];
 }
 
 /** A plan as the Floor shows it in its group's section. */
@@ -2453,6 +2457,9 @@ export interface BossPlanTicket extends Ticket {
   /** The plan took it on from a board as it was, rather than making it;
    *  absent from an older hub. */
   adopted?: boolean;
+  /** The session it is assigned to was closed or removed, so it holds no
+   *  slot of its plan; absent when it wasn't, or from an older hub. */
+  sessionClosed?: boolean;
 }
 
 /** One ticket of a revision, as the plan has it. */
