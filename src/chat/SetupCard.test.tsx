@@ -400,9 +400,12 @@ it("shows a step Kat couldn't do with its instruction, the page to open and Done
   await show(a);
   expect(screen.getByText("Step 5 of 11: Set up Desk’s sign-in screen")).toBeTruthy();
   expect(screen.getByText("Under Branding, type Desk as the app name, then save.")).toBeTruthy();
-  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Open the page", "Done"]);
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Open the page", "I’ll do this step"]);
   fireEvent.click(screen.getByRole("button", { name: "Open the page" }));
   expect(opened).toEqual(["https://console.cloud.google.com/auth/branding"]);
+  fireEvent.click(screen.getByRole("button", { name: "I’ll do this step" }));
+  expect(screen.getByText("Under Branding, type Desk as the app name, then save.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "I’ll do this step" })).toBeNull();
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
   });
@@ -417,6 +420,8 @@ it("takes the app's identifier and secret on the card, to the hub alone and in t
     pasteApp: vi.fn(async () => setup({ ...FREEAGENT, now: APPROVE })),
   });
   await show(a);
+  expect(screen.queryByLabelText("OAuth secret")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "I’ll do this step" }));
   expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Open the page", "Save"]);
   const id = screen.getByLabelText("OAuth identifier") as HTMLInputElement;
   const secret = screen.getByLabelText("OAuth secret") as HTMLInputElement;
@@ -440,6 +445,7 @@ it("uses Google's words for the app's keys, and says what the hub refused", asyn
     pasteApp: vi.fn(async () => Promise.reject(new HubError(400, "That doesn't look like a Google client id."))),
   });
   await show(a);
+  fireEvent.click(screen.getByRole("button", { name: "I’ll do this step" }));
   fireEvent.change(screen.getByLabelText("Client ID"), { target: { value: "nope" } });
   fireEvent.change(screen.getByLabelText("Client secret"), { target: { value: "hunter2" } });
   await act(async () => {
@@ -447,4 +453,29 @@ it("uses Google's words for the app's keys, and says what the hub refused", asyn
   });
   expect(screen.getByRole("alert").textContent).toMatch(/doesn't look like a Google client id/);
   expect((screen.getByLabelText("Client secret") as HTMLInputElement).value).toBe("");
+});
+
+it("offers no Open button for a step without a page, and still lets the person take it on", async () => {
+  const a = api([setup({ service: "google", serviceName: "Google", name: "Google", way: "app", now: { ...STEP, url: null } })], {
+    choose: vi.fn(async () => setup({ now: CONNECTED })),
+  });
+  await show(a);
+  expect(screen.queryByRole("button", { name: "Open the page" })).toBeNull();
+  expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "I’ll do this step" }));
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Done"]);
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Done" }));
+  });
+  expect(a.choose).toHaveBeenCalledWith("s1", "done-step");
+});
+
+it("shows the paste box on the key step only once the person takes it on", async () => {
+  const keys = now({ ...STEP, url: null, title: "Step 9 of 11: Copy the app’s keys", appPaste: true });
+  await show(api([setup({ ...FREEAGENT, now: keys })]));
+  expect(screen.queryByRole("button", { name: "Open the page" })).toBeNull();
+  expect(screen.queryByLabelText("OAuth identifier")).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "I’ll do this step" }));
+  expect(screen.getByLabelText("OAuth identifier")).toBeTruthy();
+  expect(screen.getByLabelText("OAuth secret")).toBeTruthy();
 });

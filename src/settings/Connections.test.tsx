@@ -410,7 +410,8 @@ describe("signing in on the person's own app", () => {
     await show(a);
     fireEvent.click(within(service("FreeAgent")).getByRole("button", { name: "Manage" }));
     const card = within(service("FreeAgent")).getByLabelText("Acme Ltd");
-    expect(within(card).getByText("Approve it again to carry on.", { exact: false })).toBeTruthy();
+    expect(within(card).getAllByText(/to carry on/)).toHaveLength(1);
+    expect(within(card).getByText("Approve Desk on FreeAgent again to carry on with Acme Ltd.")).toBeTruthy();
     await act(async () => {
       fireEvent.click(within(card).getByRole("button", { name: "Approve again" }));
     });
@@ -422,6 +423,20 @@ describe("signing in on the person's own app", () => {
     });
     expect(a.flow).toHaveBeenCalledWith("g1");
     expect(a.list).toHaveBeenCalledTimes(2);
+  });
+
+  it("offers to set the app up, not to approve again, where the app isn't kept", async () => {
+    withDeskAgent();
+    const lapsed = connection({ id: "all~~acme", name: "Acme Ltd", status: "needs_reconnect", approveAgain: true });
+    const a = api([freeagent({ app: "missing", signInReady: false, connections: [lapsed] })]);
+    await show(a);
+    fireEvent.click(within(service("FreeAgent")).getByRole("button", { name: "Manage" }));
+    const card = within(service("FreeAgent")).getByLabelText("Acme Ltd");
+    expect(within(card).queryByRole("button", { name: "Approve again" })).toBeNull();
+    expect(within(card).getByText(/app isn’t kept/)).toBeTruthy();
+    fireEvent.click(within(card).getByRole("button", { name: "Ask Kat to set it up" }));
+    expect(asked).toHaveLength(1);
+    expect(a.approveAgain).not.toHaveBeenCalled();
   });
 
   it("offers no approving again to a connection that doesn't need it", async () => {

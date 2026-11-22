@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { parse } from "smol-toml";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent } from "../chat/types";
 import { HubError, type DeskHub } from "../hub/client";
 import type { ConnectionsApi, Connector, Listing, Pick as Choice, PicksChange, ServicePicks } from "../hub/connections";
@@ -9,6 +9,7 @@ import { AgentConnectors } from "./AgentConnectors";
 import { useAgentConfigs } from "./agentBrain";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
+vi.mock("../platform", async (importOriginal) => ({ ...(await importOriginal<typeof import("../platform")>()), openUrl: vi.fn() }));
 
 const ALLAN: Agent = { hubId: "local", id: "allan", name: "Allan", model: null, provider: null, isDefault: false };
 
@@ -469,4 +470,59 @@ it("says Saved only once every save is in and none failed since", async () => {
   await act(async () => answers.shift()!());
   expect(screen.getByRole("status").textContent).toBe("Saved.");
   expect(within(box("Jira")).getByText("2 of 2 on")).toBeTruthy();
+});
+
+describe("approving a lapsed connection again", () => {
+  const lapsed = svc({
+    id: "freeagent",
+    name: "FreeAgent",
+    connections: [pick({ id: "all~~acme", name: "Acme", account: "Acme Ltd", status: "needs_reconnect", picked: true, default: true })],
+  });
+  const listed = (app: "ready" | "missing", approveAgain = true) =>
+    vi.fn(async () => ({
+      adapters: [],
+      connectors: [
+        {
+          id: "freeagent",
+          name: "FreeAgent",
+          about: "",
+          signIn: "app" as const,
+          fields: [],
+          signInReady: app === "ready",
+          app,
+          several: true,
+          nameHint: "",
+          usedBy: [],
+          connections: [{ id: "all~~acme", name: "Acme", approveAgain }],
+        },
+      ],
+    })) as unknown as ConnectionsApi["list"];
+
+  it("starts the approval from the agent's Connectors", async () => {
+    const a = api([lapsed], {
+      list: listed("ready"),
+      approveAgain: vi.fn(async () => ({ flow: "f1", url: "https://api.freeagent.com/v2/approve_app?y", userCode: null, verificationUri: null, expiresIn: 900 })),
+      flow: vi.fn(async () => ({ state: "waiting" as const })),
+    });
+    await show(a);
+    await act(async () => {
+      fireEvent.click(await within(box("FreeAgent")).findByRole("button", { name: "Approve again" }));
+    });
+    expect(a.approveAgain).toHaveBeenCalledWith("freeagent", "all~~acme");
+  });
+
+  it("offers to set the app up, not to approve, where the app isn't kept", async () => {
+    const a = api([lapsed], { list: listed("missing") });
+    await show(a);
+    expect(await within(box("FreeAgent")).findByText(/app isn’t kept/)).toBeTruthy();
+    expect(within(box("FreeAgent")).queryByRole("button", { name: "Approve again" })).toBeNull();
+    expect(within(box("FreeAgent")).getByRole("button", { name: "Ask Allan to set it up" })).toBeTruthy();
+  });
+
+  it("offers nothing to a connection the hub doesn't say can be approved again", async () => {
+    const a = api([lapsed], { list: listed("ready", false) });
+    await show(a);
+    await act(async () => {});
+    expect(within(box("FreeAgent")).queryByRole("button", { name: "Approve again" })).toBeNull();
+  });
 });

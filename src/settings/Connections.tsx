@@ -611,7 +611,7 @@ function ConnectionCard({
           {x.status === "failing"
             ? "Test it again in a moment, or reconnect it."
             : x.approveAgain
-              ? "Approve it again to carry on."
+              ? ""
               : "Reconnect it to carry on."}
         </p>
       )}
@@ -1247,10 +1247,30 @@ function AppSignIn({
 }
 
 /** A connection whose sign-in lapsed, or was made on an earlier app: Desk
- *  is approved on it again, and nothing new is made. */
-function ApproveAgain({ api, connector: c, connection: x, onDone }: { api: ConnectionsApi; connector: Connector; connection: Connection; onDone: () => void | Promise<void> }) {
+ *  is approved on it again, and nothing new is made. Where the person's app
+ *  isn't kept, approving can't work, so the way to set the app up shows
+ *  instead. */
+export function ApproveAgain({
+  api,
+  connector: c,
+  connection: x,
+  onDone,
+  agent: given,
+  onAsk,
+}: {
+  api: ConnectionsApi;
+  connector: Connector;
+  connection: { id: string; name: string };
+  onDone: () => void | Promise<void>;
+  /** Who is asked to set the app up; Desk's own agent when not said. */
+  agent?: { id: string; name: string };
+  onAsk?: () => boolean;
+}) {
+  const manager = useSetUpAgent();
+  const agent = given ?? manager;
   const { started, setStarted, said, setSaid, cancel } = useFlow(api, onDone);
   const [busy, setBusy] = useState(false);
+  const [own, setOwn] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
 
   const begin = async () => {
@@ -1269,6 +1289,41 @@ function ApproveAgain({ api, connector: c, connection: x, onDone }: { api: Conne
   };
 
   if (started) return <WaitingFor service={c.name} started={started} onCancel={() => void cancel()} />;
+
+  if (appOf(c) !== "ready") {
+    if (own || !agent) return <AppForm api={api} connector={c} onKept={onDone} onCancel={agent ? () => setOwn(false) : undefined} />;
+    return (
+      <>
+        {problem && (
+          <p className="small state-blocked" role="alert">
+            {problem}
+          </p>
+        )}
+        <div className="prov-actions">
+          <span className="small">
+            {appOf(c) === "moved"
+              ? `Desk’s address changed, so ${x.name} can’t be approved again yet.`
+              : `Your ${c.name} app isn’t kept, so ${x.name} can’t be approved again yet.`}
+          </span>
+          <button type="button" className="link small" onClick={() => setOwn(true)}>
+            I have an app already
+          </button>
+          <button
+            type="button"
+            className="btn btn-sm btn-signal"
+            onClick={() => {
+              const asked = onAsk ? onAsk() : askAgent(agent.id, setUpRequest(c.name, "me"));
+              if (asked) useUi.getState().closeSettings();
+              else setProblem(`${agent.name} isn’t on this computer to ask. Use an app you have already.`);
+            }}
+          >
+            Ask {agent.name} to set it up
+          </button>
+        </div>
+      </>
+    );
+  }
+
   return (
     <>
       {(problem ?? said) && (

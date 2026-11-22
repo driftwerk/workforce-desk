@@ -84,12 +84,12 @@ function DocumentsRow({ hub, agent }: { hub: DeskHub | null; agent: Agent }) {
     act(path).catch((e: unknown) => setProblem(plainError(e)));
   };
   return (
-    <div className="file-row" role="group" aria-label="Documents">
+    <div className="docs-row" role="group" aria-label="Documents">
       <span className="file-name">Documents</span>
-      <span>{agent.name}’s documents — invoices, statements and files it makes or downloads for you.</span>
-      <span className="mono conn-site">{path}</span>
+      <span className="docs-row-about">{agent.name}’s documents — invoices, statements and files it makes or downloads for you.</span>
+      <span className="docs-row-path">{path}</span>
       {problem && <span className="small state-blocked">{problem}</span>}
-      <div className="prov-actions">
+      <div className="docs-row-actions">
         <button type="button" className="btn btn-sm" onClick={go(openHubPath)}>
           Open
         </button>

@@ -263,7 +263,7 @@ function PasteForm({
     >
       {hint && <p className="small faint">{hint}</p>}
       {fields.map((f, i) => (
-        <div key={f.name} className="setup-paste">
+        <div key={f.name} className="setup-paste-field">
           <label className="small muted" htmlFor={`${id}-${f.name}`}>
             {f.label}
           </label>
@@ -328,6 +328,8 @@ export function SetupCard({
   const [copied, setCopied] = useState(false);
   /** The field a token of the person's own is pasted in: open or not. */
   const [pasting, setPasting] = useState(false);
+  /** The person has said they'll do the step the card is on themselves. */
+  const [doing, setDoing] = useState(false);
   const live = useLive();
   const card = useRef<HTMLElement>(null);
   const named = useChat((c) => c.roster.find((a) => a.hubId === origin.hub && a.id === origin.agent)?.name);
@@ -336,6 +338,14 @@ export function SetupCard({
   const n = s.steps.length;
   const done = s.steps.filter((x) => x.state === "done").length;
   const needsYou = NEEDS_YOU.has(now.kind);
+  // A step the person took on is theirs only until it changes.
+  const stepKey = now.kind === "step" ? now.title : null;
+  useEffect(() => setDoing(false), [stepKey]);
+  const stuck = now.kind === "step";
+  /** What the step asks once it is the person's: Done, and the paste box. */
+  const theirs = !stuck || doing;
+  /** Its one button, where it has somewhere to go. */
+  const action = now.action && (now.action !== "open_step" && now.action !== "open_approve" ? true : !!now.url) ? now.action : null;
 
   useEffect(() => {
     const el = card.current;
@@ -486,8 +496,7 @@ export function SetupCard({
     }
   };
 
-  const primary =
-    now.kind === "failed" || (now.action !== null && ["use_cli", "open_code", "new_code", "open_approve", "open_step"].includes(now.action));
+  const primary = now.kind === "failed" || (action !== null && ["use_cli", "open_code", "new_code", "open_approve", "open_step"].includes(action));
   const words = appWords(s.service);
   const expiry = now.kind === "code" ? expiresIn(now.expiresAt, clock) : null;
   return (
@@ -538,28 +547,33 @@ export function SetupCard({
           onCancel={() => setPasting(false)}
         />
       )}
-      {!pasting && (now.action || now.other || escape || now.paste) && (
+      {!pasting && (action || (now.other && theirs) || (stuck && !doing) || escape || now.paste) && (
         <div className="setup-actions">
-          {now.action && now.action !== "paste_token" && (
-            <button type="button" className={primary ? "btn btn-approve" : "btn"} disabled={busy} onClick={() => act(now.action!)}>
-              {busy && now.action === "use_cli"
+          {action && action !== "paste_token" && (
+            <button type="button" className={primary ? "btn btn-approve" : "btn"} disabled={busy} onClick={() => act(action)}>
+              {busy && action === "use_cli"
                 ? "Checking…"
-                : now.action === "open_code" && copied
+                : action === "open_code" && copied
                   ? "Copied · open GitHub again"
-                  : labelOf(now.action, s.serviceName)}
+                  : labelOf(action, s.serviceName)}
             </button>
           )}
-          {(now.paste || now.action === "paste_token") && (
+          {stuck && !doing && (
+            <button type="button" className="btn" disabled={busy} onClick={() => setDoing(true)}>
+              I’ll do this step
+            </button>
+          )}
+          {(now.paste || action === "paste_token") && (
             <button
               type="button"
-              className={now.action === "paste_token" ? "btn btn-approve" : "btn"}
+              className={action === "paste_token" ? "btn btn-approve" : "btn"}
               disabled={busy}
-              onClick={() => startPaste(now.action !== "paste_token")}
+              onClick={() => startPaste(action !== "paste_token")}
             >
               {labelOf("paste_token", s.serviceName)}
             </button>
           )}
-          {now.other && !(now.appPaste && now.other === "done_step") && (
+          {now.other && theirs && !(now.appPaste && now.other === "done_step") && (
             <button type="button" className="link small" disabled={busy} onClick={() => act(now.other!)}>
               {labelOf(now.other, s.serviceName)}
             </button>
@@ -571,7 +585,7 @@ export function SetupCard({
           )}
         </div>
       )}
-      {now.appPaste && (
+      {now.appPaste && theirs && (
         <PasteForm
           id={`app-${s.id}`}
           fields={[

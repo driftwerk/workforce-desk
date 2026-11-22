@@ -449,14 +449,26 @@ pub fn remove_proposal(dir: &Path, id: &str) -> Result<()> {
     }
 }
 
-/// `path`, resolved, where it lies inside the hub's data folder: the only
-/// place the page may have opened or shown in the file manager.
+/// `path`, resolved, where it is an agent's documents folder in the hub's
+/// data (`<hub data>/agents/<agent>/documents`): the only place the page may
+/// have opened or shown in the file manager.
 pub fn within_hub_data(paths: &Paths, path: &Path) -> Result<std::path::PathBuf> {
+    use std::path::Component;
     let root = std::fs::canonicalize(paths.hub_data())?;
     let found = std::fs::canonicalize(path)
         .map_err(|_| eyre::eyre!("that folder isn't there on this computer"))?;
-    if !found.starts_with(&root) {
-        eyre::bail!("Desk opens only what its own hub keeps");
+    let allowed = found.is_dir()
+        && found
+            .strip_prefix(root.join("agents"))
+            .map(|rest| {
+                let parts: Vec<_> = rest.components().collect();
+                parts.len() == 2
+                    && parts.iter().all(|c| matches!(c, Component::Normal(_)))
+                    && parts[1].as_os_str() == "documents"
+            })
+            .unwrap_or(false);
+    if !allowed {
+        eyre::bail!("Desk opens only an agent's documents folder");
     }
     Ok(found)
 }
@@ -503,6 +515,44 @@ mod tests {
             .join("elsewhere");
         assert!(within_hub_data(&paths, &sneaky).is_err());
         assert!(within_hub_data(&paths, &documents.join("missing")).is_err());
+    }
+
+    #[test]
+    fn only_an_agents_documents_folder_is_opened() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let agent = paths.hub_data().join("agents").join("kat");
+        let documents = agent.join("documents");
+        std::fs::create_dir_all(&documents).unwrap();
+        let sibling = agent.join("memory");
+        std::fs::create_dir_all(&sibling).unwrap();
+        std::fs::write(documents.join("note.txt"), "x").unwrap();
+        assert!(within_hub_data(&paths, &documents).is_ok());
+        // A sibling folder in the same hub data, and the hub data itself.
+        assert!(within_hub_data(&paths, &sibling).is_err());
+        assert!(within_hub_data(&paths, &agent).is_err());
+        assert!(within_hub_data(&paths, &paths.hub_data()).is_err());
+        // A file inside the documents folder, not a directory.
+        assert!(within_hub_data(&paths, &documents.join("note.txt")).is_err());
+        // A `..` path that lands on a sibling.
+        assert!(within_hub_data(&paths, &documents.join("..").join("memory")).is_err());
+        // Deeper than one agent segment.
+        let nested = documents.join("documents");
+        std::fs::create_dir_all(&nested).unwrap();
+        assert!(within_hub_data(&paths, &nested).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_link_out_of_the_documents_folder_is_not_followed() {
+        let dir = tempfile::tempdir().unwrap();
+        let paths = Paths::at(dir.path());
+        let agent = paths.hub_data().join("agents").join("kat");
+        std::fs::create_dir_all(&agent).unwrap();
+        let outside = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&outside).unwrap();
+        std::os::unix::fs::symlink(&outside, agent.join("documents")).unwrap();
+        assert!(within_hub_data(&paths, &agent.join("documents")).is_err());
     }
 
     #[test]

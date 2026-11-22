@@ -1219,6 +1219,38 @@ button.card-icon:hover:not(:disabled) {
   color: var(--faint);
   line-height: 1.4;
 }
+/* The agent's documents folder in the Files list: a row to read, with its
+   own buttons, not one to click. */
+.docs-row {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  width: 100%;
+  padding: 10px 12px;
+  margin-top: 8px;
+  border-top: 1px solid var(--border);
+  color: var(--text);
+  cursor: default;
+}
+.docs-row-about {
+  font-size: 12px;
+  color: var(--faint);
+  line-height: 1.4;
+}
+.docs-row-path {
+  max-width: 100%;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--faint);
+  overflow-wrap: anywhere;
+}
+.docs-row-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 4px;
+}
 .unsaved-dot {
   width: 7px;
   height: 7px;
