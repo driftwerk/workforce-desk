@@ -55,9 +55,13 @@ describe("a tile's log line", () => {
     expect(logLine()).toBe("● waiting for a build slot, 3m");
   });
 
-  it("joins a done session's background work with what it waits on", () => {
-    render(<Tile session={session({ state: "done", background: { count: 1, since: since() }, waits: waits() })} />);
-    expect(logLine()).toBe("Waiting on 1 background task · 3m · waiting for a build slot, 3m");
+  it("joins a done session's background work with what it waits on, said once when they began together", () => {
+    const { unmount } = render(<Tile session={session({ state: "done", background: { count: 1, since: since() }, waits: waits() })} />);
+    expect(logLine()).toBe("Waiting on 1 background task · 3m · waiting for a build slot");
+    unmount();
+    const earlier = new Date(Date.now() - 13 * 60_000).toISOString();
+    render(<Tile session={session({ state: "done", background: { count: 1, since: earlier }, waits: waits() })} />);
+    expect(logLine()).toBe("Waiting on 1 background task · 13m · waiting for a build slot, 3m");
   });
 
   it("is the background work alone, or the current tool alone, without waits", () => {
