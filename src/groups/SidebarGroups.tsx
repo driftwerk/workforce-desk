@@ -1,6 +1,6 @@
 import { DragDropProvider, DragOverlay, useDraggable, useDroppable } from "@dnd-kit/react";
 import { useShallow } from "zustand/react/shallow";
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useRef, useState, type MouseEvent, type ReactNode } from "react";
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
@@ -79,6 +79,7 @@ import { Confirm } from "../ui/Confirm";
 import type { GroupBoss } from "../hub/types";
 import {
   asksBeforeOverseeing,
+  bossNameOf,
   bossOfGroup,
   bossTagOf,
   bossTagSays,
@@ -194,6 +195,13 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   const badges = useBadgeData();
   const manager = useOverview((s) => s.manager);
   const managerId = manager?.agentId ?? null;
+  const localHubId = hubs.find((h) => h.local)?.id;
+  // Named from the roster: a rename shows before the hub lists bosses again.
+  const groupBosses = useMemo(
+    () => new Map((manager?.bosses ?? []).map((b) => [b.group, { ...b, name: bossNameOf(roster, localHubId, manager, b.agentId) }])),
+    [manager, roster, localHubId],
+  );
+  const groupBoss = (id: string): GroupBoss | null => groupBosses.get(id) ?? null;
   // Who each group's grant names as its boss on another hub, so the rows
   // tag it once it is read.
   const grantNamed = useGrantBosses((s) => s.named);
@@ -470,7 +478,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
 
   /** A group with a boss asks first; deleting it takes the boss off it. */
   const removeGroup = (id: string) => {
-    const boss = bossOfGroup(manager, id);
+    const boss = groupBoss(id);
     if (boss) return setAsking({ kind: "delete", group: id, boss });
     void deleteNow(id);
   };
@@ -850,7 +858,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
           <GroupSection
             key={g.id}
             group={g}
-            boss={g.id === UNGROUPED ? null : bossOfGroup(manager, g.id)}
+            boss={g.id === UNGROUPED ? null : groupBoss(g.id)}
             sealed={g.id !== UNGROUPED && isSealed(manager, g.id) && !bossOfGroup(manager, g.id)}
             onBoss={openBoss}
             hint={`${hint}-group`}

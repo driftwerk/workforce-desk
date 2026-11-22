@@ -102,6 +102,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   createAgent: (h) => h.createAgent({ id: "a", name: "A", system_prompt: "" }),
   deleteAgent: (h) => h.deleteAgent("a b"),
   renameAgent: (h) => h.renameAgent("a", "B", "p"),
+  oldNameMentions: (h) => h.oldNameMentions("a b", "Desk & co"),
   setAgentPicture: (h) => Promise.all([h.setAgentPicture("a", new Blob([new Uint8Array([1, 2])], { type: "image/png" })), h.setAgentPicture("a", null)]),
   providers: (h) => h.providers(),
   connectProvider: (h) => h.connectProvider("anthropic", { key: "k" }),
