@@ -218,13 +218,25 @@ export const levelFor = (rows: OnItsOwnRow[], kind: OnItsOwnKind): OnItsOwnLevel
 export const overridesFor = (rows: OnItsOwnRow[], kind: OnItsOwnKind): string[] =>
   rows.flatMap((r) => (r.kind === kind && r.scope.kind !== "whole" ? [r.scope.value] : []));
 
+/** Whether `host` is an IPv6 address, as a URL would read it. */
+const isIpv6 = (host: string): boolean => {
+  if (!host.includes(":") || !/^[0-9a-f:.]+$/.test(host)) return false;
+  try {
+    return new URL(`http://[${host}]/`).hostname.length > 2;
+  } catch {
+    return false;
+  }
+};
+
 /** A host or site as typed, as the hub keeps it; and why it can't be. */
 export const typedOverride = (by: "host" | "site", typed: string): { value: string | null; problem: string | null } => {
   const t = typed.trim();
   if (!t) return { value: null, problem: null };
   if (by === "host") {
-    const host = (t.split("@").pop() ?? t).toLowerCase();
-    return /^[a-z0-9._-]{1,253}$/.test(host) ? { value: host, problem: null } : { value: null, problem: `${t} isn’t a host name or address.` };
+    const host = (t.split("@").pop() ?? t).toLowerCase().replace(/^\[(.*)\]$/, "$1");
+    return /^[a-z0-9._-]{1,253}$/.test(host) || isIpv6(host)
+      ? { value: host, problem: null }
+      : { value: null, problem: `${t} isn’t a host name or address.` };
   }
   try {
     const url = new URL(/^[a-z]+:\/\//i.test(t) ? t : `https://${t}`);

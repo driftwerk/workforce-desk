@@ -12,8 +12,6 @@ import { ActivityList, EMPTY_ACTIVITY, GrantList } from "./Lists";
 import { OnItsOwn } from "./OnItsOwn";
 import "../styles/computer.css";
 
-/** How many of the agent's own rows its tab shows. */
-
 /** The home folder, as the backend reads it; `null` until known. */
 function useHome(): string | null {
   const [home, setHome] = useState<string | null>(null);

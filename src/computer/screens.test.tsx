@@ -399,5 +399,6 @@ describe("what an agent does on its own", () => {
     expect(region().queryByRole("radiogroup", { name: "Run commands: when it asks" })).toBeNull();
     expect(region().queryByText("These apply at Full access, asking only before irreversible things.")).toBeNull();
     expect(region().getByRole("button", { name: "Ask me again" }).className).toBe("btn");
+    expect(region().queryByText(/always ask/)).toBeNull();
   });
 });

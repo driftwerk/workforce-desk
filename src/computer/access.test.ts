@@ -105,7 +105,9 @@ describe("what an agent does on its own", () => {
 
   it("keeps a typed host or site as the hub does, and says why it can't", () => {
     expect(typedOverride("host", " dev@DevBox ")).toEqual({ value: "devbox", problem: null });
-    expect(typedOverride("host", "::1").value).toBeNull();
+    expect(typedOverride("host", "::1").value).toBe("::1");
+    expect(typedOverride("host", "[FE80::1]").value).toBe("fe80::1");
+    expect(typedOverride("host", "fe80:::1:").value).toBeNull();
     expect(typedOverride("host", "devbox:22").problem).toBe("devbox:22 isn’t a host name or address.");
     expect(typedOverride("host", "a b").problem).toBe("a b isn’t a host name or address.");
     expect(typedOverride("host", "  ")).toEqual({ value: null, problem: null });

@@ -86,9 +86,12 @@ export function OnItsOwn({
             Ask me again
           </button>
         </div>
-        <p className="small faint">
-          On its own, it doesn’t ask you first. Passwords and sign-ins, payments, sending to people and this computer’s own settings always ask. Everything it does is in the audit, and Stop still stops it.
-        </p>
+        {!everything && (
+          <p className="small faint">
+            On its own, it doesn’t ask you first. Passwords and sign-ins, payments, sending to people, this computer’s own settings, commands Desk can’t read and deletes it can’t tell always ask.
+            Everything it does is in the audit, and Stop still stops it.
+          </p>
+        )}
         <p className="small faint">Ask me again: Desk asks you about everything again and forgets what is always allowed for {agent.name}.</p>
         {!applies && !everything && <p className="ability-note small">These apply at Full access, asking only before irreversible things.</p>}
         {everything ? (
