@@ -510,6 +510,7 @@ it("won't add or rename a connection to a name the service has already", async (
 describe("a bank", () => {
   const approval = (daysLeft: number) => ({ until: "2027-02-19", daysLeft, due: daysLeft <= 7, estimated: true });
   const renewal = {
+    service: "BankSync",
     label: "Bank approval",
     page: "https://app.banksync.io",
     open: "Open BankSync",
@@ -531,14 +532,15 @@ describe("a bank", () => {
     fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
     const row = within(service("Bank")).getByLabelText("NatWest");
     expect(within(row).getByText("Bank approval")).toBeTruthy();
-    const line = within(row).getByText(/^Approved until about .*19.* \(estimated, 40 days\)$/);
+    const line = within(row).getByText(/^Approved until about .*19.* \(40 days\)$/);
     expect(line.textContent).toMatch(/Feb/);
+    expect(line.textContent?.match(/about|estimated/g)).toHaveLength(1);
     expect(line.className).not.toContain("state-blocked");
     cleanup();
     await show(api([bank(5)]));
-    expect(within(service("Bank")).getByText(/^\(approved until about .* \(estimated, 5 days\)\)$/).className).toContain("state-blocked");
+    expect(within(service("Bank")).getByText(/^\(approved until about .* \(5 days\)\)$/).className).toContain("state-blocked");
     fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
-    expect(within(service("Bank")).getByText(/^Approved until about .* \(estimated, 5 days\)$/).className).toContain("state-blocked");
+    expect(within(service("Bank")).getByText(/^Approved until about .* \(5 days\)$/).className).toContain("state-blocked");
   });
 
   it("is told apart by the hub's renewal, not by an approval date", async () => {
@@ -548,6 +550,21 @@ describe("a bank", () => {
     fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
     fireEvent.click(within(service("Bank")).getByRole("button", { name: "Reconnect" }));
     expect(screen.getByLabelText("Reconnect NatWest").textContent).toContain(renewal.about);
+  });
+
+  it("says a lapsed one needs renewing, and what BankSync still says when it isn't", async () => {
+    const lapsed = (detail: string | null) =>
+      connection({ id: "agent~kat~natwest", name: "NatWest", status: "needs_reconnect", detail, approval: approval(-1) });
+    const renew = vi.fn<ConnectionsApi["renew"]>().mockResolvedValue(lapsed(null));
+    await show(api([{ ...bank(-1), connections: [lapsed("Approval lapsed")] }], { renew }));
+    expect(within(service("Bank")).getByText(/needs renewing/)).toBeTruthy();
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Reconnect" }));
+    const card = screen.getByLabelText("Reconnect NatWest");
+    await act(async () => {
+      fireEvent.click(within(card).getByRole("button", { name: renewal.done }));
+    });
+    expect(within(card).getByRole("alert").textContent).toBe("BankSync still says NatWest isn’t approved.");
   });
 
   it("is reconnected by renewing it in BankSync, then checked, never by typing a key", async () => {

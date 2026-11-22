@@ -75,6 +75,8 @@ export interface Approval {
 
 /** How a connector's approval is renewed, in the hub's words. */
 export interface Renewal {
+  /** Who holds the approval: "BankSync". */
+  service: string;
   /** What the approval is called: "Bank approval". */
   label: string;
   /** Where it is renewed. */
@@ -168,6 +170,8 @@ export interface ServicePicks {
   readOnlyEach: boolean;
   /** It is only ever read (a bank): nothing to allow writes to. */
   readsOnly?: boolean;
+  /** Its approval lapses at the service and is renewed there. */
+  renewable?: boolean;
   /** Its connections are chosen one by one already. */
   chosen: boolean;
   connections: Pick[];
@@ -331,17 +335,17 @@ export const approvalLine = (a: Approval): string => {
   const about = a.estimated ? "about " : "";
   if (a.daysLeft < 0) return `Approval lapsed ${about}${day}`;
   if (a.daysLeft === 0) return `Approval lapses ${about}today`;
-  const left = `${a.daysLeft} ${a.daysLeft === 1 ? "day" : "days"}`;
-  return `Approved until ${about}${day} (${a.estimated ? "estimated, " : ""}${left})`;
+  return `Approved until ${about}${day} (${a.daysLeft} ${a.daysLeft === 1 ? "day" : "days"})`;
 };
 
-/** What a connection's status reads as. */
-export const statusLine = (x: Pick | Connection): string => {
+/** What a connection's status reads as: one whose approval lapses at the
+ *  service (`renewable`, the hub's renewal) needs renewing there. */
+export const statusLine = (x: Pick | Connection, renewable = false): string => {
   switch (x.status) {
     case "connected":
       return "Connected";
     case "needs_reconnect":
-      return "approval" in x && x.approval ? "Needs renewing" : "Needs signing in again";
+      return renewable ? "Needs renewing" : "Needs signing in again";
     case "failing":
       return "Not answering";
   }

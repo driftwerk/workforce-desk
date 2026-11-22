@@ -302,7 +302,7 @@ function ServiceCard({
             {i > 0 && " · "}
             {x.name}
             {x.status !== "connected" ? (
-              <span className="state-blocked"> ({x.status === "failing" ? "not answering" : statusLine(x).toLowerCase()})</span>
+              <span className="state-blocked"> ({x.status === "failing" ? "not answering" : statusLine(x, !!c.renewal).toLowerCase()})</span>
             ) : (
               x.approval?.due && <span className="state-blocked"> ({approvalLine(x.approval).toLowerCase()})</span>
             )}
@@ -517,7 +517,7 @@ function ConnectionCard({
     const renew = () =>
       void run("test", async () => {
         const got = await api.renew(c.id, x.id);
-        if (got.status !== "connected") throw new Error(sentence(got.detail ?? `${c.name} still says ${x.name} isn’t approved`));
+        if (got.status !== "connected") throw new Error(sentence(got.detail ?? `${renewal.service} still says ${x.name} isn’t approved`));
       }).then((done) => done && setRenewing(false));
     return (
       <div className="conn-card" aria-label={`Reconnect ${x.name}`}>
@@ -604,7 +604,7 @@ function ConnectionCard({
             {x.site && <span className="mono conn-site">{x.site.replace(/^https?:\/\//, "")}</span>}
           </>
         )}
-        <span className={`conn-status small ${ok ? "state-on" : "state-blocked"}`}>{statusLine(x)}</span>
+        <span className={`conn-status small ${ok ? "state-on" : "state-blocked"}`}>{statusLine(x, !!c.renewal)}</span>
       </div>
       {clash && (
         <p className="small state-blocked" role="alert">
