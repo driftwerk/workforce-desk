@@ -197,6 +197,11 @@
   {
     "kind": "http",
     "method": "GET",
+    "path": "/api/desk/sessions/s1/closing"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
     "path": "/api/desk/sessions/closed"
   },
   {
@@ -311,6 +316,11 @@
   },
   {
     "kind": "http",
+    "method": "GET",
+    "path": "/api/agents/a%20b/mentions?name=Desk%20%26%20co"
+  },
+  {
+    "kind": "http",
     "method": "PUT",
     "path": "/api/agents/a/picture"
   },
@@ -388,6 +398,11 @@
     "kind": "http",
     "method": "GET",
     "path": "/api/agents/a/memory/summary"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/agents/a/documents"
   },
   {
     "kind": "http",

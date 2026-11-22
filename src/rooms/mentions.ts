@@ -33,6 +33,9 @@ export const setFormerly = (f: (a: Agent) => readonly string[]): void => {
   formerly = f;
 };
 
+/** The names `a` had before, newest first. */
+export const formerNamesOf = (a: Agent): readonly string[] => formerly(a);
+
 /** Whether `m` names `a` by a name it had before, as `names` does by its
  *  name now. */
 export const namedBefore = (m: Mention, a: Agent, hubs: readonly HubAccount[] = []): boolean =>

@@ -52,7 +52,9 @@ const useOpens = (item: OverviewItem): boolean => {
 /** An agent or a session on the Floor: who, what they're doing, and what
  *  they need from you, answered in place. */
 export function ItemTile({ item: listed }: { item: OverviewItem }) {
-  const named = useSessionName(listed.kind === "session" ? listed.id : null, listed.name);
+  const sessionName = useSessionName(listed.kind === "session" ? listed.id : null, listed.name);
+  const agent = useLocalAgent(listed.kind === "agent" ? listed.id : null);
+  const named = agent?.name ?? sessionName;
   const item = named === listed.name ? listed : { ...listed, name: named };
   const session = useDesk((s) => (item.kind === "session" ? s.sessions[item.id] : undefined));
   const tone = item.state === "working" && item.background ? "background" : item.state === "quiet" ? "working" : item.state;

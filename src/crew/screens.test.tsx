@@ -21,8 +21,11 @@ vi.mock("../chat/store", async (original) => ({
   agentIdsOn: () => listed.ids(),
 }));
 
+const folder = vi.hoisted(() => ({ open: vi.fn(() => Promise.resolve()), reveal: vi.fn(() => Promise.resolve()) }));
 vi.mock("../platform", async (original) => ({
   ...(await original<typeof import("../platform")>()),
+  openHubPath: folder.open,
+  revealHubPath: folder.reveal,
   onLoginProgress: () => Promise.resolve(() => {}),
   startLogin: vi.fn(() => Promise.resolve()),
   invoke: vi.fn(() => Promise.resolve()),
@@ -55,6 +58,8 @@ const fakeHub = (over: Partial<DeskHub> = {}): DeskHub =>
     providers: vi.fn(() => Promise.resolve(useProviders.getState().providers)),
     memorySummary: vi.fn(() => Promise.reject(new HubError(404, "Not Found"))),
     agentHeartbeat: vi.fn(() => Promise.reject(new HubError(404, "Not Found"))),
+    oldNameMentions: vi.fn(() => Promise.resolve([])),
+    manager: vi.fn(() => Promise.resolve({ agentId: "desk", level: "act", bosses: [] })),
     ...over,
   }) as unknown as DeskHub;
 
@@ -234,6 +239,67 @@ describe("Files", () => {
     expect((screen.getByLabelText("SOUL.md", { selector: "textarea" }) as HTMLTextAreaElement).value).toBe("draft");
   });
 
+  describe("Documents", () => {
+    const PATH = "/Users/k/Library/Application Support/Desk/hub/data/agents/ledger/documents";
+    const local = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" };
+    const remote = { ...local, id: "dw", local: false };
+
+    it("shows the folder with Open and Show in Finder, and says if the computer refuses", async () => {
+      useChat.setState({ hubs: [local] });
+      useDesk.setState({ hub: fakeHub({ agentDocuments: vi.fn(() => Promise.resolve({ path: PATH, exists: true, state: "made" as const })) } as Partial<DeskHub>) });
+      render(<AgentFiles agent={agent} />);
+      const row = await screen.findByRole("group", { name: "Documents" });
+      expect(within(row).getByText("Ledger’s documents — invoices, statements and files it makes or downloads for you.")).toBeTruthy();
+      expect(within(row).getByText(PATH)).toBeTruthy();
+      fireEvent.click(within(row).getByRole("button", { name: "Open" }));
+      expect(folder.open).toHaveBeenCalledWith(PATH);
+      folder.reveal.mockRejectedValueOnce(new Error("that folder isn't there on this computer"));
+      await act(async () => fireEvent.click(within(row).getByRole("button", { name: "Show in Finder" })));
+      expect(folder.reveal).toHaveBeenCalledWith(PATH);
+      expect(within(row).getByText(/isn't there on this computer/)).toBeTruthy();
+    });
+
+    it("keeps the row and path but offers no buttons while the folder isn't made yet", async () => {
+      useChat.setState({ hubs: [local] });
+      useDesk.setState({ hub: fakeHub({ agentDocuments: vi.fn(() => Promise.resolve({ path: PATH, exists: false, state: "missing" as const })) } as Partial<DeskHub>) });
+      render(<AgentFiles agent={agent} />);
+      const row = await screen.findByRole("group", { name: "Documents" });
+      expect(within(row).getByText(PATH)).toBeTruthy();
+      expect(within(row).getByText("Made when Ledger next starts.")).toBeTruthy();
+      expect(within(row).queryByRole("button")).toBeNull();
+    });
+
+    it("says a documents folder that isn't one, never that it is coming", async () => {
+      useChat.setState({ hubs: [local] });
+      useDesk.setState({
+        hub: fakeHub({
+          agentDocuments: vi.fn(() => Promise.resolve({ path: PATH, exists: false, state: "not_a_folder" as const })),
+        } as Partial<DeskHub>),
+      });
+      render(<AgentFiles agent={agent} />);
+      const row = await screen.findByRole("group", { name: "Documents" });
+      expect(within(row).getByText("The documents folder isn’t a folder.")).toBeTruthy();
+      expect(within(row).queryByText(/Made when/)).toBeNull();
+      expect(within(row).queryByRole("button")).toBeNull();
+    });
+
+    it("is left out for a hub that doesn't say, and for an agent on another computer", async () => {
+      useChat.setState({ hubs: [local] });
+      useDesk.setState({ hub: fakeHub({ agentDocuments: vi.fn(() => Promise.reject(new HubError(404, "Not Found"))) } as Partial<DeskHub>) });
+      render(<AgentFiles agent={agent} />);
+      await screen.findByDisplayValue("# Soul");
+      expect(screen.queryByRole("group", { name: "Documents" })).toBeNull();
+      cleanup();
+      const agentDocuments = vi.fn(() => Promise.resolve({ path: PATH, exists: true, state: "made" as const }));
+      useChat.setState({ hubs: [remote] });
+      useDesk.setState({ hub: fakeHub({ agentDocuments } as Partial<DeskHub>) });
+      render(<AgentFiles agent={agent} />);
+      await screen.findByDisplayValue("# Soul");
+      expect(screen.queryByRole("group", { name: "Documents" })).toBeNull();
+      expect(agentDocuments).not.toHaveBeenCalled();
+    });
+  });
+
   it("says plainly when there's no history to go back to", async () => {
     useDesk.setState({ hub: fakeHub() });
     render(<AgentFiles agent={agent} />);
@@ -268,6 +334,70 @@ describe("Renaming in Settings", () => {
     await waitFor(() => expect(screen.getByText("Saved into their files.")).toBeTruthy());
     expect(vi.mocked(hub.renameAgent).mock.calls[0]?.slice(0, 2)).toEqual(["ledger", "Penny"]);
     expect(useChat.getState().roster[0]!.name).toBe("Penny");
+  });
+
+  it("renames the boss, refreshes who oversees what, says what still says its old name, and takes it back", async () => {
+    const boss: Agent = { hubId: "local", id: "desk", name: "Desk", model: null, provider: null, isDefault: true };
+    const scout: Agent = { hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false };
+    const mentions = [
+      { agent: "desk", place: "SOUL.md", line: "Sign every update as Desk." },
+      { agent: "scout", place: "its instructions", line: "Ask Desk before you deploy." },
+    ];
+    // The hub builds it again after each new name: left out once, then serving.
+    let rebuilding = false;
+    const hub = fakeHub({
+      renameAgent: vi.fn(() => {
+        rebuilding = true;
+        return Promise.resolve({});
+      }),
+      oldNameMentions: vi.fn().mockResolvedValueOnce(mentions).mockResolvedValue([]),
+    } as Partial<DeskHub>);
+    listed.ids.mockReset().mockImplementation(async () => {
+      const ids = rebuilding ? ["scout"] : ["desk", "scout"];
+      rebuilding = false;
+      return ids;
+    });
+    useDesk.setState({ hub });
+    useChat.setState({ hubs: [local], roster: [boss, scout], refreshRoster: vi.fn(() => Promise.resolve()) });
+    render(<AgentSettings agent={boss} hub={local} onOpenFiles={() => {}} />);
+    const name = (await screen.findByDisplayValue("Desk")) as HTMLInputElement;
+
+    fireEvent.change(name, { target: { value: "scout" } });
+    expect(screen.getByText("That name is taken.")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.change(name, { target: { value: "Kat" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    expect(useChat.getState().roster.find((a) => a.id === "desk")!.name).toBe("Kat");
+    await screen.findByText("Saved into their files.");
+    const note = await screen.findByRole("note", { name: "Still says Desk" });
+    expect(hub.oldNameMentions).toHaveBeenCalledWith("desk", "Desk");
+    expect(hub.manager).toHaveBeenCalled();
+    expect([...note.querySelectorAll(".mention-row")].map((r) => r.textContent)).toEqual([
+      "SOUL.mdSign every update as Desk.",
+      "Scout’s instructionsAsk Desk before you deploy.",
+    ]);
+
+    fireEvent.change(name, { target: { value: "Desk" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    await waitFor(() => expect(vi.mocked(hub.renameAgent).mock.calls.map((c) => c[1])).toEqual(["Kat", "Desk"]));
+    await screen.findByText("Saved into their files.");
+    expect(useChat.getState().roster.find((a) => a.id === "desk")!.name).toBe("Desk");
+    expect(screen.queryByRole("note", { name: /Still says/ })).toBeNull();
+  });
+
+  it("says quietly when it couldn't check where the old name is still said", async () => {
+    const hub = fakeHub({
+      renameAgent: vi.fn(() => Promise.resolve({})),
+      oldNameMentions: vi.fn(() => Promise.reject(new HubError(404, "Not Found"))),
+    } as Partial<DeskHub>);
+    renderSettings(hub);
+    const name = (await screen.findByDisplayValue("Ledger")) as HTMLInputElement;
+    fireEvent.change(name, { target: { value: "Penny" } });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    expect(await screen.findByText("Desk couldn’t check where “Ledger” is still said.")).toBeTruthy();
+    expect(screen.queryByRole("note", { name: /Still says/ })).toBeNull();
+    await screen.findByText("Saved into their files.", undefined, { timeout: 3000 });
   });
 
   it("puts the name back and says why when the hub can't rename yet", async () => {

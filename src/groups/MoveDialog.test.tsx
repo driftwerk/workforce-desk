@@ -200,6 +200,19 @@ describe("moving a session to another boss's group", () => {
     expect(screen.getByRole("dialog")).toBeTruthy();
   });
 
+  it("calls a note no boss wrote Desk's, and the renamed main boss's draft by its name", async () => {
+    useChat.setState((st) => ({ roster: st.roster.map((a) => (a.id === "desk" ? { ...a, name: "Kat" } : a)) }));
+    serve((ask) => ({ ...sessionMove(ask), handovers: [draftNote("session:s1", null, "mia", "Desk's facts.")] }));
+    open(SESSION, "globex");
+    expect(await screen.findByText(/Written by Desk from what it knows/)).toBeTruthy();
+    expect(screen.queryByText(/Kat is writing|Drafted by Kat|Kat’s draft/)).toBeNull();
+    cleanup();
+    serve((ask) => ({ ...sessionMove(ask), handovers: [draftNote("session:s1", "desk", "mia", "Desk's facts.", { drafting: true })] }));
+    open(SESSION, "globex");
+    expect(await screen.findByText(/Kat is writing a draft/)).toBeTruthy();
+    expect(screen.getByText("Waiting for Kat’s draft…")).toBeTruthy();
+  });
+
   it("waits for the old boss's draft, offers it when it comes, and never puts it in place of what's shown", async () => {
     serve((ask) => ({ ...sessionMove(ask), handovers: [draftNote("session:s1", "sarah", "mia", "Desk's facts.", { drafting: true })] }));
     open(SESSION, "globex");

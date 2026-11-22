@@ -85,6 +85,8 @@
     "allow-grid-window-monitor",
     "allow-grid-monitors",
     "allow-attachment-open",
+    "allow-hub-path-open",
+    "allow-hub-path-reveal",
     "allow-remote-image-fetch",
     "allow-attachment-save",
     "allow-attachment-upload",
