@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { useChat } from "../chat/store";
 import type { HubAccount } from "../chat/types";
-import { boardSyncOf, syncHubId, type BoardSyncApi } from "../hub/boardSync";
+import { boardSyncOf, syncHubId, THIS_COMPUTER, type BoardSyncApi } from "../hub/boardSync";
 import type { SyncHub, SyncVia } from "../hub/types";
 
 /** This computer's hub, as the person: where a board's sync is asked. */
@@ -36,7 +36,7 @@ export const useSyncHubs = create<SyncHubsState>((set) => ({
 /** The name a board's hub goes by: the kept hub's name, else a paired
  *  hub's label, else its id. */
 export const hubNameOf = (via: SyncVia, kept: readonly SyncHub[] | null, paired: readonly HubAccount[]): string => {
-  if (via.kind === "thisHub") return "This computer";
+  if (via.kind === "thisHub") return THIS_COMPUTER;
   return kept?.find((h) => h.id === via.hub)?.name ?? paired.find((h) => !h.local && syncHubId(h.id) === via.hub)?.label ?? via.hub;
 };
 

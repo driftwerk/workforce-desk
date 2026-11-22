@@ -1545,8 +1545,9 @@ body.side-resizing * {
 .terminal .xterm {
   height: 100%;
 }
-/* A running CLI drawn for the other ground than its terminal's now. */
-.session-recolor {
+/* A row of words under a session's driver bar: its CLI drawn for another
+   ground, or its folder's dependencies. */
+.session-note {
   display: flex;
   align-items: center;
   gap: 10px;

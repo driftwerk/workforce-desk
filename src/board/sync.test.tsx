@@ -717,10 +717,10 @@ describe("the link dialog", () => {
       expect(linked.body).toMatchObject({ system: "github", target: "acme/projects/7", targetId: "PVT_kwDOroad", repo: "acme/web" });
     });
 
-    it("links a typed project with the id the hub resolved, and keeps the workspace when the owner changes", async () => {
+    it("links a typed project with the id the hub resolved, naming no connection the person didn't pick", async () => {
       native.route = (hub, method, path, body) => {
         if (hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "github") {
-          if (!body.workspace && !body.target) return { status: 200, body: { offered: true, workspaces: ["acme-ws", "other-ws"], workspace: "acme-ws" } };
+          if (!body.workspace && !body.target && !body.owner) return { status: 200, body: { offered: true, workspaces: ["acme-ws", "other-ws"], workspace: "acme-ws" } };
           if (body.target === "acme/projects/8") {
             const r = ghRoutes(hub, method, path, body) as { body: Record<string, unknown> };
             return { status: 200, body: { ...r.body, targetId: "PVT_resolved" } };
@@ -730,7 +730,7 @@ describe("the link dialog", () => {
       };
       await open();
       fireEvent.change(await screen.findByLabelText("Owner"), { target: { value: "acme" } });
-      await waitFor(() => expect(native.asked.some((a) => a.path === "/api/desk/boards/link/check" && a.body?.owner === "acme" && a.body?.workspace === "acme-ws")).toBe(true));
+      await waitFor(() => expect(native.asked.some((a) => a.path === "/api/desk/boards/link/check" && a.body?.owner === "acme" && a.body?.workspace === undefined)).toBe(true));
       fireEvent.click(await screen.findByRole("button", { name: "Not listed? Type it" }));
       fireEvent.change(await screen.findByLabelText("The project’s address"), { target: { value: "acme/projects/8" } });
       await screen.findByRole("radiogroup", { name: "Import" });
@@ -743,7 +743,66 @@ describe("the link dialog", () => {
       await screen.findByText("9 issues", undefined, { timeout: 2000 });
       fireEvent.click(screen.getByRole("button", { name: "Link to acme · project 8" }));
       await waitFor(() => expect(native.asked.some((a) => a.method === "PUT")).toBe(true));
-      expect(native.asked.find((a) => a.method === "PUT")!.body).toMatchObject({ system: "github", target: "acme/projects/8", targetId: "PVT_resolved", workspace: "acme-ws" });
+      const put = native.asked.find((a) => a.method === "PUT")!.body!;
+      expect(put).toMatchObject({ system: "github", target: "acme/projects/8", targetId: "PVT_resolved" });
+      expect(put.workspace).toBeUndefined();
+    });
+
+    it("goes through the connection the hub found reaching the owner, keeping the owner typed", async () => {
+      const CONNECTIONS = ["driftwerk", "mantis", "patchwork"];
+      native.route = (hub, method, path, body) => {
+        if (hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "github") {
+          const r = ghRoutes(hub, method, path, body) as { body: Record<string, unknown> };
+          const workspace = body.owner === "acme" ? "driftwerk" : ((body.workspace as string | undefined) ?? "mantis");
+          return { status: 200, body: { ...r.body, workspaces: CONNECTIONS, workspace } };
+        }
+        return ghRoutes(hub, method, path, body);
+      };
+      await open();
+      const picker = within(await screen.findByRole("radiogroup", { name: "GitHub connection" }));
+      const radio = (name: string) => picker.getByRole("radio", { name: new RegExp(`^${name}`) }) as HTMLInputElement;
+      // The hub's choice is said, not checked, so it can be picked to keep.
+      expect(picker.getAllByRole("radio").every((r) => !(r as HTMLInputElement).checked)).toBe(true);
+      expect(radio("mantis").closest("label")!.textContent).toMatch(/The one this link goes through/);
+      fireEvent.change(await screen.findByLabelText("Owner"), { target: { value: "acme" } });
+      await waitFor(() => expect(radio("driftwerk").closest("label")!.textContent).toMatch(/The one this link goes through/));
+      expect((screen.getByLabelText("Owner") as HTMLInputElement).value).toBe("acme");
+      fireEvent.change(await screen.findByLabelText("acme’s GitHub project"), { target: { value: "acme/projects/7" } });
+      await screen.findByText("9 open issues", undefined, { timeout: 2000 });
+      const checks = () => native.asked.filter((a) => a.path === "/api/desk/boards/link/check" && a.body?.target === "acme/projects/7");
+      // Not picked: the hub finds the connection, so none is named.
+      expect(checks().at(-1)!.body).toMatchObject({ owner: "acme" });
+      expect(checks().every((a) => a.body?.workspace === undefined)).toBe(true);
+      // The hub's own choice is picked to keep it, and another to change it.
+      fireEvent.click(radio("driftwerk"));
+      await waitFor(() => expect(checks().at(-1)!.body).toMatchObject({ owner: "acme", workspace: "driftwerk" }), { timeout: 2000 });
+      expect(radio("driftwerk").checked).toBe(true);
+      fireEvent.click(radio("patchwork"));
+      await waitFor(() => expect(checks().at(-1)!.body).toMatchObject({ owner: "acme", workspace: "patchwork" }), { timeout: 2000 });
+      expect(radio("patchwork").checked).toBe(true);
+    });
+
+    it("asks which connection where several reach the project, from those only", async () => {
+      const why = "Pick which GitHub connection: driftwerk or patchwork";
+      native.route = (hub, method, path, body) => {
+        if (hub === "local" && path === "/api/desk/boards/link/check" && body?.system === "github") {
+          const r = ghRoutes(hub, method, path, body) as { body: Record<string, unknown> };
+          if (body.target && !body.workspace) return { status: 200, body: { offered: true, workspaces: ["driftwerk", "patchwork"], workspaceWhy: why } };
+          return { status: 200, body: { ...r.body, workspaces: ["driftwerk", "mantis", "patchwork"], workspace: (body.workspace as string | undefined) ?? "mantis" } };
+        }
+        return ghRoutes(hub, method, path, body);
+      };
+      await open();
+      fireEvent.change(await screen.findByLabelText("Owner"), { target: { value: "acme" } });
+      fireEvent.change(await screen.findByLabelText("acme’s GitHub project"), { target: { value: "acme/projects/7" } });
+      await waitFor(() => expect(document.querySelector(".dialog-foot-note")?.textContent).toBe(why), { timeout: 2000 });
+      expect((screen.getByRole("button", { name: /^Link/ }) as HTMLButtonElement).disabled).toBe(true);
+      const picker = within(screen.getByRole("radiogroup", { name: "GitHub connection" }));
+      expect(picker.getAllByRole("radio").map((r) => r.closest("label")!.querySelector(".move-opt-main > span")!.textContent)).toEqual(["driftwerk", "patchwork"]);
+      fireEvent.click(picker.getByRole("radio", { name: /^patchwork/ }));
+      await screen.findByText("9 open issues", undefined, { timeout: 2000 });
+      const checked = native.asked.filter((a) => a.path === "/api/desk/boards/link/check" && a.body?.target === "acme/projects/7").at(-1)!;
+      expect(checked.body).toMatchObject({ owner: "acme", workspace: "patchwork" });
     });
 
     it("takes a typed repository where the hub lists none, and says what it waits on", async () => {
@@ -1201,7 +1260,7 @@ describe("the board, synced", () => {
     expect(screen.getByText("Atlas: jira.transition_issue failed.")).toBeTruthy();
     unmount();
     show(synced({ paused: { kind: "noToken" } }), []);
-    expect(screen.getByText("Paused: Atlas needs a new token.")).toBeTruthy();
+    expect(screen.getByText("Paused: paste a new token for Atlas.")).toBeTruthy();
     expect(screen.getByRole("button", { name: "New token…" })).toBeTruthy();
   });
 
@@ -1418,6 +1477,10 @@ describe("board sync's words and checks", () => {
     expect(linkedTo(gh, "Atlas")).toBe("GitHub acme · project 7 via Atlas");
     expect(pausedWords({ kind: "missing", tools: ["github.project_items"] }, "Atlas")).toBe("Paused: no agent on Atlas you can reach has GitHub switched on any more.");
     expect(fixOf({ ...gh.sync!, paused: { kind: "missing", tools: ["github.project_items"] } }, "Atlas")?.label).toBe("Ask an agent on Atlas to switch GitHub on");
+    expect(pausedWords({ kind: "missing", tools: ["github.project_items"] }, "This computer")).toBe("Paused: no agent on this computer you can reach has GitHub switched on any more.");
+    const here = { ...gh, sync: { ...gh.sync!, via: { kind: "thisHub" as const } } };
+    expect(linkedTo(here, "This computer")).toBe("GitHub acme · project 7 with this computer's keys");
+    expect(linkedTo({ ...here, sync: { ...here.sync, agent: "desk" } }, "This computer")).toBe("GitHub acme · project 7 through Desk on this computer");
   });
 
   it("takes a pasted token as the local hub does: wfr_, letters, digits, _ and -, longer than 20", () => {
