@@ -202,6 +202,7 @@ const HTTP: &[Route] = &[
     // Agents.
     route("POST", "/api/agents"),
     route("PATCH", "/api/agents/{}"),
+    with_query("GET", "/api/agents/{}/mentions", &["name"]),
     route("DELETE", "/api/agents/{}"),
     route("PUT", "/api/agents/{}/picture"),
     route("DELETE", "/api/agents/{}/picture"),
@@ -383,6 +384,8 @@ pub fn native_boss(method: &str, target: &str) -> Result<Allowed, Refused> {
 const RELAY_LOCAL: &[Route] = &[
     route("GET", "/api/desk/crew/relay"),
     route("POST", "/api/desk/crew/relay/{}"),
+    // A machine's session's Linear or Jira call (`crate::issues_relay`).
+    route("POST", "/api/desk/issues/served"),
 ];
 /// And a plan's sessions on a machine, as New session's own requests.
 const RELAY_MACHINE: &[Route] = &[
@@ -395,6 +398,9 @@ const RELAY_MACHINE: &[Route] = &[
     with_query("GET", "/api/desk/repos", &["remote"]),
     route("POST", "/api/desk/repos/checkout"),
     route("POST", "/api/desk/run"),
+    // Its sessions' Linear and Jira calls, carried home (`issues_relay`).
+    route("GET", "/api/desk/issues/relay"),
+    route("POST", "/api/desk/issues/relay/{}"),
 ];
 
 /// `method target` as one of the relay's requests to this computer's hub.
@@ -859,6 +865,7 @@ mod tests {
     fn the_relay_is_never_the_pages() {
         let id = "0f0e0d0c-0b0a-4909-8807-060504030201";
         let relay = format!("/api/desk/crew/relay/{id}");
+        let issues = format!("/api/desk/issues/relay/{id}");
         let paths = [
             "/api/desk/crew/relay".to_string(),
             "/api/desk/crew/relay?token=x".to_string(),
@@ -868,6 +875,12 @@ mod tests {
             "/api/desk/crew/served".to_string(),
             "/api/desk/crew/served?token=x".to_string(),
             "/api/desk/crew/served/x".to_string(),
+            "/api/desk/issues/relay".to_string(),
+            "/api/desk/issues/relay?token=x".to_string(),
+            issues.clone(),
+            format!("{issues}/x"),
+            "/api/desk/issues/served".to_string(),
+            "/api/desk/issues/served?token=x".to_string(),
         ];
         for target in &paths {
             for method in ["GET", "POST", "PUT", "PATCH", "DELETE"] {
@@ -898,6 +911,12 @@ mod tests {
         assert!(relay_machine("GET", "/api/desk/repos?remote=github.com%2Fa%2Fb").is_ok());
         assert!(relay_machine("POST", "/api/desk/repos/checkout").is_ok());
         assert!(relay_machine("POST", "/api/desk/run").is_ok());
+        assert!(relay_local("POST", "/api/desk/issues/served").is_ok());
+        assert!(relay_machine("GET", "/api/desk/issues/relay").is_ok());
+        assert!(relay_machine("POST", &issues).is_ok());
+        assert!(relay_machine("POST", "/api/desk/issues/served").is_err());
+        assert!(relay_local("GET", "/api/desk/issues/relay").is_err());
+        assert!(relay_local("POST", &issues).is_err());
         assert!(relay_machine("POST", "/api/desk/run?token=x").is_err());
         // The repository and check routes are the relay's alone: never the
         // page's.
