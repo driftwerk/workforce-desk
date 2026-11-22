@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { Layout } from "../groups/model";
 import type { BossView, Need, PlanProgress, Work } from "../hub/types";
 import type { FloorNeed, FloorWork } from "./merge";
-import { MAIN, floorSections, oversightOf, placer, sealedSection, sectionDomId, sectionName, sectionOfEvent, totals, type DeskItem, type Oversight, type Section } from "./sections";
+import { MAIN, floorSections, namedBosses, oversightOf, placer, sealedSection, sectionDomId, sectionName, sectionOfEvent, totals, type DeskItem, type Oversight, type Section } from "./sections";
 import { agent, approval, at, need, session, view, work } from "./testing";
 
 const layout: Layout = {
@@ -319,5 +319,18 @@ describe("an Activity event's section", () => {
     const ungrouped = JSON.parse('{"id":"e1","actor":{"kind":"session","id":"s-web","name":"acme-web"}}') as { group?: string | null };
     expect("group" in ungrouped).toBe(false);
     expect(sectionOfEvent(p, ungrouped)).toBe(MAIN);
+  });
+});
+
+describe("bosses by their names now", () => {
+  it("calls this computer's bosses as the roster does, a rename's at once, and keeps the rest", () => {
+    const o: Oversight = { bosses: [boss("desk", "Desk", null), boss("sarah", "Sarah", "acme")], sealed: [], plans: [] };
+    const roster = [
+      { hubId: "local", id: "desk", name: "Kat", model: null, provider: null, isDefault: true },
+      { hubId: "dw", id: "sarah", name: "Rowan", model: null, provider: null, isDefault: false },
+    ];
+    const named = namedBosses(o, roster, "local");
+    expect(named.bosses.map((b) => b.name)).toEqual(["Kat", "Sarah"]);
+    expect(named.bosses[1]).toBe(o.bosses[1]);
   });
 });

@@ -7,7 +7,8 @@ import { useChat } from "../chat/store";
 import { defaultShortcuts } from "../shortcuts/keys";
 import { QUIET, toggleTalk, useMic } from "./mic";
 import { useVoiceStore } from "./store";
-import { useVoice } from "./useVoice";
+import { Turns, useVoice } from "./useVoice";
+import { rememberFormerNames } from "../rooms/formerNames";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -164,6 +165,29 @@ describe("voice following the microphone", () => {
     await act(async () => toggleTalk(key));
     await act(async () => undefined);
     expect(useMic.getState()).toMatchObject({ talk: null, problem: { agent: key, mode: "talk", message: "microphone access was denied" } });
+    unmount();
+  });
+});
+
+describe("voice after a rename", () => {
+  it("wakes on the old name while no one has it, and the old name reaches the agent", () => {
+    rememberFormerNames();
+    const kat = { hubId: "local", id: "atlas", name: "Kat", model: null, provider: null, isDefault: false };
+    const send = vi.fn(() => true);
+    useSettings.setState({ formerNames: { [key]: ["Atlas"] } });
+    useChat.setState({ roster: [kat], activeAgent: null, openDm: vi.fn(), watchDm: vi.fn(), send });
+    const { unmount } = renderHook(() => useVoice(false));
+    expect(calls("voice_set_roster").at(-1)).toEqual({ roster: [{ name: "Kat" }, { name: "Atlas" }] });
+    const turns = new Turns();
+    turns.heard({ agent: "Atlas", text: "what failed overnight?" });
+    expect(send).toHaveBeenCalledWith(key, "what failed overnight?", expect.anything());
+    turns.stop();
+    act(() => useChat.setState({ roster: [kat, { ...kat, id: "scout", name: "Atlas" }] }));
+    expect(calls("voice_set_roster").at(-1)).toEqual({ roster: [{ name: "Kat" }, { name: "Atlas" }] });
+    const again = new Turns();
+    again.heard({ agent: "Atlas", text: "and now?" });
+    expect(send).toHaveBeenLastCalledWith("local/scout", "and now?", expect.anything());
+    again.stop();
     unmount();
   });
 });

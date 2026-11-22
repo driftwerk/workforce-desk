@@ -17,7 +17,7 @@ import { useHost } from "../shell/host";
 import { CloseButton, Dialog, radioKeys } from "../ui/Dialog";
 import { AgentMark, Mark } from "../ui/Mark";
 import { plainError } from "../ui/plainError";
-import { bossOfGroup, overseeGroup, stopOverseeing } from "./bosses";
+import { bossNameOf, bossOfGroup, overseeGroup, stopOverseeing } from "./bosses";
 import { sessionOf } from "./model";
 import {
   BOSS_LEVELS,
@@ -136,7 +136,10 @@ export function BossSheet({ group, preselect, onClose }: { group: string; presel
       : null;
   const preset: Who | null = presetAgent && teamHubs.some((h) => h.id === presetAgent.hubId) ? { kind: "remote", agent: presetAgent } : null;
   const picked = who ?? (now ? preset : null) ?? now;
-  const bossName = picked?.kind === "desk" ? "Desk" : (picked?.agent.name ?? "the boss");
+  /** What a group with no boss of its own defers to: the main boss, by its
+   *  name, or Desk when there is none. */
+  const mainName = bossNameOf(roster, local?.id, manager);
+  const bossName = picked?.kind === "desk" ? mainName : (picked?.agent.name ?? "the boss");
   const remote = picked?.kind === "remote";
   const linkedHere = remote && status && now && sameWho(picked, now);
 
@@ -269,13 +272,13 @@ export function BossSheet({ group, preselect, onClose }: { group: string; presel
                       {agent ? (
                         <AgentMark agent={`${agent.hubId}/${agent.id}`} name={agent.name} size="sm" />
                       ) : mainBoss && local ? (
-                        <AgentMark agent={`${local.id}/${mainBoss}`} name="Desk" size="sm" />
+                        <AgentMark agent={`${local.id}/${mainBoss}`} name={mainName} size="sm" />
                       ) : (
                         <Mark name="Desk" size="sm" />
                       )}
                     </span>
                     <span className="move-opt-main">
-                      <span>{o.who.kind === "desk" ? "Desk" : o.who.agent.name}</span>
+                      <span>{o.who.kind === "desk" ? mainName : o.who.agent.name}</span>
                       <span className="move-opt-sub">{o.off ?? o.sub}</span>
                     </span>
                   </label>
@@ -460,7 +463,7 @@ export function BossSheet({ group, preselect, onClose }: { group: string; presel
           </button>
           {changed && picked && (
             <button type="button" className="btn btn-signal" disabled={busy} onClick={makeBoss}>
-              {picked.kind === "desk" ? "Give it back to Desk" : `Make ${bossName} ${name}’s boss`}
+              {picked.kind === "desk" ? `Give it back to ${mainName}` : `Make ${bossName} ${name}’s boss`}
             </button>
           )}
           {!changed && choiceChanged && (
