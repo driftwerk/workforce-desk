@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import type { PlannedTicket } from "../hub/types";
+import type { BossPlanTicket, PlannedTicket } from "../hub/types";
 import { ticket } from "./planTesting";
 import progressCases from "./fixtures/plan/progress.json";
 import wavesCases from "./fixtures/plan/waves.json";
@@ -12,6 +12,7 @@ import {
   ownWorktrees,
   progress,
   progressLine,
+  full,
   ruled,
   standing,
   waveTitle,
@@ -84,6 +85,23 @@ describe("the plan card's words", () => {
   it("says where it stands", () => {
     expect(progressLine({ done: 3, doing: 3, review: 0, ready: 1, blocked: 1, waiting: 0, total: 8, next: ["ACM-16"] })).toBe("3 of 8 done · 3 running · next ACM-16 when a slot frees");
     expect(progressLine({ done: 0, doing: 0, review: 0, ready: 0, blocked: 0, waiting: 2, total: 2, next: [] })).toBe("0 of 2 done");
+  });
+
+  it("says a full plan holds all it may run, and by which tickets, so it never looks stuck", () => {
+    const p = { done: 0, doing: 2, review: 0, ready: 1, blocked: 0, waiting: 0, total: 3, next: ["ACM-3"], holding: ["ACM-1", "ACM-2"] };
+    expect(full(p, 2)).toBe("holds 2 of 2 sessions: ACM-1, ACM-2");
+    expect(progressLine(p, 2)).toBe("0 of 3 done · 2 running · holds 2 of 2 sessions: ACM-1, ACM-2: the next starts when one is closed or its ticket moves on");
+    expect(full(p, 3)).toBeNull();
+    expect(progressLine(p, 3)).toBe("0 of 3 done · 2 running · next ACM-3 when a slot frees");
+    expect(full(p, null)).toBeNull();
+    expect(full({ ...p, holding: undefined }, 2)).toBeNull();
+  });
+
+  it("reads a ticket's session as holding its slot until that session is closed", () => {
+    const t = { id: "t1", key: "ACM-1", state: "doing", assignee: { kind: "session", id: "devbox/s1", name: "s1" }, starting: false } as unknown as BossPlanTicket;
+    expect(ruled(t).session).toBe("devbox/s1");
+    expect(ruled({ ...t, sessionClosed: true }).session).toBeNull();
+    expect(ruled({ ...t, assignee: { kind: "agent", id: "scout", name: "Scout" } }).session).toBeNull();
   });
 
   it("waits on the person for the first revision and for each change of scope", () => {
