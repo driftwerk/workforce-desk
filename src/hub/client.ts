@@ -383,11 +383,16 @@ export const sortRulesOf = (hub: HubRef) => ({
 
 export type SortRulesApi = ReturnType<typeof sortRulesOf>;
 
-/** Whether agent `agentId` on hub `hub` has mail sorting rules: whether the
- *  hub gives it the tool that keeps them. */
-export const sortsMail = async (hub: HubRef, agentId: string): Promise<boolean> =>
-  ((await hubCall<{ tools?: { name: string }[] }>(hub, "GET", `/api/agents/${encodeURIComponent(agentId)}/tools`)).tools ?? []).some(
-    (t) => t.name === "email.sort_rules",
+/** Whether hub `hub` has email for agent `agentId`: whether it gives the
+ *  agent the email skill's inbox, which it does only once an account is
+ *  set up. A hub that won't say is taken to have none. */
+export const sortsMail = (hub: HubRef, agentId: string): Promise<boolean> =>
+  hubCall<{ tools?: { name: string }[] }>(hub, "GET", `/api/agents/${encodeURIComponent(agentId)}/tools`).then(
+    (r) => (r.tools ?? []).some((t) => t.name === "email.inbox"),
+    (e: unknown) => {
+      if (e instanceof HubError && (e.status === 401 || e.status === 403)) return false;
+      throw e;
+    },
   );
 
 /** A Desk route; in the browser preview, the dev bridge answers the ones

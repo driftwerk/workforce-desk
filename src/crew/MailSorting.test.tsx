@@ -215,23 +215,28 @@ describe("Mail sorting", () => {
     await waitFor(() => expect(calls("GET")).toHaveLength(after + 1));
   });
 
-  it("elsewhere, shows the rules only when that hub gives the agent them", async () => {
-    const tools = (names: string[]) =>
+  it("elsewhere, shows the rules only when that hub has email for the agent", async () => {
+    const tools = (answer: Response) =>
       fetchOnHub.mockImplementation(async (method: string, path: string) =>
         path === "/api/agents/kat/tools"
-          ? reply(200, { tools: names.map((name) => ({ name })) })
+          ? answer
           : method === "GET" && path === "/api/monitors/sort-rules"
             ? reply(200, { rules: [NEWS] })
             : reply(200, {}),
       );
-    tools(["email.inbox"]);
-    const { container } = render(<Section at={remote} />);
-    await waitFor(() => expect(fetchOnHub).toHaveBeenCalled());
-    await new Promise((r) => setTimeout(r, 0));
-    expect(container.innerHTML).toBe("");
-    expect(fetchOnHub.mock.calls.map((c) => c[1])).toEqual(["/api/agents/kat/tools"]);
-    cleanup();
-    tools(["email.inbox", "email.sort_rules"]);
+    const hidden = async (answer: Response) => {
+      vi.clearAllMocks();
+      tools(answer);
+      const { container } = render(<Section at={remote} />);
+      await waitFor(() => expect(fetchOnHub).toHaveBeenCalled());
+      await new Promise((r) => setTimeout(r, 0));
+      expect(container.innerHTML).toBe("");
+      expect(fetchOnHub.mock.calls.map((c) => c[1])).toEqual(["/api/agents/kat/tools"]);
+      cleanup();
+    };
+    await hidden(reply(200, { tools: [{ name: "email.setup" }, { name: "email.sort_rules" }] }));
+    await hidden(reply(403, { error: "Forbidden" }));
+    tools(reply(200, { tools: [{ name: "email.inbox" }, { name: "email.sort_rules" }] }));
     render(<Section at={remote} />);
     expect(await screen.findByText(NEWS.says)).toBeTruthy();
   });
