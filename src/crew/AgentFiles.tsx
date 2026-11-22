@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useChat } from "../chat/store";
 import { agentKey, type Agent } from "../chat/types";
-import { HubError, type DeskHub, type Revision } from "../hub/client";
+import { HubError, type AgentDocuments, type DeskHub, type Revision } from "../hub/client";
 import { useDesk } from "../hub/store";
 import { revealWords } from "../machines/words";
 import { openHubPath, revealHubPath } from "../platform";
@@ -62,7 +62,7 @@ function DocumentsRow({ hub, agent }: { hub: DeskHub | null; agent: Agent }) {
   const here = useChat((s) => s.hubs.find((h) => h.local)?.id === agent.hubId);
   const inDistro = useHost((h) => h.host?.kind === "wsl");
   const platform = useHost((h) => h.platform);
-  const [docs, setDocs] = useState<{ path: string; exists: boolean } | null>(null);
+  const [docs, setDocs] = useState<AgentDocuments | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
   useEffect(() => {
@@ -79,7 +79,7 @@ function DocumentsRow({ hub, agent }: { hub: DeskHub | null; agent: Agent }) {
   }, [hub, here, inDistro, agent.id]);
 
   if (!docs) return null;
-  const { path, exists } = docs;
+  const { path, exists, state } = docs;
   const go = (act: (path: string) => Promise<void>) => () => {
     setProblem(null);
     act(path).catch((e: unknown) => setProblem(plainError(e)));
@@ -99,6 +99,8 @@ function DocumentsRow({ hub, agent }: { hub: DeskHub | null; agent: Agent }) {
             {revealWords(platform)}
           </button>
         </div>
+      ) : state === "not_a_folder" ? (
+        <span className="docs-row-pending">The documents folder isn’t a folder.</span>
       ) : (
         <span className="docs-row-pending">Made when {agent.name} next starts.</span>
       )}

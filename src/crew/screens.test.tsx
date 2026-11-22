@@ -246,7 +246,7 @@ describe("Files", () => {
 
     it("shows the folder with Open and Show in Finder, and says if the computer refuses", async () => {
       useChat.setState({ hubs: [local] });
-      useDesk.setState({ hub: fakeHub({ agentDocuments: vi.fn(() => Promise.resolve({ path: PATH, exists: true })) } as Partial<DeskHub>) });
+      useDesk.setState({ hub: fakeHub({ agentDocuments: vi.fn(() => Promise.resolve({ path: PATH, exists: true, state: "made" as const })) } as Partial<DeskHub>) });
       render(<AgentFiles agent={agent} />);
       const row = await screen.findByRole("group", { name: "Documents" });
       expect(within(row).getByText("Ledger’s documents — invoices, statements and files it makes or downloads for you.")).toBeTruthy();
@@ -261,11 +261,25 @@ describe("Files", () => {
 
     it("keeps the row and path but offers no buttons while the folder isn't made yet", async () => {
       useChat.setState({ hubs: [local] });
-      useDesk.setState({ hub: fakeHub({ agentDocuments: vi.fn(() => Promise.resolve({ path: PATH, exists: false })) } as Partial<DeskHub>) });
+      useDesk.setState({ hub: fakeHub({ agentDocuments: vi.fn(() => Promise.resolve({ path: PATH, exists: false, state: "missing" as const })) } as Partial<DeskHub>) });
       render(<AgentFiles agent={agent} />);
       const row = await screen.findByRole("group", { name: "Documents" });
       expect(within(row).getByText(PATH)).toBeTruthy();
       expect(within(row).getByText("Made when Ledger next starts.")).toBeTruthy();
+      expect(within(row).queryByRole("button")).toBeNull();
+    });
+
+    it("says a documents folder that isn't one, never that it is coming", async () => {
+      useChat.setState({ hubs: [local] });
+      useDesk.setState({
+        hub: fakeHub({
+          agentDocuments: vi.fn(() => Promise.resolve({ path: PATH, exists: false, state: "not_a_folder" as const })),
+        } as Partial<DeskHub>),
+      });
+      render(<AgentFiles agent={agent} />);
+      const row = await screen.findByRole("group", { name: "Documents" });
+      expect(within(row).getByText("The documents folder isn’t a folder.")).toBeTruthy();
+      expect(within(row).queryByText(/Made when/)).toBeNull();
       expect(within(row).queryByRole("button")).toBeNull();
     });
 
@@ -276,7 +290,7 @@ describe("Files", () => {
       await screen.findByDisplayValue("# Soul");
       expect(screen.queryByRole("group", { name: "Documents" })).toBeNull();
       cleanup();
-      const agentDocuments = vi.fn(() => Promise.resolve({ path: PATH, exists: true }));
+      const agentDocuments = vi.fn(() => Promise.resolve({ path: PATH, exists: true, state: "made" as const }));
       useChat.setState({ hubs: [remote] });
       useDesk.setState({ hub: fakeHub({ agentDocuments } as Partial<DeskHub>) });
       render(<AgentFiles agent={agent} />);
