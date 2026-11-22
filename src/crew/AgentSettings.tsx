@@ -49,7 +49,7 @@ export function AgentSettings({ agent, hub, onOpenFiles }: { agent: Agent; hub: 
   const local = hub?.local ?? false;
   const { BossOfAGroup } = useContext(MainWindowParts);
   const config = useAgentConfigs((s) => s.configs[agentKey(agent)]);
-  const mail = useMailSorting(hub, !local || reachesEmail(config));
+  const mail = useMailSorting(hub, agent.id, !local || reachesEmail(config));
   return (
     <div className="agent-page">
       <div className="agent-settings">

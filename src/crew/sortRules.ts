@@ -31,4 +31,3 @@ export const withEnabled = (rules: readonly SortRule[], rule: SortRule, enabled:
 /** `rules` without `rule`. */
 export const without = (rules: readonly SortRule[], rule: SortRule): SortRule[] =>
   rules.filter((r) => ruleKey(r) !== ruleKey(rule));
-

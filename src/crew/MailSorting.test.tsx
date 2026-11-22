@@ -23,8 +23,10 @@ const kat: Agent = { hubId: "local", id: "kat", name: "Kat", model: null, provid
 const NEWS: SortRule = { rule_id: "sort-ab12cd34ef56", owner: "me@home", says: "New mail in home INBOX from news@shop.com → move it to News", enabled: true, watched_by: [] };
 const BOSS: SortRule = { rule_id: "sort-111122223333", owner: null, says: "New mail in work INBOX from boss@acme.example → flag it", enabled: false, watched_by: ["Boss mail", "Digest"] };
 
-function Section({ on = true }: { on?: boolean }) {
-  const mail = useMailSorting(hub, on);
+const remote: HubAccount = { id: "acme", label: "Acme", url: "https://hub.acme.example", local: false, revision: "r" };
+
+function Section({ on = true, at = hub }: { on?: boolean; at?: HubAccount }) {
+  const mail = useMailSorting(at, "kat", on);
   return <MailSorting agent={kat} mail={mail} />;
 }
 
@@ -178,6 +180,60 @@ describe("Mail sorting", () => {
     await waitFor(() => expect(fetchOnHub).toHaveBeenCalled());
     await new Promise((r) => setTimeout(r, 0));
     expect(container.innerHTML).toBe("");
+  });
+
+  it("shows only the latest read when an earlier one answers after it", async () => {
+    let answerFirst: (r: Response) => void = () => {};
+    let n = 0;
+    fetchOnHub.mockImplementation(async () => {
+      n += 1;
+      return n === 1 ? new Promise<Response>((r) => (answerFirst = r)) : reply(200, { rules: [BOSS] });
+    });
+    render(<Section />);
+    fireEvent.focus(window);
+    expect(await screen.findByText(BOSS.says)).toBeTruthy();
+    answerFirst(reply(200, { rules: [NEWS] }));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.queryByText(NEWS.says)).toBeNull();
+    expect(screen.getByText(BOSS.says)).toBeTruthy();
+  });
+
+  it("reads once for a hub however often it is handed over afresh", async () => {
+    await show([NEWS]);
+    const reads = calls("GET").length;
+    cleanup();
+    serve([NEWS]);
+    const { rerender } = render(<Section at={{ ...hub }} />);
+    await screen.findByText(NEWS.says);
+    const after = calls("GET").length;
+    rerender(<Section at={{ ...hub }} />);
+    rerender(<Section at={{ ...hub }} />);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(calls("GET")).toHaveLength(after);
+    expect(after).toBe(reads + 1);
+    rerender(<Section at={{ ...hub, revision: "renewed" }} />);
+    await waitFor(() => expect(calls("GET")).toHaveLength(after + 1));
+  });
+
+  it("elsewhere, shows the rules only when that hub gives the agent them", async () => {
+    const tools = (names: string[]) =>
+      fetchOnHub.mockImplementation(async (method: string, path: string) =>
+        path === "/api/agents/kat/tools"
+          ? reply(200, { tools: names.map((name) => ({ name })) })
+          : method === "GET" && path === "/api/monitors/sort-rules"
+            ? reply(200, { rules: [NEWS] })
+            : reply(200, {}),
+      );
+    tools(["email.inbox"]);
+    const { container } = render(<Section at={remote} />);
+    await waitFor(() => expect(fetchOnHub).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 0));
+    expect(container.innerHTML).toBe("");
+    expect(fetchOnHub.mock.calls.map((c) => c[1])).toEqual(["/api/agents/kat/tools"]);
+    cleanup();
+    tools(["email.inbox", "email.sort_rules"]);
+    render(<Section at={remote} />);
+    expect(await screen.findByText(NEWS.says)).toBeTruthy();
   });
 
   it("says why when the rules can't be read", async () => {

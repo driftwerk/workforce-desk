@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { agentKey, type Agent, type HubAccount } from "../chat/types";
-import { HubError, sortRulesOf, type SortRule } from "../hub/client";
+import { HubError, sortRulesOf, sortsMail, type SortRule } from "../hub/client";
 import { requestFocus } from "../shell/focus";
 import { openTarget } from "../shell/navigate";
 import { Confirm } from "../ui/Confirm";
@@ -38,45 +38,70 @@ const askToChange = (agent: Agent, rule: SortRule): void => {
   requestFocus(`agent:${key}`, changeRequest(rule));
 };
 
+/** What tells one hub from another for reading: a new token reads again,
+ *  a new object for the same hub doesn't. */
+const hubKey = (hub: HubAccount | undefined): string | null => (hub ? `${hub.id}\n${hub.url}\n${hub.revision}` : null);
+
 /** The person's mail sorting rules on `hub`, read when `on` and read again
  *  whenever Desk comes back into view, as a rule changed in chat shows
- *  there. Their load is "missing" when `on` is off or the hub has none. */
-export function useMailSorting(hub: HubAccount | undefined, on: boolean): MailRules {
+ *  there; only the latest read is shown. On this computer's hub `on` says
+ *  whether the agent reaches email; elsewhere the hub is asked whether
+ *  agent `agentId` has the rules. Their load is "missing" when it doesn't,
+ *  or the hub has none. */
+export function useMailSorting(hub: HubAccount | undefined, agentId: string, on: boolean): MailRules {
   const [load, setLoad] = useState<Load>("loading");
   const [problem, setProblem] = useState<string | null>(null);
   const [saving, setSaving] = useState<ReadonlySet<string>>(new Set());
   const shown = useRef(0);
+  const asked = useRef(0);
   const writing = useRef(0);
+  const current = useRef(hub);
+  current.current = hub;
+  const key = hubKey(hub);
 
   useEffect(() => {
     const n = ++shown.current;
     writing.current = 0;
     setProblem(null);
     setSaving(new Set());
-    if (!hub || !on) return void setLoad("missing");
+    const at = current.current;
+    if (!at || !on) return void setLoad("missing");
     setLoad("loading");
-    const read = (quiet: boolean) =>
-      sortRulesOf(hub)
+    const failed = (quiet: boolean) => (e: unknown) => n === shown.current && !quiet && setLoad(unavailable(e) ? "missing" : { problem: plainError(e) });
+    const read = (quiet: boolean) => {
+      const r = ++asked.current;
+      return sortRulesOf(at)
         .list()
-        .then(
-          (rules) => n === shown.current && writing.current === 0 && setLoad({ rules }),
-          (e: unknown) => n === shown.current && !quiet && setLoad(unavailable(e) ? "missing" : { problem: plainError(e) }),
-        );
+        .then((rules) => n === shown.current && r === asked.current && writing.current === 0 && setLoad({ rules }), failed(quiet));
+    };
     const again = () => {
       if (document.visibilityState === "visible" && writing.current === 0) void read(true);
     };
-    void read(false);
-    document.addEventListener("visibilitychange", again);
-    window.addEventListener("focus", again);
+    let listening = false;
+    const listen = () => {
+      if (n !== shown.current) return;
+      listening = true;
+      document.addEventListener("visibilitychange", again);
+      window.addEventListener("focus", again);
+      void read(false);
+    };
+    if (at.local) listen();
+    else
+      sortsMail(at, agentId).then((has) => {
+        if (has) listen();
+        else if (n === shown.current) setLoad("missing");
+      }, failed(false));
     return () => {
       shown.current++;
+      if (!listening) return;
       document.removeEventListener("visibilitychange", again);
       window.removeEventListener("focus", again);
     };
-  }, [hub, on]);
+  }, [key, agentId, on]);
 
   const toggle = useCallback(
     async (rule: SortRule, enabled: boolean) => {
+      const hub = current.current;
       if (!hub) return;
       const n = shown.current;
       const k = ruleKey(rule);
@@ -101,11 +126,12 @@ export function useMailSorting(hub: HubAccount | undefined, on: boolean): MailRu
         }
       }
     },
-    [hub],
+    [],
   );
 
   const remove = useCallback(
     async (rule: SortRule) => {
+      const hub = current.current;
       if (!hub) return;
       const n = shown.current;
       writing.current++;
@@ -116,7 +142,7 @@ export function useMailSorting(hub: HubAccount | undefined, on: boolean): MailRu
         if (n === shown.current) writing.current--;
       }
     },
-    [hub],
+    [],
   );
 
   return { load, problem, saving, toggle, remove };
