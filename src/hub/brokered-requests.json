@@ -311,6 +311,11 @@
   },
   {
     "kind": "http",
+    "method": "GET",
+    "path": "/api/agents/a%20b/mentions?name=Desk%20%26%20co"
+  },
+  {
+    "kind": "http",
     "method": "PUT",
     "path": "/api/agents/a/picture"
   },

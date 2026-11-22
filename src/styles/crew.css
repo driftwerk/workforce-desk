@@ -823,6 +823,23 @@ button.card-icon:hover:not(:disabled) {
 .think-row + .think-row {
   border-top: 1px solid var(--border);
 }
+.mention-row {
+  display: grid;
+  grid-template-columns: 140px minmax(0, 1fr);
+  gap: 14px;
+  padding: 13px 16px;
+}
+.mention-row + .mention-row {
+  border-top: 1px solid var(--border);
+}
+.mention-row > span:first-child {
+  font-size: 13px;
+  color: var(--muted);
+}
+.mention-line {
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
 .think-row > span:first-child,
 .think-row > label:first-child {
   font-size: 13px;

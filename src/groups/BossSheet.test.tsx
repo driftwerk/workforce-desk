@@ -93,6 +93,17 @@ const open = async () => {
 };
 
 describe("a group's Boss sheet", () => {
+
+  it("calls the main boss by its name once it is renamed", async () => {
+    useChat.setState({ roster: [agent("local", "desk", "Kat"), ...ROSTER.slice(1)] });
+    useOverview.setState({ manager: { agentId: "desk", level: "act", bosses: [{ agentId: "sarah", name: "Sarah", group: "acme", level: "act" }] } });
+    await open();
+    const main = await screen.findByRole("radio", { name: /Kat/ });
+    expect(main.closest("label")!.textContent).toContain("The main boss");
+    expect(screen.queryByRole("radio", { name: /^Desk/ })).toBeNull();
+    fireEvent.click(main);
+    expect(await screen.findByRole("button", { name: "Give it back to Kat" })).toBeTruthy();
+  });
   it("offers the agents of paired team hubs, and says plainly why a hub offers none", async () => {
     await open();
     expect(await screen.findByText("Allan")).toBeTruthy();
