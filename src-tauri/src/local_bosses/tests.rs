@@ -195,6 +195,7 @@ fn wanted(machines: &[(&str, Vec<WantedGrant>, &[&str])]) -> Wanted {
     Wanted {
         grant_version: 1,
         plans_known: true,
+        ungrouped_known: false,
         machines: machines
             .iter()
             .map(|(m, g, listed)| {
@@ -308,6 +309,35 @@ async fn the_main_overseer_is_asked_once_for_a_machine_s_ungrouped_sessions() {
     // Read, with nothing in Ungrouped there: it goes.
     sync(&f.bosses, &f.kept, &unread(true), &on(&[&devbox])).await;
     assert!(devbox.grant("ungrouped").is_none());
+}
+
+#[tokio::test]
+async fn a_machine_s_ungrouped_grant_goes_once_there_is_no_main_overseer() {
+    let f = files();
+    let devbox = Machine::new("devbox");
+    let mut g = acme(&[S1], "act");
+    g.group = "ungrouped".into();
+    g.agent = "desk".into();
+    g.grant["boss"] = json!("local:desk");
+    let w = wanted(&[("devbox", vec![g], &[S1])]);
+    say(&f, &w, true).await.expect("asked");
+    sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    assert!(devbox.grant("ungrouped").is_some());
+
+    // The main overseer is gone: devbox, with no other grant, isn't listed
+    // at all, and every machine's Ungrouped grant is said to be none.
+    let gone = Wanted {
+        ungrouped_known: true,
+        ..wanted(&[])
+    };
+    let s = sync(&f.bosses, &f.kept, &gone, &on(&[&devbox])).await;
+    assert_eq!(s.failed, vec![]);
+    assert!(devbox.grant("ungrouped").is_none(), "{:?}", devbox.writes());
+    assert!(
+        s.carried.get("devbox").is_none_or(BTreeMap::is_empty),
+        "{:?}",
+        s.carried
+    );
 }
 
 #[tokio::test]

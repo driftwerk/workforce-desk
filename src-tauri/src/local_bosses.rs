@@ -144,6 +144,10 @@ pub struct Wanted {
     /// one past its time, which goes.
     #[serde(default)]
     pub plans_known: bool,
+    /// Whether every machine's Ungrouped grant is said, listed or not: with
+    /// no main overseer, none holds one.
+    #[serde(default)]
+    pub ungrouped_known: bool,
     #[serde(default)]
     pub machines: BTreeMap<String, MachineWanted>,
 }
@@ -1014,7 +1018,7 @@ pub async fn sync<E: Engine>(
         };
         let now = Utc::now();
         let mw = wanted.machines.get(id);
-        let ungrouped_known = mw.is_some_and(|m| m.ungrouped_known);
+        let ungrouped_known = wanted.ungrouped_known || mw.is_some_and(|m| m.ungrouped_known);
         let (held, unknown): (BTreeMap<String, Value>, BTreeMap<String, Value>) =
             match held_on(engine).await {
                 Ok(h) => h.into_iter().partition(|(g, h)| {
