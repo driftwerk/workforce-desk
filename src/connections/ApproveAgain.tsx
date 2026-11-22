@@ -47,25 +47,10 @@ export function ApproveAgain({
     }
   };
 
-  if (started)
-    return (
-      <WaitingFor
-        service={c.name}
-        started={started}
-        onCancel={() => void cancel()}
-      />
-    );
+  if (started) return <WaitingFor service={c.name} started={started} onCancel={() => void cancel()} />;
 
   if (appOf(c) !== "ready") {
-    if (own || !agent)
-      return (
-        <AppForm
-          api={api}
-          connector={c}
-          onKept={onDone}
-          onCancel={agent ? () => setOwn(false) : undefined}
-        />
-      );
+    if (own || !agent) return <AppForm api={api} connector={c} onKept={onDone} onCancel={agent ? () => setOwn(false) : undefined} />;
     return (
       <>
         {problem && (
@@ -79,11 +64,7 @@ export function ApproveAgain({
               ? `Desk’s address changed, so ${x.name} can’t be approved again yet.`
               : `Your ${c.name} app isn’t kept, so ${x.name} can’t be approved again yet.`}
           </span>
-          <button
-            type="button"
-            className="link small"
-            onClick={() => setOwn(true)}
-          >
+          <button type="button" className="link small" onClick={() => setOwn(true)}>
             I have an app already
           </button>
           <button
@@ -92,10 +73,7 @@ export function ApproveAgain({
             onClick={() => {
               const asked = onAsk(agent);
               if (asked) useUi.getState().closeSettings();
-              else
-                setProblem(
-                  `${agent.name} isn’t on this computer to ask. Use an app you have already.`,
-                );
+              else setProblem(`${agent.name} isn’t on this computer to ask. Use an app you have already.`);
             }}
           >
             Ask {agent.name} to set it up
@@ -116,12 +94,7 @@ export function ApproveAgain({
         <span className="small">
           Approve Desk on {c.name} again to carry on with {x.name}.
         </span>
-        <button
-          type="button"
-          className="btn btn-sm btn-signal"
-          disabled={busy}
-          onClick={() => void begin()}
-        >
+        <button type="button" className="btn btn-sm btn-signal" disabled={busy} onClick={() => void begin()}>
           {busy ? "Starting…" : "Approve again"}
         </button>
       </div>

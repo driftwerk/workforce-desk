@@ -1,43 +1,31 @@
 import { useEffect, useRef, useState } from "react";
 import { useChat } from "../chat/store";
-import {
-  appWords,
-  type ConnectionsApi,
-  type Connector,
-  type Started,
-} from "../hub/connections";
+import { appWords, type ConnectionsApi, type Connector, type Started } from "../hub/connections";
 import { useOverview } from "../overview/store";
 import { openUrl } from "../platform";
 import "../styles/connections.css";
 import { useLive } from "../ui/useLive";
 
-export const SAVED_WHERE =
-  "Saved in Desk’s vault on this computer. Never in a file.";
+export const SAVED_WHERE = "Saved in Desk’s vault on this computer. Never in a file.";
 const CANCELLED = "Sign-in was cancelled. Nothing was saved.";
 const EXPIRED = "The sign-in timed out. Nothing was saved.";
 /** How often a sign-in in progress is asked about. */
 const FLOW_POLL_MS = 1500;
 
-export const message = (e: unknown): string =>
-  e instanceof Error ? e.message : String(e);
+export const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
 
 /** The agent on this computer that sets services up for the person: Desk's
  *  own, as the roster names it. */
 export const useSetUpAgent = (): { id: string; name: string } | null => {
   const id = useOverview((s) => s.manager?.agentId);
   const hub = useChat((s) => s.hubs.find((h) => h.local));
-  const name = useChat(
-    (s) => s.roster.find((a) => a.id === id && a.hubId === hub?.id)?.name,
-  );
+  const name = useChat((s) => s.roster.find((a) => a.id === id && a.hubId === hub?.id)?.name);
   return id ? { id, name: name ?? "Desk" } : null;
 };
 
 /** Waits on a sign-in the hub is finishing: asks where it is until it
  *  ends, then says so. */
-export const useFlow = (
-  api: ConnectionsApi,
-  onDone: (account?: string) => void | Promise<void>,
-) => {
+export const useFlow = (api: ConnectionsApi, onDone: (account?: string) => void | Promise<void>) => {
   const [started, setStarted] = useState<Started | null>(null);
   const [said, setSaid] = useState<string | null>(null);
   const live = useLive();
@@ -96,31 +84,17 @@ export const useFlow = (
 };
 
 /** A sign-in in the browser, being waited on. */
-export function WaitingFor({
-  service,
-  started,
-  onCancel,
-}: {
-  service: string;
-  started: Started;
-  onCancel: () => void;
-}) {
+export function WaitingFor({ service, started, onCancel }: { service: string; started: Started; onCancel: () => void }) {
   return (
     <div className="conn-flow" role="status">
-      <p className="small">
-        Finish signing in to {service} in your browser, then come back.
-      </p>
+      <p className="small">Finish signing in to {service} in your browser, then come back.</p>
       <div className="connect-actions">
         <span className="small faint">Waiting for {service}…</span>
         <button type="button" className="btn btn-ghost" onClick={onCancel}>
           Cancel
         </button>
         {started.url && (
-          <button
-            type="button"
-            className="btn"
-            onClick={() => openUrl(started.url!)}
-          >
+          <button type="button" className="btn" onClick={() => openUrl(started.url!)}>
             Open {service}
           </button>
         )}
@@ -162,11 +136,7 @@ export function AppForm({
   };
 
   return (
-    <form
-      className="connect-form"
-      onSubmit={save}
-      aria-label={`Your ${c.name} app`}
-    >
+    <form className="connect-form" onSubmit={save} aria-label={`Your ${c.name} app`}>
       <label className="field-stack">
         <span className="field-label">{words.id}</span>
         <input
@@ -200,11 +170,7 @@ export function AppForm({
             Cancel
           </button>
         )}
-        <button
-          type="submit"
-          className="btn btn-signal"
-          disabled={busy || !app.id.trim() || !app.secret.trim()}
-        >
+        <button type="submit" className="btn btn-signal" disabled={busy || !app.id.trim() || !app.secret.trim()}>
           {busy ? "Saving…" : "Save app"}
         </button>
       </div>

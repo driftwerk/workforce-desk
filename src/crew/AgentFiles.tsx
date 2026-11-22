@@ -28,22 +28,14 @@ import {
 } from "./files";
 
 /** When the file's newest version was saved, if the hub keeps versions. */
-const savedAt = (
-  hub: DeskHub,
-  id: string,
-  file: string,
-): Promise<string | null> =>
+const savedAt = (hub: DeskHub, id: string, file: string): Promise<string | null> =>
   hub.identityRevisions(id, file).then(
     (r) => r[0]?.created_at ?? null,
     () => null,
   );
 
 /** Saves one file's draft; what's typed meanwhile stays a draft. */
-export async function saveDraft(
-  hub: DeskHub,
-  agent: Agent,
-  file: string,
-): Promise<void> {
+export async function saveDraft(hub: DeskHub, agent: Agent, file: string): Promise<void> {
   const key = agentKey(agent);
   const d = draftOf(useDrafts.getState().drafts, key, file);
   if (!d || !isDirty(d)) return;
@@ -54,17 +46,14 @@ export async function saveDraft(
     throw new Error(plainError(e));
   }
   const now = draftOf(useDrafts.getState().drafts, key, file) ?? d;
-  useDrafts
-    .getState()
-    .put(key, file, saved(now, text, new Date().toISOString()));
+  useDrafts.getState().put(key, file, saved(now, text, new Date().toISOString()));
 }
 
 /** Discards every unsaved change to an agent's files. */
 export const discardDrafts = (agent: Agent): void => {
   const key = agentKey(agent);
   const { drafts, put } = useDrafts.getState();
-  for (const file of dirtyFiles(drafts, key))
-    put(key, file, discarded(draftOf(drafts, key, file)!));
+  for (const file of dirtyFiles(drafts, key)) put(key, file, discarded(draftOf(drafts, key, file)!));
 };
 
 /** The folder an agent keeps what it makes or downloads for you, where it
@@ -73,9 +62,7 @@ function DocumentsRow({ hub, agent }: { hub: DeskHub | null; agent: Agent }) {
   const here = useChat((s) => s.hubs.find((h) => h.local)?.id === agent.hubId);
   const inDistro = useHost((h) => h.host?.kind === "wsl");
   const platform = useHost((h) => h.platform);
-  const [docs, setDocs] = useState<{ path: string; exists: boolean } | null>(
-    null,
-  );
+  const [docs, setDocs] = useState<{ path: string; exists: boolean } | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
 
   useEffect(() => {
@@ -100,33 +87,20 @@ function DocumentsRow({ hub, agent }: { hub: DeskHub | null; agent: Agent }) {
   return (
     <div className="docs-row" role="group" aria-label="Documents">
       <span className="file-name">Documents</span>
-      <span className="docs-row-about">
-        {agent.name}’s documents — invoices, statements and files it makes or
-        downloads for you.
-      </span>
+      <span className="docs-row-about">{agent.name}’s documents — invoices, statements and files it makes or downloads for you.</span>
       <span className="docs-row-path">{path}</span>
       {problem && <span className="small state-blocked">{problem}</span>}
       {exists ? (
         <div className="docs-row-actions">
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={go(openHubPath)}
-          >
+          <button type="button" className="btn btn-sm" onClick={go(openHubPath)}>
             Open
           </button>
-          <button
-            type="button"
-            className="btn btn-sm"
-            onClick={go(revealHubPath)}
-          >
+          <button type="button" className="btn btn-sm" onClick={go(revealHubPath)}>
             {revealWords(platform)}
           </button>
         </div>
       ) : (
-        <span className="docs-row-pending">
-          Made when {agent.name} next starts.
-        </span>
+        <span className="docs-row-pending">Made when {agent.name} next starts.</span>
       )}
     </div>
   );
@@ -141,9 +115,7 @@ export function AgentFiles({ agent }: { agent: Agent }) {
   const put = useDrafts((s) => s.put);
   // The file open, per agent (and across launches).
   const chosen = useUi((u) => u.agentFiles[key]);
-  const file = AGENT_FILES.some((f) => f.name === chosen)
-    ? chosen!
-    : AGENT_FILES[0].name;
+  const file = AGENT_FILES.some((f) => f.name === chosen) ? chosen! : AGENT_FILES[0].name;
   const setAgentFile = useUi((u) => u.setAgentFile);
   const setFile = (f: string) => setAgentFile(key, f);
   const [problem, setProblem] = useState<string | null>(null);
@@ -158,17 +130,12 @@ export function AgentFiles({ agent }: { agent: Agent }) {
     if (!hub) return;
     for (const f of AGENT_FILES) {
       if (draftOf(useDrafts.getState().drafts, key, f.name)) continue;
-      Promise.all([
-        hub.identityFile(agent.id, f.name),
-        savedAt(hub, agent.id, f.name),
-      ]).then(
+      Promise.all([hub.identityFile(agent.id, f.name), savedAt(hub, agent.id, f.name)]).then(
         ([text, at]) => {
           // Changes kept from before (a crash, a quit) go back over it.
-          if (!draftOf(useDrafts.getState().drafts, key, f.name))
-            put(key, f.name, withKeptChanges(opened(text, at), key, f.name));
+          if (!draftOf(useDrafts.getState().drafts, key, f.name)) put(key, f.name, withKeptChanges(opened(text, at), key, f.name));
         },
-        (e: unknown) =>
-          setProblem(`Desk couldn’t open ${f.name}. ${plainError(e)}`),
+        (e: unknown) => setProblem(`Desk couldn’t open ${f.name}. ${plainError(e)}`),
       );
     }
   }, [hub, agent.id, key, put]);
@@ -209,57 +176,31 @@ export function AgentFiles({ agent }: { agent: Agent }) {
             >
               <span className="file-name">
                 {f.name}
-                {isDirty(d) && (
-                  <span
-                    className="unsaved-dot"
-                    role="img"
-                    aria-label="Unsaved changes"
-                  />
-                )}
+                {isDirty(d) && <span className="unsaved-dot" role="img" aria-label="Unsaved changes" />}
               </span>
               <span>{f.about}</span>
             </button>
           );
         })}
         <DocumentsRow hub={hub} agent={agent} />
-        <p className="files-note">
-          Every save is kept. Open History to see or restore an earlier version.
-        </p>
+        <p className="files-note">Every save is kept. Open History to see or restore an earlier version.</p>
       </nav>
       <section className="files-editor" aria-label={file}>
         <div className="files-bar">
           <span className="files-bar-title">
             <b>{file}</b>
-            <span
-              className={`file-status file-status-${status.tone === "quiet" ? "" : status.tone}`}
-              role="status"
-            >
+            <span className={`file-status file-status-${status.tone === "quiet" ? "" : status.tone}`} role="status">
               {saving ? "Saving…" : status.text}
             </span>
             {problem && <span className="small state-blocked">{problem}</span>}
           </span>
-          <button
-            type="button"
-            className="btn btn-ghost"
-            disabled={!draft}
-            onClick={() => setHistory(true)}
-          >
+          <button type="button" className="btn btn-ghost" disabled={!draft} onClick={() => setHistory(true)}>
             History
           </button>
-          <button
-            type="button"
-            className="btn"
-            disabled={!dirty}
-            onClick={() => draft && put(key, file, discarded(draft))}
-          >
+          <button type="button" className="btn" disabled={!dirty} onClick={() => draft && put(key, file, discarded(draft))}>
             Discard
           </button>
-          <button
-            type="button"
-            className="btn btn-signal"
-            disabled={!dirty || saving}
-            onClick={() => void save()}
-          >
+          <button type="button" className="btn btn-signal" disabled={!dirty || saving} onClick={() => void save()}>
             Save
           </button>
         </div>
@@ -270,9 +211,7 @@ export function AgentFiles({ agent }: { agent: Agent }) {
           value={draft?.text ?? ""}
           disabled={!draft}
           placeholder={draft ? `${file} is empty.` : "Opening…"}
-          onChange={(e) =>
-            draft && put(key, file, edited(draft, e.target.value))
-          }
+          onChange={(e) => draft && put(key, file, edited(draft, e.target.value))}
         />
         <div className="files-foot">
           <span>Markdown · takes effect from {agent.name}’s next message</span>
@@ -300,9 +239,7 @@ const how = (r: Revision, name: string): string => {
     case "web":
       return "Saved in Desk";
     case "restore":
-      return r.restored_from
-        ? `Restored version ${r.restored_from}`
-        : "Restored an earlier version";
+      return r.restored_from ? `Restored version ${r.restored_from}` : "Restored an earlier version";
     case "agent_tool":
       return `${name} changed it`;
     case "seed":
@@ -367,10 +304,7 @@ function HistoryDialog({
     setProblem(null);
     try {
       await hub.restoreIdentityRevision(agent.id, file, selected);
-      const [text, list] = await Promise.all([
-        hub.identityFile(agent.id, file),
-        hub.identityRevisions(agent.id, file),
-      ]);
+      const [text, list] = await Promise.all([hub.identityFile(agent.id, file), hub.identityRevisions(agent.id, file)]);
       onRestored(text, list[0]?.created_at ?? new Date().toISOString());
       onClose();
     } catch (e) {
@@ -389,10 +323,7 @@ function HistoryDialog({
             <h1 id={id} className="display-lg">
               {file} history
             </h1>
-            <p>
-              Every saved version of {agent.name}’s file, newest first.
-              Restoring one keeps the rest.
-            </p>
+            <p>Every saved version of {agent.name}’s file, newest first. Restoring one keeps the rest.</p>
           </span>
           <CloseButton onClose={onClose} />
         </header>
@@ -412,11 +343,7 @@ function HistoryDialog({
                   onClick={() => setSelected(r.rev)}
                 >
                   <span className="provider-text">
-                    <b>
-                      {r.rev === newest
-                        ? "Current version"
-                        : `Version ${r.rev}`}
-                    </b>
+                    <b>{r.rev === newest ? "Current version" : `Version ${r.rev}`}</b>
                     <span>
                       {how(r, agent.name)} · {ago(r.created_at)}
                     </span>
@@ -425,30 +352,18 @@ function HistoryDialog({
               ))}
             </nav>
             <div className="history-preview">
-              <pre aria-label="This version">
-                {selected !== null ? (content[selected] ?? "Opening…") : ""}
-              </pre>
+              <pre aria-label="This version">{selected !== null ? (content[selected] ?? "Opening…") : ""}</pre>
             </div>
           </>
         ) : (
           <div className="brain-pane">
-            <p className="pane-empty">
-              {problem ??
-                (revisions
-                  ? `No saved versions of ${file} yet.`
-                  : "Opening the history…")}
-            </p>
+            <p className="pane-empty">{problem ?? (revisions ? `No saved versions of ${file} yet.` : "Opening the history…")}</p>
           </div>
         )}
       </div>
       <footer className="dialog-foot">
-        <span
-          className={`dialog-foot-note ${problem || dirty ? "state-blocked" : ""}`}
-        >
-          {revisions &&
-            revisions.length > 0 &&
-            (problem ??
-              (dirty ? "Restoring replaces your unsaved changes." : ""))}
+        <span className={`dialog-foot-note ${problem || dirty ? "state-blocked" : ""}`}>
+          {revisions && revisions.length > 0 && (problem ?? (dirty ? "Restoring replaces your unsaved changes." : ""))}
         </span>
         <button type="button" className="btn btn-ghost" onClick={onClose}>
           Close
@@ -456,19 +371,10 @@ function HistoryDialog({
         <button
           type="button"
           className="btn btn-signal"
-          disabled={
-            busy ||
-            selected === null ||
-            selected === newest ||
-            !revisions?.length
-          }
+          disabled={busy || selected === null || selected === newest || !revisions?.length}
           onClick={() => void restore()}
         >
-          {busy
-            ? "Restoring…"
-            : selected === newest
-              ? "This is the current version"
-              : "Restore this version"}
+          {busy ? "Restoring…" : selected === newest ? "This is the current version" : "Restore this version"}
         </button>
       </footer>
     </Dialog>

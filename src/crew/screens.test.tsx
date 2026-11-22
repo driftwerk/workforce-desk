@@ -1,12 +1,4 @@
-import {
-  act,
-  cleanup,
-  fireEvent,
-  render,
-  screen,
-  waitFor,
-  within,
-} from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent } from "../chat/types";
 import { HubError, type DeskHub } from "../hub/client";
@@ -23,18 +15,13 @@ import { useFloor } from "../floor/store";
 
 // The roster's read of a hub's agents: the agent is built again after a
 // new name (left out once), then serves.
-const listed = vi.hoisted(() => ({
-  ids: vi.fn(async (): Promise<string[]> => ["ledger"]),
-}));
+const listed = vi.hoisted(() => ({ ids: vi.fn(async (): Promise<string[]> => ["ledger"]) }));
 vi.mock("../chat/store", async (original) => ({
   ...(await original<typeof import("../chat/store")>()),
   agentIdsOn: () => listed.ids(),
 }));
 
-const folder = vi.hoisted(() => ({
-  open: vi.fn(() => Promise.resolve()),
-  reveal: vi.fn(() => Promise.resolve()),
-}));
+const folder = vi.hoisted(() => ({ open: vi.fn(() => Promise.resolve()), reveal: vi.fn(() => Promise.resolve()) }));
 vi.mock("../platform", async (original) => ({
   ...(await original<typeof import("../platform")>()),
   openHubPath: folder.open,
@@ -52,19 +39,10 @@ const plan = (id: string, name: string, connected: boolean): Provider => ({
   connected,
   connect:
     id === "anthropic"
-      ? {
-          kind: "fields",
-          hint: "Paste your key.",
-          fields: [{ name: "api_key", label: "API key", secret: true }],
-        }
+      ? { kind: "fields", hint: "Paste your key.", fields: [{ name: "api_key", label: "API key", secret: true }] }
       : { kind: "login", fields: [] },
   models: [
-    {
-      id: `${id}-big`,
-      name: "Big",
-      description: "Most capable",
-      default: false,
-    },
+    { id: `${id}-big`, name: "Big", description: "Most capable", default: false },
     { id: `${id}-mid`, name: "Mid", description: "Everyday", default: true },
   ],
   efforts: ["low", "medium", "high"],
@@ -75,28 +53,19 @@ const fakeHub = (over: Partial<DeskHub> = {}): DeskHub =>
   ({
     identityFile: vi.fn(() => Promise.resolve("# Soul\n")),
     saveIdentityFile: vi.fn(() => Promise.resolve()),
-    identityRevisions: vi.fn(() =>
-      Promise.reject(new HubError(503, "revision history requires Postgres")),
-    ),
-    connectProvider: vi.fn((id: string) =>
-      Promise.resolve({ ...plan(id, "Anthropic API", true) }),
-    ),
+    identityRevisions: vi.fn(() => Promise.reject(new HubError(503, "revision history requires Postgres"))),
+    connectProvider: vi.fn((id: string) => Promise.resolve({ ...plan(id, "Anthropic API", true) })),
     providers: vi.fn(() => Promise.resolve(useProviders.getState().providers)),
     memorySummary: vi.fn(() => Promise.reject(new HubError(404, "Not Found"))),
     agentHeartbeat: vi.fn(() => Promise.reject(new HubError(404, "Not Found"))),
     oldNameMentions: vi.fn(() => Promise.resolve([])),
-    manager: vi.fn(() =>
-      Promise.resolve({ agentId: "desk", level: "act", bosses: [] }),
-    ),
+    manager: vi.fn(() => Promise.resolve({ agentId: "desk", level: "act", bosses: [] })),
     ...over,
   }) as unknown as DeskHub;
 
 beforeEach(() => {
   useProviders.setState({
-    providers: [
-      plan("claude-code", "Claude plan", true),
-      plan("anthropic", "Anthropic API", false),
-    ],
+    providers: [plan("claude-code", "Claude plan", true), plan("anthropic", "Anthropic API", false)],
     loaded: true,
     loading: false,
     problem: null,
@@ -116,65 +85,31 @@ describe("How they think", () => {
       <BrainDialog
         title="How Ledger thinks"
         who="Ledger"
-        initial={{
-          provider: "claude-code",
-          model: "claude-code-mid",
-          effort: "medium",
-        }}
+        initial={{ provider: "claude-code", model: "claude-code-mid", effort: "medium" }}
         onUse={onUse}
         onClose={onClose}
       />,
     );
-    expect(
-      screen.getByText(
-        "Ledger will use Mid on your Claude plan · Medium effort",
-      ),
-    ).toBeTruthy();
-    expect(
-      screen.getByRole("radio", { name: /Mid/ }).getAttribute("aria-checked"),
-    ).toBe("true");
+    expect(screen.getByText("Ledger will use Mid on your Claude plan · Medium effort")).toBeTruthy();
+    expect(screen.getByRole("radio", { name: /Mid/ }).getAttribute("aria-checked")).toBe("true");
 
     fireEvent.click(screen.getByRole("radio", { name: "High" }));
     fireEvent.click(screen.getByRole("radio", { name: /Big/ }));
-    expect(
-      screen.getByText("Ledger will use Big on your Claude plan · High effort"),
-    ).toBeTruthy();
+    expect(screen.getByText("Ledger will use Big on your Claude plan · High effort")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /Anthropic API/ }));
-    expect(
-      screen.getByRole("heading", { name: "Connect Anthropic API" }),
-    ).toBeTruthy();
-    const use = screen.getByRole("button", {
-      name: "Use this",
-    }) as HTMLButtonElement;
+    expect(screen.getByRole("heading", { name: "Connect Anthropic API" })).toBeTruthy();
+    const use = screen.getByRole("button", { name: "Use this" }) as HTMLButtonElement;
     expect(use.disabled).toBe(true);
-    fireEvent.change(screen.getByLabelText("API key"), {
-      target: { value: "sk-ant-test" },
-    });
+    fireEvent.change(screen.getByLabelText("API key"), { target: { value: "sk-ant-test" } });
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
-    await waitFor(() =>
-      expect(
-        screen.getByText(
-          "Ledger will use Mid on your Anthropic API · Medium effort",
-        ),
-      ).toBeTruthy(),
-    );
-    expect(hub.connectProvider).toHaveBeenCalledWith("anthropic", {
-      api_key: "sk-ant-test",
-    });
+    await waitFor(() => expect(screen.getByText("Ledger will use Mid on your Anthropic API · Medium effort")).toBeTruthy());
+    expect(hub.connectProvider).toHaveBeenCalledWith("anthropic", { api_key: "sk-ant-test" });
 
     fireEvent.click(screen.getByRole("button", { name: /Claude plan/ }));
-    expect(
-      screen.getByText("Ledger will use Big on your Claude plan · High effort"),
-    ).toBeTruthy();
-    await act(async () =>
-      fireEvent.click(screen.getByRole("button", { name: "Use this" })),
-    );
-    expect(onUse).toHaveBeenCalledWith({
-      provider: "claude-code",
-      model: "claude-code-big",
-      effort: "high",
-    });
+    expect(screen.getByText("Ledger will use Big on your Claude plan · High effort")).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Use this" })));
+    expect(onUse).toHaveBeenCalledWith({ provider: "claude-code", model: "claude-code-big", effort: "high" });
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -186,56 +121,26 @@ describe("How they think", () => {
         {
           ...claude,
           models: [
-            {
-              id: "deep",
-              name: "Deep",
-              description: "",
-              default: true,
-              efforts: ["high", "max"],
-              defaultEffort: "high",
-            },
-            {
-              id: "quick",
-              name: "Quick",
-              description: "",
-              default: false,
-              efforts: [],
-            },
+            { id: "deep", name: "Deep", description: "", default: true, efforts: ["high", "max"], defaultEffort: "high" },
+            { id: "quick", name: "Quick", description: "", default: false, efforts: [] },
           ],
         },
       ],
     });
     const onUse = vi.fn();
     render(
-      <BrainDialog
-        title="How Ledger thinks"
-        who="Ledger"
-        initial={{ provider: "claude-code", model: "deep", effort: "max" }}
-        onUse={onUse}
-        onClose={() => {}}
-      />,
+      <BrainDialog title="How Ledger thinks" who="Ledger" initial={{ provider: "claude-code", model: "deep", effort: "max" }} onUse={onUse} onClose={() => {}} />,
     );
-    expect(
-      screen.getByRole("radio", { name: "Max" }).getAttribute("aria-checked"),
-    ).toBe("true");
+    expect(screen.getByRole("radio", { name: "Max" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.queryByRole("radio", { name: "Low" })).toBeNull();
     fireEvent.click(screen.getByRole("radio", { name: /Quick/ }));
     expect(screen.queryByRole("radiogroup", { name: "Effort" })).toBeNull();
-    expect(
-      screen.getByText("Ledger will use Quick on your Claude plan"),
-    ).toBeTruthy();
+    expect(screen.getByText("Ledger will use Quick on your Claude plan")).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: /Deep/ }));
-    expect(
-      screen.getByRole("radio", { name: "High" }).getAttribute("aria-checked"),
-    ).toBe("true");
+    expect(screen.getByRole("radio", { name: "High" }).getAttribute("aria-checked")).toBe("true");
     fireEvent.click(screen.getByRole("radio", { name: /Quick/ }));
-    await act(async () =>
-      fireEvent.click(screen.getByRole("button", { name: "Use this" })),
-    );
-    expect(onUse).toHaveBeenCalledWith({
-      provider: "claude-code",
-      model: "quick",
-    });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Use this" })));
+    expect(onUse).toHaveBeenCalledWith({ provider: "claude-code", model: "quick" });
   });
 
   it("offers Fast only on a model whose plan has a faster tier, worded as the plan words it", async () => {
@@ -246,66 +151,28 @@ describe("How they think", () => {
         {
           ...chatgpt,
           models: [
-            {
-              id: "sol",
-              name: "Sol",
-              description: "",
-              default: true,
-              fast: "2x speed, increased usage",
-            },
-            {
-              id: "nova",
-              name: "Nova",
-              description: "Released since",
-              default: false,
-              fast: "1.5x speed",
-            },
+            { id: "sol", name: "Sol", description: "", default: true, fast: "2x speed, increased usage" },
+            { id: "nova", name: "Nova", description: "Released since", default: false, fast: "1.5x speed" },
             { id: "luna", name: "Luna", description: "", default: false },
           ],
         },
       ],
     });
     const onUse = vi.fn();
-    render(
-      <BrainDialog
-        title="How Ledger thinks"
-        who="Ledger"
-        initial={{ provider: "chatgpt", model: "sol" }}
-        onUse={onUse}
-        onClose={() => {}}
-      />,
-    );
-    expect(
-      screen
-        .getByRole("radio", { name: "Standard" })
-        .getAttribute("aria-checked"),
-    ).toBe("true");
+    render(<BrainDialog title="How Ledger thinks" who="Ledger" initial={{ provider: "chatgpt", model: "sol" }} onUse={onUse} onClose={() => {}} />);
+    expect(screen.getByRole("radio", { name: "Standard" }).getAttribute("aria-checked")).toBe("true");
     fireEvent.click(screen.getByRole("radio", { name: "Fast" }));
     expect(
-      screen.getByText(
-        "Asks for Fast (2x speed, increased usage); the plan may not give it, and where it does, it uses up your plan’s limits sooner.",
-      ),
+      screen.getByText("Asks for Fast (2x speed, increased usage); the plan may not give it, and where it does, it uses up your plan’s limits sooner."),
     ).toBeTruthy();
-    expect(
-      screen.getByText(
-        "Ledger will use Sol on your ChatGPT plan · Medium effort · Fast",
-      ),
-    ).toBeTruthy();
+    expect(screen.getByText("Ledger will use Sol on your ChatGPT plan · Medium effort · Fast")).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: /Nova/ }));
-    expect(
-      screen.getByText("Asks for Fast (1.5x speed); the plan may not give it."),
-    ).toBeTruthy();
+    expect(screen.getByText("Asks for Fast (1.5x speed); the plan may not give it.")).toBeTruthy();
     fireEvent.click(screen.getByRole("radio", { name: /Luna/ }));
     expect(screen.queryByRole("radiogroup", { name: "Speed" })).toBeNull();
     fireEvent.click(screen.getByRole("radio", { name: /Nova/ }));
-    await act(async () =>
-      fireEvent.click(screen.getByRole("button", { name: "Use this" })),
-    );
-    expect(onUse).toHaveBeenCalledWith({
-      provider: "chatgpt",
-      model: "nova",
-      effort: "medium",
-    });
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Use this" })));
+    expect(onUse).toHaveBeenCalledWith({ provider: "chatgpt", model: "nova", effort: "medium" });
   });
 
   it("closes on Escape without the key reaching anything underneath", () => {
@@ -313,15 +180,7 @@ describe("How they think", () => {
     const onClose = vi.fn();
     const below = vi.fn();
     window.addEventListener("keydown", below);
-    render(
-      <BrainDialog
-        title="t"
-        who="Ledger"
-        initial={{ provider: "claude-code", model: "claude-code-mid" }}
-        onUse={vi.fn()}
-        onClose={onClose}
-      />,
-    );
+    render(<BrainDialog title="t" who="Ledger" initial={{ provider: "claude-code", model: "claude-code-mid" }} onUse={vi.fn()} onClose={onClose} />);
     fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
     window.removeEventListener("keydown", below);
     expect(onClose).toHaveBeenCalledOnce();
@@ -330,48 +189,28 @@ describe("How they think", () => {
 });
 
 describe("Files", () => {
-  const agent: Agent = {
-    hubId: "local",
-    id: "ledger",
-    name: "Ledger",
-    model: null,
-    provider: null,
-    isDefault: false,
-  };
+  const agent: Agent = { hubId: "local", id: "ledger", name: "Ledger", model: null, provider: null, isDefault: false };
 
   it("marks changes unsaved, saves with ⌘S, and discards back to the saved text", async () => {
     const hub = fakeHub();
     useDesk.setState({ hub });
     render(<AgentFiles agent={agent} />);
-    const editor = (await screen.findByDisplayValue(
-      "# Soul",
-    )) as HTMLTextAreaElement;
+    const editor = (await screen.findByDisplayValue("# Soul")) as HTMLTextAreaElement;
     expect(screen.getByRole("status").textContent).toBe("Saved");
 
-    fireEvent.change(editor, {
-      target: { value: "# Soul\n\nWatch the bill.\n" },
-    });
+    fireEvent.change(editor, { target: { value: "# Soul\n\nWatch the bill.\n" } });
     expect(screen.getByRole("status").textContent).toBe("Unsaved changes");
     expect(screen.getAllByLabelText("Unsaved changes")).toHaveLength(1);
 
-    await act(async () =>
-      fireEvent.keyDown(editor, { key: "s", code: "KeyS", metaKey: true }),
-    );
-    expect(hub.saveIdentityFile).toHaveBeenCalledWith(
-      "ledger",
-      "SOUL.md",
-      "# Soul\n\nWatch the bill.\n",
-    );
+    await act(async () => fireEvent.keyDown(editor, { key: "s", code: "KeyS", metaKey: true }));
+    expect(hub.saveIdentityFile).toHaveBeenCalledWith("ledger", "SOUL.md", "# Soul\n\nWatch the bill.\n");
     expect(screen.getByRole("status").textContent).toBe("Saved");
     expect(screen.queryAllByLabelText("Unsaved changes")).toHaveLength(0);
 
     fireEvent.change(editor, { target: { value: "scrap this" } });
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(editor.value).toBe("# Soul\n\nWatch the bill.\n");
-    expect(
-      (screen.getByRole("button", { name: "Save" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("saves with the configured keys, and says which", async () => {
@@ -379,133 +218,67 @@ describe("Files", () => {
     useDesk.setState({ hub });
     useSettings.getState().setShortcut("saveFile", "Control+Alt+S");
     render(<AgentFiles agent={agent} />);
-    const editor = (await screen.findByDisplayValue(
-      "# Soul",
-    )) as HTMLTextAreaElement;
+    const editor = (await screen.findByDisplayValue("# Soul")) as HTMLTextAreaElement;
     expect(screen.getByText("⌃⌥S")).toBeTruthy();
     fireEvent.change(editor, { target: { value: "# Soul\n\nNew.\n" } });
-    await act(async () =>
-      fireEvent.keyDown(editor, { key: "s", code: "KeyS", metaKey: true }),
-    );
+    await act(async () => fireEvent.keyDown(editor, { key: "s", code: "KeyS", metaKey: true }));
     expect(hub.saveIdentityFile).not.toHaveBeenCalled();
-    await act(async () =>
-      fireEvent.keyDown(editor, {
-        key: "ß",
-        code: "KeyS",
-        ctrlKey: true,
-        altKey: true,
-      }),
-    );
-    expect(hub.saveIdentityFile).toHaveBeenCalledWith(
-      "ledger",
-      "SOUL.md",
-      "# Soul\n\nNew.\n",
-    );
+    await act(async () => fireEvent.keyDown(editor, { key: "ß", code: "KeyS", ctrlKey: true, altKey: true }));
+    expect(hub.saveIdentityFile).toHaveBeenCalledWith("ledger", "SOUL.md", "# Soul\n\nNew.\n");
     useSettings.getState().setShortcut("saveFile", "Super+S");
   });
 
   it("keeps a file's unsaved text while another is open", async () => {
     useDesk.setState({ hub: fakeHub() });
     render(<AgentFiles agent={agent} />);
-    const editor = (await screen.findByDisplayValue(
-      "# Soul",
-    )) as HTMLTextAreaElement;
+    const editor = (await screen.findByDisplayValue("# Soul")) as HTMLTextAreaElement;
     fireEvent.change(editor, { target: { value: "draft" } });
     fireEvent.click(screen.getByRole("button", { name: /AGENTS\.md/ }));
     expect(screen.getByRole("status").textContent).toBe("Saved");
     fireEvent.click(screen.getByRole("button", { name: /SOUL\.md/ }));
-    expect(
-      (
-        screen.getByLabelText("SOUL.md", {
-          selector: "textarea",
-        }) as HTMLTextAreaElement
-      ).value,
-    ).toBe("draft");
+    expect((screen.getByLabelText("SOUL.md", { selector: "textarea" }) as HTMLTextAreaElement).value).toBe("draft");
   });
 
   describe("Documents", () => {
-    const PATH =
-      "/Users/k/Library/Application Support/Desk/hub/data/agents/ledger/documents";
-    const local = {
-      id: "local",
-      label: "This computer",
-      url: "http://127.0.0.1:1",
-      local: true,
-      revision: "t",
-    };
+    const PATH = "/Users/k/Library/Application Support/Desk/hub/data/agents/ledger/documents";
+    const local = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" };
     const remote = { ...local, id: "dw", local: false };
 
     it("shows the folder with Open and Show in Finder, and says if the computer refuses", async () => {
       useChat.setState({ hubs: [local] });
-      useDesk.setState({
-        hub: fakeHub({
-          agentDocuments: vi.fn(() =>
-            Promise.resolve({ path: PATH, exists: true }),
-          ),
-        } as Partial<DeskHub>),
-      });
+      useDesk.setState({ hub: fakeHub({ agentDocuments: vi.fn(() => Promise.resolve({ path: PATH, exists: true })) } as Partial<DeskHub>) });
       render(<AgentFiles agent={agent} />);
       const row = await screen.findByRole("group", { name: "Documents" });
-      expect(
-        within(row).getByText(
-          "Ledger’s documents — invoices, statements and files it makes or downloads for you.",
-        ),
-      ).toBeTruthy();
+      expect(within(row).getByText("Ledger’s documents — invoices, statements and files it makes or downloads for you.")).toBeTruthy();
       expect(within(row).getByText(PATH)).toBeTruthy();
       fireEvent.click(within(row).getByRole("button", { name: "Open" }));
       expect(folder.open).toHaveBeenCalledWith(PATH);
-      folder.reveal.mockRejectedValueOnce(
-        new Error("that folder isn't there on this computer"),
-      );
-      await act(async () =>
-        fireEvent.click(
-          within(row).getByRole("button", { name: "Show in Finder" }),
-        ),
-      );
+      folder.reveal.mockRejectedValueOnce(new Error("that folder isn't there on this computer"));
+      await act(async () => fireEvent.click(within(row).getByRole("button", { name: "Show in Finder" })));
       expect(folder.reveal).toHaveBeenCalledWith(PATH);
-      expect(
-        within(row).getByText(/isn't there on this computer/),
-      ).toBeTruthy();
+      expect(within(row).getByText(/isn't there on this computer/)).toBeTruthy();
     });
 
     it("keeps the row and path but offers no buttons while the folder isn't made yet", async () => {
       useChat.setState({ hubs: [local] });
-      useDesk.setState({
-        hub: fakeHub({
-          agentDocuments: vi.fn(() =>
-            Promise.resolve({ path: PATH, exists: false }),
-          ),
-        } as Partial<DeskHub>),
-      });
+      useDesk.setState({ hub: fakeHub({ agentDocuments: vi.fn(() => Promise.resolve({ path: PATH, exists: false })) } as Partial<DeskHub>) });
       render(<AgentFiles agent={agent} />);
       const row = await screen.findByRole("group", { name: "Documents" });
       expect(within(row).getByText(PATH)).toBeTruthy();
-      expect(
-        within(row).getByText("Made when Ledger next starts."),
-      ).toBeTruthy();
+      expect(within(row).getByText("Made when Ledger next starts.")).toBeTruthy();
       expect(within(row).queryByRole("button")).toBeNull();
     });
 
     it("is left out for a hub that doesn't say, and for an agent on another computer", async () => {
       useChat.setState({ hubs: [local] });
-      useDesk.setState({
-        hub: fakeHub({
-          agentDocuments: vi.fn(() =>
-            Promise.reject(new HubError(404, "Not Found")),
-          ),
-        } as Partial<DeskHub>),
-      });
+      useDesk.setState({ hub: fakeHub({ agentDocuments: vi.fn(() => Promise.reject(new HubError(404, "Not Found"))) } as Partial<DeskHub>) });
       render(<AgentFiles agent={agent} />);
       await screen.findByDisplayValue("# Soul");
       expect(screen.queryByRole("group", { name: "Documents" })).toBeNull();
       cleanup();
-      const agentDocuments = vi.fn(() =>
-        Promise.resolve({ path: PATH, exists: true }),
-      );
+      const agentDocuments = vi.fn(() => Promise.resolve({ path: PATH, exists: true }));
       useChat.setState({ hubs: [remote] });
-      useDesk.setState({
-        hub: fakeHub({ agentDocuments } as Partial<DeskHub>),
-      });
+      useDesk.setState({ hub: fakeHub({ agentDocuments } as Partial<DeskHub>) });
       render(<AgentFiles agent={agent} />);
       await screen.findByDisplayValue("# Soul");
       expect(screen.queryByRole("group", { name: "Documents" })).toBeNull();
@@ -518,101 +291,43 @@ describe("Files", () => {
     render(<AgentFiles agent={agent} />);
     await screen.findByDisplayValue("# Soul");
     fireEvent.click(screen.getByRole("button", { name: "History" }));
-    expect(
-      await screen.findByText(
-        /Earlier versions aren’t kept on this computer yet/,
-      ),
-    ).toBeTruthy();
+    expect(await screen.findByText(/Earlier versions aren’t kept on this computer yet/)).toBeTruthy();
   });
 });
 
 describe("Renaming in Settings", () => {
-  const agent: Agent = {
-    hubId: "local",
-    id: "ledger",
-    name: "Ledger",
-    model: null,
-    provider: null,
-    isDefault: false,
-  };
-  const local = {
-    id: "local",
-    label: "This computer",
-    url: "http://127.0.0.1:1",
-    local: true,
-    revision: "t",
-  };
+  const agent: Agent = { hubId: "local", id: "ledger", name: "Ledger", model: null, provider: null, isDefault: false };
+  const local = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" };
 
   const renderSettings = (hub: DeskHub) => {
-    listed.ids
-      .mockReset()
-      .mockResolvedValueOnce([])
-      .mockResolvedValue(["ledger"]);
+    listed.ids.mockReset().mockResolvedValueOnce([]).mockResolvedValue(["ledger"]);
     useDesk.setState({ hub });
-    useChat.setState({
-      hubs: [local],
-      roster: [agent],
-      refreshRoster: vi.fn(() => Promise.resolve()),
-    });
-    const view = () =>
-      render(
-        <AgentSettings
-          agent={useChat.getState().roster[0]!}
-          hub={local}
-          onOpenFiles={() => {}}
-        />,
-      );
+    useChat.setState({ hubs: [local], roster: [agent], refreshRoster: vi.fn(() => Promise.resolve()) });
+    const view = () => render(<AgentSettings agent={useChat.getState().roster[0]!} hub={local} onOpenFiles={() => {}} />);
     return view();
   };
 
   it("renames at once everywhere the roster shows it", async () => {
     let finish: () => void = () => {};
-    const hub = fakeHub({
-      renameAgent: vi.fn(() => new Promise<void>((r) => (finish = r))),
-    } as Partial<DeskHub>);
+    const hub = fakeHub({ renameAgent: vi.fn(() => new Promise<void>((r) => (finish = r))) } as Partial<DeskHub>);
     renderSettings(hub);
-    const name = (await screen.findByDisplayValue(
-      "Ledger",
-    )) as HTMLInputElement;
+    const name = (await screen.findByDisplayValue("Ledger")) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "Penny" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
     expect(useChat.getState().roster[0]!.name).toBe("Penny");
     await waitFor(() => expect(hub.renameAgent).toHaveBeenCalled());
     await act(async () => finish());
-    await waitFor(() =>
-      expect(screen.getByText("Saved into their files.")).toBeTruthy(),
-    );
-    expect(vi.mocked(hub.renameAgent).mock.calls[0]?.slice(0, 2)).toEqual([
-      "ledger",
-      "Penny",
-    ]);
+    await waitFor(() => expect(screen.getByText("Saved into their files.")).toBeTruthy());
+    expect(vi.mocked(hub.renameAgent).mock.calls[0]?.slice(0, 2)).toEqual(["ledger", "Penny"]);
     expect(useChat.getState().roster[0]!.name).toBe("Penny");
   });
 
   it("renames the boss, refreshes who oversees what, says what still says its old name, and takes it back", async () => {
-    const boss: Agent = {
-      hubId: "local",
-      id: "desk",
-      name: "Desk",
-      model: null,
-      provider: null,
-      isDefault: true,
-    };
-    const scout: Agent = {
-      hubId: "local",
-      id: "scout",
-      name: "Scout",
-      model: null,
-      provider: null,
-      isDefault: false,
-    };
+    const boss: Agent = { hubId: "local", id: "desk", name: "Desk", model: null, provider: null, isDefault: true };
+    const scout: Agent = { hubId: "local", id: "scout", name: "Scout", model: null, provider: null, isDefault: false };
     const mentions = [
       { agent: "desk", place: "SOUL.md", line: "Sign every update as Desk." },
-      {
-        agent: "scout",
-        place: "its instructions",
-        line: "Ask Desk before you deploy.",
-      },
+      { agent: "scout", place: "its instructions", line: "Ask Desk before you deploy." },
     ];
     // The hub builds it again after each new name: left out once, then serving.
     let rebuilding = false;
@@ -621,10 +336,7 @@ describe("Renaming in Settings", () => {
         rebuilding = true;
         return Promise.resolve({});
       }),
-      oldNameMentions: vi
-        .fn()
-        .mockResolvedValueOnce(mentions)
-        .mockResolvedValue([]),
+      oldNameMentions: vi.fn().mockResolvedValueOnce(mentions).mockResolvedValue([]),
     } as Partial<DeskHub>);
     listed.ids.mockReset().mockImplementation(async () => {
       const ids = rebuilding ? ["scout"] : ["desk", "scout"];
@@ -632,105 +344,58 @@ describe("Renaming in Settings", () => {
       return ids;
     });
     useDesk.setState({ hub });
-    useChat.setState({
-      hubs: [local],
-      roster: [boss, scout],
-      refreshRoster: vi.fn(() => Promise.resolve()),
-    });
+    useChat.setState({ hubs: [local], roster: [boss, scout], refreshRoster: vi.fn(() => Promise.resolve()) });
     render(<AgentSettings agent={boss} hub={local} onOpenFiles={() => {}} />);
     const name = (await screen.findByDisplayValue("Desk")) as HTMLInputElement;
 
     fireEvent.change(name, { target: { value: "scout" } });
     expect(screen.getByText("That name is taken.")).toBeTruthy();
-    expect(
-      (screen.getByRole("button", { name: "Save" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.change(name, { target: { value: "Kat" } });
-    await act(async () =>
-      fireEvent.click(screen.getByRole("button", { name: "Save" })),
-    );
-    expect(useChat.getState().roster.find((a) => a.id === "desk")!.name).toBe(
-      "Kat",
-    );
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    expect(useChat.getState().roster.find((a) => a.id === "desk")!.name).toBe("Kat");
     await screen.findByText("Saved into their files.");
     const note = await screen.findByRole("note", { name: "Still says Desk" });
     expect(hub.oldNameMentions).toHaveBeenCalledWith("desk", "Desk");
     expect(hub.manager).toHaveBeenCalled();
-    expect(
-      [...note.querySelectorAll(".mention-row")].map((r) => r.textContent),
-    ).toEqual([
+    expect([...note.querySelectorAll(".mention-row")].map((r) => r.textContent)).toEqual([
       "SOUL.mdSign every update as Desk.",
       "Scout’s instructionsAsk Desk before you deploy.",
     ]);
 
     fireEvent.change(name, { target: { value: "Desk" } });
-    await act(async () =>
-      fireEvent.click(screen.getByRole("button", { name: "Save" })),
-    );
-    await waitFor(() =>
-      expect(vi.mocked(hub.renameAgent).mock.calls.map((c) => c[1])).toEqual([
-        "Kat",
-        "Desk",
-      ]),
-    );
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    await waitFor(() => expect(vi.mocked(hub.renameAgent).mock.calls.map((c) => c[1])).toEqual(["Kat", "Desk"]));
     await screen.findByText("Saved into their files.");
-    expect(useChat.getState().roster.find((a) => a.id === "desk")!.name).toBe(
-      "Desk",
-    );
+    expect(useChat.getState().roster.find((a) => a.id === "desk")!.name).toBe("Desk");
     expect(screen.queryByRole("note", { name: /Still says/ })).toBeNull();
   });
 
   it("says quietly when it couldn't check where the old name is still said", async () => {
     const hub = fakeHub({
       renameAgent: vi.fn(() => Promise.resolve({})),
-      oldNameMentions: vi.fn(() =>
-        Promise.reject(new HubError(404, "Not Found")),
-      ),
+      oldNameMentions: vi.fn(() => Promise.reject(new HubError(404, "Not Found"))),
     } as Partial<DeskHub>);
     renderSettings(hub);
-    const name = (await screen.findByDisplayValue(
-      "Ledger",
-    )) as HTMLInputElement;
+    const name = (await screen.findByDisplayValue("Ledger")) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "Penny" } });
-    await act(async () =>
-      fireEvent.click(screen.getByRole("button", { name: "Save" })),
-    );
-    expect(
-      await screen.findByText(
-        "Desk couldn’t check where “Ledger” is still said.",
-      ),
-    ).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    expect(await screen.findByText("Desk couldn’t check where “Ledger” is still said.")).toBeTruthy();
     expect(screen.queryByRole("note", { name: /Still says/ })).toBeNull();
-    await screen.findByText("Saved into their files.", undefined, {
-      timeout: 3000,
-    });
+    await screen.findByText("Saved into their files.", undefined, { timeout: 3000 });
   });
 
   it("puts the name back and says why when the hub can't rename yet", async () => {
-    const hub = fakeHub({
-      renameAgent: vi.fn(() =>
-        Promise.reject(new HubError(405, "Method Not Allowed")),
-      ),
-    } as Partial<DeskHub>);
+    const hub = fakeHub({ renameAgent: vi.fn(() => Promise.reject(new HubError(405, "Method Not Allowed"))) } as Partial<DeskHub>);
     renderSettings(hub);
-    const name = (await screen.findByDisplayValue(
-      "Ledger",
-    )) as HTMLInputElement;
+    const name = (await screen.findByDisplayValue("Ledger")) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "Penny" } });
-    await act(async () =>
-      fireEvent.click(screen.getByRole("button", { name: "Save" })),
-    );
-    expect(
-      await screen.findByText(/Renaming isn’t available yet/),
-    ).toBeTruthy();
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
+    expect(await screen.findByText(/Renaming isn’t available yet/)).toBeTruthy();
     expect(useChat.getState().roster[0]!.name).toBe("Ledger");
     // Its files were written first, and are put back as they were.
-    const writes = vi
-      .mocked(hub.saveIdentityFile)
-      .mock.calls.filter(([, f]) => f === "IDENTITY.md")
-      .map(([, , t]) => t);
+    const writes = vi.mocked(hub.saveIdentityFile).mock.calls.filter(([, f]) => f === "IDENTITY.md").map(([, , t]) => t);
     expect(writes.at(-1)).toBe("# Soul\n");
     fireEvent.click(screen.getByRole("button", { name: "Discard" }));
     expect(name.value).toBe("Ledger");
@@ -739,78 +404,45 @@ describe("Renaming in Settings", () => {
   it("keeps their name, and doesn't ask the hub, when their files can't be written; says why", async () => {
     const hub = fakeHub({
       renameAgent: vi.fn(() => Promise.resolve({})),
-      saveIdentityFile: vi.fn(() =>
-        Promise.reject(new HubError(500, "disk full")),
-      ),
+      saveIdentityFile: vi.fn(() => Promise.reject(new HubError(500, "disk full"))),
     } as Partial<DeskHub>);
     renderSettings(hub);
-    const name = (await screen.findByDisplayValue(
-      "Ledger",
-    )) as HTMLInputElement;
+    const name = (await screen.findByDisplayValue("Ledger")) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "Penny" } });
-    await act(async () =>
-      fireEvent.click(screen.getByRole("button", { name: "Save" })),
-    );
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: "Save" })));
     const about = screen.getByRole("region", { name: "About" });
-    await waitFor(() =>
-      expect(about.querySelector(".state-blocked")?.textContent).toBeTruthy(),
-    );
+    await waitFor(() => expect(about.querySelector(".state-blocked")?.textContent).toBeTruthy());
     expect(screen.queryByText("Saved into their files.")).toBeNull();
     expect(hub.renameAgent).not.toHaveBeenCalled();
     expect(useChat.getState().roster[0]!.name).toBe("Ledger");
   });
 
   it("says a name another agent here has is taken, and won't save it; its own name in another case is fine", async () => {
-    const hub = fakeHub({
-      renameAgent: vi.fn(() => Promise.resolve({})),
-    } as Partial<DeskHub>);
+    const hub = fakeHub({ renameAgent: vi.fn(() => Promise.resolve({})) } as Partial<DeskHub>);
     renderSettings(hub);
-    useChat.setState({
-      roster: [agent, { ...agent, id: "atlas", name: "Atlas" }],
-    });
-    const name = (await screen.findByDisplayValue(
-      "Ledger",
-    )) as HTMLInputElement;
+    useChat.setState({ roster: [agent, { ...agent, id: "atlas", name: "Atlas" }] });
+    const name = (await screen.findByDisplayValue("Ledger")) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "atlas" } });
     expect(screen.getByText("That name is taken.")).toBeTruthy();
     expect(name.getAttribute("aria-invalid")).toBe("true");
-    expect(
-      (screen.getByRole("button", { name: "Save" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(true);
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(name, { target: { value: "LEDGER" } });
     expect(screen.queryByText("That name is taken.")).toBeNull();
-    expect(
-      (screen.getByRole("button", { name: "Save" }) as HTMLButtonElement)
-        .disabled,
-    ).toBe(false);
+    expect((screen.getByRole("button", { name: "Save" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("keeps showing the agent while its hub builds it again, and reads the roster once it serves", async () => {
     const refreshRoster = vi.fn(() => Promise.resolve());
-    const hub = fakeHub({
-      renameAgent: vi.fn(() => Promise.resolve({})),
-    } as Partial<DeskHub>);
+    const hub = fakeHub({ renameAgent: vi.fn(() => Promise.resolve({})) } as Partial<DeskHub>);
     renderSettings(hub);
     useChat.setState({ refreshRoster });
-    listed.ids
-      .mockReset()
-      .mockResolvedValueOnce([])
-      .mockResolvedValueOnce([])
-      .mockResolvedValue(["ledger"]);
-    const name = (await screen.findByDisplayValue(
-      "Ledger",
-    )) as HTMLInputElement;
+    listed.ids.mockReset().mockResolvedValueOnce([]).mockResolvedValueOnce([]).mockResolvedValue(["ledger"]);
+    const name = (await screen.findByDisplayValue("Ledger")) as HTMLInputElement;
     fireEvent.change(name, { target: { value: "Penny" } });
     fireEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() =>
-      expect(useChat.getState().settling["local/ledger"]).toBe(true),
-    );
+    await waitFor(() => expect(useChat.getState().settling["local/ledger"]).toBe(true));
     expect(refreshRoster).not.toHaveBeenCalled();
-    await waitFor(
-      () => expect(screen.getByText("Saved into their files.")).toBeTruthy(),
-      { timeout: 3000 },
-    );
+    await waitFor(() => expect(screen.getByText("Saved into their files.")).toBeTruthy(), { timeout: 3000 });
     expect(refreshRoster).toHaveBeenCalledTimes(1);
     expect(listed.ids.mock.calls.length).toBeGreaterThanOrEqual(3);
     expect(useChat.getState().settling["local/ledger"]).toBeUndefined();
@@ -818,103 +450,41 @@ describe("Renaming in Settings", () => {
 });
 
 describe("A picture in About", () => {
-  const local = {
-    id: "local",
-    label: "This computer",
-    url: "http://127.0.0.1:1",
-    local: true,
-    revision: "t",
-  };
-  const remote = {
-    id: "dw",
-    label: "Driftwerk",
-    url: "https://dw.example",
-    local: false,
-    revision: "t",
-  };
-  const slack = {
-    version: "s1",
-    source: "slack" as const,
-    at: "",
-    slack: "Acme",
-  };
+  const local = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" };
+  const remote = { id: "dw", label: "Driftwerk", url: "https://dw.example", local: false, revision: "t" };
+  const slack = { version: "s1", source: "slack" as const, at: "", slack: "Acme" };
 
   it("of an agent here, goes back to its Slack picture, and the roster shows what the hub now shows", async () => {
     const setAgentPicture = vi.fn(() => Promise.resolve(slack));
-    const agent: Agent = {
-      hubId: "local",
-      id: "ledger",
-      name: "Ledger",
-      model: null,
-      provider: null,
-      isDefault: false,
-      picture: { ...slack, version: "c1", source: "chosen" },
-    };
+    const agent: Agent = { hubId: "local", id: "ledger", name: "Ledger", model: null, provider: null, isDefault: false, picture: { ...slack, version: "c1", source: "chosen" } };
     useDesk.setState({ hub: fakeHub({ setAgentPicture } as Partial<DeskHub>) });
-    useChat.setState({
-      hubs: [local],
-      roster: [agent],
-      refreshRoster: vi.fn(() => Promise.resolve()),
-    });
+    useChat.setState({ hubs: [local], roster: [agent], refreshRoster: vi.fn(() => Promise.resolve()) });
     render(<AgentSettings agent={agent} hub={local} onOpenFiles={() => {}} />);
     const about = screen.getByRole("region", { name: "About" });
     expect(within(about).getByText(/^Chosen/)).toBeTruthy();
-    await act(async () =>
-      fireEvent.click(
-        within(about).getByRole("button", { name: "Use the Slack picture" }),
-      ),
-    );
+    await act(async () => fireEvent.click(within(about).getByRole("button", { name: "Use the Slack picture" })));
     expect(setAgentPicture).toHaveBeenCalledWith("ledger", null);
     expect(useChat.getState().roster[0]!.picture).toEqual(slack);
   });
 
   it("of an agent on another workspace, is shown as it has it, not changed here", () => {
-    const agent: Agent = {
-      hubId: "dw",
-      id: "allan",
-      name: "Allan",
-      model: null,
-      provider: null,
-      isDefault: false,
-      picture: slack,
-    };
+    const agent: Agent = { hubId: "dw", id: "allan", name: "Allan", model: null, provider: null, isDefault: false, picture: slack };
     useChat.setState({ hubs: [local, remote], roster: [agent] });
     render(<AgentSettings agent={agent} hub={remote} onOpenFiles={() => {}} />);
     const about = screen.getByRole("region", { name: "About" });
     expect(within(about).getByText("From Slack (Acme)")).toBeTruthy();
-    expect(
-      within(about).queryByRole("button", { name: "Choose a picture…" }),
-    ).toBeNull();
+    expect(within(about).queryByRole("button", { name: "Choose a picture…" })).toBeNull();
   });
 });
 
 describe("How an agent on another workspace thinks", () => {
-  const remote = {
-    id: "pw",
-    label: "Patchwork",
-    url: "https://pw.example",
-    local: false,
-    revision: "t",
-  };
-  const lattice: Agent = {
-    hubId: "pw",
-    id: "lattice",
-    name: "Lattice",
-    model: "us.anthropic.claude-opus-4-8",
-    provider: "bedrock",
-    isDefault: false,
-  };
+  const remote = { id: "pw", label: "Patchwork", url: "https://pw.example", local: false, revision: "t" };
+  const lattice: Agent = { hubId: "pw", id: "lattice", name: "Lattice", model: "us.anthropic.claude-opus-4-8", provider: "bedrock", isDefault: false };
 
   it("says what your own conversations run on when they take your own plan", () => {
     const agent: Agent = {
       ...lattice,
-      personalRoute: {
-        kind: "claude-code",
-        title: "Claude",
-        model: "opus",
-        fallback: "hub",
-        connected: true,
-      },
+      personalRoute: { kind: "claude-code", title: "Claude", model: "opus", fallback: "hub", connected: true },
     };
     useChat.setState({ hubs: [remote], roster: [agent] });
     render(<AgentSettings agent={agent} hub={remote} onOpenFiles={() => {}} />);
@@ -926,39 +496,19 @@ describe("How an agent on another workspace thinks", () => {
 
   it("has no such row while they run on the workspace's models", () => {
     useChat.setState({ hubs: [remote], roster: [lattice] });
-    render(
-      <AgentSettings agent={lattice} hub={remote} onOpenFiles={() => {}} />,
-    );
+    render(<AgentSettings agent={lattice} hub={remote} onOpenFiles={() => {}} />);
     expect(screen.queryByText("Your conversations")).toBeNull();
   });
 });
 
 describe("Background work in Settings", () => {
-  const agent: Agent = {
-    hubId: "local",
-    id: "ledger",
-    name: "Ledger",
-    model: null,
-    provider: null,
-    isDefault: false,
-  };
-  const local = {
-    id: "local",
-    label: "This computer",
-    url: "http://127.0.0.1:1",
-    local: true,
-    revision: "t",
-  };
-  const FILE =
-    '[llm]\nprovider = "claude-code"\ndefault_model = "claude-code-big"\n';
+  const agent: Agent = { hubId: "local", id: "ledger", name: "Ledger", model: null, provider: null, isDefault: false };
+  const local = { id: "local", label: "This computer", url: "http://127.0.0.1:1", local: true, revision: "t" };
+  const FILE = '[llm]\nprovider = "claude-code"\ndefault_model = "claude-code-big"\n';
 
   const show = (hub: DeskHub) => {
     useDesk.setState({ hub });
-    useChat.setState({
-      hubs: [local],
-      roster: [agent],
-      refreshRoster: vi.fn(() => Promise.resolve()),
-    });
+    useChat.setState({ hubs: [local], roster: [agent], refreshRoster: vi.fn(() => Promise.resolve()) });
     render(<AgentSettings agent={agent} hub={local} onOpenFiles={() => {}} />);
   };
 
@@ -968,33 +518,16 @@ describe("Background work in Settings", () => {
       saved = toml;
       return Promise.resolve();
     });
-    show(
-      fakeHub({
-        agentConfig: vi.fn(() => Promise.resolve(saved)),
-        saveAgentConfig,
-      } as Partial<DeskHub>),
-    );
-    const light = (await screen.findByLabelText(
-      "Light background",
-    )) as HTMLSelectElement;
-    const heavy = screen.getByLabelText(
-      "Heavy background",
-    ) as HTMLSelectElement;
+    show(fakeHub({ agentConfig: vi.fn(() => Promise.resolve(saved)), saveAgentConfig } as Partial<DeskHub>));
+    const light = (await screen.findByLabelText("Light background")) as HTMLSelectElement;
+    const heavy = screen.getByLabelText("Heavy background") as HTMLSelectElement;
     expect(light.value).toBe("");
-    expect(
-      within(light).getByRole("option", { name: "Default · cheapest model" }),
-    ).toBeTruthy();
-    expect(
-      within(heavy).getByRole("option", { name: "Same as chat · Big" }),
-    ).toBeTruthy();
+    expect(within(light).getByRole("option", { name: "Default · cheapest model" })).toBeTruthy();
+    expect(within(heavy).getByRole("option", { name: "Same as chat · Big" })).toBeTruthy();
 
-    await act(async () =>
-      fireEvent.change(light, { target: { value: "claude-code-mid" } }),
-    );
+    await act(async () => fireEvent.change(light, { target: { value: "claude-code-mid" } }));
     expect(saved).toContain('light_model = "claude-code-mid"');
-    await act(async () =>
-      fireEvent.change(heavy, { target: { value: "chat" } }),
-    );
+    await act(async () => fireEvent.change(heavy, { target: { value: "chat" } }));
     expect(saved).toContain('heavy_model = "chat"');
     await act(async () => fireEvent.change(light, { target: { value: "" } }));
     expect(saved).not.toContain("light_model");
@@ -1007,35 +540,18 @@ describe("Background work in Settings", () => {
       saved = toml;
       return Promise.resolve();
     });
-    show(
-      fakeHub({
-        agentConfig: vi.fn(() => Promise.resolve(saved)),
-        saveAgentConfig,
-      } as Partial<DeskHub>),
-    );
-    const chat = (await screen.findByLabelText(
-      "Conversation",
-    )) as HTMLSelectElement;
+    show(fakeHub({ agentConfig: vi.fn(() => Promise.resolve(saved)), saveAgentConfig } as Partial<DeskHub>));
+    const chat = (await screen.findByLabelText("Conversation")) as HTMLSelectElement;
     expect(chat.value).toBe("");
-    const options = within(chat)
-      .getAllByRole("option")
-      .map((o) => o.textContent);
+    const options = within(chat).getAllByRole("option").map((o) => o.textContent);
     expect(options[0]).toBe("Default · same as chat · Big");
     // Plain chatting has no "Same as chat": that's the default.
     expect(options.some((o) => o?.startsWith("Same as chat"))).toBe(false);
     // Its row comes before the background ones.
-    const rows = screen
-      .getAllByRole("combobox")
-      .map((c) => c.getAttribute("id"));
-    expect(rows.indexOf(chat.id)).toBeLessThan(
-      rows.indexOf(
-        (screen.getByLabelText("Light background") as HTMLElement).id,
-      ),
-    );
+    const rows = screen.getAllByRole("combobox").map((c) => c.getAttribute("id"));
+    expect(rows.indexOf(chat.id)).toBeLessThan(rows.indexOf((screen.getByLabelText("Light background") as HTMLElement).id));
 
-    await act(async () =>
-      fireEvent.change(chat, { target: { value: "claude-code-mid" } }),
-    );
+    await act(async () => fireEvent.change(chat, { target: { value: "claude-code-mid" } }));
     expect(saved).toContain("[llm.model_preferences]");
     expect(saved).toContain('conversation = "claude-code-mid"');
     await act(async () => fireEvent.change(chat, { target: { value: "" } }));
@@ -1060,51 +576,20 @@ describe("Background work in Settings", () => {
                 options: null,
                 since: "2026-11-15T10:00:00Z",
                 place: { kind: "dm" },
-                answer: {
-                  kind: "decide",
-                  at: { kind: "config", agentId: "ledger", hash: "abc" },
-                },
+                answer: { kind: "decide", at: { kind: "config", agentId: "ledger", hash: "abc" } },
               },
             ],
           },
         },
       },
     } as unknown as Partial<ReturnType<typeof useFloor.getState>>);
-    const held = new HubError(
-      409,
-      "The settings file was changed outside the hub.",
-    );
-    show(
-      fakeHub({
-        agentConfig: vi.fn(() => Promise.resolve(FILE)),
-        saveAgentConfig: vi.fn(() => Promise.reject(held)),
-      } as Partial<DeskHub>),
-    );
-    const banner = await screen.findByRole("region", {
-      name: "Settings changed outside Desk",
-    });
-    expect(
-      within(banner).getByText(
-        "Ledger’s settings file was changed outside Desk",
-      ),
-    ).toBeTruthy();
-    await act(async () =>
-      fireEvent.click(within(banner).getByRole("button", { name: "Use it" })),
-    );
-    expect(decide).toHaveBeenCalledWith(
-      "local",
-      expect.objectContaining({ id: "config:ledger:abc" }),
-      "allow",
-    );
-    await act(async () =>
-      fireEvent.click(
-        within(banner).getByRole("button", { name: "Keep saved" }),
-      ),
-    );
-    expect(decide).toHaveBeenLastCalledWith(
-      "local",
-      expect.objectContaining({ id: "config:ledger:abc" }),
-      "deny",
-    );
+    const held = new HubError(409, "The settings file was changed outside the hub.");
+    show(fakeHub({ agentConfig: vi.fn(() => Promise.resolve(FILE)), saveAgentConfig: vi.fn(() => Promise.reject(held)) } as Partial<DeskHub>));
+    const banner = await screen.findByRole("region", { name: "Settings changed outside Desk" });
+    expect(within(banner).getByText("Ledger’s settings file was changed outside Desk")).toBeTruthy();
+    await act(async () => fireEvent.click(within(banner).getByRole("button", { name: "Use it" })));
+    expect(decide).toHaveBeenCalledWith("local", expect.objectContaining({ id: "config:ledger:abc" }), "allow");
+    await act(async () => fireEvent.click(within(banner).getByRole("button", { name: "Keep saved" })));
+    expect(decide).toHaveBeenLastCalledWith("local", expect.objectContaining({ id: "config:ledger:abc" }), "deny");
   });
 });
