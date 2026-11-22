@@ -16,7 +16,7 @@ import { useDesk } from "../hub/store";
 import { useUi } from "../shell/ui";
 import { askAgent } from "../ui/askDesk";
 import { useAgentConfigs } from "./agentBrain";
-import { ApproveAgain } from "../settings/Connections";
+import { ApproveAgain } from "../connections/ApproveAgain";
 import { ago } from "./files";
 import "../styles/connections.css";
 import { allowWrites, choose, setAgentConnectors, todayOf, writesOf, type Writes } from "./connectors";

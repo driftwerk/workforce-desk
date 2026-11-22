@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useChat } from "../chat/store";
 import { ago } from "../crew/files";
 import { HubError } from "../hub/client";
@@ -15,34 +15,42 @@ import {
   type Connection,
   type ConnectionsApi,
   type Connector,
-  type Started,
 } from "../hub/connections";
 import { useOverview } from "../overview/store";
 import { openUrl } from "../platform";
 import { useUi } from "../shell/ui";
 import "../styles/connections.css";
 import { askAgent, askDeskTo } from "../ui/askDesk";
-import { useLive } from "../ui/useLive";
+import { ApproveAgain } from "../connections/ApproveAgain";
+import {
+  AppForm,
+  message,
+  SAVED_WHERE,
+  useFlow,
+  useSetUpAgent,
+  WaitingFor,
+} from "../connections/flow";
 import { CopyOffers } from "./CopyOffers";
 
-const SAVED_WHERE = "Saved in Desk’s vault on this computer. Never in a file.";
-const CANCELLED = "Sign-in was cancelled. Nothing was saved.";
-const EXPIRED = "The sign-in timed out. Nothing was saved.";
-/** How often a sign-in in progress is asked about. */
-const FLOW_POLL_MS = 1500;
-
-const message = (e: unknown): string => (e instanceof Error ? e.message : String(e));
-
 /** `text` ending as a sentence does. */
-const sentence = (text: string): string => (/[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`);
+const sentence = (text: string): string =>
+  /[.!?]$/.test(text.trim()) ? text.trim() : `${text.trim()}.`;
 
 /** What a name the person gives a connection of `c` clashes with: another
  *  of its connections by that name (`but` aside), or none. */
-export const nameTaken = (c: Connector, name: string, but?: string): string | null => {
+export const nameTaken = (
+  c: Connector,
+  name: string,
+  but?: string,
+): string | null => {
   const n = name.trim().toLowerCase();
   if (!n) return null;
-  const same = c.connections.find((x) => x.id !== but && x.name.trim().toLowerCase() === n);
-  return same ? `${c.name} has a connection called ${same.name} already. Give this one another name.` : null;
+  const same = c.connections.find(
+    (x) => x.id !== but && x.name.trim().toLowerCase() === n,
+  );
+  return same
+    ? `${c.name} has a connection called ${same.name} already. Give this one another name.`
+    : null;
 };
 
 /** How far the hub's clock may be behind Desk's. */
@@ -59,19 +67,34 @@ export const madeAgain = (
 ): Connection | undefined => {
   const account = signedIn.account?.trim().toLowerCase();
   return (now?.connections ?? [])
-    .filter((k) => !before.has(k.id) && k.level === x.level && k.agent === x.agent)
-    .filter((k) => !k.connectedAt || Date.parse(k.connectedAt) >= signedIn.since - CLOCK_SKEW_MS)
+    .filter(
+      (k) => !before.has(k.id) && k.level === x.level && k.agent === x.agent,
+    )
+    .filter(
+      (k) =>
+        !k.connectedAt ||
+        Date.parse(k.connectedAt) >= signedIn.since - CLOCK_SKEW_MS,
+    )
     .filter((k) => !account || k.account?.trim().toLowerCase() === account)
-    .sort((a, b) => Date.parse(b.connectedAt ?? "") - Date.parse(a.connectedAt ?? ""))[0];
+    .sort(
+      (a, b) =>
+        Date.parse(b.connectedAt ?? "") - Date.parse(a.connectedAt ?? ""),
+    )[0];
 };
 
 /** What moving agents off a connection left. */
-export type Moved = { problem: null } | { problem: string; fresh: Connection | null };
+export type Moved =
+  { problem: null } | { problem: string; fresh: Connection | null };
 
 /** Each agent that picked `x` by name picks `fresh` in its place (taking
  *  changes as before, its default still), read again until none is left
  *  to move; then `x` goes. */
-export const moveOver = async (api: ConnectionsApi, c: Connector, x: Connection, fresh: Connection): Promise<Moved> => {
+export const moveOver = async (
+  api: ConnectionsApi,
+  c: Connector,
+  x: Connection,
+  fresh: Connection,
+): Promise<Moved> => {
   for (let pass = 0; pass < 3; pass++) {
     let users: Connection["usedBy"];
     try {
@@ -79,7 +102,10 @@ export const moveOver = async (api: ConnectionsApi, c: Connector, x: Connection,
       // Who uses it now, not when the page was read.
       users = now?.connections.find((k) => k.id === x.id)?.usedBy ?? [];
     } catch {
-      return { problem: `Desk couldn’t read who uses ${x.name} just now, so it is kept for now.`, fresh };
+      return {
+        problem: `Desk couldn’t read who uses ${x.name} just now, so it is kept for now.`,
+        fresh,
+      };
     }
     let moved = 0;
     const stuck: string[] = [];
@@ -105,13 +131,20 @@ export const moveOver = async (api: ConnectionsApi, c: Connector, x: Connection,
         stuck.push(u.name);
       }
     }
-    if (stuck.length > 0) return { problem: `Signed in again, but Desk couldn’t move ${names(stuck)} over to it yet, so the old ${x.name} is kept too.`, fresh };
+    if (stuck.length > 0)
+      return {
+        problem: `Signed in again, but Desk couldn’t move ${names(stuck)} over to it yet, so the old ${x.name} is kept too.`,
+        fresh,
+      };
     if (moved === 0) break;
   }
   try {
     await api.disconnect(c.id, x.id);
   } catch (e) {
-    return { problem: `Signed in again, but Desk couldn’t remove the old ${x.name}: ${sentence(message(e))}`, fresh };
+    return {
+      problem: `Signed in again, but Desk couldn’t remove the old ${x.name}: ${sentence(message(e))}`,
+      fresh,
+    };
   }
   return { problem: null };
 };
@@ -127,11 +160,20 @@ export const carryOver = async (
   const before = new Set(c.connections.map((k) => k.id));
   let fresh: Connection | undefined;
   try {
-    fresh = madeAgain((await api.list()).connectors.find((k) => k.id === c.id), before, x, signedIn);
+    fresh = madeAgain(
+      (await api.list()).connectors.find((k) => k.id === c.id),
+      before,
+      x,
+      signedIn,
+    );
   } catch {
     // Said below.
   }
-  if (!fresh) return { problem: `Desk couldn’t find the new sign-in, so ${x.name} is kept as it was. Reconnect it again in a moment.`, fresh: null };
+  if (!fresh)
+    return {
+      problem: `Desk couldn’t find the new sign-in, so ${x.name} is kept as it was. Reconnect it again in a moment.`,
+      fresh: null,
+    };
   return moveOver(api, c, x, fresh);
 };
 
@@ -145,23 +187,20 @@ const localApi = (): ConnectionsApi | null => {
 const useLocalAgents = (): { id: string; name: string }[] => {
   const hub = useChat((s) => s.hubs.find((h) => h.local));
   const roster = useChat((s) => s.roster);
-  return hub ? roster.filter((a) => a.hubId === hub.id).map((a) => ({ id: a.id, name: a.name })) : [];
-};
-
-/** The agent on this computer that sets services up for the person: Desk's
- *  own, as the roster names it. */
-const useSetUpAgent = (): { id: string; name: string } | null => {
-  const id = useOverview((s) => s.manager?.agentId);
-  const hub = useChat((s) => s.hubs.find((h) => h.local));
-  const name = useChat((s) => s.roster.find((a) => a.id === id && a.hubId === hub?.id)?.name);
-  return id ? { id, name: name ?? "Desk" } : null;
+  return hub
+    ? roster
+        .filter((a) => a.hubId === hub.id)
+        .map((a) => ({ id: a.id, name: a.name }))
+    : [];
 };
 
 /** Asks Desk's agent to set `c` up (or one the person names), in its
  *  chat. */
 const askDesk = (c: Connector | null): boolean => {
   const asked = askDeskTo(
-    c ? setUpRequest(c.name, "all") : "I’d like to connect a service for my agents. Ask me which one, then set it up in your browser.",
+    c
+      ? setUpRequest(c.name, "all")
+      : "I’d like to connect a service for my agents. Ask me which one, then set it up in your browser.",
   );
   if (asked) useUi.getState().closeSettings();
   return asked;
@@ -183,7 +222,8 @@ export function Connections({
   const [problem, setProblem] = useState<string | null>(null);
   const [unsupported, setUnsupported] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
-  const canAsk = useOverview((s) => !!s.manager?.agentId) || given !== undefined;
+  const canAsk =
+    useOverview((s) => !!s.manager?.agentId) || given !== undefined;
 
   const load = useCallback(async () => {
     if (!api) return;
@@ -201,17 +241,25 @@ export function Connections({
   }, [load]);
 
   const askFor = (c: Connector | null) => {
-    if (!ask(c)) setNotice("Desk’s agent isn’t on this computer to ask. Connect it yourself below.");
+    if (!ask(c))
+      setNotice(
+        "Desk’s agent isn’t on this computer to ask. Connect it yourself below.",
+      );
   };
 
   return (
-    <section className="settings-pane providers-pane connections-pane" aria-label="Connections">
+    <section
+      className="settings-pane providers-pane connections-pane"
+      aria-label="Connections"
+    >
       <header className="conn-header">
         <div>
           <h1 className="display-lg">Connections</h1>
           <p className="muted">
-            The services your agents on this computer work in. A service can have several connections — two Jira sites, work and personal
-            email — each with its own name. Each agent uses only the ones you pick for it.
+            The services your agents on this computer work in. A service can
+            have several connections — two Jira sites, work and personal email —
+            each with its own name. Each agent uses only the ones you pick for
+            it.
           </p>
         </div>
         {canAsk && (
@@ -224,7 +272,10 @@ export function Connections({
       {!api || unsupported ? (
         <div className="setting-card">
           <span className="card-text">
-            <span className="muted">This version of Desk doesn’t offer connections yet. Update Desk to connect services.</span>
+            <span className="muted">
+              This version of Desk doesn’t offer connections yet. Update Desk to
+              connect services.
+            </span>
           </span>
         </div>
       ) : null}
@@ -249,13 +300,19 @@ export function Connections({
               {notice}
             </span>
           </span>
-          <button type="button" className="btn btn-ghost" onClick={() => setNotice(null)}>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => setNotice(null)}
+          >
             OK
           </button>
         </div>
       )}
 
-      {api && list && list.length > 0 && <CopyOffers local={list} reload={load} />}
+      {api && list && list.length > 0 && (
+        <CopyOffers local={list} reload={load} />
+      )}
 
       {api && list && list.length > 0 && (
         <div className="conn-services" role="list" aria-label="Services">
@@ -273,7 +330,9 @@ export function Connections({
         </div>
       )}
 
-      {api && list === null && !problem && !unsupported && <p className="small faint">Looking…</p>}
+      {api && list === null && !problem && !unsupported && (
+        <p className="small faint">Looking…</p>
+      )}
     </section>
   );
 }
@@ -300,11 +359,17 @@ function ServiceCard({
   const [adding, setAdding] = useState(false);
   const trouble = c.connections.filter((x) => x.status !== "connected");
   const using = c.usedBy.length;
-  const agents = using === 1 ? "1 agent uses it" : `${using} agents use ${count >= 2 ? "them" : "it"}`;
+  const agents =
+    using === 1
+      ? "1 agent uses it"
+      : `${using} agents use ${count >= 2 ? "them" : "it"}`;
 
   const summary = (() => {
     if (count === 0) return <span className="faint">Not connected</span>;
-    if (open) return <span>{`${count === 1 ? "1 connection" : `${count} connections`}${using ? ` · ${agents}` : ""}`}</span>;
+    if (open)
+      return (
+        <span>{`${count === 1 ? "1 connection" : `${count} connections`}${using ? ` · ${agents}` : ""}`}</span>
+      );
     return (
       <span>
         {c.connections.map((x, i) => (
@@ -312,7 +377,14 @@ function ServiceCard({
             {i > 0 && " · "}
             {x.name}
             {x.status !== "connected" && (
-              <span className="state-blocked"> ({x.status === "failing" ? "not answering" : "needs signing in again"})</span>
+              <span className="state-blocked">
+                {" "}
+                (
+                {x.status === "failing"
+                  ? "not answering"
+                  : "needs signing in again"}
+                )
+              </span>
             )}
           </span>
         ))}
@@ -322,9 +394,16 @@ function ServiceCard({
   })();
 
   return (
-    <section className={`conn-service ${open ? "conn-service-open" : ""}`} role="listitem" aria-label={c.name}>
+    <section
+      className={`conn-service ${open ? "conn-service-open" : ""}`}
+      role="listitem"
+      aria-label={c.name}
+    >
       <div className="conn-head">
-        <span className={`conn-dot ${trouble.length ? "conn-dot-blocked" : count ? "conn-dot-on" : ""}`} aria-hidden="true" />
+        <span
+          className={`conn-dot ${trouble.length ? "conn-dot-blocked" : count ? "conn-dot-on" : ""}`}
+          aria-hidden="true"
+        />
         <b className="conn-service-name">{c.name}</b>
         <span className="conn-summary small">{summary}</span>
         <span className="conn-head-actions">
@@ -341,7 +420,11 @@ function ServiceCard({
                 Connect
               </button>
               {onAsk && SET_UP_BY_AGENT.has(c.id) && (
-                <button type="button" className="btn btn-sm btn-signal" onClick={onAsk}>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-signal"
+                  onClick={onAsk}
+                >
                   Have Desk set it up
                 </button>
               )}
@@ -349,7 +432,11 @@ function ServiceCard({
           ) : open ? (
             <>
               {c.several && !adding && (
-                <button type="button" className="btn btn-sm btn-signal-outline" onClick={() => setAdding(true)}>
+                <button
+                  type="button"
+                  className="btn btn-sm btn-signal-outline"
+                  onClick={() => setAdding(true)}
+                >
                   + Add another {c.name}
                 </button>
               )}
@@ -366,7 +453,12 @@ function ServiceCard({
               </button>
             </>
           ) : (
-            <button type="button" className="btn btn-sm" aria-expanded={false} onClick={() => setOpen(true)}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              aria-expanded={false}
+              onClick={() => setOpen(true)}
+            >
               Manage
             </button>
           )}
@@ -378,7 +470,14 @@ function ServiceCard({
           {count > 0 && (
             <div className="conn-grid">
               {c.connections.map((x) => (
-                <ConnectionCard key={x.id} api={api} connector={c} connection={x} reload={reload} onNotice={onNotice} />
+                <ConnectionCard
+                  key={x.id}
+                  api={api}
+                  connector={c}
+                  connection={x}
+                  reload={reload}
+                  onNotice={onNotice}
+                />
               ))}
             </div>
           )}
@@ -423,7 +522,8 @@ function AddConnection({
   const agents = useLocalAgents();
   const [name, setName] = useState("");
   const [whom, setWhom] = useState<string>("all");
-  const at: At = whom === "all" ? { level: "all" } : { level: "agent", agent: whom };
+  const at: At =
+    whom === "all" ? { level: "all" } : { level: "agent", agent: whom };
   const title = first ? `Connect ${c.name}` : `Add another ${c.name}`;
   const clash = c.several ? nameTaken(c, name) : null;
   return (
@@ -447,7 +547,11 @@ function AddConnection({
         )}
         <label className="field-stack">
           <span className="field-label">For</span>
-          <select className="ability-select" value={whom} onChange={(e) => setWhom(e.target.value)}>
+          <select
+            className="ability-select"
+            value={whom}
+            onChange={(e) => setWhom(e.target.value)}
+          >
             <option value="all">All my agents</option>
             {agents.map((a) => (
               <option key={a.id} value={a.id}>
@@ -493,7 +597,9 @@ function ConnectionCard({
   reload: () => Promise<void>;
   onNotice: (n: string | null) => void;
 }) {
-  const [busy, setBusy] = useState<null | "test" | "disconnect" | "rename" | "move">(null);
+  const [busy, setBusy] = useState<
+    null | "test" | "disconnect" | "rename" | "move"
+  >(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [confirming, setConfirming] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
@@ -504,7 +610,10 @@ function ConnectionCard({
   const [moving, setMoving] = useState<Connection | null>(null);
   const losing = x.usedBy.map((u) => u.name);
 
-  const run = async (kind: "test" | "disconnect" | "rename" | "move", work: () => Promise<unknown>): Promise<boolean> => {
+  const run = async (
+    kind: "test" | "disconnect" | "rename" | "move",
+    work: () => Promise<unknown>,
+  ): Promise<boolean> => {
     setBusy(kind);
     setProblem(null);
     try {
@@ -519,7 +628,10 @@ function ConnectionCard({
     }
   };
 
-  const at: At = x.level === "all" ? { level: "all" } : { level: "agent", agent: x.agent ?? "" };
+  const at: At =
+    x.level === "all"
+      ? { level: "all" }
+      : { level: "agent", agent: x.agent ?? "" };
   const clash = renaming !== null ? nameTaken(c, renaming, x.id) : null;
 
   if (reconnecting) {
@@ -536,7 +648,9 @@ function ConnectionCard({
           onDone={async (inPlace, account) => {
             // New keys keep the connection as it is; a sign-in makes a new
             // one, which takes the old one's place for its agents.
-            const left: Moved = inPlace ? { problem: null } : await carryOver(api, c, x, { account, since });
+            const left: Moved = inPlace
+              ? { problem: null }
+              : await carryOver(api, c, x, { account, since });
             setProblem(left.problem);
             setMoving(left.problem ? left.fresh : null);
             setReconnecting(false);
@@ -552,7 +666,10 @@ function ConnectionCard({
 
   const ok = x.status === "connected";
   return (
-    <div className={`conn-card ${ok ? "" : "conn-card-trouble"}`} aria-label={x.name}>
+    <div
+      className={`conn-card ${ok ? "" : "conn-card-trouble"}`}
+      aria-label={x.name}
+    >
       <div className="conn-card-head">
         {renaming !== null ? (
           <form
@@ -560,7 +677,9 @@ function ConnectionCard({
             onSubmit={(e) => {
               e.preventDefault();
               if (!renaming.trim() || clash) return;
-              void run("rename", () => api.rename(c.id, x.id, renaming.trim())).then((done) => done && setRenaming(null));
+              void run("rename", () =>
+                api.rename(c.id, x.id, renaming.trim()),
+              ).then((done) => done && setRenaming(null));
             }}
           >
             <input
@@ -571,20 +690,36 @@ function ConnectionCard({
               value={renaming}
               onChange={(e) => setRenaming(e.target.value)}
             />
-            <button type="submit" className="btn btn-sm btn-signal" disabled={busy !== null || !renaming.trim() || !!clash}>
+            <button
+              type="submit"
+              className="btn btn-sm btn-signal"
+              disabled={busy !== null || !renaming.trim() || !!clash}
+            >
               {busy === "rename" ? "Saving…" : "Save"}
             </button>
-            <button type="button" className="btn btn-sm btn-ghost" onClick={() => setRenaming(null)}>
+            <button
+              type="button"
+              className="btn btn-sm btn-ghost"
+              onClick={() => setRenaming(null)}
+            >
               Cancel
             </button>
           </form>
         ) : (
           <>
             <b>{x.name}</b>
-            {x.site && <span className="mono conn-site">{x.site.replace(/^https?:\/\//, "")}</span>}
+            {x.site && (
+              <span className="mono conn-site">
+                {x.site.replace(/^https?:\/\//, "")}
+              </span>
+            )}
           </>
         )}
-        <span className={`conn-status small ${ok ? "state-on" : "state-blocked"}`}>{statusLine(x)}</span>
+        <span
+          className={`conn-status small ${ok ? "state-on" : "state-blocked"}`}
+        >
+          {statusLine(x)}
+        </span>
       </div>
       {clash && (
         <p className="small state-blocked" role="alert">
@@ -607,16 +742,31 @@ function ConnectionCard({
       </dl>
       {!ok && (
         <p className="small state-blocked conn-fix" role="status">
-          {sentence(x.detail ?? (x.status === "failing" ? `${c.name} isn’t answering` : `${c.name} no longer takes this key`))}{" "}
-          {x.status === "failing"
-            ? "Test it again in a moment, or reconnect it."
-            : x.approveAgain
-              ? ""
-              : "Reconnect it to carry on."}
+          {sentence(
+            x.detail ??
+              (x.status === "failing"
+                ? `${c.name} isn’t answering`
+                : `${c.name} no longer takes this key`),
+          )}
+          {x.status === "failing" ? (
+            <> Test it again in a moment, or reconnect it.</>
+          ) : x.approveAgain ? null : (
+            <> Reconnect it to carry on.</>
+          )}
         </p>
       )}
-      {x.checkedAt && ok && <p className="small faint">Checked {ago(x.checkedAt)}</p>}
-      {x.approveAgain && <ApproveAgain api={api} connector={c} connection={x} onDone={reload} />}
+      {x.checkedAt && ok && (
+        <p className="small faint">Checked {ago(x.checkedAt)}</p>
+      )}
+      {x.approveAgain && (
+        <ApproveAgain
+          api={api}
+          connector={c}
+          connection={x}
+          onDone={reload}
+          onAsk={(agent) => askAgent(agent.id, setUpRequest(c.name, "me"))}
+        />
+      )}
       {problem && (
         <p className="small state-blocked" role="alert">
           {problem}
@@ -638,7 +788,9 @@ function ConnectionCard({
                   })
                 }
               >
-                {busy === "move" ? "Moving…" : "Finish moving to the new sign-in"}
+                {busy === "move"
+                  ? "Moving…"
+                  : "Finish moving to the new sign-in"}
               </button>
             </>
           )}
@@ -646,8 +798,16 @@ function ConnectionCard({
       )}
       {confirming ? (
         <div className="prov-actions">
-          <span className="small">{losing.length > 0 ? `${names(losing)} will lose ${x.name}.` : `Disconnect ${x.name}?`}</span>
-          <button type="button" className="btn btn-sm btn-ghost" onClick={() => setConfirming(false)}>
+          <span className="small">
+            {losing.length > 0
+              ? `${names(losing)} will lose ${x.name}.`
+              : `Disconnect ${x.name}?`}
+          </span>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost"
+            onClick={() => setConfirming(false)}
+          >
             Keep
           </button>
           <button
@@ -666,18 +826,38 @@ function ConnectionCard({
         </div>
       ) : (
         <div className="prov-actions conn-actions">
-          <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => void run("test", () => api.test(c.id, x.id))}>
+          <button
+            type="button"
+            className="btn btn-sm"
+            disabled={busy !== null}
+            onClick={() => void run("test", () => api.test(c.id, x.id))}
+          >
             {busy === "test" ? "Testing…" : "Test"}
           </button>
           {c.several && (
-            <button type="button" className="btn btn-sm" disabled={busy !== null} onClick={() => setRenaming(x.name)}>
+            <button
+              type="button"
+              className="btn btn-sm"
+              disabled={busy !== null}
+              onClick={() => setRenaming(x.name)}
+            >
               Rename
             </button>
           )}
-          <button type="button" className={`btn btn-sm ${ok ? "" : "btn-signal"}`} disabled={busy !== null} onClick={() => (setSince(Date.now()), setReconnecting(true))}>
+          <button
+            type="button"
+            className={`btn btn-sm ${ok ? "" : "btn-signal"}`}
+            disabled={busy !== null}
+            onClick={() => (setSince(Date.now()), setReconnecting(true))}
+          >
             Reconnect
           </button>
-          <button type="button" className="btn btn-sm btn-ghost conn-disconnect" disabled={busy !== null} onClick={() => setConfirming(true)}>
+          <button
+            type="button"
+            className="btn btn-sm btn-ghost conn-disconnect"
+            disabled={busy !== null}
+            onClick={() => setConfirming(true)}
+          >
             Disconnect
           </button>
         </div>
@@ -759,11 +939,19 @@ export function Connect({
         ) : (
           <div className="connect-actions">
             {onCancel && (
-              <button type="button" className="btn btn-ghost" onClick={onCancel}>
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={onCancel}
+              >
                 Cancel
               </button>
             )}
-            <button type="button" className="btn btn-signal" onClick={() => setForm(true)}>
+            <button
+              type="button"
+              className="btn btn-signal"
+              onClick={() => setForm(true)}
+            >
               {label}
             </button>
           </div>
@@ -774,7 +962,11 @@ export function Connect({
   if (!form) {
     return (
       <div className="connect-actions">
-        <button type="button" className="btn btn-signal" onClick={() => setForm(true)}>
+        <button
+          type="button"
+          className="btn btn-signal"
+          onClick={() => setForm(true)}
+        >
           {label}
         </button>
       </div>
@@ -824,7 +1016,9 @@ export function FieldsForm({
   const [values, setValues] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
-  const ready = c.fields.filter((f) => f.required).every((f) => values[f.name]?.trim());
+  const ready = c.fields
+    .filter((f) => f.required)
+    .every((f) => values[f.name]?.trim());
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -848,7 +1042,11 @@ export function FieldsForm({
   };
 
   return (
-    <form className="connect-form" onSubmit={submit} aria-label={title ?? `Connect ${c.name}`}>
+    <form
+      className="connect-form"
+      onSubmit={submit}
+      aria-label={title ?? `Connect ${c.name}`}
+    >
       {title && <b>{title}</b>}
       {c.fields.map((f, i) => (
         <label key={f.name} className="field-stack">
@@ -863,7 +1061,9 @@ export function FieldsForm({
             data-autofocus={i === 0 ? true : undefined}
             placeholder={f.placeholder}
             value={values[f.name] ?? ""}
-            onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+            onChange={(e) =>
+              setValues((v) => ({ ...v, [f.name]: e.target.value }))
+            }
           />
         </label>
       ))}
@@ -879,73 +1079,17 @@ export function FieldsForm({
             Cancel
           </button>
         )}
-        <button type="submit" className="btn btn-signal" disabled={busy || !ready || blocked}>
+        <button
+          type="submit"
+          className="btn btn-signal"
+          disabled={busy || !ready || blocked}
+        >
           {busy ? "Testing…" : "Save and connect"}
         </button>
       </div>
     </form>
   );
 }
-
-/** Waits on a sign-in the hub is finishing: asks where it is until it
- *  ends, then says so. */
-const useFlow = (api: ConnectionsApi, onDone: (account?: string) => void | Promise<void>) => {
-  const [started, setStarted] = useState<Started | null>(null);
-  const [said, setSaid] = useState<string | null>(null);
-  const live = useLive();
-  const done = useRef(onDone);
-  done.current = onDone;
-
-  useEffect(() => {
-    if (!started) return;
-    let stop = false;
-    const tick = async () => {
-      if (stop || !live.current) return;
-      try {
-        const at = await api.flow(started.flow);
-        if (stop || !live.current) return;
-        switch (at.state) {
-          case "waiting":
-            break;
-          case "connected":
-            setStarted(null);
-            await done.current(at.account);
-            return;
-          case "cancelled":
-            setStarted(null);
-            setSaid(CANCELLED);
-            return;
-          case "expired":
-            setStarted(null);
-            setSaid(EXPIRED);
-            return;
-          case "failed":
-            setStarted(null);
-            setSaid(`${at.error}. Nothing was saved.`);
-            return;
-        }
-      } catch {
-        /* asked again below */
-      }
-      timer = setTimeout(() => void tick(), FLOW_POLL_MS);
-    };
-    let timer = setTimeout(() => void tick(), FLOW_POLL_MS);
-    return () => {
-      stop = true;
-      clearTimeout(timer);
-    };
-  }, [api, started]);
-
-  const cancel = async () => {
-    if (!started) return;
-    const flow = started.flow;
-    setStarted(null);
-    setSaid(CANCELLED);
-    await api.cancel(flow).catch(() => {});
-  };
-
-  return { started, setStarted, said, setSaid, cancel };
-};
 
 /** GitHub's device sign-in: a code to type at github.com, no secret here. */
 function DeviceSignIn({
@@ -991,16 +1135,28 @@ function DeviceSignIn({
     return (
       <div className="conn-flow" role="status">
         <p className="small">
-          Type this code at <span className="mono">{started.verificationUri?.replace(/^https?:\/\//, "")}</span>, then come back.
+          Type this code at{" "}
+          <span className="mono">
+            {started.verificationUri?.replace(/^https?:\/\//, "")}
+          </span>
+          , then come back.
         </p>
         <p className="conn-code mono">{started.userCode}</p>
         <div className="connect-actions">
           <span className="small faint">Waiting for GitHub…</span>
-          <button type="button" className="btn btn-ghost" onClick={() => void cancel()}>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            onClick={() => void cancel()}
+          >
             Cancel
           </button>
           {started.verificationUri && (
-            <button type="button" className="btn" onClick={() => openUrl(started.verificationUri!)}>
+            <button
+              type="button"
+              className="btn"
+              onClick={() => openUrl(started.verificationUri!)}
+            >
               Open GitHub
             </button>
           )}
@@ -1024,106 +1180,16 @@ function DeviceSignIn({
             Cancel
           </button>
         )}
-        <button type="button" className="btn btn-signal" disabled={busy || blocked} onClick={() => void begin()}>
+        <button
+          type="button"
+          className="btn btn-signal"
+          disabled={busy || blocked}
+          onClick={() => void begin()}
+        >
           {busy ? "Starting…" : "Sign in with GitHub"}
         </button>
       </div>
     </>
-  );
-}
-
-/** A sign-in in the browser, being waited on. */
-function WaitingFor({ service, started, onCancel }: { service: string; started: Started; onCancel: () => void }) {
-  return (
-    <div className="conn-flow" role="status">
-      <p className="small">Finish signing in to {service} in your browser, then come back.</p>
-      <div className="connect-actions">
-        <span className="small faint">Waiting for {service}…</span>
-        <button type="button" className="btn btn-ghost" onClick={onCancel}>
-          Cancel
-        </button>
-        {started.url && (
-          <button type="button" className="btn" onClick={() => openUrl(started.url!)}>
-            Open {service}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
-/** The identifier and secret of the person's own app at a service, kept in
- *  the hub's vault before anything is signed in to. */
-function AppForm({
-  api,
-  connector: c,
-  onKept,
-  onCancel,
-}: {
-  api: ConnectionsApi;
-  connector: Connector;
-  onKept: () => void | Promise<void>;
-  onCancel?: () => void;
-}) {
-  const words = appWords(c.id);
-  const [app, setApp] = useState({ id: "", secret: "" });
-  const [busy, setBusy] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
-
-  const save = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setBusy(true);
-    setProblem(null);
-    try {
-      await api.saveApp(c.id, app.id.trim(), app.secret.trim());
-      await onKept();
-    } catch (err) {
-      setProblem(message(err));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <form className="connect-form" onSubmit={save} aria-label={`Your ${c.name} app`}>
-      <label className="field-stack">
-        <span className="field-label">{words.id}</span>
-        <input
-          type="text"
-          autoComplete="off"
-          spellCheck={false}
-          data-autofocus
-          value={app.id}
-          onChange={(e) => setApp((v) => ({ ...v, id: e.target.value }))}
-        />
-      </label>
-      <label className="field-stack">
-        <span className="field-label">{words.secret}</span>
-        <input
-          type="password"
-          autoComplete="off"
-          spellCheck={false}
-          value={app.secret}
-          onChange={(e) => setApp((v) => ({ ...v, secret: e.target.value }))}
-        />
-      </label>
-      {problem && (
-        <p className="small state-blocked" role="alert">
-          {problem}
-        </p>
-      )}
-      <div className="connect-actions">
-        <span className="small faint conn-where">{SAVED_WHERE}</span>
-        {onCancel && (
-          <button type="button" className="btn btn-ghost" onClick={onCancel}>
-            Cancel
-          </button>
-        )}
-        <button type="submit" className="btn btn-signal" disabled={busy || !app.id.trim() || !app.secret.trim()}>
-          {busy ? "Saving…" : "Save app"}
-        </button>
-      </div>
-    </form>
   );
 }
 
@@ -1175,8 +1241,12 @@ function AppSignIn({
 
   const askToSetUp = () => {
     if (!agent) return;
-    if (askAgent(agent.id, setUpRequest(c.name, "me"))) useUi.getState().closeSettings();
-    else setProblem(`${agent.name} isn’t on this computer to ask. Use an app you have already.`);
+    if (askAgent(agent.id, setUpRequest(c.name, "me")))
+      useUi.getState().closeSettings();
+    else
+      setProblem(
+        `${agent.name} isn’t on this computer to ask. Use an app you have already.`,
+      );
   };
 
   if (state !== "ready") {
@@ -1206,7 +1276,11 @@ function AppSignIn({
           </p>
         )}
         <div className="connect-actions">
-          <button type="button" className="link small" onClick={() => setOwn(true)}>
+          <button
+            type="button"
+            className="link small"
+            onClick={() => setOwn(true)}
+          >
             I have an app already
           </button>
           {onCancel && (
@@ -1222,7 +1296,14 @@ function AppSignIn({
     );
   }
 
-  if (started) return <WaitingFor service={c.name} started={started} onCancel={() => void cancel()} />;
+  if (started)
+    return (
+      <WaitingFor
+        service={c.name}
+        started={started}
+        onCancel={() => void cancel()}
+      />
+    );
 
   return (
     <div className="connect-form">
@@ -1238,105 +1319,15 @@ function AppSignIn({
             Cancel
           </button>
         )}
-        <button type="button" className="btn btn-signal" disabled={busy || blocked} onClick={() => void begin()}>
+        <button
+          type="button"
+          className="btn btn-signal"
+          disabled={busy || blocked}
+          onClick={() => void begin()}
+        >
           {busy ? "Starting…" : `Sign in with ${c.name}`}
         </button>
       </div>
     </div>
-  );
-}
-
-/** A connection whose sign-in lapsed, or was made on an earlier app: Desk
- *  is approved on it again, and nothing new is made. Where the person's app
- *  isn't kept, approving can't work, so the way to set the app up shows
- *  instead. */
-export function ApproveAgain({
-  api,
-  connector: c,
-  connection: x,
-  onDone,
-  agent: given,
-  onAsk,
-}: {
-  api: ConnectionsApi;
-  connector: Connector;
-  connection: { id: string; name: string };
-  onDone: () => void | Promise<void>;
-  /** Who is asked to set the app up; Desk's own agent when not said. */
-  agent?: { id: string; name: string };
-  onAsk?: () => boolean;
-}) {
-  const manager = useSetUpAgent();
-  const agent = given ?? manager;
-  const { started, setStarted, said, setSaid, cancel } = useFlow(api, onDone);
-  const [busy, setBusy] = useState(false);
-  const [own, setOwn] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
-
-  const begin = async () => {
-    setBusy(true);
-    setSaid(null);
-    setProblem(null);
-    try {
-      const s = await api.approveAgain(c.id, x.id);
-      setStarted(s);
-      if (s.url) openUrl(s.url);
-    } catch (e) {
-      setProblem(message(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  if (started) return <WaitingFor service={c.name} started={started} onCancel={() => void cancel()} />;
-
-  if (appOf(c) !== "ready") {
-    if (own || !agent) return <AppForm api={api} connector={c} onKept={onDone} onCancel={agent ? () => setOwn(false) : undefined} />;
-    return (
-      <>
-        {problem && (
-          <p className="small state-blocked" role="alert">
-            {problem}
-          </p>
-        )}
-        <div className="prov-actions">
-          <span className="small">
-            {appOf(c) === "moved"
-              ? `Desk’s address changed, so ${x.name} can’t be approved again yet.`
-              : `Your ${c.name} app isn’t kept, so ${x.name} can’t be approved again yet.`}
-          </span>
-          <button type="button" className="link small" onClick={() => setOwn(true)}>
-            I have an app already
-          </button>
-          <button
-            type="button"
-            className="btn btn-sm btn-signal"
-            onClick={() => {
-              const asked = onAsk ? onAsk() : askAgent(agent.id, setUpRequest(c.name, "me"));
-              if (asked) useUi.getState().closeSettings();
-              else setProblem(`${agent.name} isn’t on this computer to ask. Use an app you have already.`);
-            }}
-          >
-            Ask {agent.name} to set it up
-          </button>
-        </div>
-      </>
-    );
-  }
-
-  return (
-    <>
-      {(problem ?? said) && (
-        <p className="small state-blocked" role={problem ? "alert" : "status"}>
-          {problem ?? said}
-        </p>
-      )}
-      <div className="prov-actions">
-        <span className="small">Approve Desk on {c.name} again to carry on with {x.name}.</span>
-        <button type="button" className="btn btn-sm btn-signal" disabled={busy} onClick={() => void begin()}>
-          {busy ? "Starting…" : "Approve again"}
-        </button>
-      </div>
-    </>
   );
 }
