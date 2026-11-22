@@ -22,12 +22,16 @@ afterEach(() => {
 });
 
 it("reads what each machine holds while shown, and again once that goes stale", async () => {
-  invoke.mockResolvedValueOnce({}).mockResolvedValueOnce({ devbox: { ungrouped: "desk" } });
+  // The first read answers a while after it is asked: what it read is as
+  // old as the ask, so the next comes a window after the ask.
+  invoke
+    .mockImplementationOnce(() => new Promise((done) => setTimeout(() => done({}), 1_000)))
+    .mockResolvedValueOnce({ devbox: { ungrouped: "desk" } });
   const { result, rerender } = renderHook(() => useBossOf({ id: "s1", machine: "devbox" }));
-  await vi.advanceTimersByTimeAsync(0);
+  await vi.advanceTimersByTimeAsync(1_000);
   expect(invoke).toHaveBeenCalledWith("local_boss_grants");
   expect(result.current, "devbox holds no grant for it yet").toBeNull();
-  await vi.advanceTimersByTimeAsync(CARRIED_FRESH_MS);
+  await vi.advanceTimersByTimeAsync(CARRIED_FRESH_MS - 1_000);
   rerender();
   expect(invoke).toHaveBeenCalledTimes(2);
   expect(result.current).toMatchObject({ id: "home/desk", served: true });

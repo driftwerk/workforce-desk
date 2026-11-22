@@ -524,7 +524,11 @@ async fn a_stop_desk_made_before_the_persons_yes_is_lifted_with_it_and_one_after
         .left
         .insert("acme".into(), (4, stop("desk", before)));
     say(&f, &w, true).await;
-    sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    let s = sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    assert!(
+        s.carried["devbox"].contains_key("acme"),
+        "held for its boss"
+    );
     let g = devbox.grant("acme").unwrap();
     assert_eq!(g["stopped"], Value::Null, "lifted by the yes");
     assert_eq!(g["revision"], 5);
@@ -538,11 +542,17 @@ async fn a_stop_desk_made_before_the_persons_yes_is_lifted_with_it_and_one_after
     let lower = wanted(&[("devbox", vec![acme(&[S1], "watch")], &[S1])]);
     let s = sync(&f.bosses, &f.kept, &lower, &on(&[&devbox])).await;
     assert!(s.stopped_since_yes.contains_key("acme"));
+    assert!(
+        s.carried["devbox"].is_empty(),
+        "stopped: its boss runs nothing"
+    );
     let g = devbox.grant("acme").unwrap();
     assert_eq!((&g["level"], &g["stopped"]), (&json!("watch"), &after));
-    // A Cancel leaves it stopped and isn't asked again.
+    // A Cancel leaves it stopped and isn't asked again; written as it was,
+    // it is still not carried.
     say(&f, &lower, false).await.expect("asked again");
-    sync(&f.bosses, &f.kept, &lower, &on(&[&devbox])).await;
+    let s = sync(&f.bosses, &f.kept, &lower, &on(&[&devbox])).await;
+    assert!(s.carried["devbox"].is_empty(), "{:?}", s.carried);
     assert_eq!(devbox.grant("acme").unwrap()["stopped"], after);
     assert!(say(&f, &lower, true).await.is_none());
 

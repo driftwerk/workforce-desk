@@ -171,6 +171,7 @@ interface HomeGrantsState {
   /** Each machine's groups whose grant Desk keeps there for a boss on this
    *  computer, with that boss's agent id, as last read. */
   byMachine: Record<string, Record<string, string>>;
+  /** When the last read was asked for: what it read was so by then. */
   readAt: number;
   /** Reads them again unless they were read just now. */
   ensure: () => void;
@@ -184,11 +185,12 @@ export const useHomeGrants = create<HomeGrantsState>((set, get) => ({
   ensure: () => {
     if (readingCarried || Date.now() - get().readAt < CARRIED_FRESH_MS) return;
     readingCarried = true;
+    const readAt = Date.now();
     invoke<Record<string, Record<string, string>> | null>("local_boss_grants")
       // A Desk with no native side to ask (the browser) keeps none.
-      .then((byMachine) => set({ byMachine: byMachine ?? {}, readAt: Date.now() }))
+      .then((byMachine) => set({ byMachine: byMachine ?? {}, readAt }))
       // Kept as last read, and not asked again until it would be anyway.
-      .catch(() => set({ readAt: Date.now() }))
+      .catch(() => set({ readAt }))
       .finally(() => {
         readingCarried = false;
       });

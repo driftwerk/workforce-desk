@@ -957,7 +957,10 @@ async fn run(
         };
         let key = (engine.id().to_string(), group.clone());
         match (&done, step) {
-            (Ok(w), Step::Write(..)) if w.ours && !remote => out.holding.insert(key),
+            // One Desk stopped after the person's yes stays stopped there.
+            (Ok(w), Step::Write(..)) if w.ours && w.stopped_since_yes.is_none() && !remote => {
+                out.holding.insert(key)
+            }
             _ => out.holding.remove(&key),
         };
         match done {
