@@ -2421,6 +2421,10 @@ export interface BossPlan {
   /** What holds its new starts while Desk's breaker does, in the Floor's
    *  words: Continue on the Floor. */
   held?: string | null;
+  /** How many sessions it runs at once: its own limit within its boss's,
+   *  as the hub's runner counts them; null while no boss of it oversees,
+   *  absent from an older hub. */
+  limit?: number | null;
 }
 
 /** What a plan may spend. */
