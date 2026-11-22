@@ -2,7 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent, HubAccount } from "../chat/types";
 import type { SortRule } from "../hub/client";
-import { MailSorting } from "./MailSorting";
+import { MailSorting, useMailSorting } from "./MailSorting";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 
@@ -23,6 +23,11 @@ const kat: Agent = { hubId: "local", id: "kat", name: "Kat", model: null, provid
 const NEWS: SortRule = { rule_id: "sort-ab12cd34ef56", owner: "me@home", says: "New mail in home INBOX from news@shop.com → move it to News", enabled: true, watched_by: [] };
 const BOSS: SortRule = { rule_id: "sort-111122223333", owner: null, says: "New mail in work INBOX from boss@acme.example → flag it", enabled: false, watched_by: ["Boss mail", "Digest"] };
 
+function Section({ on = true }: { on?: boolean }) {
+  const mail = useMailSorting(hub, on);
+  return <MailSorting agent={kat} mail={mail} />;
+}
+
 const reply = (status: number, body?: unknown): Response =>
   new Response(body === undefined ? null : JSON.stringify(body), { status, headers: body === undefined ? {} : { "content-type": "application/json" } });
 
@@ -35,7 +40,7 @@ const calls = (method: string) => fetchOnHub.mock.calls.filter((c) => c[0] === m
 
 const show = async (rules: SortRule[] = [NEWS, BOSS], others?: (method: string, path: string) => Response) => {
   serve(rules, others);
-  render(<MailSorting agent={kat} hub={hub} />);
+  render(<Section />);
   await screen.findByRole("heading", { name: "Mail sorting" });
 };
 
@@ -114,15 +119,62 @@ describe("Mail sorting", () => {
     expect(requestFocus).toHaveBeenCalledWith("agent:local/kat", `Change my mail sorting rule "${NEWS.says}" (${NEWS.rule_id}) so that `);
   });
 
-  it("says Kat can sort mail when there are no rules", async () => {
+  it("words the rules as the person's own, and says they have none yet", async () => {
     await show([]);
-    expect(screen.getByText("Kat can sort new mail for you. Ask Kat to set up a rule.")).toBeTruthy();
+    expect(screen.getByText("You have no mail sorting rules yet. Ask Kat to set one up.")).toBeTruthy();
+    expect(screen.getByText(/Your rules for sorting new mail/)).toBeTruthy();
     expect(screen.queryByRole("switch")).toBeNull();
+  });
+
+  it("says it is reading the rules until they arrive", async () => {
+    serve([NEWS]);
+    render(<Section />);
+    expect(screen.getByRole("status").textContent).toBe("Reading your mail sorting rules…");
+    expect(await screen.findByText(NEWS.says)).toBeTruthy();
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("reads again when Desk is looked at again, keeping a rule being saved as it is", async () => {
+    await show([NEWS]);
+    serve([NEWS, BOSS]);
+    fireEvent.focus(window);
+    expect(await screen.findByText(BOSS.says)).toBeTruthy();
+
+    serve([], (method) => (method === "PUT" ? new Promise<Response>(() => {}) as never : reply(200, {})));
+    fireEvent.click(within(row(NEWS.says)).getByRole("switch"));
+    const reads = calls("GET").length;
+    fireEvent.focus(window);
+    expect(calls("GET")).toHaveLength(reads);
+    expect(screen.getByText(NEWS.says)).toBeTruthy();
+  });
+
+  it("does not read again while Desk is hidden, and keeps what it has when a later read fails", async () => {
+    await show([NEWS]);
+    const hidden = vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+    const reads = calls("GET").length;
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(calls("GET")).toHaveLength(reads);
+    hidden.mockReturnValue("visible");
+    fetchOnHub.mockResolvedValue(reply(500, { error: "The hub is busy." }));
+    document.dispatchEvent(new Event("visibilitychange"));
+    await waitFor(() => expect(calls("GET")).toHaveLength(reads + 1));
+    await new Promise((r) => setTimeout(r, 0));
+    expect(screen.getByText(NEWS.says)).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+    hidden.mockRestore();
+  });
+
+  it("neither reads nor shows anything for an agent without the email skill", async () => {
+    serve([NEWS]);
+    const { container } = render(<Section on={false} />);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(fetchOnHub).not.toHaveBeenCalled();
+    expect(container.innerHTML).toBe("");
   });
 
   it("shows nothing at all on a hub without the route", async () => {
     fetchOnHub.mockResolvedValue(reply(404, { error: "Not Found" }));
-    const { container } = render(<MailSorting agent={kat} hub={hub} />);
+    const { container } = render(<Section />);
     await waitFor(() => expect(fetchOnHub).toHaveBeenCalled());
     await new Promise((r) => setTimeout(r, 0));
     expect(container.innerHTML).toBe("");
@@ -130,7 +182,7 @@ describe("Mail sorting", () => {
 
   it("says why when the rules can't be read", async () => {
     fetchOnHub.mockResolvedValue(reply(500, { error: "The hub is busy." }));
-    render(<MailSorting agent={kat} hub={hub} />);
+    render(<Section />);
     expect((await screen.findByRole("alert")).textContent).toBeTruthy();
     expect(screen.getByRole("heading", { name: "Mail sorting" })).toBeTruthy();
   });
