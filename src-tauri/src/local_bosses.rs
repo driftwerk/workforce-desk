@@ -128,6 +128,10 @@ pub struct MachineWanted {
     pub grants: Vec<WantedGrant>,
     #[serde(default)]
     pub listed: Vec<String>,
+    /// Whether its Ungrouped grant is said: until its sessions are read
+    /// there, the one it holds is left as it is, but for one past its time.
+    #[serde(default, rename = "ungroupedKnown")]
+    pub ungrouped_known: bool,
 }
 
 /// What every machine should hold, by machine id.
@@ -1009,21 +1013,20 @@ pub async fn sync<E: Engine>(
             }
         };
         let now = Utc::now();
-        let held = match held_on(engine).await {
-            Ok(h) => h
-                .into_iter()
-                .filter(|(g, h)| {
-                    wanted.plans_known
-                        || plan_of(g).is_none()
-                        || held_at(h, "expiresAt").is_some_and(|e| e <= now)
-                })
-                .collect(),
-            Err(why) => {
-                out.failed.push((id.clone(), why));
-                continue;
-            }
-        };
         let mw = wanted.machines.get(id);
+        let ungrouped_known = mw.is_some_and(|m| m.ungrouped_known);
+        let (held, unknown): (BTreeMap<String, Value>, BTreeMap<String, Value>) =
+            match held_on(engine).await {
+                Ok(h) => h.into_iter().partition(|(g, h)| {
+                    let unsaid = (!wanted.plans_known && plan_of(g).is_some())
+                        || (!ungrouped_known && g == bosses::UNGROUPED);
+                    !unsaid || held_at(h, "expiresAt").is_some_and(|e| e <= now)
+                }),
+                Err(why) => {
+                    out.failed.push((id.clone(), why));
+                    continue;
+                }
+            };
         let desired: BTreeMap<String, (Value, Option<DateTime<Utc>>)> = mw
             .into_iter()
             .flat_map(|m| m.grants.iter())
@@ -1038,11 +1041,22 @@ pub async fn sync<E: Engine>(
                 }
             })
             .collect();
+        // An Ungrouped grant held there and not yet said either way still
+        // hands its sessions to its boss here.
+        let kept: Option<(String, String)> = unknown
+            .get(bosses::UNGROUPED)
+            .filter(|h| ours(h) && h["stopped"].is_null())
+            .and_then(|h| h["boss"].as_str()?.strip_prefix("local:"))
+            .map(|agent| (bosses::UNGROUPED.to_string(), agent.to_string()));
+        if let Some((group, _)) = &kept {
+            out.holding.insert((id.clone(), group.clone()));
+        }
         let bossed = mw
             .into_iter()
             .flat_map(|m| m.grants.iter())
             .filter(|g| desired.contains_key(&g.group) && !remote.contains(&g.group))
             .map(|g| (g.group.clone(), g.agent.clone()))
+            .chain(kept)
             .collect();
         out.carried.insert(id.clone(), bossed);
         let listed: BTreeSet<String> = mw

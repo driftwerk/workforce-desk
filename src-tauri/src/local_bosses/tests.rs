@@ -203,6 +203,7 @@ fn wanted(machines: &[(&str, Vec<WantedGrant>, &[&str])]) -> Wanted {
                     MachineWanted {
                         grants: g.clone(),
                         listed: listed.iter().map(|s| s.to_string()).collect(),
+                        ungrouped_known: true,
                     },
                 )
             })
@@ -284,10 +285,29 @@ async fn the_main_overseer_is_asked_once_for_a_machine_s_ungrouped_sessions() {
         content(&g.grant)
     );
     // What the page hands devbox's ungrouped sessions to.
-    assert_eq!(
-        s.carried["devbox"],
-        BTreeMap::from([("ungrouped".to_string(), "desk".to_string())])
-    );
+    let desk = BTreeMap::from([("ungrouped".to_string(), "desk".to_string())]);
+    assert_eq!(s.carried["devbox"], desk);
+
+    // The hub restarted, or Desk asks again after a while: devbox's
+    // sessions aren't read yet, so its grant is left as it is, still handed
+    // to its boss.
+    let unread = |known: bool| {
+        let mut w = wanted(&[("devbox", vec![], &[S1])]);
+        w.machines.get_mut("devbox").unwrap().ungrouped_known = known;
+        w
+    };
+    let before = devbox.writes().len();
+    let s = sync(&f.bosses, &f.kept, &unread(false), &on(&[&devbox])).await;
+    assert_eq!(devbox.writes().len(), before, "{:?}", devbox.writes());
+    assert!(devbox.grant("ungrouped").is_some());
+    assert_eq!(s.carried["devbox"], desk);
+    // A machine the hub doesn't say at all is left as it is too.
+    let s = sync(&f.bosses, &f.kept, &wanted(&[]), &on(&[&devbox])).await;
+    assert!(devbox.grant("ungrouped").is_some());
+    assert_eq!(s.carried.get("devbox"), Some(&desk));
+    // Read, with nothing in Ungrouped there: it goes.
+    sync(&f.bosses, &f.kept, &unread(true), &on(&[&devbox])).await;
+    assert!(devbox.grant("ungrouped").is_none());
 }
 
 #[tokio::test]
