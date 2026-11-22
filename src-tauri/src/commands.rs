@@ -72,6 +72,8 @@ pub const COMMANDS: &[&str] = &[
     "themes_propose",
     "themes_proposal_remove",
     "themes_reveal",
+    "hub_path_open",
+    "hub_path_reveal",
     "hubs_list",
     "hubs_remove",
     "hubs_rename",

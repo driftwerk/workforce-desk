@@ -1545,8 +1545,9 @@ body.side-resizing * {
 .terminal .xterm {
   height: 100%;
 }
-/* A running CLI drawn for the other ground than its terminal's now. */
-.session-recolor {
+/* A row of words under a session's driver bar: its CLI drawn for another
+   ground, or its folder's dependencies. */
+.session-note {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -2574,6 +2575,32 @@ button.thread-bar:hover {
 .gi.in-focus.on {
   background: color-mix(in srgb, var(--signal) 8%, var(--raised));
 }
+/* Picked to close with others. */
+.gi.selected,
+.gi.selected:hover {
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--signal) 40%, transparent);
+}
+.side-select {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 6px;
+  padding: 6px 6px 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: 0 1px 2px var(--lift);
+}
+.side-select-count {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+}
 .gi .gi-handle {
   opacity: 0;
   cursor: grab;
@@ -2800,6 +2827,41 @@ button.thread-bar:hover {
 }
 .confirm-body > * + * {
   margin-top: 12px;
+}
+.close-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  max-height: 320px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.close-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 12px;
+  min-width: 0;
+}
+.close-row + .close-row {
+  border-top: 1px solid var(--border);
+}
+.close-row-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.close-row-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.close-row-why,
+.close-row-folder {
+  padding-left: 16px;
+  overflow-wrap: anywhere;
 }
 .confirm-check {
   display: flex;

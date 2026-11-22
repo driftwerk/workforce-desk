@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { emptyConversation, type ConversationState, type Turn } from "../chat/conversation";
-import type { Agent, ChatMessage } from "../chat/types";
+import { agentKey, type Agent, type ChatMessage } from "../chat/types";
 import { asked, failureIn, forModel, missingAgent, newAnswers, resolveAgent, turnsOver, voiceFor, voiceRoster, wakeNames } from "./route";
 
 const roster: Agent[] = [
@@ -29,6 +29,27 @@ describe("voice routing", () => {
     expect(resolveAgent("Atlas", roster, null, null)?.id).toBe("atlas-l");
     expect(resolveAgent("allan", roster, roster[0]!, null)?.id).toBe("allan");
     expect(resolveAgent("nobody", roster, roster[0]!, null)).toBeNull();
+  });
+
+  describe("after a rename", () => {
+    const kat: Agent = { hubId: "local", id: "desk", name: "Kat", model: null, provider: null, isDefault: true };
+    const renamed = [...roster, kat];
+    const former = (a: Agent) => (agentKey(a) === agentKey(kat) ? ["Desk", "Atlas"] : []);
+
+    it("wakes on the new name and on an old one no one has now, and the old one reaches them", () => {
+      expect(wakeNames(renamed, former)).toEqual(["Atlas", "allan", "Kat", "Desk"]);
+      expect(resolveAgent("Kat", renamed, null, null, former)?.id).toBe("desk");
+      expect(resolveAgent("Desk", renamed, null, null, former)?.id).toBe("desk");
+      expect(resolveAgent("desk", renamed, null, null, former)?.id).toBe("desk");
+      expect(resolveAgent("Atlas", renamed, null, null, former)?.id).toBe("atlas-l");
+      expect(resolveAgent("Des", renamed, null, null, former)).toBeNull();
+      expect(voiceRoster(renamed, {}, former).map((m) => m.name)).toEqual(["Atlas", "allan", "Kat", "Desk"]);
+    });
+
+    it("hears an old name in the voice its agent has now", () => {
+      const live = { provider: "gpt-live", voice: "marin" };
+      expect(voiceRoster(renamed, { "local/desk": live }, former).find((m) => m.name === "Desk")).toEqual({ name: "Desk", voice: live });
+    });
   });
 
   it("sends a follow-up to whoever is being talked to, else the open DM", () => {

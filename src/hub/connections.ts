@@ -8,9 +8,13 @@ import type { HubRef } from "./net";
  *  email), each with a name the person gave it. */
 
 /** How a connector is signed in to: its fields, GitHub's device sign-in
- *  (or a token in the fields), or Google's sign-in on the person's own
- *  OAuth client. */
-export type SignIn = "fields" | "github" | "google";
+ *  (or a token in the fields), or a sign-in on the person's own app at the
+ *  service (Google, FreeAgent). */
+export type SignIn = "fields" | "github" | "app";
+
+/** The person's own app at a service: `ready` (a sign-in can start),
+ *  `missing` (none kept yet), or `moved` (made for an older Desk address). */
+export type AppState = "ready" | "missing" | "moved";
 
 export interface ConnectorField {
   name: string;
@@ -59,6 +63,9 @@ export interface Connection {
   source: string;
   /** The agents it reaches. */
   usedBy: UsedBy[];
+  /** Its sign-in lapsed, or was made on an earlier app: it is approved
+   *  again, without making a new connection. */
+  approveAgain?: boolean;
 }
 
 /** About when an approval lapses, as the hub counts it (by the UTC
@@ -95,9 +102,10 @@ export interface Connector {
   about: string;
   signIn: SignIn;
   fields: ConnectorField[];
-  /** Whether its sign-in can start (GitHub's app, the person's Google
-   *  client). */
+  /** Whether its sign-in can start (GitHub's app, the person's own app). */
   signInReady: boolean;
+  /** For a sign-in on the person's own app: where that app stands. */
+  app?: AppState | null;
   /** It holds more than one connection (Slack holds one). */
   several: boolean;
   /** What a new connection's name should be, as the form says. */
@@ -122,7 +130,7 @@ export interface Disconnected {
 
 export interface Started {
   flow: string;
-  /** Google: the page to open. */
+  /** An app's sign-in: the page to open. */
   url: string | null;
   /** GitHub: the code to type at `verificationUri`. */
   userCode: string | null;
@@ -195,10 +203,21 @@ export interface SetupStep {
 }
 
 /** What a setup's card shows now, as the hub decides it. */
-export type SetupNowKind = "working" | "offer" | "code" | "sign_in" | "connected" | "failed" | "ended";
+export type SetupNowKind = "working" | "offer" | "code" | "sign_in" | "approve" | "step" | "connected" | "failed" | "ended";
 
 /** The card's one button. */
-export type SetupAction = "use_cli" | "open_code" | "show_page" | "new_code" | "other_way" | "retry" | "paste_token" | "open_connections";
+export type SetupAction =
+  | "use_cli"
+  | "open_code"
+  | "show_page"
+  | "new_code"
+  | "other_way"
+  | "retry"
+  | "paste_token"
+  | "open_connections"
+  | "open_approve"
+  | "open_step"
+  | "done_step";
 
 /** The one thing a setup's card shows now: the hub's words, never the
  *  agent's. */
@@ -212,14 +231,17 @@ export interface SetupNow {
   expiresAt: string | null;
   action: SetupAction | null;
   /** A quiet second choice. */
-  other: "other_way" | null;
+  other: "other_way" | "done_step" | null;
   /** GitHub: the page a token of the person's own is made on, filled in;
    *  set while they may paste one on the card instead. */
   paste?: string | null;
+  /** An app's step where its identifier and secret are saved: set while
+   *  they may be pasted on the card. */
+  appPaste?: boolean;
 }
 
 /** What the person chooses on a setup's card. */
-export type SetupChoice = "use-cli" | "other-way" | "new-code";
+export type SetupChoice = "use-cli" | "other-way" | "new-code" | "done-step";
 
 /** An agent setting a connection up itself, as the hub keeps it: the card
  *  the chat shows. */
@@ -236,7 +258,7 @@ export interface Setup {
   /** When the agent last asked for it: its message shows the card. */
   askedAt?: string;
   connected: { connection: string; account: string; onFor: string | null; write: boolean | null } | null;
-  way?: "cli" | "device" | "browser" | "token";
+  way?: "cli" | "device" | "browser" | "token" | "app";
   now?: SetupNow;
   /** A newer setup of the service took over: never shown. */
   ended?: "replaced" | null;
@@ -254,8 +276,11 @@ export interface ConnectionsApi {
    *  only on a pass keeps that it was approved now. */
   renew(id: string, connection: string): Promise<Connection>;
   disconnect(id: string, connection: string): Promise<Disconnected>;
-  saveGoogleClient(clientId: string, clientSecret: string): Promise<void>;
+  /** Keeps the person's own app at a service: its identifier and secret. */
+  saveApp(id: string, clientId: string, clientSecret: string): Promise<void>;
   start(id: string, at: At, name?: string): Promise<Started>;
+  /** Approves Desk again on a connection whose sign-in lapsed. */
+  approveAgain(id: string, connection: string): Promise<Started>;
   flow(flow: string): Promise<FlowState>;
   cancel(flow: string): Promise<void>;
   picks(agent: string): Promise<ServicePicks[]>;
@@ -266,6 +291,9 @@ export interface ConnectionsApi {
   /** A token the person pasted on the card: straight to the hub's vault,
    *  never through the chat. */
   pasteToken(setup: string, token: string): Promise<Setup>;
+  /** The identifier and secret of an app the person made, from the card:
+   *  straight to the hub's vault, never through the chat. */
+  pasteApp(setup: string, clientId: string, clientSecret: string): Promise<Setup>;
 }
 
 const path = (id: string, connection?: string) =>
@@ -289,9 +317,10 @@ export const connectionsOf = (hub: HubRef): ConnectionsApi => ({
     (await hubCall<{ connection: Connection }>(hub, "POST", `${path(id, connection)}/test?renewed=true`, {})).connection,
   disconnect: async (id, connection) =>
     (await hubCall<Disconnected | undefined>(hub, "DELETE", path(id, connection))) ?? { stillKept: null, note: null },
-  saveGoogleClient: (clientId, clientSecret) =>
-    hubCall<void>(hub, "POST", "/api/desk/connections/google/client", { client_id: clientId, client_secret: clientSecret }),
+  saveApp: (id, clientId, clientSecret) =>
+    hubCall<void>(hub, "POST", `${path(id)}/app`, { client_id: clientId, client_secret: clientSecret }),
   start: (id, at, name) => hubCall<Started>(hub, "POST", `${path(id)}/oauth/start`, { ...at, ...(name ? { name } : {}) }),
+  approveAgain: (id, connection) => hubCall<Started>(hub, "POST", `${path(id, connection)}/approve`, {}),
   flow: (flow) => hubCall<FlowState>(hub, "GET", `/api/desk/connection-flows/${encodeURIComponent(flow)}`),
   cancel: (flow) => hubCall<void>(hub, "DELETE", `/api/desk/connection-flows/${encodeURIComponent(flow)}`),
   picks: async (agent) =>
@@ -306,6 +335,13 @@ export const connectionsOf = (hub: HubRef): ConnectionsApi => ({
     (await hubCall<{ setup: Setup }>(hub, "POST", `/api/desk/connection-setups/${encodeURIComponent(setup)}/signed-in`, {})).setup,
   pasteToken: async (setup, token) =>
     (await hubCall<{ setup: Setup }>(hub, "POST", `/api/desk/connection-setups/${encodeURIComponent(setup)}/token`, { token })).setup,
+  pasteApp: async (setup, clientId, clientSecret) =>
+    (
+      await hubCall<{ setup: Setup }>(hub, "POST", `/api/desk/connection-setups/${encodeURIComponent(setup)}/app`, {
+        client_id: clientId,
+        client_secret: clientSecret,
+      })
+    ).setup,
   choose: async (setup, choice) =>
     (await hubCall<{ setup: Setup }>(hub, "POST", `/api/desk/connection-setups/${encodeURIComponent(setup)}/${choice}`, {})).setup,
 });
@@ -321,7 +357,24 @@ export const forAll = (c: Connector): Connection[] => c.connections.filter((x) =
 export const agentOnly = (c: Connector): Connection[] => c.connections.filter((x) => x.level === "agent");
 
 /** The services an agent can set up itself, in Desk's own browser. */
-export const SET_UP_BY_AGENT = new Set(["jira", "linear", "datadog", "metabase", "github", "bank"]);
+export const SET_UP_BY_AGENT = new Set(["jira", "linear", "datadog", "metabase", "github", "google", "freeagent", "bank"]);
+
+/** The app's own words at a service: what its identifier and secret are
+ *  called there, and what its sign-in page asks of the person. */
+export interface AppWords {
+  id: string;
+  secret: string;
+  signInNote: string | null;
+}
+
+const APP_WORDS: Record<string, AppWords> = {
+  freeagent: { id: "OAuth identifier", secret: "OAuth secret", signInNote: "Choose the business on FreeAgent’s page." },
+};
+
+export const appWords = (service: string): AppWords => APP_WORDS[service] ?? { id: "Client ID", secret: "Client secret", signInNote: null };
+
+/** Where an app stands: older hubs said only whether its sign-in could start. */
+export const appOf = (c: Connector): AppState => c.app ?? (c.signInReady ? "ready" : "missing");
 
 /** What an approval reads as: always "about", as the hub only estimates
  *  it. Its day is the hub's UTC date, shown as that date. */

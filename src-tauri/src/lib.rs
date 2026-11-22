@@ -14,6 +14,7 @@ mod grid_windows;
 mod helper;
 mod hub_io;
 mod hubs;
+mod issues_relay;
 mod key_copies;
 mod knows_machines;
 mod links;
@@ -213,6 +214,29 @@ fn themes_reveal(handle: tauri::AppHandle, app: State<'_, App>) -> CommandResult
         .opener()
         .open_path(dir.to_string_lossy(), None::<&str>)
         .map_err(text)
+}
+
+/// Opens a folder the local hub keeps, such as an agent's documents, in the
+/// system's file manager.
+#[tauri::command]
+fn hub_path_open(
+    handle: tauri::AppHandle,
+    app: State<'_, App>,
+    path: PathBuf,
+) -> CommandResult<()> {
+    use tauri_plugin_opener::OpenerExt;
+    let path = files::within_hub_data(&app.paths, &path).map_err(text)?;
+    handle
+        .opener()
+        .open_path(path.to_string_lossy(), None::<&str>)
+        .map_err(text)
+}
+
+/// Shows a place the local hub keeps in the system's file manager.
+#[tauri::command]
+fn hub_path_reveal(app: State<'_, App>, path: PathBuf) -> CommandResult<()> {
+    let path = files::within_hub_data(&app.paths, &path).map_err(text)?;
+    tauri_plugin_opener::reveal_item_in_dir(path).map_err(text)
 }
 
 /// Shows Desk's own log on this computer in the system's file manager.
@@ -1287,6 +1311,9 @@ pub fn run() {
             // A local boss's calls on its group's machine sessions, carried
             // to each machine while Desk is open.
             app.manage(crew_relay::start(app.handle().clone()));
+            // The machines' sessions' Linear and Jira calls, carried to this
+            // computer's hub, which holds the boards' links.
+            app.manage(issues_relay::start(app.handle().clone()));
             app.manage(App {
                 paths,
                 backend,
@@ -1402,6 +1429,8 @@ pub fn run() {
             themes_propose,
             themes_proposal_remove,
             themes_reveal,
+            hub_path_open,
+            hub_path_reveal,
             hubs_list,
             hubs_remove,
             hubs_rename,
@@ -1505,6 +1534,11 @@ pub fn run() {
             }
             if let tauri::RunEvent::Exit = event
                 && let Some(relay) = app.try_state::<crew_relay::Stop>()
+            {
+                relay.stop();
+            }
+            if let tauri::RunEvent::Exit = event
+                && let Some(relay) = app.try_state::<issues_relay::Stop>()
             {
                 relay.stop();
             }

@@ -21,6 +21,23 @@ export const saysBosses = (manager: Manager | null): boolean => !!manager?.bosse
 export const bossOfGroup = (manager: Manager | null, group: string): GroupBoss | null =>
   manager?.bosses?.find((b) => b.group === group) ?? null;
 
+/** Boss `id` (default: the main boss) by its roster name, else as the hub
+ *  listed it; "Desk" when there is no boss. */
+export const bossNameOf = (
+  roster: readonly Agent[],
+  localHub: string | null | undefined,
+  manager: Manager | null,
+  id?: string | null,
+): string => {
+  const who = id ?? manager?.agentId ?? null;
+  if (!who) return "Desk";
+  return (
+    roster.find((a) => a.id === who && a.hubId === localHub)?.name ??
+    manager?.bosses?.find((b) => b.agentId === who)?.name ??
+    (who === manager?.agentId ? "the main boss" : "its boss")
+  );
+};
+
 /** The group the agent `agentId` is the boss of, if it is one. */
 export const groupOfBoss = (manager: Manager | null, agentId: string): string | null =>
   manager?.bosses?.find((b) => b.agentId === agentId)?.group ?? null;

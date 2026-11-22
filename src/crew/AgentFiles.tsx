@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
+import { useChat } from "../chat/store";
 import { agentKey, type Agent } from "../chat/types";
-import { HubError, type DeskHub, type Revision } from "../hub/client";
+import { HubError, type AgentDocuments, type DeskHub, type Revision } from "../hub/client";
 import { useDesk } from "../hub/store";
+import { revealWords } from "../machines/words";
+import { openHubPath, revealHubPath } from "../platform";
 import { useSettings } from "../settings/store";
 import { matches, shortcutLabel } from "../shortcuts/keys";
 import { CloseButton, Dialog } from "../ui/Dialog";
 import { plainError } from "../ui/plainError";
 import { withKeptChanges } from "../restore/drafts";
+import { useHost } from "../shell/host";
 import { useUi } from "../shell/ui";
 import {
   AGENT_FILES,
@@ -51,6 +55,58 @@ export const discardDrafts = (agent: Agent): void => {
   const { drafts, put } = useDrafts.getState();
   for (const file of dirtyFiles(drafts, key)) put(key, file, discarded(draftOf(drafts, key, file)!));
 };
+
+/** The folder an agent keeps what it makes or downloads for you, where it
+ *  is on this computer: opened, or shown in the file manager. */
+function DocumentsRow({ hub, agent }: { hub: DeskHub | null; agent: Agent }) {
+  const here = useChat((s) => s.hubs.find((h) => h.local)?.id === agent.hubId);
+  const inDistro = useHost((h) => h.host?.kind === "wsl");
+  const platform = useHost((h) => h.platform);
+  const [docs, setDocs] = useState<AgentDocuments | null>(null);
+  const [problem, setProblem] = useState<string | null>(null);
+
+  useEffect(() => {
+    setDocs(null);
+    if (!hub || !here || inDistro) return;
+    let stop = false;
+    hub.agentDocuments(agent.id).then(
+      (d) => !stop && setDocs(d),
+      () => undefined,
+    );
+    return () => {
+      stop = true;
+    };
+  }, [hub, here, inDistro, agent.id]);
+
+  if (!docs) return null;
+  const { path, exists, state } = docs;
+  const go = (act: (path: string) => Promise<void>) => () => {
+    setProblem(null);
+    act(path).catch((e: unknown) => setProblem(plainError(e)));
+  };
+  return (
+    <div className="docs-row" role="group" aria-label="Documents">
+      <span className="file-name">Documents</span>
+      <span className="docs-row-about">{agent.name}’s documents — invoices, statements and files it makes or downloads for you.</span>
+      <span className="docs-row-path">{path}</span>
+      {problem && <span className="small state-blocked">{problem}</span>}
+      {exists ? (
+        <div className="docs-row-actions">
+          <button type="button" className="btn btn-sm" onClick={go(openHubPath)}>
+            Open
+          </button>
+          <button type="button" className="btn btn-sm" onClick={go(revealHubPath)}>
+            {revealWords(platform)}
+          </button>
+        </div>
+      ) : state === "not_a_folder" ? (
+        <span className="docs-row-pending">The documents folder isn’t a folder.</span>
+      ) : (
+        <span className="docs-row-pending">Made when {agent.name} next starts.</span>
+      )}
+    </div>
+  );
+}
 
 /** The agent's Files tab: the files that shape them, edited in place, with
  *  every saved version kept. */
@@ -128,6 +184,7 @@ export function AgentFiles({ agent }: { agent: Agent }) {
             </button>
           );
         })}
+        <DocumentsRow hub={hub} agent={agent} />
         <p className="files-note">Every save is kept. Open History to see or restore an earlier version.</p>
       </nav>
       <section className="files-editor" aria-label={file}>

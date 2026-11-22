@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import type { FileHome } from "../attachments/Attachments";
 import { browserOf } from "../hub/browser";
 import { HubError } from "../hub/client";
-import { connectionsOf, type ConnectionsApi, type Setup, type SetupAction, type SetupChoice, type SetupNow } from "../hub/connections";
+import { appWords, connectionsOf, type ConnectionsApi, type Setup, type SetupAction, type SetupChoice, type SetupNow } from "../hub/connections";
 import { openUrl } from "../platform";
 import { useUi } from "../shell/ui";
 import { useLive } from "../ui/useLive";
@@ -43,7 +43,7 @@ const nowOf = (s: Setup): SetupNow => {
 export const settled = (s: Setup): boolean => s.ended != null || ["connected", "failed", "ended"].includes(nowOf(s).kind);
 
 /** What the card asks of the person now. */
-const NEEDS_YOU = new Set(["offer", "code", "sign_in", "failed"]);
+const NEEDS_YOU = new Set(["offer", "code", "sign_in", "approve", "step", "failed"]);
 
 /* Which message shows each setup: the newest that asked for it, so one
    setup is one card, where the person is looking. */
@@ -203,8 +203,8 @@ export function SetupCards({
   );
 }
 
-/** What each of the card's buttons says. */
-const LABEL: Record<SetupAction, string> = {
+/** What each of the card's buttons says, as the service names it. */
+const LABEL: Record<SetupAction, string | ((service: string) => string)> = {
   use_cli: "Use it",
   open_code: "Copy code and open GitHub",
   show_page: "Show the page",
@@ -213,7 +213,91 @@ const LABEL: Record<SetupAction, string> = {
   retry: "Try again",
   paste_token: "Paste a token",
   open_connections: "Open Connections",
+  open_approve: (service) => `Open ${service}`,
+  open_step: "Open the page",
+  done_step: "Done",
 };
+
+const labelOf = (action: SetupAction, service: string): string => {
+  const label = LABEL[action];
+  return typeof label === "function" ? label(service) : label;
+};
+
+/** A field the person pastes a secret in, labelled as the card says. */
+interface PasteField {
+  name: string;
+  label: string;
+  placeholder?: string;
+}
+
+/** Secrets of the person's own, pasted on the card: they go to the hub
+ *  alone, and are cleared from the page as they are sent. */
+function PasteForm({
+  id,
+  fields,
+  hint,
+  submit,
+  busy,
+  onSubmit,
+  onCancel,
+}: {
+  id: string;
+  fields: PasteField[];
+  hint?: string;
+  submit: string;
+  busy: boolean;
+  onSubmit: (values: Record<string, string>) => void;
+  onCancel?: () => void;
+}) {
+  const [values, setValues] = useState<Record<string, string>>({});
+  const ready = fields.every((f) => values[f.name]?.trim());
+  return (
+    <form
+      className="setup-paste"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (!ready) return;
+        onSubmit(Object.fromEntries(fields.map((f) => [f.name, values[f.name]!.trim()])));
+        setValues({});
+      }}
+    >
+      {hint && <p className="small faint">{hint}</p>}
+      {fields.map((f, i) => (
+        <div key={f.name} className="setup-paste-field">
+          <label className="small muted" htmlFor={`${id}-${f.name}`}>
+            {f.label}
+          </label>
+          <span className="setup-paste-row">
+            <input
+              id={`${id}-${f.name}`}
+              className="mono"
+              type="password"
+              autoFocus={i === 0}
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={f.placeholder}
+              value={values[f.name] ?? ""}
+              disabled={busy}
+              onChange={(e) => setValues((v) => ({ ...v, [f.name]: e.target.value }))}
+            />
+            {i === fields.length - 1 && (
+              <>
+                <button type="submit" className="btn btn-approve" disabled={busy || !ready}>
+                  {busy ? "Checking…" : submit}
+                </button>
+                {onCancel && (
+                  <button type="button" className="link small" disabled={busy} onClick={onCancel}>
+                    Cancel
+                  </button>
+                )}
+              </>
+            )}
+          </span>
+        </div>
+      ))}
+    </form>
+  );
+}
 
 /** "in 14 min", while a code lasts. */
 const expiresIn = (at: string | null, now: number): string | null => {
@@ -244,7 +328,8 @@ export function SetupCard({
   const [copied, setCopied] = useState(false);
   /** The field a token of the person's own is pasted in: open or not. */
   const [pasting, setPasting] = useState(false);
-  const [token, setToken] = useState("");
+  /** The person has said they'll do the step the card is on themselves. */
+  const [doing, setDoing] = useState(false);
   const live = useLive();
   const card = useRef<HTMLElement>(null);
   const named = useChat((c) => c.roster.find((a) => a.hubId === origin.hub && a.id === origin.agent)?.name);
@@ -253,6 +338,14 @@ export function SetupCard({
   const n = s.steps.length;
   const done = s.steps.filter((x) => x.state === "done").length;
   const needsYou = NEEDS_YOU.has(now.kind);
+  // A step the person took on is theirs only until it changes.
+  const stepKey = now.kind === "step" ? now.title : null;
+  useEffect(() => setDoing(false), [stepKey]);
+  const stuck = now.kind === "step";
+  /** What the step asks once it is the person's: Done, and the paste box. */
+  const theirs = !stuck || doing;
+  /** Its one button, where it has somewhere to go. */
+  const action = now.action && (now.action !== "open_step" && now.action !== "open_approve" ? true : !!now.url) ? now.action : null;
 
   useEffect(() => {
     const el = card.current;
@@ -348,6 +441,11 @@ export function SetupCard({
         return void startPaste(false);
       case "open_connections":
         return void useUi.getState().openSettings("connections");
+      case "open_approve":
+      case "open_step":
+        return void (now.url && openUrl(now.url));
+      case "done_step":
+        return void choose("done-step");
       case "retry":
         return void (async () => {
           setBusy(true);
@@ -366,15 +464,12 @@ export function SetupCard({
     if (open && now.paste) openUrl(now.paste);
   };
 
-  /** The pasted token goes to the hub alone: never into the chat. */
-  const paste = async () => {
-    const given = token.trim();
-    if (!given) return;
+  /** What was pasted goes to the hub alone: never into the chat. */
+  const paste = async (send: () => Promise<Setup>) => {
     setBusy(true);
     setProblem(null);
-    setToken("");
     try {
-      const next = await api.pasteToken(s.id, given);
+      const next = await send();
       if (!live.current) return;
       onChange(next);
       setPasting(false);
@@ -401,7 +496,8 @@ export function SetupCard({
     }
   };
 
-  const primary = now.kind === "failed" || now.action === "use_cli" || now.action === "open_code" || now.action === "new_code";
+  const primary = now.kind === "failed" || (action !== null && ["use_cli", "open_code", "new_code", "open_approve", "open_step"].includes(action));
+  const words = appWords(s.service);
   const expiry = now.kind === "code" ? expiresIn(now.expiresAt, clock) : null;
   return (
     <section ref={card} className={`setup-card setup-${now.kind}${needsYou ? " setup-needs" : ""}`} aria-label={`Setting up ${title}`}>
@@ -435,62 +531,51 @@ export function SetupCard({
         </p>
       )}
       {pasting && now.paste != null && (
-        <form
-          className="setup-paste"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void paste();
-          }}
-        >
-          <label className="small muted" htmlFor={`token-${s.id}`}>
-            On GitHub’s page, under Repository access choose All repositories, then Generate token. Paste the token here: it goes straight to the vault on this computer, never into the chat.
-          </label>
-          <span className="setup-paste-row">
-            <input
-              id={`token-${s.id}`}
-              className="mono"
-              type="password"
-              autoFocus
-              autoComplete="off"
-              spellCheck={false}
-              placeholder="github_pat_…"
-              value={token}
-              disabled={busy}
-              onChange={(e) => setToken(e.target.value)}
-            />
-            <button type="submit" className="btn btn-approve" disabled={busy || !token.trim()}>
-              {busy ? "Checking…" : "Connect"}
-            </button>
-            <button type="button" className="link small" disabled={busy} onClick={() => (setPasting(false), setToken(""))}>
-              Cancel
-            </button>
-          </span>
-        </form>
+        <PasteForm
+          id={`token-${s.id}`}
+          fields={[
+            {
+              name: "token",
+              label:
+                "On GitHub’s page, under Repository access choose All repositories, then Generate token. Paste the token here: it goes straight to the vault on this computer, never into the chat.",
+              placeholder: "github_pat_…",
+            },
+          ]}
+          submit="Connect"
+          busy={busy}
+          onSubmit={(v) => void paste(() => api.pasteToken(s.id, v.token!))}
+          onCancel={() => setPasting(false)}
+        />
       )}
-      {!pasting && (now.action || now.other || escape || now.paste) && (
+      {!pasting && (action || (now.other && theirs) || (stuck && !doing) || escape || now.paste) && (
         <div className="setup-actions">
-          {now.action && now.action !== "paste_token" && (
-            <button type="button" className={primary ? "btn btn-approve" : "btn"} disabled={busy} onClick={() => act(now.action!)}>
-              {busy && now.action === "use_cli"
+          {action && action !== "paste_token" && (
+            <button type="button" className={primary ? "btn btn-approve" : "btn"} disabled={busy} onClick={() => act(action)}>
+              {busy && action === "use_cli"
                 ? "Checking…"
-                : now.action === "open_code" && copied
+                : action === "open_code" && copied
                   ? "Copied · open GitHub again"
-                  : LABEL[now.action]}
+                  : labelOf(action, s.serviceName)}
             </button>
           )}
-          {(now.paste || now.action === "paste_token") && (
+          {stuck && !doing && (
+            <button type="button" className="btn" disabled={busy} onClick={() => setDoing(true)}>
+              I’ll do this step
+            </button>
+          )}
+          {(now.paste || action === "paste_token") && (
             <button
               type="button"
-              className={now.action === "paste_token" ? "btn btn-approve" : "btn"}
+              className={action === "paste_token" ? "btn btn-approve" : "btn"}
               disabled={busy}
-              onClick={() => startPaste(now.action !== "paste_token")}
+              onClick={() => startPaste(action !== "paste_token")}
             >
-              {LABEL.paste_token}
+              {labelOf("paste_token", s.serviceName)}
             </button>
           )}
-          {now.other && (
+          {now.other && theirs && !(now.appPaste && now.other === "done_step") && (
             <button type="button" className="link small" disabled={busy} onClick={() => act(now.other!)}>
-              {LABEL[now.other]}
+              {labelOf(now.other, s.serviceName)}
             </button>
           )}
           {escape && (
@@ -499,6 +584,19 @@ export function SetupCard({
             </button>
           )}
         </div>
+      )}
+      {now.appPaste && theirs && (
+        <PasteForm
+          id={`app-${s.id}`}
+          fields={[
+            { name: "id", label: words.id },
+            { name: "secret", label: words.secret },
+          ]}
+          hint="They go straight to the vault on this computer, never into the chat."
+          submit="Save"
+          busy={busy}
+          onSubmit={(v) => void paste(() => api.pasteApp(s.id, v.id!, v.secret!))}
+        />
       )}
       {problem && (
         <p className="small state-blocked" role="alert">

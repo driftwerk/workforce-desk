@@ -1,6 +1,6 @@
 import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { parse } from "smol-toml";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent } from "../chat/types";
 import { HubError, type DeskHub } from "../hub/client";
 import type { ConnectionsApi, Connector, Listing, Pick as Choice, PicksChange, ServicePicks } from "../hub/connections";
@@ -9,6 +9,7 @@ import { AgentConnectors } from "./AgentConnectors";
 import { useAgentConfigs } from "./agentBrain";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
+vi.mock("../platform", async (importOriginal) => ({ ...(await importOriginal<typeof import("../platform")>()), openUrl: vi.fn() }));
 
 const ALLAN: Agent = { hubId: "local", id: "allan", name: "Allan", model: null, provider: null, isDefault: false };
 
@@ -60,8 +61,9 @@ const api = (services: ServicePicks[], over: Partial<ConnectionsApi> = {}): Conn
   test: vi.fn(),
   renew: vi.fn(),
   disconnect: vi.fn(),
-  saveGoogleClient: vi.fn(),
+  saveApp: vi.fn(),
   start: vi.fn(),
+  approveAgain: vi.fn(),
   flow: vi.fn(),
   cancel: vi.fn(),
   picks: vi.fn(async () => services),
@@ -70,6 +72,7 @@ const api = (services: ServicePicks[], over: Partial<ConnectionsApi> = {}): Conn
   signedIn: vi.fn(),
   choose: vi.fn(),
   pasteToken: vi.fn(),
+  pasteApp: vi.fn(),
   ...over,
 });
 
@@ -174,6 +177,46 @@ it("asks the agent to set up a service it has no connection to, or offers to con
   expect(within(dd).getByRole("button", { name: "Connect myself" })).toBeTruthy();
   // Slack the person connects.
   expect(within(box("Slack")).queryByRole("button", { name: "Ask Allan to set it up" })).toBeNull();
+});
+
+it("offers both ways to connect Google and FreeAgent when the agent has none", async () => {
+  const asked: string[] = [];
+  await show(api([svc({ id: "google", name: "Google" }), svc({ id: "freeagent", name: "FreeAgent" })]), (_a, s) => {
+    asked.push(s);
+    return true;
+  });
+  for (const name of ["Google", "FreeAgent"]) {
+    const empty = box(name);
+    fireEvent.click(within(empty).getByRole("button", { name: "Ask Allan to set it up" }));
+    expect(within(empty).getByRole("button", { name: "Connect myself" })).toBeTruthy();
+  }
+  expect(asked).toEqual(["Google", "FreeAgent"]);
+});
+
+it("shows several FreeAgent connections by company, with the default to change", async () => {
+  const a = api([
+    svc({
+      id: "freeagent",
+      name: "FreeAgent",
+      connections: [
+        pick({ id: "all~~acme", name: "Acme", account: "Acme Ltd", picked: true, default: true, write: false }),
+        pick({ id: "all~~globex", name: "Globex", account: "Globex Trading", picked: true, write: false }),
+      ],
+    }),
+  ]);
+  await show(a);
+  const fa = box("FreeAgent");
+  expect(within(fa).getByText("Acme Ltd")).toBeTruthy();
+  expect(within(fa).getByText("Globex Trading")).toBeTruthy();
+  expect(within(fa).getByText("Acme", { selector: ".conn-pick-default-name" })).toBeTruthy();
+  fireEvent.click(within(fa).getByRole("button", { name: "change" }));
+  await act(async () => {
+    fireEvent.change(within(fa).getByLabelText("FreeAgent default"), { target: { value: "all~~globex" } });
+  });
+  expect(a.setPicks).toHaveBeenCalledWith(
+    "allan",
+    expect.objectContaining({ service: "freeagent", default: "all~~globex" }),
+  );
 });
 
 it("turns Slack's one connection on through the agent's own settings", async () => {
@@ -447,4 +490,59 @@ it("shows a bank's connections as read only, with nothing to allow writes to", a
   expect(within(bank).getByText("Needs renewing")).toBeTruthy();
   expect(within(bank).queryByRole("button", { name: /read only|read and write/ })).toBeNull();
   expect(within(bank).getByText("NatWest", { selector: ".conn-pick-default-name" })).toBeTruthy();
+});
+
+describe("approving a lapsed connection again", () => {
+  const lapsed = svc({
+    id: "freeagent",
+    name: "FreeAgent",
+    connections: [pick({ id: "all~~acme", name: "Acme", account: "Acme Ltd", status: "needs_reconnect", picked: true, default: true })],
+  });
+  const listed = (app: "ready" | "missing", approveAgain = true) =>
+    vi.fn(async () => ({
+      adapters: [],
+      connectors: [
+        {
+          id: "freeagent",
+          name: "FreeAgent",
+          about: "",
+          signIn: "app" as const,
+          fields: [],
+          signInReady: app === "ready",
+          app,
+          several: true,
+          nameHint: "",
+          usedBy: [],
+          connections: [{ id: "all~~acme", name: "Acme", approveAgain }],
+        },
+      ],
+    })) as unknown as ConnectionsApi["list"];
+
+  it("starts the approval from the agent's Connectors", async () => {
+    const a = api([lapsed], {
+      list: listed("ready"),
+      approveAgain: vi.fn(async () => ({ flow: "f1", url: "https://api.freeagent.com/v2/approve_app?y", userCode: null, verificationUri: null, expiresIn: 900 })),
+      flow: vi.fn(async () => ({ state: "waiting" as const })),
+    });
+    await show(a);
+    await act(async () => {
+      fireEvent.click(await within(box("FreeAgent")).findByRole("button", { name: "Approve again" }));
+    });
+    expect(a.approveAgain).toHaveBeenCalledWith("freeagent", "all~~acme");
+  });
+
+  it("offers to set the app up, not to approve, where the app isn't kept", async () => {
+    const a = api([lapsed], { list: listed("missing") });
+    await show(a);
+    expect(await within(box("FreeAgent")).findByText(/app isn’t kept/)).toBeTruthy();
+    expect(within(box("FreeAgent")).queryByRole("button", { name: "Approve again" })).toBeNull();
+    expect(within(box("FreeAgent")).getByRole("button", { name: "Ask Allan to set it up" })).toBeTruthy();
+  });
+
+  it("offers nothing to a connection the hub doesn't say can be approved again", async () => {
+    const a = api([lapsed], { list: listed("ready", false) });
+    await show(a);
+    await act(async () => {});
+    expect(within(box("FreeAgent")).queryByRole("button", { name: "Approve again" })).toBeNull();
+  });
 });
