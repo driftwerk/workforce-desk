@@ -1,5 +1,5 @@
 import { cleanup, render } from "@testing-library/react";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import type { Session } from "../hub/types";
 import { Tile } from "./SessionTile";
 
@@ -41,11 +41,30 @@ it("says the model a session was given beside its state, and nothing for its eng
 
 const logLine = () => document.querySelector(".tile-log")?.textContent;
 
-it("says what a held-up session waits on and for how long, else its current tool", () => {
-  const since = new Date(Date.now() - 3 * 60_000).toISOString();
-  const { unmount } = render(<Tile session={session({ currentTool: "Bash", waits: { words: "waiting for a build slot", since } })} />);
-  expect(logLine()).toBe("Waiting for a build slot · 3m");
-  unmount();
-  render(<Tile session={session({ currentTool: "Bash" })} />);
-  expect(logLine()).toBe("● Bash");
+describe("a tile's log line", () => {
+  const since = () => new Date(Date.now() - 3 * 60_000).toISOString();
+  const waits = () => ({ words: "waiting for a build slot", since: since() });
+
+  it("says what a working session with a tool waits on and for how long", () => {
+    render(<Tile session={session({ currentTool: "Bash", waits: waits() })} />);
+    expect(logLine()).toBe("● Bash · waiting for a build slot, 3m");
+  });
+
+  it("says it without a tool", () => {
+    render(<Tile session={session({ waits: waits() })} />);
+    expect(logLine()).toBe("● waiting for a build slot, 3m");
+  });
+
+  it("joins a done session's background work with what it waits on", () => {
+    render(<Tile session={session({ state: "done", background: { count: 1, since: since() }, waits: waits() })} />);
+    expect(logLine()).toBe("Waiting on 1 background task · 3m · waiting for a build slot, 3m");
+  });
+
+  it("is the background work alone, or the current tool alone, without waits", () => {
+    const { unmount } = render(<Tile session={session({ state: "done", background: { count: 2, since: since() } })} />);
+    expect(logLine()).toBe("Waiting on 2 background tasks · 3m");
+    unmount();
+    render(<Tile session={session({ currentTool: "Bash" })} />);
+    expect(logLine()).toBe("● Bash");
+  });
 });

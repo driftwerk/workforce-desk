@@ -1,5 +1,5 @@
 import { useSessionName } from "../groups/names";
-import { backgroundLine, backgroundOf, bossHandles, handledText, lookOf, restartedLine, shownState, waitsOnYou } from "./background";
+import { backgroundLine, backgroundOf, bossHandles, handledText, lookOf, restartedLine, shownState, waitsLine, waitsOnYou } from "./background";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { Approval } from "../session/Approval";
@@ -7,7 +7,6 @@ import { Mark } from "../ui/Mark";
 import { SessionTicketChip } from "../board/TicketChip";
 import { plain } from "../ui/plain";
 import { modelTitle } from "../engines/engines";
-import { durationOf } from "./time";
 
 const LABEL: Record<Session["state"], string> = {
   starting: "starting",
@@ -44,9 +43,11 @@ const log = (s: Session): string | null => {
   const restarted = restartedLine(s);
   if (restarted) return restarted;
   const background = backgroundOf(s);
-  if (background) return backgroundLine(background);
-  if (s.waits) return `${s.waits.words.charAt(0).toUpperCase()}${s.waits.words.slice(1)} · ${durationOf(s.waits.since, Date.now())}`;
-  return s.currentTool ? `● ${s.currentTool}` : s.lastReply ? plain(s.lastReply).split("\n").slice(0, 3).join("\n") : null;
+  const waits = s.waits ? waitsLine(s.waits) : null;
+  if (background) return [backgroundLine(background), waits].filter(Boolean).join(" · ");
+  if (s.currentTool) return [`● ${s.currentTool}`, waits].filter(Boolean).join(" · ");
+  if (waits) return `● ${waits}`;
+  return s.lastReply ? plain(s.lastReply).split("\n").slice(0, 3).join("\n") : null;
 };
 
 export function Tile({ session }: { session: Session }) {

@@ -7,6 +7,9 @@ export const backgroundTasks = (b: Background): string => `${b.count} background
 /** "Waiting on 2 background tasks · 6m". */
 export const backgroundLine = (b: Background, now = Date.now()): string => `Waiting on ${backgroundTasks(b)} · ${durationOf(b.since, now)}`;
 
+/** What a working session is held up on: "waiting for a build slot, 3m". */
+export const waitsLine = (w: NonNullable<Session["waits"]>, now = Date.now()): string => `${w.words}, ${durationOf(w.since, now)}`;
+
 /** The background work a session shows as waiting on, if its turn ended
  *  while that work still runs. */
 export const backgroundOf = (s: Pick<Session, "state" | "background">): Background | null =>
