@@ -38,3 +38,14 @@ it("says the model a session was given beside its state, and nothing for its eng
   render(<Tile session={session({ engine: "codex", model: "gpt-6.1-sol" })} />);
   expect(stateLine()).toBe("working · local · gpt-6.1-sol");
 });
+
+const logLine = () => document.querySelector(".tile-log")?.textContent;
+
+it("says what a held-up session waits on and for how long, else its current tool", () => {
+  const since = new Date(Date.now() - 3 * 60_000).toISOString();
+  const { unmount } = render(<Tile session={session({ currentTool: "Bash", waits: { words: "waiting for a build slot", since } })} />);
+  expect(logLine()).toBe("Waiting for a build slot · 3m");
+  unmount();
+  render(<Tile session={session({ currentTool: "Bash" })} />);
+  expect(logLine()).toBe("● Bash");
+});

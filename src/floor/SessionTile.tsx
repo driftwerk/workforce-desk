@@ -7,6 +7,7 @@ import { Mark } from "../ui/Mark";
 import { SessionTicketChip } from "../board/TicketChip";
 import { plain } from "../ui/plain";
 import { modelTitle } from "../engines/engines";
+import { durationOf } from "./time";
 
 const LABEL: Record<Session["state"], string> = {
   starting: "starting",
@@ -44,6 +45,7 @@ const log = (s: Session): string | null => {
   if (restarted) return restarted;
   const background = backgroundOf(s);
   if (background) return backgroundLine(background);
+  if (s.waits) return `${s.waits.words.charAt(0).toUpperCase()}${s.waits.words.slice(1)} · ${durationOf(s.waits.since, Date.now())}`;
   return s.currentTool ? `● ${s.currentTool}` : s.lastReply ? plain(s.lastReply).split("\n").slice(0, 3).join("\n") : null;
 };
 
