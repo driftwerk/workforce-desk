@@ -154,10 +154,8 @@ fn spawn(
     ] {
         std::fs::create_dir_all(&dir)?;
     }
-    let log = desk_core::logs::append_log(
-        &paths.logs().join("memory.log"),
-        desk_core::logs::LOG_LIMIT,
-    )?;
+    let log =
+        desk_core::logs::append_log(&paths.logs().join("memory.log"), desk_core::logs::LOG_LIMIT)?;
     let (mut cmd, handover) = store_command(binary, paths, env, secrets)?;
     let child = cmd
         .stdin(Stdio::null())

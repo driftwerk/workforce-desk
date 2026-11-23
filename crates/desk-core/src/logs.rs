@@ -64,7 +64,12 @@ pub fn cap(log: &Path, limit: u64) -> io::Result<Capped> {
     if size <= limit {
         return Ok(Capped::Under);
     }
-    let emptied = || std::fs::OpenOptions::new().write(true).open(log)?.set_len(0);
+    let emptied = || {
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(log)?
+            .set_len(0)
+    };
     match keep(log) {
         Ok(()) => emptied().map(|()| Capped::Kept),
         Err(e) if size > limit * OVER_AT_MOST => emptied().map(|()| Capped::Dropped(e)),
