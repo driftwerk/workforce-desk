@@ -154,6 +154,47 @@ pub const CLAUDE_PAGES: &[SignInPage] = &[
     },
 ];
 
+/// Where Claude's sign-in page sends the browser when its code is to be
+/// pasted: Claude Code's `MANUAL_REDIRECT_URL` (2.1.330), and Console's,
+/// where earlier versions sent it.
+pub const CLAUDE_CODE_PAGES: &[SignInPage] = &[
+    SignInPage {
+        host: "platform.claude.com",
+        paths: &["/oauth/code/callback"],
+        query: true,
+        loopback_only: false,
+    },
+    SignInPage {
+        host: "console.anthropic.com",
+        paths: &["/oauth/code/callback"],
+        query: true,
+        loopback_only: false,
+    },
+];
+
+/// What Claude Code takes as a pasted code: the `code#state` its page
+/// shows, as pasted, or the address of that page ([`CLAUDE_CODE_PAGES`])
+/// as its `code` and `state` joined so. Anything else is left as pasted,
+/// for Claude Code to answer.
+pub fn pasted_code(pasted: &str) -> String {
+    let pasted = pasted.trim();
+    sign_in_page(pasted, CLAUDE_CODE_PAGES)
+        .and_then(|page| {
+            let only = |name: &str| {
+                let mut values = page
+                    .query_pairs()
+                    .filter(|(k, _)| k == name)
+                    .map(|(_, v)| v.into_owned());
+                match (values.next(), values.next()) {
+                    (Some(v), None) if !v.is_empty() => Some(v),
+                    _ => None,
+                }
+            };
+            Some(format!("{}#{}", only("code")?, only("state")?))
+        })
+        .unwrap_or_else(|| pasted.to_string())
+}
+
 /// Codex's device page: exactly `https://auth.openai.com/codex/device`.
 pub const CODEX_PAGES: &[SignInPage] = &[SignInPage {
     host: "auth.openai.com",
@@ -215,10 +256,10 @@ pub fn sign_in_page(said: &str, pages: &[SignInPage]) -> Option<url::Url> {
         .then_some(page)
 }
 
-/// A page Desk refused, as it may be logged: its scheme, host, port and path
-/// only (no user, query or fragment), and the parameter that sent the
-/// browser away, if one did.
-pub fn refused_shape(said: &str) -> String {
+/// A page as it may be logged: its scheme, host, port and path only (no
+/// user, query or fragment), and the parameter that sent the browser away,
+/// if one did.
+pub fn page_shape(said: &str) -> String {
     let Ok(page) = url::Url::parse(said) else {
         return format!("a page Desk can't read ({} characters)", said.len());
     };
@@ -645,23 +686,50 @@ mod tests {
     }
 
     #[test]
+    fn a_code_is_pasted_as_its_page_shows_it_or_from_that_pages_address() {
+        assert_eq!(pasted_code("  abc-_1#st-2 \n"), "abc-_1#st-2");
+        for page in [
+            "https://platform.claude.com/oauth/code/callback?code=abc-_1&state=st-2",
+            "https://console.anthropic.com/oauth/code/callback?state=st-2&code=abc-_1",
+            " https://PLATFORM.claude.com/oauth/code/callback?code=abc%2D_1&state=st-2\n",
+        ] {
+            assert_eq!(pasted_code(page), "abc-_1#st-2", "{page}");
+        }
+        // Anything else goes as pasted, for Claude Code to answer: a code
+        // made for the localhost callback, another page, one that is
+        // missing a part or has two.
+        for other in [
+            "http://localhost:53121/callback?code=abc&state=st",
+            "https://evil.example/oauth/code/callback?code=abc&state=st",
+            "https://platform.claude.com/oauth/code/success?code=abc&state=st",
+            "https://platform.claude.com/oauth/code/callback?code=abc",
+            "https://platform.claude.com/oauth/code/callback?code=&state=st",
+            "https://platform.claude.com/oauth/code/callback?code=a&code=b&state=st",
+            "https://platform.claude.com:8443/oauth/code/callback?code=abc&state=st",
+            "abc",
+        ] {
+            assert_eq!(pasted_code(other), other, "{other}");
+        }
+    }
+
+    #[test]
     fn a_refused_page_is_logged_without_its_query() {
         assert_eq!(
-            refused_shape(
+            page_shape(
                 "https://app.devin.ai/auth/cli/continue?state=secret&returnTo=https%3A%2F%2Fevil.example#f"
             ),
             "https://app.devin.ai/auth/cli/continue (sent away by `returnTo`)"
         );
         assert_eq!(
-            refused_shape("https://user:pw@evil.example:8443/a/b?code=secret"),
+            page_shape("https://user:pw@evil.example:8443/a/b?code=secret"),
             "https://evil.example:8443/a/b"
         );
         assert_eq!(
-            refused_shape("https://app.devin.ai/x?https%3A%2F%2Fevil.example%2Fsecret"),
+            page_shape("https://app.devin.ai/x?https%3A%2F%2Fevil.example%2Fsecret"),
             "https://app.devin.ai/x (sent away by `?`)"
         );
         assert_eq!(
-            refused_shape("not a page"),
+            page_shape("not a page"),
             "a page Desk can't read (10 characters)"
         );
     }
