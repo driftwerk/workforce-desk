@@ -91,6 +91,8 @@ export const deliveryText = (m: LineMessage, now: number): string | null => {
       return "Not delivered: withdrawn before it went in";
     case "noted":
       return "A note here only: not typed in";
+    case "unreceived":
+      return "Not received: it went in twice and never showed in the session";
     default:
       return unknown(m.delivery);
   }

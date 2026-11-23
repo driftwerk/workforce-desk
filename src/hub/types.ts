@@ -1421,7 +1421,10 @@ export type LineDelivery =
    *  went in, and the person runs it now. */
   | "withdrawn"
   /** Shown in the thread only, never typed into the session. */
-  | "noted";
+  | "noted"
+  /** Never shown to have gone in: it went in twice and never showed in the
+   *  session either time. Its sender is told; it isn't put in again. */
+  | "unreceived";
 /** "lapsed": its session stopped waiting and went ahead without an answer;
  *  "dismissed": you set it aside unanswered. */
 export type LineAsked = "open" | "escalated" | "answered" | "withdrawn" | "lapsed" | "dismissed";
