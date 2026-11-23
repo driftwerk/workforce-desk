@@ -17,11 +17,13 @@ interface Selection {
   /** The rows that can be picked now, in the order the sidebar shows them:
    *  nothing out of sight stays picked. */
   shown: readonly ItemKey[];
+  /** The open row, which a selection let go of comes back to. */
+  open: ItemKey | null;
 }
 
 const NONE: ReadonlySet<ItemKey> = new Set();
 
-export const useSelection = create<Selection>(() => ({ keys: NONE, anchor: null, base: NONE, shown: [] }));
+export const useSelection = create<Selection>(() => ({ keys: NONE, anchor: null, base: NONE, shown: [], open: null }));
 
 /** Whether `s` is a selection to act on together: two rows or more. */
 export const isBulk = (s: Pick<Selection, "keys">): boolean => s.keys.size >= 2;
@@ -81,8 +83,17 @@ export const selectAll = (keys: readonly ItemKey[] = useSelection.getState().sho
   useSelection.setState({ keys: picked, anchor: keys[0] ?? null, base: picked });
 };
 
+/** Lets go of the picks, back to the open row alone (none when none is
+ *  open), so the next ⌘-click adds to it. */
 export const clearSelection = (): void =>
-  useSelection.setState((s) => (s.keys.size || s.anchor !== null ? { keys: NONE, anchor: null, base: NONE } : s));
+  useSelection.setState((s) => {
+    if (s.keys.size === (s.open ? 1 : 0) && (!s.open || s.keys.has(s.open)) && s.anchor === s.open) return s;
+    const keys = s.open ? new Set([s.open]) : NONE;
+    return { keys, anchor: s.open, base: keys };
+  });
+
+/** The row open now, as the sidebar shows it (null when none is). */
+export const followOpen = (open: ItemKey | null): void => useSelection.setState({ open });
 
 /** Keeps only the picked rows `keep` says. Nothing changes when all are
  *  kept. */

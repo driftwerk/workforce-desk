@@ -98,7 +98,7 @@ import { GroupDot } from "./GroupChip";
 import { askMove, moveAnswered, moveRow, type MoveSubject } from "./move";
 import { crossesBoss } from "../hub/client";
 import { useHubLayout } from "./hubLayout";
-import { clearSelection, extend, inBulk, isBulk, only, pickOf, selectAll, showRows, toggle, typedIn, useSelection } from "./selection";
+import { clearSelection, extend, followOpen, inBulk, isBulk, only, pickOf, selectAll, showRows, toggle, typedIn, useSelection } from "./selection";
 import { useHost } from "../shell/host";
 import { CloseSessions, RemoveSessions, type Closable } from "../session/CloseSessions";
 import { cannot, tally, talliedEntry, type Choice } from "./bulk";
@@ -330,15 +330,9 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   // Opened from anywhere, the row open is the one picked, unless several
   // are or a confirm is acting on those picked.
   useEffect(() => {
-    if (asked || isBulk(useSelection.getState())) return;
-    if (openKey) only(openKey);
-    else clearSelection();
+    followOpen(openKey);
+    if (!asked && !isBulk(useSelection.getState())) clearSelection();
   }, [openKey]);
-  // Let go of, the row open is picked again: the next ⌘-click adds to it.
-  const empty = picked.size === 0;
-  useEffect(() => {
-    if (empty && openKey && !asked) only(openKey);
-  }, [empty, asked]);
   const selection = visible.filter((key) => picked.has(key));
   /** The sessions among `keys` that can be closed or removed. */
   const sessionsOf = (keys: readonly ItemKey[]): Closable[] =>
@@ -992,7 +986,13 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
         setDragging(null);
         justDragged.current = true;
         setTimeout(() => (justDragged.current = false), 0);
-        if (onGrid) return dropOnGrid(onGrid.target, onGrid.content);
+        if (onGrid) {
+          dropOnGrid(onGrid.target, onGrid.content);
+          const key = s ? end(s).id : null;
+          // The rest of a selection dragged follows it into that grid.
+          if (key && inBulk(key)) addToGrid(selection.filter((k) => k !== key), onGrid.target.kind === "new" ? useGrids.getState().active : onGrid.target.gridId);
+          return;
+        }
         if (!s || !d) return;
         if (d.kind === "item") {
           const key = end(s).id;
@@ -1467,31 +1467,27 @@ function SelectionBar({
         <span className="side-select-count" aria-live="polite">
           {count} selected
         </span>
+        <button type="button" className="btn btn-sm side-select-more" aria-haspopup="menu" onClick={(e) => onMore(below(e.currentTarget), e.currentTarget)}>
+          Actions <span aria-hidden="true">▾</span>
+        </button>
         <button type="button" className="icon-btn-sm side-select-clear" aria-label="Clear selection" title="Clear selection (Esc)" onClick={clearSelection}>
           <span aria-hidden="true">×</span>
         </button>
       </div>
-      <div className="side-select-acts">
-        <button type="button" className="btn btn-sm side-select-more" aria-haspopup="menu" onClick={(e) => onMore(below(e.currentTarget), e.currentTarget)}>
-          Actions <span aria-hidden="true">▾</span>
-        </button>
-        {closing > 0 && (
-          <button type="button" className="btn btn-sm" aria-label={`Close ${plural(closing, "session")}`} title={`Close ${plural(closing, "session")}`} onClick={onClose}>
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
-              <rect x="2.5" y="2.5" width="7" height="7" rx="1.5" />
-            </svg>
-            {closing}
-          </button>
-        )}
-        {removing > 0 && (
-          <button type="button" className="btn btn-danger btn-sm" aria-label={`Remove ${plural(removing, "session")}`} title={`Remove ${plural(removing, "session")}`} onClick={onRemove}>
-            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-              <path d="M2 3.5h8M4.5 3.5V2.2h3v1.3M3 3.5l.6 6.3h4.8L9 3.5" />
-            </svg>
-            {removing}
-          </button>
-        )}
-      </div>
+      {(closing > 0 || removing > 0) && (
+        <div className="side-select-acts">
+          {closing > 0 && (
+            <button type="button" className="btn btn-sm" aria-label={`Close ${plural(closing, "session")}`} onClick={onClose}>
+              Close {closing}
+            </button>
+          )}
+          {removing > 0 && (
+            <button type="button" className="btn btn-danger btn-sm" aria-label={`Remove ${plural(removing, "session")}`} onClick={onRemove}>
+              Remove {removing}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }

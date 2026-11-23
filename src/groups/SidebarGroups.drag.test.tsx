@@ -8,6 +8,10 @@ import { useSettings } from "../settings/store";
 import { setSectionOpen } from "../shell/SideSection";
 import { EMPTY_LAYOUT } from "./model";
 import { clearSelection, useSelection } from "./selection";
+import { contentOfItem, useGridDrag } from "../grids/drag";
+import { createGrid, startGrids, useGrids } from "../grids/store";
+import type { GridStorage } from "../grids/storage";
+import { MAIN_GRID } from "../grids/model";
 import { SidebarGroups } from "./SidebarGroups";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
@@ -85,6 +89,22 @@ describe("dragging picked rows", () => {
     fireEvent.click(row("docs"), { metaKey: true });
     await drop("session:s3", { id: "session:s1", type: "item" });
     expect(rows("Acme")).toEqual(["web", "docs", "api"]);
+  });
+
+  it("puts the whole selection in the grid one of them is dropped on", () => {
+    const kept = new Map<string, unknown>();
+    const memory = { get: (k: string) => kept.get(k), set: (k: string, v: unknown) => void kept.set(k, structuredClone(v)), remove: (k: string) => void kept.delete(k), subscribe: () => () => {} } as GridStorage;
+    useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
+    startGrids(memory, { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
+    const grid = createGrid();
+    render(<SidebarGroups />);
+    fireEvent.click(row("api"), { metaKey: true });
+    fireEvent.click(row("docs"), { metaKey: true });
+    act(() => useGridDrag.setState({ item: { content: contentOfItem("session:s3")!, name: "docs" }, over: { kind: "row", gridId: grid } }));
+    act(() => end("session:s3", { id: "session:s3", type: "item" }));
+    const shown = JSON.stringify(useGrids.getState().grids[grid]!.panes.map((p) => p.content));
+    expect([contentOfItem("session:s1"), contentOfItem("session:s3")].every((c) => shown.includes(JSON.stringify(c)))).toBe(true);
+    expect(shown.includes(JSON.stringify(contentOfItem("session:s2")))).toBe(false);
   });
 
   it("takes the click that ends a drag for neither a pick nor an open", async () => {

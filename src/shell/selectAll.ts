@@ -1,5 +1,7 @@
+import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { selectAll as selectRows } from "../groups/selection";
-import { inApp, listen, subscribe } from "../platform";
+import { inApp, subscribe } from "../platform";
 
 // Select All (⌘A), which Desk's Edit menu sends here rather than leaving to
 // the web view: what has focus decides what it selects.
@@ -37,11 +39,14 @@ export const selectAllAt = (target: Element | null): SelectedAll => {
   }
   const editable = target?.closest('[contenteditable]:not([contenteditable="false"])');
   if (editable) {
-    const range = document.createRange();
-    range.selectNodeContents(editable);
-    const selection = window.getSelection();
-    selection?.removeAllRanges();
-    selection?.addRange(range);
+    // As the web view's own Select All, so an editor following the
+    // selection hears it; a range where the command isn't there.
+    if (!document.execCommand("selectAll")) {
+      const range = document.createRange();
+      range.selectNodeContents(editable);
+      window.getSelection()?.removeAllRanges();
+      window.getSelection()?.addRange(range);
+    }
     return "text";
   }
   if (target?.closest(`[${SELECTS_ROWS}]`)) {
@@ -51,6 +56,9 @@ export const selectAllAt = (target: Element | null): SelectedAll => {
   return "none";
 };
 
-/** Follows the Edit menu's Select All in this window. */
+/** Follows the Edit menu's Select All sent to this window, and only that:
+ *  each window selects in itself. */
 export const followSelectAll = (): (() => void) =>
-  inApp ? subscribe(listen(SELECT_ALL_EVENT, () => void selectAllAt(document.activeElement))) : () => {};
+  inApp
+    ? subscribe(listen(SELECT_ALL_EVENT, () => void selectAllAt(document.activeElement), { target: { kind: "WebviewWindow", label: getCurrentWindow().label } }))
+    : () => {};

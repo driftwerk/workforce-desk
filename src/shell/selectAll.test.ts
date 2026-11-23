@@ -1,9 +1,11 @@
+import { listen } from "@tauri-apps/api/event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { clearSelection, showRows, useSelection } from "../groups/selection";
-import { registerTerminal, selectAllAt } from "./selectAll";
+import { followSelectAll, registerTerminal, selectAllAt } from "./selectAll";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
+vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: () => ({ label: "grid-g1" }) }));
 
 afterEach(() => {
   clearSelection();
@@ -24,13 +26,26 @@ describe("Select All, where focus is", () => {
     expect(selectAllAt(at("keys"))).toBe("field");
   });
 
-  it("selects a field's text, and an editable's contents", () => {
+  it("selects a field's text, and an editable's contents as the web view's own Select All does", () => {
     document.body.innerHTML = `<input id="f" value="hello"><div contenteditable="true"><p id="p">one</p><p>two</p></div>`;
     const field = at("f") as HTMLInputElement;
     expect(selectAllAt(field)).toBe("field");
     expect([field.selectionStart, field.selectionEnd]).toEqual([0, 5]);
+    const command = vi.fn(() => true);
+    document.execCommand = command;
+    expect(selectAllAt(at("p"))).toBe("text");
+    expect(command).toHaveBeenCalledWith("selectAll");
+    expect(window.getSelection()?.toString()).toBe("");
+    // Where the command isn't there, a range over the editable.
+    command.mockReturnValue(false);
     expect(selectAllAt(at("p"))).toBe("text");
     expect(window.getSelection()?.toString()).toBe("onetwo");
+  });
+
+  it("hears the menu's Select All sent to this window only", () => {
+    const stop = followSelectAll();
+    expect(vi.mocked(listen)).toHaveBeenCalledWith("select-all", expect.any(Function), { target: { kind: "WebviewWindow", label: "grid-g1" } });
+    stop();
   });
 
   it("picks every row in sight in the sidebar, and selects nothing anywhere else", () => {

@@ -670,6 +670,15 @@ describe("picking rows and acting on them together", () => {
     expect(bar()?.textContent).toContain("2 selected");
   });
 
+  it("lets the only row picked be ⌘-clicked off, as Finder does", () => {
+    groups();
+    fireEvent.click(row("api-e7"));
+    cmd("api-e7");
+    expect(picked()).toEqual([]);
+    cmd("web-release");
+    expect(picked()).toEqual(["session:s2"]);
+  });
+
   it("keeps focus on a row picked with a modifier, so the keys that act on picks reach it", () => {
     groups();
     cmd("api-e7", "web-release");
@@ -690,7 +699,7 @@ describe("picking rows and acting on them together", () => {
     groups();
     expect(row("acme-web").className).toContain("selected");
     // Only a session whose machine is there can be removed or closed.
-    expect(buttons()).toEqual(["Clear selection", "Actions ▾", "Close 1 session", "Remove 1 session"]);
+    expect(buttons()).toEqual(["Actions ▾", "Clear selection", "Close 1 session", "Remove 1 session"]);
   });
 
   it("pins the bar above the rows, saying how many and what each choice is for", () => {
@@ -699,7 +708,8 @@ describe("picking rows and acting on them together", () => {
     const body = screen.getByRole("region", { name: "Groups" }).querySelector(".side-section-body")!;
     expect(body.firstElementChild).toBe(bar());
     expect(bar()?.textContent).toContain("3 selected");
-    expect(buttons()).toEqual(["Clear selection", "Actions ▾", "Close 2 sessions", "Remove 2 sessions"]);
+    expect(buttons()).toEqual(["Actions ▾", "Clear selection", "Close 2 sessions", "Remove 2 sessions"]);
+    expect(within(bar()!).getByRole("button", { name: "Remove 2 sessions" }).textContent).toBe("Remove 2");
     fireEvent.click(within(bar()!).getByRole("button", { name: "Actions" }));
     expect(screen.getByRole("menu", { name: "3 selected" })).toBeTruthy();
     fireEvent.click(within(bar()!).getByRole("button", { name: "Clear selection" }));

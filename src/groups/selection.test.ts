@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { between, clearSelection, extend, inBulk, isBulk, keepOnly, modHeld, only, pickOf, selectAll, showRows, toggle, typedIn, useSelection } from "./selection";
+import { between, clearSelection, followOpen, extend, inBulk, isBulk, keepOnly, modHeld, only, pickOf, selectAll, showRows, toggle, typedIn, useSelection } from "./selection";
 
 const ORDER = ["session:a", "session:b", "session:devbox/c", "agent:local/d", "session:e"];
 const picked = () => [...useSelection.getState().keys];
@@ -104,6 +104,21 @@ describe("picking rows in the sidebar", () => {
     expect([...useSelection.getState().base]).toEqual(["session:a"]);
     extend("session:e");
     expect(picked()).toEqual(["session:a", "session:e"]);
+  });
+
+  it("lets go back to the open row alone, so the next ⌘-click adds to it", () => {
+    followOpen("session:b");
+    toggle("session:a");
+    toggle("session:e");
+    clearSelection();
+    expect(picked()).toEqual(["session:b"]);
+    expect(useSelection.getState().anchor).toBe("session:b");
+    const same = useSelection.getState();
+    clearSelection();
+    expect(useSelection.getState()).toBe(same);
+    toggle("session:b");
+    expect(picked()).toEqual([]);
+    followOpen(null);
   });
 
   it("clears the picks, and leaves an empty selection as it is", () => {
