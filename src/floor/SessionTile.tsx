@@ -1,5 +1,5 @@
 import { useSessionName } from "../groups/names";
-import { backgroundLine, backgroundOf, bossHandles, handledText, lookOf, restartedLine, shownState, waitsOnYou } from "./background";
+import { backgroundLine, backgroundOf, bossHandles, handledText, lookOf, restartedLine, shownState, waitsLine, waitsOnYou } from "./background";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { Approval } from "../session/Approval";
@@ -39,12 +39,21 @@ const home = (s: Session): string => (s.origin === "external" ? "other terminal"
 
 const task = (s: Session): string => s.goal || (s.lastPrompt && plain(s.lastPrompt)) || "No goal yet";
 
+/** How close two times are said as one. */
+const ONE_TIME_MS = 60_000;
+
 const log = (s: Session): string | null => {
   const restarted = restartedLine(s);
   if (restarted) return restarted;
   const background = backgroundOf(s);
-  if (background) return backgroundLine(background);
-  return s.currentTool ? `● ${s.currentTool}` : s.lastReply ? plain(s.lastReply).split("\n").slice(0, 3).join("\n") : null;
+  const waits = s.waits ? waitsLine(s.waits) : null;
+  if (background) {
+    const said = s.waits && Math.abs(Date.parse(s.waits.since) - Date.parse(background.since)) < ONE_TIME_MS ? s.waits.words : waits;
+    return [backgroundLine(background), said].filter(Boolean).join(" · ");
+  }
+  if (s.currentTool) return [`● ${s.currentTool}`, waits].filter(Boolean).join(" · ");
+  if (waits) return `● ${waits}`;
+  return s.lastReply ? plain(s.lastReply).split("\n").slice(0, 3).join("\n") : null;
 };
 
 export function Tile({ session }: { session: Session }) {

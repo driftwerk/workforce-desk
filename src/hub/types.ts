@@ -180,6 +180,9 @@ export interface Session {
   group?: { id: string; name: string } | null;
   /** Background work still running after its turn ended; absent from older hubs. */
   background?: Background | null;
+  /** What a working session has been held up on for 2+ min ("waiting for a
+   *  build slot"); absent while it isn't, and from older hubs. */
+  waits?: { words: string; since: string } | null;
   /** Restarted over work it had running, until the turn that re-checks it
    *  ends; absent from older hubs. */
   restarted?: Restarted | null;
