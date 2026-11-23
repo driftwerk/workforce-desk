@@ -1131,7 +1131,7 @@ mod tests {
         let mut command = portable_pty::CommandBuilder::new("/bin/sh");
         command.args([
             "-c",
-            "(trap '' HUP; exec sleep 30) & echo 'Error: the browser sign-in failed'; exit 3",
+            "trap '' HUP; sleep 30 & echo 'Error: the browser sign-in failed'; exit 3",
         ]);
         let mut child = pair.slave.spawn_command(command).unwrap();
         drop(pair.slave);
