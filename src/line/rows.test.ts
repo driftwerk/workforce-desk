@@ -71,7 +71,7 @@ describe("a line's rows", () => {
     expect(boss({ delivery: "queued", waiting: "person_driving" })).toBe("Waiting: you're driving");
     expect(boss({ delivery: "queued", waiting: "mode_ending" })).toBe("Waiting: Desk is putting it back in its own mode");
     expect(boss({ delivery: "withdrawn" })).toBe("Not delivered: withdrawn before it went in");
-    expect(boss({ delivery: "unreceived" })).toBe("Not received: Desk tried twice and it never showed in the session");
+    expect(boss({ delivery: "unreceived" })).toBe("Not received: Desk couldn't show it reached the session");
     expect(boss({ delivery: "queued", waiting: "next_call" })).toBe("Sent now: it reads this with its next tool call");
     expect(boss({ delivery: "queued", waiting: "awaited" })).toBe("Waiting: its call takes this as its answer");
     expect(boss({ delivery: "queued", waiting: "behind" })).toBe("Waiting behind one on its way in");

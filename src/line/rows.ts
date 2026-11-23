@@ -92,7 +92,7 @@ export const deliveryText = (m: LineMessage, now: number): string | null => {
     case "noted":
       return "A note here only: not typed in";
     case "unreceived":
-      return "Not received: Desk tried twice and it never showed in the session";
+      return "Not received: Desk couldn't show it reached the session";
     default:
       return unknown(m.delivery);
   }
