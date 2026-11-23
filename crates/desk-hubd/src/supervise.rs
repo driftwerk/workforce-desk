@@ -311,9 +311,6 @@ fn too_old_for_this_desk(status: std::process::ExitStatus) -> Option<&'static st
 /// for as long as they run, kept under [`LOG_LIMIT`] while they do.
 const CAPPED_LOGS: [&str; 4] = ["hub.log", "memory.log", "pty-holder.log", "desk-hubd.log"];
 
-/// How often the running logs are checked against their limit.
-const CAP_EVERY: Duration = Duration::from_secs(60);
-
 /// `workforce serve` on the hub's config, with `env` and, on a pipe, the
 /// secrets. The pipe is kept open by what this returns beside the command.
 fn hub_command(
@@ -833,7 +830,7 @@ async fn run_helper(
             .map(|log| paths.logs().join(log))
             .collect(),
         LOG_LIMIT,
-        CAP_EVERY,
+        logs::CAP_EVERY,
     )));
     // A machine's folder says so, so what is asked over SSH later
     // (`connection --json`, `--remove-everything`) finds its secrets where

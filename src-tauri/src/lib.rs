@@ -1184,7 +1184,7 @@ pub fn run() {
             tauri::async_runtime::spawn(desk_core::logs::keep_capped(
                 vec![paths.logs().join("desk.log")],
                 desk_core::logs::LOG_LIMIT,
-                std::time::Duration::from_secs(60),
+                desk_core::logs::CAP_EVERY,
             ));
             // What was open, and where the window was, before anything shows.
             let store = state::StateStore::open(paths.desk_state());
