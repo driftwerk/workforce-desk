@@ -16,22 +16,41 @@ export interface Feed {
   state: "loading" | "ready" | "failed";
   /** Reading the page before the oldest event shown. */
   earlier: "idle" | "loading" | "failed";
+  /** Someone reads it below its newest, or one group's part of it: what
+   *  they read stays while live events come in. */
+  held?: boolean;
 }
 
 export const PAGE = 100;
 
-/** `feed` with the live event `e` in its place. A live event never makes a
- *  list longer than a page, or than what Show earlier read into it: the
- *  oldest goes, to be read again. While an earlier page is on its way,
- *  which follows the oldest shown, nothing goes. */
-export const heard = (feed: Feed, e: ActivityEvent): Feed => {
-  const events = mergeEvents(feed.events, [e]);
-  const keep = Math.max(PAGE, feed.events.length);
-  return events.length > keep && feed.earlier !== "loading" ? { ...feed, events: events.slice(0, keep), more: true } : { ...feed, events };
-};
+/** The most a held list keeps of live events before its oldest go. */
+export const HELD = PAGE * 5;
 
-/** Whether two readings of the overview say the same. */
-const same = (a: Overview | null, b: Overview): boolean => JSON.stringify(a) === JSON.stringify(b);
+/** `feed`'s newest `keep` events: what goes is read again by Show earlier.
+ *  While an earlier page is on its way, which follows the oldest shown,
+ *  nothing goes. */
+const capped = (feed: Feed, keep: number): Feed =>
+  feed.events.length > keep && feed.earlier !== "loading" ? { ...feed, events: feed.events.slice(0, keep), more: true } : feed;
+
+/** `feed` with the live event `e` in its place. A live event never makes a
+ *  list longer than a page; a held one keeps what's read in it, up to
+ *  `HELD` or what Show earlier read. */
+export const heard = (feed: Feed, e: ActivityEvent): Feed =>
+  capped({ ...feed, events: mergeEvents(feed.events, [e]) }, feed.held ? Math.max(HELD, feed.events.length) : PAGE);
+
+/** `feed` held, or let go: back to a page. */
+export const held = (feed: Feed, hold: boolean): Feed => (hold ? { ...feed, held: true } : capped({ ...feed, held: false }, PAGE));
+
+let shown: { overview: Overview; text: string } | null = null;
+
+/** The overview just read, or `was` where it says the same: the text of the
+ *  one shown is kept, so each read is written out once. */
+const kept = (was: Overview | null, read: Overview): Overview => {
+  const text = JSON.stringify(read);
+  if (was && shown?.overview === was && shown.text === text) return was;
+  shown = { overview: read, text };
+  return read;
+};
 
 interface OverviewStore {
   overview: Overview | null;
@@ -49,6 +68,9 @@ interface OverviewStore {
   /** A filter's latest page (again, replacing what was shown). */
   loadActivity: (filter: ActivityFilter) => Promise<void>;
   loadEarlier: (filter: ActivityFilter) => Promise<void>;
+  /** Keeps a list's live events from pushing out what's read in it, or
+   *  lets it go back to a page. */
+  hold: (filter: ActivityFilter, hold: boolean) => void;
   /** An event from the socket, into every list it belongs in. */
   receive: (e: ActivityEvent) => void;
   loadManager: () => Promise<void>;
@@ -91,7 +113,7 @@ export const useOverview = create<OverviewStore>((set, get) => ({
     if (!hub) return;
     try {
       const overview = await hub.overview();
-      if (hubNow() === hub) set((s) => ({ overview: same(s.overview, overview) ? s.overview : overview, overviewSupport: "yes" }));
+      if (hubNow() === hub) set((s) => ({ overview: kept(s.overview, overview), overviewSupport: "yes" }));
     } catch (e) {
       // Anything else keeps what's shown; the next event or tick asks again.
       if (missing(e) && hubNow() === hub) set({ overview: null, overviewSupport: "no" });
@@ -132,6 +154,11 @@ export const useOverview = create<OverviewStore>((set, get) => ({
       put(() => ({ earlier: "failed" }));
     }
   },
+  hold: (filter, hold) =>
+    set((s) => {
+      const feed = s.feeds[filter];
+      return feed && !!feed.held !== hold ? { feeds: { ...s.feeds, [filter]: held(feed, hold) } } : s;
+    }),
   receive: (e) => {
     set((s) => ({
       feeds: Object.fromEntries(

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { useChat } from "../chat/store";
 import { useSessionName } from "../groups/names";
 import { useDesk } from "../hub/store";
@@ -51,7 +51,7 @@ const useOpens = (item: OverviewItem): boolean => {
 
 /** An agent or a session on the Floor: who, what they're doing, and what
  *  they need from you, answered in place. */
-export function ItemTile({ item: listed }: { item: OverviewItem }) {
+export const ItemTile = memo(function ItemTile({ item: listed }: { item: OverviewItem }) {
   const sessionName = useSessionName(listed.kind === "session" ? listed.id : null, listed.name);
   const agent = useLocalAgent(listed.kind === "agent" ? listed.id : null);
   const named = agent?.name ?? sessionName;
@@ -85,7 +85,7 @@ export function ItemTile({ item: listed }: { item: OverviewItem }) {
         ))}
     </article>
   );
-}
+});
 
 function TileHead({ item, tone, opens }: { item: OverviewItem; tone: string; opens: boolean }) {
   const inner = (

@@ -1,3 +1,4 @@
+import { memo } from "react";
 import { useSessionName } from "../groups/names";
 import { backgroundLine, backgroundOf, bossHandles, handledText, lookOf, restartedLine, shownState, waitsLine, waitsOnYou } from "./background";
 import { useDesk } from "../hub/store";
@@ -56,7 +57,7 @@ const log = (s: Session): string | null => {
   return s.lastReply ? plain(s.lastReply).split("\n").slice(0, 3).join("\n") : null;
 };
 
-export function Tile({ session }: { session: Session }) {
+export const Tile = memo(function Tile({ session }: { session: Session }) {
   const open = useDesk((s) => s.open);
   const name = useSessionName(session.id, session.name);
   const text = log(session);
@@ -82,4 +83,4 @@ export function Tile({ session }: { session: Session }) {
       {session.pending && <Approval session={session} compact />}
     </article>
   );
-}
+});

@@ -21,7 +21,7 @@ import { useDesk } from "../hub/store";
 import { placeLabel } from "../floor/target";
 import { openTarget } from "../shell/navigate";
 import { EventTicketChip } from "../board/TicketChip";
-import { useOverview } from "./store";
+import { HELD, PAGE, useOverview } from "./store";
 import { useSubHeading } from "../floor/FloorShell";
 
 /** "allowed by you 16:31", "no longer waiting". */
@@ -160,6 +160,7 @@ export const ActivityRail = memo(function ActivityRail({
   const feed = useOverview((s) => s.feeds[shown]);
   const loadActivity = useOverview((s) => s.loadActivity);
   const loadEarlier = useOverview((s) => s.loadEarlier);
+  const hold = useOverview((s) => s.hold);
   const floorOn = useLocalFloor();
   const allNeeds = useNeeds();
   const localId = useChat((s) => s.hubs.find((h) => h.local)?.id);
@@ -192,6 +193,21 @@ export const ActivityRail = memo(function ActivityRail({
     [fed, group, localId, place],
   );
   const earlier = () => void loadEarlier(shown);
+  // Read below its newest, or one group's part of it: what's read stays.
+  const [below, setBelow] = useState(false);
+  const holding = below || group !== null;
+  const loaded = !!feed;
+  useEffect(() => {
+    if (!fromLog || !loaded) return;
+    hold(shown, holding);
+    return () => hold(shown, false);
+  }, [fromLog, loaded, shown, holding, hold]);
+  // One group's part is read back until it fills a page, as far as a held
+  // list goes.
+  const short = !!group && fromLog && events.length < PAGE && fed.length < HELD && feed?.state === "ready" && feed.more && feed.earlier === "idle";
+  useEffect(() => {
+    if (short) void loadEarlier(shown);
+  }, [short, fed.length, shown, loadEarlier]);
   // What happened is read as its rows show; the newest row seen is the point.
   const scroller = useRef<HTMLDivElement>(null);
   const seenItems = useMemo(() => [...events].reverse().map((e) => ({ id: e.id, at: e.at })), [events]);
@@ -200,18 +216,21 @@ export const ActivityRail = memo(function ActivityRail({
   const brief = useUnread((s) => s.local?.brief);
   const floorBadge = badgeOfFloor(allNeeds, activity, brief);
   const words = useRowWords();
-  // Who allowed or denied it, as they are called now.
-  const states = useMemo(
-    () =>
+  // Who allowed or denied it, as they are called now; a row whose state
+  // says the same keeps it, and is left as it is.
+  const lastStates = useRef<ReadonlyMap<string, NeedState>>(new Map());
+  const states = useMemo(() => {
+    lastStates.current =
       floorOn && shown === "all"
         ? needStates(
             events,
             needs.filter((n) => n.hubId === localId),
             words.agentName,
+            lastStates.current,
           )
-        : new Map<string, NeedState>(),
-    [floorOn, shown, events, needs, localId, words.agentName],
-  );
+        : new Map<string, NeedState>();
+    return lastStates.current;
+  }, [floorOn, shown, events, needs, localId, words.agentName]);
 
   const log = (
     <>
@@ -225,7 +244,7 @@ export const ActivityRail = memo(function ActivityRail({
           </button>
         </p>
       ) : events.length === 0 ? (
-        <p className="faint small activity-note">{EMPTY[shown]}</p>
+        <p className="faint small activity-note">{group ? (feed.more ? "Nothing from this group lately." : "Nothing has happened in this group yet.") : EMPTY[shown]}</p>
       ) : (
         <ol className="ev-list" aria-label={`Activity: ${options[current]?.label ?? "All"}`}>
           {events.flatMap((e, i) => {
@@ -303,6 +322,7 @@ export const ActivityRail = memo(function ActivityRail({
         className="activity-scroll"
         onScroll={(e) => {
           const el = e.currentTarget;
+          setBelow(el.scrollTop > 0);
           if (fromLog && el.scrollHeight - el.scrollTop - el.clientHeight < 120 && feed?.more && feed.earlier === "idle") earlier();
         }}
       >

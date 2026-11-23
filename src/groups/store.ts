@@ -5,6 +5,7 @@
 // it hands over what it kept itself. Against a hub that can't keep them,
 // Desk's settings hold them, as before.
 
+import { useMemo } from "react";
 import { crossesBoss, HubError, type DeskHub } from "../hub/client";
 import { deskListeners, hubOf, useDesk } from "../hub/store";
 import { LOCAL, splitKey } from "../hub/machines";
@@ -52,7 +53,7 @@ export const useLayout = (): Layout => {
   const hub = useHubLayout((s) => s.layout);
   const groups = useSettings((s) => s.groups);
   const ungrouped = useSettings((s) => s.ungrouped);
-  return hub ?? { groups, ungrouped };
+  return useMemo(() => hub ?? { groups, ungrouped }, [hub, groups, ungrouped]);
 };
 
 // ── Changes ───────────────────────────────────────────────────────────────

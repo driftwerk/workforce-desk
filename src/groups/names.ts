@@ -26,19 +26,24 @@ export const useSessionName = (id: string | null | undefined, hubName: string): 
   return (hub ? theirs : local) ?? hubName;
 };
 
-let lastGiven: { sessions: Record<string, Session>; restore: readonly Session[]; key: string } | null = null;
+const givenOf = new WeakMap<Record<string, Session>, WeakMap<readonly Session[], string>>();
 
-/** The names given, as one key, worked out once for the same sessions:
- *  every list's selector runs on every change of Desk's state. */
+/** The names given, as one key, worked out once for the same sessions: a
+ *  session's every other change (its state, its last reply) leaves every
+ *  list that names sessions as it is, and each list's selector, run on
+ *  every change of Desk's state, reads it again for nothing. */
 const givenKey = (sessions: Record<string, Session>, restore: readonly Session[]): string => {
-  if (lastGiven?.sessions === sessions && lastGiven.restore === restore) return lastGiven.key;
+  const byRestore = givenOf.get(sessions) ?? new WeakMap<readonly Session[], string>();
+  givenOf.set(sessions, byRestore);
+  const was = byRestore.get(restore);
+  if (was !== undefined) return was;
   const key = JSON.stringify(
     [...restore, ...Object.values(sessions)].flatMap((x) => {
       const name = given(x);
       return name ? [[sessionKey(x), name]] : [];
     }),
   );
-  lastGiven = { sessions, restore, key };
+  byRestore.set(restore, key);
   return key;
 };
 
@@ -46,8 +51,6 @@ const givenKey = (sessions: Record<string, Session>, restore: readonly Session[]
 export const useSessionNames = (): Record<string, string> => {
   const hub = useHubLayout((s) => s.layout !== null);
   const local = useSettings((s) => s.sessionNames);
-  // The names given, as one key: a session's every other change (its state,
-  // its last reply) leaves every list that names sessions as it is.
   const given_ = useDesk((s) => givenKey(s.sessions, s.restore));
   const theirs = useMemo(() => Object.fromEntries(JSON.parse(given_) as [string, string][]), [given_]);
   // A machine's engine keeps the names given its sessions whichever this
