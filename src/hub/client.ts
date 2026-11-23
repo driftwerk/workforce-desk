@@ -377,6 +377,43 @@ export const hubRequest = async <T>(hub: HubRef, method: string, path: string, b
 export const hubCall = async <T>(hub: HubRef, method: string, path: string, body?: unknown): Promise<T> =>
   (await hubRequest<T>(hub, method, path, body)).body;
 
+/** One of the person's standing rules for sorting new mail, as its hub
+ *  keeps it: a monitor that moves, archives, marks read or flags what
+ *  matches. `says` is the rule in a sentence; `watched_by` names the other
+ *  monitors that read the same mail. */
+export interface SortRule {
+  rule_id: string;
+  owner: string | null;
+  says: string;
+  enabled: boolean;
+  watched_by: string[];
+}
+
+const sortRulePath = (rule: Pick<SortRule, "rule_id" | "owner">, rest = ""): string =>
+  `/api/monitors/${encodeURIComponent(rule.rule_id)}${rest}${rule.owner === null ? "" : `?owner=${encodeURIComponent(rule.owner)}`}`;
+
+/** The person's mail sorting rules on hub `hub`. */
+export const sortRulesOf = (hub: HubRef) => ({
+  list: async (): Promise<SortRule[]> => (await hubCall<{ rules?: SortRule[] }>(hub, "GET", "/api/monitors/sort-rules")).rules ?? [],
+  setEnabled: (rule: SortRule, enabled: boolean): Promise<unknown> => hubCall(hub, "PUT", sortRulePath(rule, "/enabled"), { enabled }),
+  remove: (rule: SortRule): Promise<unknown> => hubCall(hub, "DELETE", sortRulePath(rule)),
+});
+
+export type SortRulesApi = ReturnType<typeof sortRulesOf>;
+
+/** Whether hub `hub` has email for agent `agentId`: whether it gives the
+ *  agent the email skill's inbox, which it does only once an account is
+ *  set up, deferred or not. Asked by name alone, so no schema is sent. A
+ *  hub that won't say is taken to have none. */
+export const sortsMail = (hub: HubRef, agentId: string): Promise<boolean> =>
+  hubCall<{ tools?: { name: string }[] }>(hub, "GET", `/api/agents/${encodeURIComponent(agentId)}/tools?names=true`).then(
+    (r) => (r.tools ?? []).some((t) => t.name === "email.inbox"),
+    (e: unknown) => {
+      if (e instanceof HubError && (e.status === 401 || e.status === 403)) return false;
+      throw e;
+    },
+  );
+
 /** A Desk route; in the browser preview, the dev bridge answers the ones
  *  the running hub doesn't have yet. */
 export const deskCall = <T>(hub: HubRef, method: string, path: string, body?: unknown): Promise<T> =>
