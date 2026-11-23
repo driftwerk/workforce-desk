@@ -124,7 +124,7 @@ describe("an agent clicked on the Floor", () => {
   it("from a Floor tile too", () => {
     render(
       <>
-        <ItemTile item={{ kind: "agent", id: "scout", name: "Scout", state: "working", task: "Deploying" }} />
+        <ItemTile item={{ kind: "agent", id: "scout", name: "Scout", state: "working", task: "Deploying" }} now={Date.now()} />
         <Desk />
       </>,
     );
@@ -138,7 +138,7 @@ describe("an agent clicked on the Floor", () => {
     deliver(MAIN_GRID, { kind: "agent", agent: "local/scout" });
     render(
       <>
-        <ItemTile item={{ kind: "agent", id: "scout", name: "Scout", state: "working", task: "Deploying" }} />
+        <ItemTile item={{ kind: "agent", id: "scout", name: "Scout", state: "working", task: "Deploying" }} now={Date.now()} />
         <Desk />
       </>,
     );

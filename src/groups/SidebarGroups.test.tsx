@@ -151,7 +151,7 @@ describe("groups in the sidebar", () => {
 
   it("a renamed session shows its new name on the Floor and in its header", () => {
     useSettings.setState({ sessionNames: { s1: "date picker" } });
-    render(<Tile session={useDesk.getState().sessions.s1!} />);
+    render(<Tile session={useDesk.getState().sessions.s1!} now={Date.now()} />);
     expect(screen.getByText("date picker", { selector: ".tile-title" })).toBeTruthy();
     cleanup();
     render(<SessionCard session={useDesk.getState().sessions.s1!} />);

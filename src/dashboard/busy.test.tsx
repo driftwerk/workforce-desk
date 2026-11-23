@@ -79,6 +79,8 @@ const json = (body: unknown) => new Response(JSON.stringify(body), { status: 200
 
 /** How often each of this computer's engine's routes was read. */
 let reads: Record<string, number>;
+/** What the engine answers for its overview: none, where it has none. */
+let served: Overview | null;
 
 /** A page of `history` as the engine pages it: before an event, `limit` at most. */
 const activityPage = (query: URLSearchParams) => {
@@ -93,7 +95,7 @@ const engine: DeskTransport = {
     const url = new URL(path, "http://local.test");
     const route = `${method} ${url.pathname}`;
     reads[route] = (reads[route] ?? 0) + 1;
-    if (route === "GET /api/desk/overview") return json(overview);
+    if (route === "GET /api/desk/overview") return served ? json(served) : new Response("Not Found", { status: 404 });
     if (route === "GET /api/desk/activity") return json(activityPage(url.searchParams));
     if (route === "GET /api/desk/manager") return json({ agentId: null, level: null });
     return new Response("Not Found", { status: 404 });
@@ -154,6 +156,7 @@ beforeEach(async () => {
   vi.setSystemTime(NOW);
   FakeSocket.reset();
   reads = {};
+  served = overview;
   commits = 0;
   live = 0;
   useUi.setState({ activityOpen: true });
@@ -267,5 +270,33 @@ describe("the Dashboard with a dozen sessions running", () => {
     expect(ids()).toEqual(acme);
     await says(liveEvent("acme"));
     expect(ids()).toEqual(["live-100", ...acme]);
+  });
+});
+
+describe("the times on the Floor's tiles", () => {
+  const twoMinutesAgo = new Date(NOW - 2 * 60_000).toISOString();
+  /** A session whose background work runs, one that waits on a test, and
+   *  an agent at work: none says anything new as the minutes go by. */
+  const quiet = async () => {
+    await says({ type: "session", session: { ...running(5), state: "done", background: { count: 1, since: twoMinutesAgo } } });
+    await says({ type: "session", session: { ...running(6), waits: { words: "Waits on npm test", since: twoMinutesAgo } } });
+  };
+  const times = () => [
+    screen.getByText(/Waiting on .* · \d+m/).textContent,
+    screen.getByText(/Waits on npm test, \d+m/).textContent,
+    ...(served ? [screen.getByText(/working · \d+ min/).textContent] : []),
+  ];
+
+  it.each([
+    ["Desk's groups", () => (served = { ...overview, items: [...overview.items, { kind: "agent", id: "scout", name: "Scout", state: "working", since: twoMinutesAgo }] })],
+    ["the sessions, before the engine has an overview", () => (served = null)],
+  ])("move on with the minutes in %s", async (_, serve) => {
+    serve();
+    useFloor.setState({ hubs: {} });
+    await quiet();
+    await dashboard();
+    expect(times().every((t) => /\b2 ?m/.test(t!))).toBe(true);
+    await act(() => vi.advanceTimersByTimeAsync(5 * 60_000));
+    expect(times().every((t) => /\b7 ?m/.test(t!))).toBe(true);
   });
 });

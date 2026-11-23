@@ -9,6 +9,7 @@ import { useOverview } from "../overview/store";
 import { waitsOnYou } from "./background";
 import { TICK_MS, tickFloor } from "./store";
 import { RestoreBanner } from "./RestoreBanner";
+import { useMinute } from "./RightNow";
 import { GROUPS, Tile } from "./SessionTile";
 import { useSavedScroll } from "../restore/scroll";
 
@@ -100,6 +101,7 @@ export function SessionsFloor({ heading }: { heading?: ReactNode } = {}) {
     tiles.forEach((s) => seen.add(s.id));
     return { ...g, tiles };
   }).filter((g) => g.tiles.length);
+  const now = useMinute();
   const scroller = useSavedScroll<HTMLElement>("floor");
   return (
     <FloorShell heading={heading} className="floor" scroller={scroller}>
@@ -121,7 +123,7 @@ export function SessionsFloor({ heading }: { heading?: ReactNode } = {}) {
             <H>{g.title}</H>
             <div className="tiles">
               {g.tiles.map((s) => (
-                <Tile key={s.id} session={s} />
+                <Tile key={s.id} session={s} now={now} />
               ))}
             </div>
           </section>

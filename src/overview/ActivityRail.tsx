@@ -44,6 +44,8 @@ export const useRowWords = (): RowWords => {
   return useMemo(() => ({ names, agentName, rooms }), [names, agentName, rooms]);
 };
 
+const NO_STATES: ReadonlyMap<string, NeedState> = new Map();
+
 export const ActivityRow = memo(function ActivityRow({ event, need, words }: { event: ActivityEvent; need?: NeedState; words: RowWords }) {
   const { rooms } = words;
   const line = lineOf(event, words.names, words.agentName);
@@ -218,19 +220,22 @@ export const ActivityRail = memo(function ActivityRail({
   const words = useRowWords();
   // Who allowed or denied it, as they are called now; a row whose state
   // says the same keeps it, and is left as it is.
-  const lastStates = useRef<ReadonlyMap<string, NeedState>>(new Map());
-  const states = useMemo(() => {
-    lastStates.current =
+  const shownStates = useRef<ReadonlyMap<string, NeedState>>(NO_STATES);
+  const states = useMemo(
+    () =>
       floorOn && shown === "all"
         ? needStates(
             events,
             needs.filter((n) => n.hubId === localId),
             words.agentName,
-            lastStates.current,
+            shownStates.current,
           )
-        : new Map<string, NeedState>();
-    return lastStates.current;
-  }, [floorOn, shown, events, needs, localId, words.agentName]);
+        : NO_STATES,
+    [floorOn, shown, events, needs, localId, words.agentName],
+  );
+  useEffect(() => {
+    shownStates.current = states;
+  }, [states]);
 
   const log = (
     <>
@@ -248,8 +253,8 @@ export const ActivityRail = memo(function ActivityRail({
       ) : (
         <ol className="ev-list" aria-label={`Activity: ${options[current]?.label ?? "All"}`}>
           {events.flatMap((e, i) => {
-            const day = dayName(e.at);
-            const heading = day !== "Today" && day !== (i > 0 ? dayName(events[i - 1]!.at) : "Today");
+            const day = dayName(e.at, now);
+            const heading = day !== "Today" && day !== (i > 0 ? dayName(events[i - 1]!.at, now) : "Today");
             return [
               heading && (
                 <li key={`day-${e.id}`} className="ev-day">

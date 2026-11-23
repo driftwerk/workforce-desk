@@ -186,9 +186,10 @@ export const FloorColumn = memo(function FloorColumn({
   const { groups, sections, sectioned, onFloor } = read;
   const scroller = useSavedScroll<HTMLDivElement>(scrollKey);
   const scope = useFloorScope();
+  const now = useMinute();
   return (
     <div ref={scroller} className={className}>
-      <FloorCards brief={overview.brief} sections={sections} sectioned={sectioned} onFloor={onFloor} />
+      <FloorCards brief={overview.brief} sections={sections} sectioned={sectioned} onFloor={onFloor} now={now} />
       {!sections && groups.length === 0 && (
         <p className="empty muted">
           {scope
@@ -197,7 +198,7 @@ export const FloorColumn = memo(function FloorColumn({
         </p>
       )}
       {groups.map((g) => (
-        <Group key={g.title} group={g} />
+        <Group key={g.title} group={g} now={now} />
       ))}
     </div>
   );
@@ -210,17 +211,18 @@ const FloorCards = memo(function FloorCards({
   sections,
   sectioned,
   onFloor,
+  now,
 }: {
   brief: Overview["brief"];
   sections: readonly Section[] | null;
   sectioned: CrewFloorRead["sectioned"];
   onFloor: boolean;
+  now: number;
 }) {
   const manager = useOverview((s) => s.manager);
   const managerAgent = useLocalAgent(manager?.agentId);
   const managerName = manager?.agentId ? (managerAgent?.name ?? said?.by.name ?? manager.agentId) : null;
   const [paused, setPaused] = useState<{ id: string; name: string } | null>(null);
-  const now = useMinute();
   const scope = useFloorScope();
   const brief =
     said && manager?.agentId ? (
@@ -333,7 +335,7 @@ export function CrewFloor({ overview, onNewSession, heading }: { overview: Overv
 
 const TONE: Record<string, string> = { "Needs you": "blocked", Working: "working", "Done today": "done" };
 
-const Group = memo(function Group({ group }: { group: FloorGroup }) {
+const Group = memo(function Group({ group, now }: { group: FloorGroup; now: number }) {
   const H = useSubHeading();
   const tone = TONE[group.title] ?? "idle";
   return (
@@ -341,10 +343,10 @@ const Group = memo(function Group({ group }: { group: FloorGroup }) {
       <H className={`ov-label state-${tone}`}>{group.title}</H>
       <div className={group.title === "Needs you" ? "ov-tiles ov-tiles-wide" : "ov-tiles"}>
         {group.agents.map((i) => (
-          <ItemTile key={`agent:${i.id}`} item={i} />
+          <ItemTile key={`agent:${i.id}`} item={i} now={now} />
         ))}
         {group.sessions.map((s) => (
-          <Tile key={s.id} session={s} />
+          <Tile key={s.id} session={s} now={now} />
         ))}
       </div>
     </section>

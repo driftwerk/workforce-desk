@@ -29,13 +29,13 @@ afterEach(cleanup);
 const stateLine = () => document.querySelector(".tile-state")?.textContent;
 
 it("says the model a session was given beside its state, and nothing for its engine's default", () => {
-  const { unmount } = render(<Tile session={session()} />);
+  const { unmount } = render(<Tile session={session()} now={Date.now()} />);
   expect(stateLine()).toBe("working · local");
   unmount();
-  render(<Tile session={session({ model: "sonnet" })} />);
+  render(<Tile session={session({ model: "sonnet" })} now={Date.now()} />);
   expect(stateLine()).toBe("working · local · Sonnet");
   cleanup();
-  render(<Tile session={session({ engine: "codex", model: "gpt-6.1-sol" })} />);
+  render(<Tile session={session({ engine: "codex", model: "gpt-6.1-sol" })} now={Date.now()} />);
   expect(stateLine()).toBe("working · local · gpt-6.1-sol");
 });
 
@@ -46,29 +46,29 @@ describe("a tile's log line", () => {
   const waits = () => ({ words: "waiting for a build slot", since: since() });
 
   it("says what a working session with a tool waits on and for how long", () => {
-    render(<Tile session={session({ currentTool: "Bash", waits: waits() })} />);
+    render(<Tile session={session({ currentTool: "Bash", waits: waits() })} now={Date.now()} />);
     expect(logLine()).toBe("● Bash · waiting for a build slot, 3m");
   });
 
   it("says it without a tool", () => {
-    render(<Tile session={session({ waits: waits() })} />);
+    render(<Tile session={session({ waits: waits() })} now={Date.now()} />);
     expect(logLine()).toBe("● waiting for a build slot, 3m");
   });
 
   it("joins a done session's background work with what it waits on, said once when they began together", () => {
-    const { unmount } = render(<Tile session={session({ state: "done", background: { count: 1, since: since() }, waits: waits() })} />);
+    const { unmount } = render(<Tile session={session({ state: "done", background: { count: 1, since: since() }, waits: waits() })} now={Date.now()} />);
     expect(logLine()).toBe("Waiting on 1 background task · 3m · waiting for a build slot");
     unmount();
     const earlier = new Date(Date.now() - 13 * 60_000).toISOString();
-    render(<Tile session={session({ state: "done", background: { count: 1, since: earlier }, waits: waits() })} />);
+    render(<Tile session={session({ state: "done", background: { count: 1, since: earlier }, waits: waits() })} now={Date.now()} />);
     expect(logLine()).toBe("Waiting on 1 background task · 13m · waiting for a build slot, 3m");
   });
 
   it("is the background work alone, or the current tool alone, without waits", () => {
-    const { unmount } = render(<Tile session={session({ state: "done", background: { count: 2, since: since() } })} />);
+    const { unmount } = render(<Tile session={session({ state: "done", background: { count: 2, since: since() } })} now={Date.now()} />);
     expect(logLine()).toBe("Waiting on 2 background tasks · 3m");
     unmount();
-    render(<Tile session={session({ currentTool: "Bash" })} />);
+    render(<Tile session={session({ currentTool: "Bash" })} now={Date.now()} />);
     expect(logLine()).toBe("● Bash");
   });
 });

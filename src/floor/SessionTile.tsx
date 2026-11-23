@@ -43,24 +43,25 @@ const task = (s: Session): string => s.goal || (s.lastPrompt && plain(s.lastProm
 /** How close two times are said as one. */
 const ONE_TIME_MS = 60_000;
 
-const log = (s: Session): string | null => {
+const log = (s: Session, now: number): string | null => {
   const restarted = restartedLine(s);
   if (restarted) return restarted;
   const background = backgroundOf(s);
-  const waits = s.waits ? waitsLine(s.waits) : null;
+  const waits = s.waits ? waitsLine(s.waits, now) : null;
   if (background) {
     const said = s.waits && Math.abs(Date.parse(s.waits.since) - Date.parse(background.since)) < ONE_TIME_MS ? s.waits.words : waits;
-    return [backgroundLine(background), said].filter(Boolean).join(" · ");
+    return [backgroundLine(background, now), said].filter(Boolean).join(" · ");
   }
   if (s.currentTool) return [`● ${s.currentTool}`, waits].filter(Boolean).join(" · ");
   if (waits) return `● ${waits}`;
   return s.lastReply ? plain(s.lastReply).split("\n").slice(0, 3).join("\n") : null;
 };
 
-export const Tile = memo(function Tile({ session }: { session: Session }) {
+/** A session's tile; `now`, the minute it's drawn in, moves its times on. */
+export const Tile = memo(function Tile({ session, now }: { session: Session; now: number }) {
   const open = useDesk((s) => s.open);
   const name = useSessionName(session.id, session.name);
-  const text = log(session);
+  const text = log(session, now);
   const state = shownState(session);
   return (
     <article className={`tile tile-${lookOf(session)}`}>
