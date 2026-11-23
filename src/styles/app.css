@@ -2575,31 +2575,51 @@ button.thread-bar:hover {
 .gi.in-focus.on {
   background: color-mix(in srgb, var(--signal) 8%, var(--raised));
 }
-/* Picked to close with others. */
+/* Picked to act on with others; the open one among them keeps its ring. */
 .gi.selected,
 .gi.selected:hover {
   background: var(--signal-soft);
   color: var(--signal-soft-text);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--signal) 40%, transparent);
 }
+.gi.selected.on {
+  box-shadow:
+    inset 0 0 0 1px var(--signal),
+    0 1px 2px var(--lift);
+}
+/* Pinned above the rows while two or more are picked, over the scroller's
+   top fade. */
 .side-select {
   position: sticky;
-  bottom: 0;
-  z-index: 1;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 6px;
+  padding: 8px;
+  border: 1px solid var(--signal);
+  border-radius: var(--radius-sm);
+  background: var(--signal-soft);
+  color: var(--signal-soft-text);
+  box-shadow: 0 2px 6px var(--lift);
+}
+.side-select-head,
+.side-select-acts {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-top: 6px;
-  padding: 6px 6px 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--surface);
-  box-shadow: 0 1px 2px var(--lift);
+}
+.side-select-acts {
+  flex-wrap: wrap;
 }
 .side-select-count {
   flex: 1;
   min-width: 0;
-  color: var(--muted);
+  font-weight: 650;
+}
+.side-select .btn-ghost {
+  color: inherit;
 }
 .gi .gi-handle {
   opacity: 0;
