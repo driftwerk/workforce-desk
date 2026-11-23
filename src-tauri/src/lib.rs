@@ -1104,14 +1104,7 @@ fn init_logging(paths: &Paths) {
     let file = (!std::io::stderr().is_terminal())
         .then(|| {
             std::fs::create_dir_all(paths.logs()).ok()?;
-            if std::fs::metadata(&log).is_ok_and(|m| m.len() > 20 * 1024 * 1024) {
-                let _ = std::fs::rename(&log, log.with_extension("log.1"));
-            }
-            std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(&log)
-                .ok()
+            desk_core::logs::append_log(&log, desk_core::logs::LOG_LIMIT).ok()
         })
         .flatten();
     match file {
@@ -1187,6 +1180,13 @@ pub fn run() {
         .register_asynchronous_uri_scheme_protocol(attachments::SCHEME, attachments::protocol)
         .setup(|app| {
             let paths = Paths::new()?;
+            // Kept under its limit for as long as Desk runs, not only at
+            // its launch.
+            tauri::async_runtime::spawn(desk_core::logs::keep_capped(
+                vec![paths.logs().join("desk.log")],
+                desk_core::logs::LOG_LIMIT,
+                desk_core::logs::CAP_EVERY,
+            ));
             // What was open, and where the window was, before anything shows.
             let store = state::StateStore::open(paths.desk_state());
             let handle = app.handle().clone();
