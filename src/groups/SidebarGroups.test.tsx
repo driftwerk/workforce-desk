@@ -765,7 +765,7 @@ describe("picking rows and acting on them together", () => {
     expect(here.remove.mock.calls.map(([id]) => id).sort()).toEqual(["s1", "s2"]);
     expect(there.remove).toHaveBeenCalledWith("d1", false);
     expect(picked()).toEqual(["session:devbox/d1"]);
-    expect(screen.getByRole("dialog").textContent).toContain("1 of 3 weren’t removed");
+    expect(await within(screen.getByRole("dialog")).findByText(/1 of 3 weren’t removed/)).toBeTruthy();
   });
 
   it("closes them in one confirm that says what each would leave, as End session does, and keeps the refused saying why", async () => {
@@ -786,7 +786,7 @@ describe("picking rows and acting on them together", () => {
     expect(here.end.mock.calls.map(([id]) => id).sort()).toEqual(["s1", "s2"]);
     expect(there.end).toHaveBeenCalledWith("d1");
     expect(picked()).toEqual(["session:devbox/d1"]);
-    expect(screen.getByRole("dialog").textContent).toContain("1 of 3 weren’t closed");
+    expect(await within(screen.getByRole("dialog")).findByText(/1 of 3 weren’t closed/)).toBeTruthy();
     expect(within(screen.getByRole("dialog")).getByRole("heading").textContent).toBe("Close 1 session?");
   });
 
