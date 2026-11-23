@@ -595,11 +595,11 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     if (target) openTarget(target);
   };
 
-  /** Puts each of `keys` in grid `gridId` (its first empty pane, else
-   *  beside the largest), or one new grid, and shows them there. */
   const addedTo = (fits: readonly ItemKey[], id: string | null) => {
     if (id && fits.length) setSaid(`Added ${called(fits)} to ${useGrids.getState().grids[id]?.name ?? "the grid"}`);
   };
+  /** Puts each of `keys` in grid `gridId` (its first empty pane, else
+   *  beside the largest), or one new grid, and shows them there. */
   const addToGrid = (keys: readonly ItemKey[], gridId: string | null) => {
     const fits = keys.filter((key) => contentOfItem(key));
     addedTo(fits, fits.reduce<string | null>((grid, key) => placeInGrid(contentOfItem(key)!, grid).gridId, gridId));
