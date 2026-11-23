@@ -134,9 +134,9 @@ pub async fn ensure(
         Ok(Probe::Absent) => {}
         Err(e) => tracing::warn!(error = %e, "the PTY holder didn't say hello; starting one"),
     }
-    let log = crate::supervise::append_log(
+    let log = desk_core::logs::append_log(
         &paths.logs().join("pty-holder.log"),
-        crate::supervise::LOG_LIMIT,
+        desk_core::logs::LOG_LIMIT,
     )?;
     // No kill_on_drop: the holder outlives this process (it starts its own
     // session) and is never stopped with the hub.
