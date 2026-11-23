@@ -5,7 +5,7 @@ import { Fail, perform, workable, type Exec } from "../src/commands";
 import { DeskTabs, type ChromeTabs, type Kept } from "../src/desk";
 import { labelOf } from "../src/identity";
 import { Link, type Port } from "../src/link";
-import { asksPassword, clickOn, fillField, onKeyPage, pressKey, readKey, readPage, selectOption, setFiles, shownOf, typeText } from "../src/page";
+import { asksPassword, clickOn, fillField, focused, onKeyPage, present, pressKey, readKey, readPage, selectOption, setFiles, shownOf, typeText } from "../src/page";
 import { PROOF_PREFIX, PROTOCOL, REVISION, fromHub, type Command, type ToHub } from "../src/protocol";
 import { upToDate, type Reloader } from "../src/update";
 
@@ -276,6 +276,9 @@ describe("page functions", () => {
     expect(clicked).toBe(0);
     atPoint = el;
     expect(clickOn("#save")).toBe("ok");
+    // A selector Chrome can't parse is said, by every step that takes one.
+    const bad = 'button:has-text("Save")';
+    expect([clickOn(bad), fillField(bad, "x", location.origin), typeText(bad, "x", location.origin), pressKey(bad, "Enter"), selectOption(bad, "x"), present(bad), focused(bad), setFiles(bad, []), shownOf(bad, false), readKey(bad, location.origin, [location.pathname], 512)]).toEqual(Array(10).fill("bad_selector"));
     expect(clicked).toBe(1);
   });
 
@@ -358,17 +361,9 @@ describe("calls", () => {
     expect(moved.captured).toBe(0);
   });
 
-  it("never say a step was done that Chrome didn't run, such as one on a selector that isn't CSS", async () => {
+  it("fail at once on a selector that isn't CSS, naming it, and never say a step was done that Chrome didn't run", async () => {
     const tabs = new DeskTabs(new FakeChrome());
-    // As Chrome does: a page function that throws answers nothing.
     const exec = execOn();
-    exec.run = async (_tab, func, args) => {
-      try {
-        return func(...args);
-      } catch {
-        return undefined as never;
-      }
-    };
     document.body.innerHTML = `<button id="create">Create Key</button><input id="name">`;
     const playwright = 'button:has-text("Create Key")';
     for (const c of [
@@ -380,6 +375,11 @@ describe("calls", () => {
       await expect(perform(c, tabs, exec)).rejects.toThrow(/can't use .* as a selector.*browser\.get_content/);
     }
     expect(await perform({ cmd: "fill", session: "s", selector: "#name", value: "x", origin: location.origin }, tabs, exec)).toBe(true);
+    // As Chrome does when a page function throws for any other reason: it
+    // answers nothing, and that is never a step done, nor the selector's fault.
+    const silent = execOn();
+    silent.run = async () => undefined as never;
+    await expect(perform({ cmd: "click", session: "s", selector: "#create" }, tabs, silent)).rejects.toThrow("Chrome didn't run that on the page");
   });
 
   it("wait for an element until it appears, or say it didn't", async () => {

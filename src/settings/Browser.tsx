@@ -6,7 +6,7 @@ import { useChat } from "../chat/store";
 import { outcomeOf, whenText } from "../computer/access";
 import { HubError, type BrowserSettings, type BrowserSettingsView, type ChromeProfile, type ComputerActivityRow } from "../hub/client";
 import { useDesk } from "../hub/store";
-import { openUrl } from "../platform";
+import { openChromeExtensions, openUrl } from "../platform";
 import { plainError } from "../ui/plainError";
 import "../styles/computer.css";
 import "../styles/browser.css";
@@ -39,6 +39,9 @@ export const sitesOf = (text: string): string[] =>
 export const chromeLine = (c: BrowserSettingsView["chrome"]): { text: string; tone: "done" | "blocked" | "" } => {
   const pending = c.profiles.some((p) => p.state === "pending" && p.connected);
   if (pending) return { text: "A Chrome is asking to connect. Check its code below, then confirm it.", tone: "blocked" };
+  const used = c.profiles.find((p) => p.connected && p.outdated);
+  if (used?.outdated === "reload") return { text: "Desk’s extension in your Chrome is an old build that can’t update itself. Reload it once, below: from then on it keeps itself up to date.", tone: "blocked" };
+  if (used?.outdated === "updating") return { text: "Desk’s extension in your Chrome is updating itself.", tone: "" };
   if (c.connected) return { text: "Connected. Desk works in a window of its own in your Chrome, signed in as you.", tone: "done" };
   if (c.profiles.some((p) => p.state === "confirmed")) return { text: "Not connected now: open Chrome and Desk connects by itself.", tone: "" };
   return { text: "Add Desk to Chrome, and Desk can work in your own Chrome, where you’re already signed in.", tone: "" };
@@ -192,7 +195,13 @@ export function Browser({ api: given }: { api?: BrowserApi }) {
                     <span className="small faint">
                       {p.connected ? "Connected" : "Not connected now"} · extension {p.version}
                     </span>
+                    {p.reload_at && <span className="small state-blocked">Old build: on Chrome’s page for it, press the reload arrow on Desk’s card.</span>}
                   </span>
+                  {p.reload_at && (
+                    <button type="button" className="btn btn-sm btn-signal" onClick={() => openChromeExtensions(p.reload_at!)}>
+                      Open Chrome’s page for it
+                    </button>
+                  )}
                   {!p.chosen && (
                     <button type="button" className="btn btn-sm" disabled={busy} onClick={() => void act(() => api.choose(p.id))}>
                       Use this one

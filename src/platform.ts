@@ -301,6 +301,15 @@ export const openUrl = (url: string): void => {
     });
 };
 
+/** Opens `page`, Chrome's page for Desk's extension, in Google Chrome:
+ *  the default browser can't open Chrome's own pages. */
+export const openChromeExtensions = (page: string): void => {
+  invoke("open_chrome_extensions", { page }).catch((e: unknown) => {
+    console.warn("couldn't open Chrome's extensions page:", e);
+    reportOpenFailure(new Error("Desk couldn’t open Chrome."));
+  });
+};
+
 /** A link clicked in a terminal, decided natively: Claude's and OpenAI's
  *  sign-in pages open at once, any other web page after a native question
  *  naming its real address, local ones never. True when it opened. */

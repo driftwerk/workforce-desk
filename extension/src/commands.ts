@@ -57,13 +57,12 @@ const onePicture = <T>(f: () => Promise<T>): Promise<T> => {
   return next;
 };
 
-/** What a step Chrome didn't run is told: a page step answers only by
- *  returning, so none came back when it threw, most often on a selector
- *  that isn't CSS. */
-const notRun = (c: Command) =>
-  "selector" in c && c.selector
-    ? `Chrome can't use \`${c.selector}\` as a selector, so nothing was done. It takes CSS only (\`:has-text()\` and \`text=\` are Playwright's): read the page's HTML with browser.get_content and pick the element by its id, name, aria-label or class.`
-    : "Chrome didn't run that on the page, so nothing was done.";
+/** What a page step on a selector Chrome can't parse is told. */
+const badSelector = (selector: string) =>
+  `Chrome can't use \`${selector}\` as a selector, so nothing was done. It takes CSS only (\`:has-text()\` and \`text=\` are Playwright's): read the page's HTML with browser.get_content and pick the element by its id, name, aria-label or class.`;
+
+/** A page step that answered nothing: Chrome didn't run it to the end. */
+const NOT_RUN = "Chrome didn't run that on the page, so nothing was done.";
 
 const typed = (done: "ok" | "missing" | "moved", missing: string) => {
   if (done === "moved") throw new Fail("The page moved since this was decided, so nothing was typed.");
@@ -83,10 +82,11 @@ export async function perform(c: Command, tabs: DeskTabs, exec: Exec): Promise<u
   }
   // Every other call works in the session's tab, which it opens when needed.
   const tab = await tabs.tabFor(c.session);
-  const run = async <A extends unknown[], R>(func: (...args: A) => R, args: A): Promise<R> => {
+  const run = async <A extends unknown[], R>(func: (...args: A) => R, args: A): Promise<Exclude<R, "bad_selector">> => {
     const r = await exec.run(tab, func, args);
-    if (r === undefined) throw new Fail(notRun(c));
-    return r;
+    if (r === "bad_selector") throw new Fail(badSelector("selector" in c ? (c.selector ?? "") : ""));
+    if (r === undefined) throw new Fail(NOT_RUN);
+    return r as Exclude<R, "bad_selector">;
   };
   const here = async () => {
     const at = await exec.where(tab);
@@ -119,7 +119,7 @@ export async function perform(c: Command, tabs: DeskTabs, exec: Exec): Promise<u
       if (done === "missing") throw new Fail(`Nothing on the page matches \`${c.selector}\`.`);
       if (done === "hidden") throw new Fail(`\`${c.selector}\` isn't showing, so it wasn't clicked.`);
       if (done === "covered") throw new Fail(`Something else lies over \`${c.selector}\`, so it wasn't clicked.`);
-      if (done !== "ok") throw new Fail(notRun(c));
+      if (done !== "ok") throw new Fail(NOT_RUN);
       return true;
     }
     case "fill": {
@@ -151,11 +151,9 @@ export async function perform(c: Command, tabs: DeskTabs, exec: Exec): Promise<u
       for (;;) {
         const at = await exec.where(tab);
         // A page between loads can't be asked yet; a selector Chrome can't use never will be.
-        const there = workable(at.url) && (await run(present, [c.selector]).catch((e: unknown) => {
-          if (e instanceof Fail) throw e;
-          return false;
-        }));
-        if (there) return true;
+        const there = workable(at.url) ? await exec.run(tab, present, [c.selector]).catch(() => false) : false;
+        if (there === "bad_selector") throw new Fail(badSelector(c.selector));
+        if (there === true) return true;
         if (Date.now() >= until) throw new Fail(`\`${c.selector}\` didn't appear in time.`);
         await exec.sleep(pause);
         pause = Math.min(pause * 2, 1000);

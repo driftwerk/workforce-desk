@@ -3,7 +3,7 @@ import type { FileHome } from "../attachments/Attachments";
 import { browserOf } from "../hub/browser";
 import { HubError } from "../hub/client";
 import { appWords, connectionsOf, type ConnectionsApi, type Setup, type SetupAction, type SetupChoice, type SetupNow } from "../hub/connections";
-import { openUrl } from "../platform";
+import { openChromeExtensions, openUrl } from "../platform";
 import { useUi } from "../shell/ui";
 import { useLive } from "../ui/useLive";
 import { useChat } from "./store";
@@ -216,6 +216,7 @@ const LABEL: Record<SetupAction, string | ((service: string) => string)> = {
   open_approve: (service) => `Open ${service}`,
   open_step: "Open the page",
   done_step: "Done",
+  reload_extension: "Open Chrome’s page for it",
 };
 
 const labelOf = (action: SetupAction, service: string): string => {
@@ -446,6 +447,8 @@ export function SetupCard({
         return void (now.url && openUrl(now.url));
       case "done_step":
         return void choose("done-step");
+      case "reload_extension":
+        return void (now.url && openChromeExtensions(now.url));
       case "retry":
         return void (async () => {
           setBusy(true);

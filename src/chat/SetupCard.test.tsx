@@ -8,7 +8,8 @@ import { useChat } from "./store";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 const opened: string[] = [];
-vi.mock("../platform", async (real) => ({ ...(await real<object>()), openUrl: (u: string) => opened.push(u) }));
+const inChrome: string[] = [];
+vi.mock("../platform", async (real) => ({ ...(await real<object>()), openUrl: (u: string) => opened.push(u), openChromeExtensions: (p: string) => inChrome.push(p) }));
 
 afterEach(() => {
   cleanup();
@@ -247,6 +248,21 @@ it("is stopped from the card at any stage, and goes with it; a settled one offer
   cleanup();
   await show(api([setup({ now: CONNECTED })]));
   expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+});
+
+it("asks the person to reload Desk's old extension, opening Chrome's page for it", async () => {
+  const page = "chrome://extensions/?id=dghneofijcmcoipiebmbhehamminngmd";
+  await show(
+    api([
+      setup({
+        way: "browser",
+        now: now({ kind: "step", title: "Reload Desk's extension in Chrome", detail: "press the reload arrow", url: page, action: "reload_extension" }),
+      }),
+    ]),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open Chrome’s page for it" }));
+  expect(inChrome).toEqual([page]);
+  expect(opened).toEqual([]);
 });
 
 it("never shows a setup a newer one replaced", async () => {

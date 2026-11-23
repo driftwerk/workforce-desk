@@ -7,9 +7,11 @@ import { Browser, chromeLine, sitesOf, type BrowserApi } from "./Browser";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 const opened = vi.hoisted(() => [] as string[]);
+const inChrome = vi.hoisted(() => [] as string[]);
 vi.mock("../platform", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../platform")>()),
   openUrl: (url: string) => opened.push(url),
+  openChromeExtensions: (page: string) => inChrome.push(page),
 }));
 
 // This computer's hub, asked as the person over the paired path: every
@@ -146,6 +148,19 @@ it("lists the confirmed Chromes: which is connected, which Desk uses, and forget
   expect(a.choose).toHaveBeenCalledWith("p2");
   await act(async () => fireEvent.click(screen.getAllByRole("button", { name: "Forget" })[0]!));
   expect(a.forget).toHaveBeenCalledWith("p1");
+});
+
+it("asks the person to reload an extension too old to update itself, opening Chrome's page for it", async () => {
+  const page = "chrome://extensions/?id=dghneofijcmcoipiebmbhehamminngmd";
+  await show(api(view({}, { connected: true, profiles: [profile({ outdated: "reload", reload_at: page })] })));
+  expect(screen.getByText(/old build that can’t update itself/).className).toContain("state-blocked");
+  expect(screen.getByText(/press the reload arrow on Desk’s card/)).toBeTruthy();
+  fireEvent.click(screen.getByRole("button", { name: "Open Chrome’s page for it" }));
+  expect(inChrome).toEqual([page]);
+  cleanup();
+  await show(api(view({}, { connected: true, profiles: [profile({ outdated: "updating" })] })));
+  expect(screen.getByText("Desk’s extension in your Chrome is updating itself.")).toBeTruthy();
+  expect(screen.queryByRole("button", { name: "Open Chrome’s page for it" })).toBeNull();
 });
 
 it("watches for the extension connecting, keeping site lists being edited", async () => {

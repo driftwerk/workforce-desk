@@ -203,6 +203,11 @@ export interface ChromeProfile {
   connected: boolean;
   /** The one Desk uses. */
   chosen: boolean;
+  /** Its extension, connected now, is older than the hub needs: updating
+   *  itself, or to be reloaded by the person once. */
+  outdated?: "updating" | "reload" | null;
+  /** Chrome's page for Desk's extension, where it is reloaded. */
+  reload_at?: string | null;
 }
 
 /** The settings and how Desk's extension stands. */

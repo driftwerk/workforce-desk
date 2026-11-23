@@ -1385,6 +1385,7 @@ pub fn run() {
             machine_setup::machine_remove,
             machine_accounts::machine_share_accounts,
             links::open_terminal_link,
+            chrome_host::open_chrome_extensions,
             machine_setup::machine_log,
             machine_setup::machine_remote_log,
             machine_setup::machine_ssh_hosts,

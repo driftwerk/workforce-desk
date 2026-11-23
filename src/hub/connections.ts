@@ -217,7 +217,8 @@ export type SetupAction =
   | "open_connections"
   | "open_approve"
   | "open_step"
-  | "done_step";
+  | "done_step"
+  | "reload_extension";
 
 /** The one thing a setup's card shows now: the hub's words, never the
  *  agent's. */
@@ -386,8 +387,9 @@ export const approvalLine = (a: Approval): string => {
     timeZone: "UTC",
   });
   const about = a.estimated ? "about " : "";
-  if (a.daysLeft < 0) return a.estimated ? `Renewal due about ${day}` : `Approval lapsed ${day}`;
-  if (a.daysLeft === 0) return `Approval lapses ${about}today`;
+  // Desk's own count never says a lapse: only BankSync does, as the
+  // connection's status.
+  if (a.daysLeft <= 0) return `Renewal due ${about}${day}`;
   return `Approved until ${about}${day} (${a.daysLeft} ${a.daysLeft === 1 ? "day" : "days"})`;
 };
 

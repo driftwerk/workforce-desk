@@ -24,6 +24,7 @@ pub const COMMANDS: &[&str] = &[
     "machine_remove",
     "machine_share_accounts",
     "open_terminal_link",
+    "open_chrome_extensions",
     "machine_log",
     "machine_remote_log",
     "machine_ssh_hosts",
