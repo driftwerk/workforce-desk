@@ -485,7 +485,7 @@ pub fn machine_open_sign_in_page(
         // Its shape only: a sign-in's query holds its codes.
         tracing::warn!(
             engine = %engine,
-            page = %callback::refused_shape(&url),
+            page = %callback::page_shape(&url),
             "a machine's sign-in page wasn't the sign-in's own, so Desk didn't open it"
         );
         return Err("That page isn't the sign-in's own, so Desk won't open it.".into());

@@ -117,6 +117,17 @@ describe("a Claude sign-in waiting on its page", () => {
     expect((screen.getByLabelText("Code from the sign-in page") as HTMLInputElement).value).toBe("");
   });
 
+  it("says why a pasted code was turned down and keeps the field for another", () => {
+    render(<PlanSignIn kind="claude" />);
+    act(() => progress("claude", { state: "browser", url: URL }));
+    act(() => progress("claude", { state: "needs-code" }));
+    expect(screen.getByLabelText("Code from the sign-in page")).toBeTruthy();
+    act(() => progress("claude", { state: "needs-code", problem: "That isn't the whole code. Copy all of it, including the # in the middle." }));
+    expect(screen.getByRole("status").textContent).toContain("That isn't the whole code.");
+    expect(screen.getByLabelText("Code from the sign-in page")).toBeTruthy();
+    expect(screen.getByText(URL)).toBeTruthy();
+  });
+
   it("drops the address once the sign-in is over", () => {
     render(<PlanSignIn kind="claude" />);
     act(() => progress("claude", { state: "browser", url: URL }));
