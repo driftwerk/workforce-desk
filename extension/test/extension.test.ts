@@ -358,6 +358,30 @@ describe("calls", () => {
     expect(moved.captured).toBe(0);
   });
 
+  it("never say a step was done that Chrome didn't run, such as one on a selector that isn't CSS", async () => {
+    const tabs = new DeskTabs(new FakeChrome());
+    // As Chrome does: a page function that throws answers nothing.
+    const exec = execOn();
+    exec.run = async (_tab, func, args) => {
+      try {
+        return func(...args);
+      } catch {
+        return undefined as never;
+      }
+    };
+    document.body.innerHTML = `<button id="create">Create Key</button><input id="name">`;
+    const playwright = 'button:has-text("Create Key")';
+    for (const c of [
+      { cmd: "click", session: "s", selector: playwright },
+      { cmd: "fill", session: "s", selector: "input:has-text(x)", value: "x", origin: location.origin },
+      { cmd: "select", session: "s", selector: playwright, value: "x" },
+      { cmd: "wait", session: "s", selector: playwright, timeout_ms: 60_000 },
+    ] as const) {
+      await expect(perform(c, tabs, exec)).rejects.toThrow(/can't use .* as a selector.*browser\.get_content/);
+    }
+    expect(await perform({ cmd: "fill", session: "s", selector: "#name", value: "x", origin: location.origin }, tabs, exec)).toBe(true);
+  });
+
   it("wait for an element until it appears, or say it didn't", async () => {
     const tabs = new DeskTabs(new FakeChrome());
     const exec = execOn();

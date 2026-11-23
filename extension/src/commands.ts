@@ -57,9 +57,18 @@ const onePicture = <T>(f: () => Promise<T>): Promise<T> => {
   return next;
 };
 
+/** What a step Chrome didn't run is told: a page step answers only by
+ *  returning, so none came back when it threw, most often on a selector
+ *  that isn't CSS. */
+const notRun = (c: Command) =>
+  "selector" in c && c.selector
+    ? `Chrome can't use \`${c.selector}\` as a selector, so nothing was done. It takes CSS only (\`:has-text()\` and \`text=\` are Playwright's): read the page's HTML with browser.get_content and pick the element by its id, name, aria-label or class.`
+    : "Chrome didn't run that on the page, so nothing was done.";
+
 const typed = (done: "ok" | "missing" | "moved", missing: string) => {
   if (done === "moved") throw new Fail("The page moved since this was decided, so nothing was typed.");
   if (done === "missing") throw new Fail(missing);
+  if (done !== "ok") throw new Fail("Chrome didn't type that, so nothing was typed.");
   return true;
 };
 
@@ -74,6 +83,11 @@ export async function perform(c: Command, tabs: DeskTabs, exec: Exec): Promise<u
   }
   // Every other call works in the session's tab, which it opens when needed.
   const tab = await tabs.tabFor(c.session);
+  const run = async <A extends unknown[], R>(func: (...args: A) => R, args: A): Promise<R> => {
+    const r = await exec.run(tab, func, args);
+    if (r === undefined) throw new Fail(notRun(c));
+    return r;
+  };
   const here = async () => {
     const at = await exec.where(tab);
     if (!workable(at.url)) throw new Fail("Desk's tab is on a page Desk doesn't work in.");
@@ -89,45 +103,46 @@ export async function perform(c: Command, tabs: DeskTabs, exec: Exec): Promise<u
       const at = await exec.where(tab);
       if (!c.password) return at;
       // Whether the page asks for a password, where Desk may look.
-      const password = workable(at.url) ? await exec.run(tab, asksPassword, []).catch(() => false) : false;
+      const password = workable(at.url) ? await run(asksPassword, []).catch(() => false) : false;
       return { ...at, password: password === true };
     }
     case "read": {
       await here();
-      return exec.run(tab, readPage, [c.what, MAX_TEXT, MAX_HTML]);
+      return run(readPage, [c.what, MAX_TEXT, MAX_HTML]);
     }
     case "shown":
       await here();
-      return exec.run(tab, shownOf, [c.selector, c.form]);
+      return run(shownOf, [c.selector, c.form]);
     case "click": {
       await here();
-      const done = await exec.run(tab, clickOn, [c.selector]);
+      const done = await run(clickOn, [c.selector]);
       if (done === "missing") throw new Fail(`Nothing on the page matches \`${c.selector}\`.`);
       if (done === "hidden") throw new Fail(`\`${c.selector}\` isn't showing, so it wasn't clicked.`);
       if (done === "covered") throw new Fail(`Something else lies over \`${c.selector}\`, so it wasn't clicked.`);
+      if (done !== "ok") throw new Fail(notRun(c));
       return true;
     }
     case "fill": {
       await here();
-      return typed(await exec.run(tab, fillField, [c.selector, c.value, c.origin ?? null]), `Nothing on the page matches \`${c.selector}\`.`);
+      return typed(await run(fillField, [c.selector, c.value, c.origin ?? null]), `Nothing on the page matches \`${c.selector}\`.`);
     }
     case "type": {
       await here();
-      if (c.selector && !(await exec.run(tab, focused, [c.selector]))) {
+      if (c.selector && !(await run(focused, [c.selector]))) {
         // Typing goes only where the field has the focus.
-        typed(await exec.run(tab, typeText, [c.selector, "", c.origin ?? null]), `Nothing on the page matches \`${c.selector}\`.`);
-        if (!(await exec.run(tab, focused, [c.selector]))) throw new Fail(`\`${c.selector}\` didn't take the focus, so nothing was typed.`);
+        typed(await run(typeText, [c.selector, "", c.origin ?? null]), `Nothing on the page matches \`${c.selector}\`.`);
+        if (!(await run(focused, [c.selector]))) throw new Fail(`\`${c.selector}\` didn't take the focus, so nothing was typed.`);
       }
-      return typed(await exec.run(tab, typeText, [c.selector, c.text, c.origin ?? null]), "There's nothing to type into.");
+      return typed(await run(typeText, [c.selector, c.text, c.origin ?? null]), "There's nothing to type into.");
     }
     case "press": {
       await here();
-      if (!(await exec.run(tab, pressKey, [c.selector, c.key]))) throw new Fail("There's nothing to press the key on.");
+      if (!(await run(pressKey, [c.selector, c.key]))) throw new Fail("There's nothing to press the key on.");
       return true;
     }
     case "select": {
       await here();
-      if (!(await exec.run(tab, selectOption, [c.selector, c.value]))) throw new Fail(`\`${c.selector}\` has no option \`${c.value}\`.`);
+      if (!(await run(selectOption, [c.selector, c.value]))) throw new Fail(`\`${c.selector}\` has no option \`${c.value}\`.`);
       return true;
     }
     case "wait": {
@@ -135,7 +150,12 @@ export async function perform(c: Command, tabs: DeskTabs, exec: Exec): Promise<u
       let pause = 100;
       for (;;) {
         const at = await exec.where(tab);
-        if (workable(at.url) && (await exec.run(tab, present, [c.selector]).catch(() => false))) return true;
+        // A page between loads can't be asked yet; a selector Chrome can't use never will be.
+        const there = workable(at.url) && (await run(present, [c.selector]).catch((e: unknown) => {
+          if (e instanceof Fail) throw e;
+          return false;
+        }));
+        if (there) return true;
         if (Date.now() >= until) throw new Fail(`\`${c.selector}\` didn't appear in time.`);
         await exec.sleep(pause);
         pause = Math.min(pause * 2, 1000);
@@ -145,7 +165,7 @@ export async function perform(c: Command, tabs: DeskTabs, exec: Exec): Promise<u
       await here();
       const bytes = c.files.reduce((n, f) => n + Math.floor((f.base64.length * 3) / 4), 0);
       if (bytes > MAX_UPLOAD_BYTES) throw new Fail("Those files are too big for Desk to hand to Chrome in one go.");
-      if (!(await exec.run(tab, setFiles, [c.selector, c.files]))) throw new Fail(`\`${c.selector}\` isn't a file field.`);
+      if (!(await run(setFiles, [c.selector, c.files]))) throw new Fail(`\`${c.selector}\` isn't a file field.`);
       return true;
     }
     case "capture":
@@ -158,17 +178,17 @@ export async function perform(c: Command, tabs: DeskTabs, exec: Exec): Promise<u
         await exec.activate(tab);
         // A key page is never pictured: its address read again right now,
         // with what it shows, for the hub to check the tab it pictured.
-        if (c.refuse?.length && (await exec.run(tab, onKeyPage, [c.refuse]))) return { skipped: "key page" };
-        const seen = await exec.run(tab, readPage, ["all", MAX_TEXT, 0]);
+        if (c.refuse?.length && (await run(onKeyPage, [c.refuse]))) return { skipped: "key page" };
+        const seen = await run(readPage, ["all", MAX_TEXT, 0]);
         const data = await exec.capture(windowId, tab);
         if (data === null) return { skipped: "not_front" };
         // The page moved while it was pictured: the picture isn't of it.
-        if ((await exec.run(tab, hrefNow, [])) !== seen.url) return { skipped: "moved" };
+        if ((await run(hrefNow, [])) !== seen.url) return { skipped: "moved" };
         return { png_base64: data.replace(/^data:image\/png;base64,/, ""), url: seen.url, text: seen.text ?? "" };
       });
     case "capture_key": {
       await here();
-      const read = await exec.run(tab, readKey, [c.selector ?? null, c.origin, c.paths, MAX_KEY, c.shape ?? null]);
+      const read = await run(readKey, [c.selector ?? null, c.origin, c.paths, MAX_KEY, c.shape ?? null]);
       if ("refused" in read) throw new Fail(`Desk didn't read a key there: ${read.refused}.`);
       return read;
     }

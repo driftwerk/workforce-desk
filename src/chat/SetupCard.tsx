@@ -514,6 +514,11 @@ export function SetupCard({
             ))}
           </span>
         )}
+        {!settled(s) && (
+          <button type="button" className="link small setup-stop" disabled={busy} onClick={() => void choose("stop")}>
+            Stop
+          </button>
+        )}
       </div>
       {now.code && <p className="conn-code mono">{now.code}</p>}
       {(now.detail || expiry) && (

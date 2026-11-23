@@ -241,7 +241,7 @@ export interface SetupNow {
 }
 
 /** What the person chooses on a setup's card. */
-export type SetupChoice = "use-cli" | "other-way" | "new-code" | "done-step";
+export type SetupChoice = "use-cli" | "other-way" | "new-code" | "done-step" | "stop";
 
 /** An agent setting a connection up itself, as the hub keeps it: the card
  *  the chat shows. */
@@ -260,8 +260,8 @@ export interface Setup {
   connected: { connection: string; account: string; onFor: string | null; write: boolean | null } | null;
   way?: "cli" | "device" | "browser" | "token" | "app";
   now?: SetupNow;
-  /** A newer setup of the service took over: never shown. */
-  ended?: "replaced" | null;
+  /** A newer setup of the service took over, or it was stopped: never shown. */
+  ended?: "replaced" | "stopped" | null;
   write?: boolean;
   forWhom?: string;
 }
@@ -386,7 +386,7 @@ export const approvalLine = (a: Approval): string => {
     timeZone: "UTC",
   });
   const about = a.estimated ? "about " : "";
-  if (a.daysLeft < 0) return `Approval lapsed ${about}${day}`;
+  if (a.daysLeft < 0) return a.estimated ? `Renewal due about ${day}` : `Approval lapsed ${day}`;
   if (a.daysLeft === 0) return `Approval lapses ${about}today`;
   return `Approved until ${about}${day} (${a.daysLeft} ${a.daysLeft === 1 ? "day" : "days"})`;
 };

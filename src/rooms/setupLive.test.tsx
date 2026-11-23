@@ -1,4 +1,4 @@
-import { act, cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { emptyConversation, reduce, type ConversationState } from "../chat/conversation";
@@ -130,6 +130,23 @@ it("puts a setup no message on screen shows at the top of the stage, and gives i
     await new Promise((r) => setTimeout(r, 100));
   });
   expect(dock.container.querySelector(".setup-card")).toBeNull();
+});
+
+it("stops a docked setup at any stage, and lets it go from the top at once (DW-746)", async () => {
+  const dock = render(<Dock hub="local" api={api} showPage={async () => false} every={{ busy: 40, idle: 40 }} />);
+  expect(await screen.findByText(/Desk is setting up GitHub/)).toBeTruthy();
+  const stopped: Setup = { ...setups[0]!, ended: "stopped", now: { ...setups[0]!.now!, kind: "ended", title: "This GitHub setup was stopped", action: null, other: null } };
+  vi.mocked(api.choose).mockResolvedValueOnce(stopped);
+  setups[0] = stopped;
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+  });
+  expect(api.choose).toHaveBeenCalledWith(stopped.id, "stop");
+  expect(dock.container.querySelector(".setup-dock")).toBeNull();
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 120));
+  });
+  expect(dock.container.querySelector(".setup-dock")).toBeNull();
 });
 
 it("leaves a setup just started to the chat that started it, rather than flash it at the top first", async () => {
