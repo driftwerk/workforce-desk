@@ -218,7 +218,7 @@ describe("Mail sorting", () => {
   it("elsewhere, shows the rules only when that hub has email for the agent", async () => {
     const tools = (answer: Response) =>
       fetchOnHub.mockImplementation(async (method: string, path: string) =>
-        path === "/api/agents/kat/tools"
+        path === "/api/agents/kat/tools?names=true"
           ? answer
           : method === "GET" && path === "/api/monitors/sort-rules"
             ? reply(200, { rules: [NEWS] })
@@ -231,7 +231,7 @@ describe("Mail sorting", () => {
       await waitFor(() => expect(fetchOnHub).toHaveBeenCalled());
       await new Promise((r) => setTimeout(r, 0));
       expect(container.innerHTML).toBe("");
-      expect(fetchOnHub.mock.calls.map((c) => c[1])).toEqual(["/api/agents/kat/tools"]);
+      expect(fetchOnHub.mock.calls.map((c) => c[1])).toEqual(["/api/agents/kat/tools?names=true"]);
       cleanup();
     };
     await hidden(reply(200, { tools: [{ name: "email.setup" }, { name: "email.sort_rules" }] }));

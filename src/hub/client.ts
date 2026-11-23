@@ -385,9 +385,10 @@ export type SortRulesApi = ReturnType<typeof sortRulesOf>;
 
 /** Whether hub `hub` has email for agent `agentId`: whether it gives the
  *  agent the email skill's inbox, which it does only once an account is
- *  set up. A hub that won't say is taken to have none. */
+ *  set up, deferred or not. Asked by name alone, so no schema is sent. A
+ *  hub that won't say is taken to have none. */
 export const sortsMail = (hub: HubRef, agentId: string): Promise<boolean> =>
-  hubCall<{ tools?: { name: string }[] }>(hub, "GET", `/api/agents/${encodeURIComponent(agentId)}/tools`).then(
+  hubCall<{ tools?: { name: string }[] }>(hub, "GET", `/api/agents/${encodeURIComponent(agentId)}/tools?names=true`).then(
     (r) => (r.tools ?? []).some((t) => t.name === "email.inbox"),
     (e: unknown) => {
       if (e instanceof HubError && (e.status === 401 || e.status === 403)) return false;
