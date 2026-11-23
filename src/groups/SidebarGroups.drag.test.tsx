@@ -91,20 +91,45 @@ describe("dragging picked rows", () => {
     expect(rows("Acme")).toEqual(["web", "docs", "api"]);
   });
 
-  it("puts the whole selection in the grid one of them is dropped on", () => {
-    const kept = new Map<string, unknown>();
-    const memory = { get: (k: string) => kept.get(k), set: (k: string, v: unknown) => void kept.set(k, structuredClone(v)), remove: (k: string) => void kept.delete(k), subscribe: () => () => {} } as GridStorage;
-    useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
-    startGrids(memory, { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
-    const grid = createGrid();
-    render(<SidebarGroups />);
-    fireEvent.click(row("api"), { metaKey: true });
-    fireEvent.click(row("docs"), { metaKey: true });
-    act(() => useGridDrag.setState({ item: { content: contentOfItem("session:s3")!, name: "docs" }, over: { kind: "row", gridId: grid } }));
-    act(() => end("session:s3", { id: "session:s3", type: "item" }));
-    const shown = JSON.stringify(useGrids.getState().grids[grid]!.panes.map((p) => p.content));
-    expect([contentOfItem("session:s1"), contentOfItem("session:s3")].every((c) => shown.includes(JSON.stringify(c)))).toBe(true);
-    expect(shown.includes(JSON.stringify(contentOfItem("session:s2")))).toBe(false);
+  describe("dropping on a grid", () => {
+    const freshGrid = () => {
+      const kept = new Map<string, unknown>();
+      const memory = { get: (k: string) => kept.get(k), set: (k: string, v: unknown) => void kept.set(k, structuredClone(v)), remove: (k: string) => void kept.delete(k), subscribe: () => () => {} } as GridStorage;
+      useGrids.setState({ ready: false, role: { kind: "main" }, order: [], grids: {}, active: MAIN_GRID, focus: {}, open: {}, undo: {}, flash: null });
+      startGrids(memory, { kind: "main" }, { deliver: vi.fn(), rename: vi.fn() });
+      return createGrid();
+    };
+    const dropOn = (grid: string, key: string, name: string) => {
+      act(() => useGridDrag.setState({ item: { content: contentOfItem(key)!, name }, over: { kind: "row", gridId: grid } }));
+      act(() => end(key, { id: key, type: "item" }));
+    };
+    /** Where each of `keys` shows in the grid, in pane order (-1: not there). */
+    const placed = (grid: string, keys: string[]) => {
+      const shown = useGrids.getState().grids[grid]!.panes.map((p) => JSON.stringify(p.content));
+      return keys.map((k) => shown.indexOf(JSON.stringify(contentOfItem(k))));
+    };
+
+    it("puts the whole selection there in sidebar order, and says how many went", () => {
+      const grid = freshGrid();
+      render(<SidebarGroups />);
+      fireEvent.click(row("api"), { metaKey: true });
+      fireEvent.click(row("docs"), { metaKey: true });
+      dropOn(grid, "session:s3", "docs");
+      const [api, web, docs] = placed(grid, ["session:s1", "session:s2", "session:s3"]);
+      expect(web).toBe(-1);
+      expect(api).toBeGreaterThanOrEqual(0);
+      expect(docs).toBeGreaterThan(api!);
+      expect(screen.getByText(/^Added 2 items to /)).toBeTruthy();
+    });
+
+    it("puts only the row dragged there when it isn't one of those picked", () => {
+      const grid = freshGrid();
+      render(<SidebarGroups />);
+      fireEvent.click(row("api"), { metaKey: true });
+      fireEvent.click(row("docs"), { metaKey: true });
+      dropOn(grid, "session:s2", "web");
+      expect(placed(grid, ["session:s1", "session:s2", "session:s3"]).map((i) => i >= 0)).toEqual([false, true, false]);
+    });
   });
 
   it("takes the click that ends a drag for neither a pick nor an open", async () => {

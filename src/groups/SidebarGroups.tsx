@@ -3,7 +3,7 @@ import { useShallow } from "zustand/react/shallow";
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from "react";
 import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
-import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag } from "../grids/drag";
+import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag, type GridTarget } from "../grids/drag";
 import { lookOf, statusOf, waitsOnYou } from "../floor/background";
 import { filledPane, flashPanes, shownGrid, useGrids } from "../grids/store";
 import { itemOf, placesOf } from "../grids/where";
@@ -597,10 +597,22 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
 
   /** Puts each of `keys` in grid `gridId` (its first empty pane, else
    *  beside the largest), or one new grid, and shows them there. */
+  const addedTo = (fits: readonly ItemKey[], id: string | null) => {
+    if (id && fits.length) setSaid(`Added ${called(fits)} to ${useGrids.getState().grids[id]?.name ?? "the grid"}`);
+  };
   const addToGrid = (keys: readonly ItemKey[], gridId: string | null) => {
     const fits = keys.filter((key) => contentOfItem(key));
-    const id = fits.reduce<string | null>((grid, key) => placeInGrid(contentOfItem(key)!, grid).gridId, gridId);
-    if (id && fits.length) setSaid(`Added ${called(fits)} to ${useGrids.getState().grids[id]?.name ?? "the grid"}`);
+    addedTo(fits, fits.reduce<string | null>((grid, key) => placeInGrid(contentOfItem(key)!, grid).gridId, gridId));
+  };
+  /** Drops `keys` on a grid in sidebar order: the first where it landed,
+   *  the rest in that grid's next free places. */
+  const dropAllOnGrid = (keys: readonly ItemKey[], target: GridTarget) => {
+    const fits = keys.filter((key) => contentOfItem(key));
+    if (!fits.length) return;
+    dropOnGrid(target, contentOfItem(fits[0]!)!);
+    const id = target.kind === "new" ? useGrids.getState().active : target.gridId;
+    fits.slice(1).forEach((key) => placeInGrid(contentOfItem(key)!, id));
+    addedTo(fits, id);
   };
 
   /** The grids to add to, and a new one. */
@@ -987,11 +999,8 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
         justDragged.current = true;
         setTimeout(() => (justDragged.current = false), 0);
         if (onGrid) {
-          dropOnGrid(onGrid.target, onGrid.content);
           const key = s ? end(s).id : null;
-          // The rest of a selection dragged follows it into that grid.
-          if (key && inBulk(key)) addToGrid(selection.filter((k) => k !== key), onGrid.target.kind === "new" ? useGrids.getState().active : onGrid.target.gridId);
-          return;
+          return key && inBulk(key) ? dropAllOnGrid(selection, onGrid.target) : dropOnGrid(onGrid.target, onGrid.content);
         }
         if (!s || !d) return;
         if (d.kind === "item") {
