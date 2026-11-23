@@ -391,7 +391,12 @@ export const useDesk = create<DeskState>((set, get) => ({
               : s.activeRoom,
           loaded: s.loaded || e.type === "snapshot",
           sessions: apply(s.sessions, e),
-          restore: e.type === "snapshot" ? e.restore : s.restore.filter((r) => e.type !== "session" || r.id !== e.session.id),
+          restore:
+            e.type === "snapshot"
+              ? e.restore
+              : e.type === "session" && s.restore.some((r) => r.id === e.session.id)
+                ? s.restore.filter((r) => r.id !== e.session.id)
+                : s.restore,
           openId: e.type === "removed" && s.openId === e.id ? null : s.openId,
           engines: e.type === "snapshot" ? patched(s.engines, LOCAL, { loaded: true }) : s.engines,
         }));
