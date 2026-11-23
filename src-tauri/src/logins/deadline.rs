@@ -21,7 +21,15 @@ pub fn isolate(command: &mut Command) {
 /// process tree only: what `wsl.exe` runs inside Linux isn't part of it and
 /// is ended inside WSL (see `cli::stop_sign_in`).
 pub fn kill_tree(child: &mut Child) {
-    let pid = child.id().to_string();
+    kill_tree_of(child.id());
+    let _ = child.kill();
+}
+
+/// Kills the process `pid` heads and what it started: on Unix its group,
+/// which it leads (see `isolate`; a pseudo-terminal's program leads its own
+/// session), on Windows its process tree.
+pub fn kill_tree_of(pid: u32) {
+    let pid = pid.to_string();
     #[cfg(unix)]
     let _ = Command::new("kill")
         .args(["-KILL", "--", &format!("-{pid}")])
@@ -37,7 +45,6 @@ pub fn kill_tree(child: &mut Child) {
             .stderr(Stdio::null())
             .status();
     }
-    let _ = child.kill();
 }
 
 /// Waits for the child, killing it at `deadline`; whether it was killed.

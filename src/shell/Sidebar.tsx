@@ -14,6 +14,9 @@ import { DeleteRoom } from "../rooms/DeleteRoom";
 import { markRoomRead } from "../unread/reads";
 import { NOTIFY_LEVELS, levelOf, setLevel } from "../unread/prefs";
 import { SidebarGroups } from "../groups/SidebarGroups";
+import { clearSelection, modHeld, typedIn } from "../groups/selection";
+import { selectAllAt } from "./selectAll";
+import { useHost } from "./host";
 import { useDesk } from "../hub/store";
 import { useSettings } from "../settings/store";
 import { ariaKeys, shortcutLabel, withDigit } from "../shortcuts/keys";
@@ -134,6 +137,40 @@ function You() {
   );
 }
 
+/** The sidebar's part in picking rows, as Finder's: ⌘A (Ctrl+A elsewhere)
+ *  picks every row in sight while focus is in it, and a click anywhere in
+ *  it but a row, the selection's bar or a dialog lets them go. */
+function useSidebarSelection(): (nav: HTMLElement | null) => void {
+  const cleanup = useRef<(() => void) | null>(null);
+  useEffect(() => () => cleanup.current?.(), []);
+  return useCallback((nav: HTMLElement | null) => {
+    cleanup.current?.();
+    cleanup.current = null;
+    if (!nav) return;
+    const keeps = (target: EventTarget | null) =>
+      target instanceof Element && !!target.closest('[data-item], [data-keeps-selection], [role="dialog"], .sheet-backdrop');
+    // Pressed and let go there: a dialog closed by pressing outside it isn't.
+    let pressedFree = false;
+    const onDown = (e: MouseEvent) => void (pressedFree = !keeps(e.target));
+    const onClick = (e: MouseEvent) => {
+      if (pressedFree && !keeps(e.target)) clearSelection();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key.toLowerCase() !== "a" || e.shiftKey || e.altKey || !modHeld(e, useHost.getState().platform) || typedIn(e.target)) return;
+      e.preventDefault();
+      selectAllAt(e.target instanceof Element ? e.target : null);
+    };
+    nav.addEventListener("mousedown", onDown);
+    nav.addEventListener("click", onClick);
+    nav.addEventListener("keydown", onKey);
+    cleanup.current = () => {
+      nav.removeEventListener("mousedown", onDown);
+      nav.removeEventListener("click", onClick);
+      nav.removeEventListener("keydown", onKey);
+    };
+  }, []);
+}
+
 /** The sidebar: Ask anyone and the views always at the top; the rooms or
  *  grids and the groups scrolling between; new session, new crew member,
  *  Settings, voice and the look always at the bottom. */
@@ -193,6 +230,7 @@ export function Sidebar({
   const setSettings = useSettings((s) => s.set);
   // Where it was scrolled is kept (in `ui.main`) and put back.
   const saved = useSavedScroll<HTMLElement>("sidebar");
+  const selecting = useSidebarSelection();
   const edges = useScrollEdges();
   const middle = useCallback(
     (el: HTMLDivElement | null) => {
@@ -202,10 +240,10 @@ export function Sidebar({
     [saved, edges],
   );
   return (
-    <nav className="sidebar" aria-label="Desk" style={{ "--side-w": `${sideWidth}px` } as React.CSSProperties}>
+    <nav ref={selecting} className="sidebar" aria-label="Desk" data-selects-rows="" style={{ "--side-w": `${sideWidth}px` } as React.CSSProperties}>
       <SideResize />
       <div className="side-top">
-        <div className="wordmark" onMouseDown={dragWindow}>
+        <div className="wordmark" data-keeps-selection="" onMouseDown={dragWindow}>
           <span>desk</span>
           <span className="wordmark-dot" />
         </div>

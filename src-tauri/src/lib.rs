@@ -7,6 +7,7 @@ mod chrome_host;
 mod commands;
 mod crew_relay;
 mod drops;
+mod edit_menu;
 mod files;
 mod fonts;
 mod frame;
@@ -1160,7 +1161,7 @@ pub fn run() {
             std::process::exit(code);
         }
     }
-    tauri::Builder::default()
+    edit_menu::with_menu(tauri::Builder::default())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_dialog::init())
