@@ -194,19 +194,24 @@ fn refused(text: &str) -> Option<&'static str> {
 }
 
 /// Why the CLI can't go on, in its words: the error drawn above "Press
-/// Enter to retry" (nothing Desk can give retries it), never a code prompt
-/// and the code it may echo, or an account on hold once its row is `whole`.
+/// Enter to retry" (nothing Desk can give retries it), from below the last
+/// code prompt so never the code it may echo, or an account on hold once
+/// its row is `whole`.
 fn failure(text: &str, whole: &str) -> Option<String> {
     let rows: Vec<&str> = text.lines().map(str::trim).collect();
     let error = rows
         .iter()
         .position(|r| r.contains("Press Enter to retry"))
         .map(|at| {
-            let block: Vec<String> = rows[..at]
+            let from = rows[..at]
+                .iter()
+                .rposition(|r| asks_for_code(r))
+                .map_or(0, |prompt| prompt + 1);
+            let block: Vec<String> = rows[from..at]
                 .iter()
                 .rev()
                 .skip_while(|r| r.is_empty())
-                .take_while(|r| !r.is_empty() && !asks_for_code(r))
+                .take_while(|r| !r.is_empty())
                 .map(|r| said(r))
                 .collect();
             block.into_iter().rev().collect::<Vec<_>>().join(" ")
@@ -516,6 +521,23 @@ mod tests {
         let seen = shown(&s.text(), false);
         assert_eq!(
             seen.failure.as_deref(),
+            Some("OAuth error: That code wasn't accepted.")
+        );
+
+        let pasted = format!(" {}#secret", "x".repeat(usize::from(COLS)));
+        let s = screen(&[
+            &waiting(FULL),
+            pasted.as_bytes(),
+            &row(2, "OAuth error: That code wasn't accepted."),
+            &row(2, "Press Enter to retry"),
+        ]);
+        let text = s.text();
+        assert!(
+            text.lines()
+                .any(|r| r.ends_with("#secret") && asks_for_code(r))
+        );
+        assert_eq!(
+            shown(&text, false).failure.as_deref(),
             Some("OAuth error: That code wasn't accepted.")
         );
     }
