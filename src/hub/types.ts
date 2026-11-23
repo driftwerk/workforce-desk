@@ -1422,8 +1422,8 @@ export type LineDelivery =
   | "withdrawn"
   /** Shown in the thread only, never typed into the session. */
   | "noted"
-  /** Never shown to have gone in: it went in twice and never showed in the
-   *  session either time. Its sender is told; it isn't put in again. */
+  /** Never shown to have gone in: Desk tried twice and it never showed in
+   *  the session. Its sender is told; it isn't put in again. */
   | "unreceived";
 /** "lapsed": its session stopped waiting and went ahead without an answer;
  *  "dismissed": you set it aside unanswered. */
