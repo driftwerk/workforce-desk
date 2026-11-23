@@ -9,7 +9,7 @@ import { Confirm } from "../ui/Confirm";
 import { homeShort } from "../ui/paths";
 import { plainError } from "../ui/plainError";
 import { plural } from "../unread/rows";
-import { endable, runs } from "./actions";
+import { endable, runs, runsElsewhere } from "./actions";
 import { endSessionNow, removeSession } from "./lifecycle";
 
 /** A picked session, by its sidebar row's key, as the sidebar names it. */
@@ -123,13 +123,17 @@ export function RemoveSessions({ sessions, onClose }: { sessions: Closable[]; on
   const [transcripts, setTranscripts] = useState(false);
   const [refused, setRefused] = useState<Record<string, string>>({});
   const running = sessions.filter((c) => runs(c.session)).length;
+  const stopping = sessions.filter((c) => c.session.live).length;
+  const elsewhere = sessions.filter((c) => runsElsewhere(c.session)).length;
   const n = sessions.length;
   const remove = (c: Closable) => removeSession(sessionKey(c.session), transcripts && !runs(c.session));
   return (
     <Confirm title={`Remove ${plural(n, "session")}?`} action={`Remove ${n}`} disabled={!n} onConfirm={() => settle(sessions, remove, "removed", setRefused)} onClose={onClose}>
       <p className="muted">
         Desk forgets each — its card, its Floor turns, its unread and its Activity — and won't pick it up again.
-        {running ? ` ${running === n ? "They're" : `${running} of them are`} running, so they stop.` : ""} You can track them again from Settings → Sessions.
+        {stopping ? ` ${stopping === n ? "They're" : `${stopping} of them ${stopping === 1 ? "is" : "are"}`} running in Desk, so they stop.` : ""}
+        {elsewhere ? ` ${elsewhere === n ? "They keep" : `${elsewhere} of them ${elsewhere === 1 ? "keeps" : "keep"}`} running in their own terminals; Desk stops tracking them.` : ""} You
+        can track them again from Settings → Sessions.
       </p>
       <ul className="close-list" aria-label="Sessions to remove">
         {sessions.map((c) => (
@@ -142,7 +146,11 @@ export function RemoveSessions({ sessions, onClose }: { sessions: Closable[]; on
             {refused[c.key] ? (
               <span className="close-row-why small state-blocked">{refused[c.key]}</span>
             ) : (
-              runs(c.session) && <span className="close-row-why small faint">Running: it stops, and its transcript is kept.</span>
+              runs(c.session) && (
+                <span className="close-row-why small faint">
+                  {c.session.live ? "Running: it stops, and its transcript is kept." : "Runs in its own terminal: it keeps running there, and Desk stops tracking it."}
+                </span>
+              )
             )}
           </li>
         ))}

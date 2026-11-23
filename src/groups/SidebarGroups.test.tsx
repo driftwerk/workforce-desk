@@ -752,11 +752,14 @@ describe("picking rows and acting on them together", () => {
   });
 
   it("removes them in one confirm with the count, and keeps the refused picked saying why", async () => {
+    useDesk.setState((s) => ({ sessions: { ...s.sessions, s2: { ...s.sessions.s2!, origin: "external", state: "working" } } }));
     groups();
     cmd("Scout", "api-e7", "acme-web", "web-release");
     fireEvent.keyDown(row("Scout"), { key: "Delete" });
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("heading").textContent).toBe("Remove 3 sessions?");
+    expect(dialog.textContent).toContain("1 of them keeps running in their own terminals; Desk stops tracking them.");
+    expect(within(dialog).getByText("Runs in its own terminal: it keeps running there, and Desk stops tracking it.")).toBeTruthy();
     fireEvent.click(within(dialog).getByRole("button", { name: "Remove 3" }));
     expect(await within(screen.getByRole("dialog")).findByText(plainError(unreachable))).toBeTruthy();
     expect(here.remove.mock.calls.map(([id]) => id).sort()).toEqual(["s1", "s2"]);
@@ -784,6 +787,18 @@ describe("picking rows and acting on them together", () => {
     expect(there.end).toHaveBeenCalledWith("d1");
     expect(picked()).toEqual(["session:devbox/d1"]);
     expect(screen.getByRole("dialog").textContent).toContain("1 of 3 weren’t closed");
+    expect(within(screen.getByRole("dialog")).getByRole("heading").textContent).toBe("Close 1 session?");
+  });
+
+  it("keeps the refused picked when the row open was among those closed", async () => {
+    groups();
+    fireEvent.click(row("api-e7"));
+    cmd("acme-web", "web-release");
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Close 3" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close 3" }));
+    expect(await within(screen.getByRole("dialog")).findByText(plainError(unreachable))).toBeTruthy();
+    act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s1: { ...s.sessions.s1!, state: "closed" } } })));
+    expect(picked()).toEqual(["session:devbox/d1"]);
     expect(within(screen.getByRole("dialog")).getByRole("heading").textContent).toBe("Close 1 session?");
   });
 

@@ -146,17 +146,24 @@ function useSidebarSelection(): (nav: HTMLElement | null) => void {
     cleanup.current?.();
     cleanup.current = null;
     if (!nav) return;
+    const keeps = (target: EventTarget | null) =>
+      target instanceof Element && !!target.closest('[data-item], [data-keeps-selection], [role="dialog"], .sheet-backdrop');
+    // Pressed and let go there: a dialog closed by pressing outside it isn't.
+    let pressedFree = false;
+    const onDown = (e: MouseEvent) => void (pressedFree = !keeps(e.target));
     const onClick = (e: MouseEvent) => {
-      if (!(e.target instanceof Element && e.target.closest('[data-item], [data-keeps-selection], [role="dialog"]'))) clearSelection();
+      if (pressedFree && !keeps(e.target)) clearSelection();
     };
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() !== "a" || e.shiftKey || e.altKey || !modHeld(e, useHost.getState().platform) || typedIn(e.target)) return;
       e.preventDefault();
       selectAll();
     };
+    nav.addEventListener("mousedown", onDown);
     nav.addEventListener("click", onClick);
     nav.addEventListener("keydown", onKey);
     cleanup.current = () => {
+      nav.removeEventListener("mousedown", onDown);
       nav.removeEventListener("click", onClick);
       nav.removeEventListener("keydown", onKey);
     };

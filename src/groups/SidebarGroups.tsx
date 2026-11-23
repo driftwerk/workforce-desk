@@ -327,9 +327,10 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
           ? !activeRoom && activeAgent === agentKey(item.agent)
           : view === "floor" && panelAgent === agentKey(item.agent);
   const openKey = visible.find((key) => isOn(items.get(key)!)) ?? null;
-  // Opened from anywhere, the row open is the one picked, unless several are.
+  // Opened from anywhere, the row open is the one picked, unless several
+  // are or a confirm is acting on those picked.
   useEffect(() => {
-    if (isBulk(useSelection.getState())) return;
+    if (asked || isBulk(useSelection.getState())) return;
     if (openKey) only(openKey);
     else clearSelection();
   }, [openKey]);

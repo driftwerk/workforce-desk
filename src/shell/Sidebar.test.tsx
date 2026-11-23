@@ -821,9 +821,15 @@ describe("picking rows in the sidebar", () => {
     fireEvent.click(row("a"), { metaKey: true });
     fireEvent.click(row("b"), { metaKey: true });
     const bar = screen.getByRole("toolbar", { name: "Selection" });
+    fireEvent.mouseDown(bar);
     fireEvent.click(bar);
     expect(picked()).toEqual(["session:a", "session:b"]);
-    fireEvent.click(screen.getByRole("region", { name: "Groups" }));
+    const groups = screen.getByRole("region", { name: "Groups" });
+    fireEvent.mouseDown(bar);
+    fireEvent.click(groups);
+    expect(picked()).toEqual(["session:a", "session:b"]);
+    fireEvent.mouseDown(groups);
+    fireEvent.click(groups);
     expect(picked()).toEqual([]);
   });
 });
