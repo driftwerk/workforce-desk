@@ -93,3 +93,26 @@
   flex-wrap: wrap;
   align-items: center;
 }
+
+/* A kind of action the agent does on its own: its words and overrides
+   beside its level, stacked on a narrow pane. */
+.alone-row {
+  flex-wrap: wrap;
+}
+.alone-row .ability-text {
+  flex: 1 1 260px;
+}
+.alone-row .seg {
+  flex: 0 1 auto;
+  min-width: 220px;
+}
+.alone-add {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-top: 6px;
+}
+.alone-add .field-text {
+  flex: 1;
+  min-width: 0;
+}

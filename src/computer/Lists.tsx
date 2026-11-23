@@ -37,9 +37,9 @@ export function GrantList({
 }
 
 /** What agents did here, newest first, each with what came of it. */
-export function ActivityList({ rows, names }: { rows: ComputerActivityRow[]; names: Record<string, string> }) {
+export function ActivityList({ rows, names, label = "What agents did here" }: { rows: ComputerActivityRow[]; names: Record<string, string>; label?: string }) {
   return (
-    <ul className="computer-list" aria-label="What agents did here">
+    <ul className="computer-list" aria-label={label}>
       {rows.map((r) => {
         const o = outcomeOf(r);
         return (
