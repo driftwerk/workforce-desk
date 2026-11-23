@@ -120,7 +120,7 @@ enum Running {
     /// `claude setup-token` on a pseudo-terminal here (macOS, Linux).
     Pty {
         keys: Keys,
-        killer: Box<dyn ChildKiller + Send + Sync>,
+        ender: PtyEnder,
     },
     /// `claude setup-token` inside WSL: `wsl.exe` over plain pipes, with a
     /// terminal of Linux's own inside (see `cli::wsl_sign_in`).
@@ -141,9 +141,7 @@ impl Running {
     /// Linux side too, which isn't in Windows' process tree.
     fn end(self) {
         match self {
-            Running::Pty { mut killer, .. } => {
-                let _ = killer.kill();
-            }
+            Running::Pty { ender, .. } => ender.end(),
             Running::Wsl {
                 keys,
                 child,
@@ -574,7 +572,7 @@ impl Logins {
             .spawn_command(cli.pty())
             .map_err(|e| eyre::eyre!("{e}"))?;
         drop(pair.slave);
-        let killer = child.clone_killer();
+        let ender = PtyEnder::of(child.as_ref());
         let chunks = chunks(
             pair.master
                 .try_clone_reader()
@@ -594,14 +592,14 @@ impl Logins {
                 None,
                 SIGN_IN_WITHIN,
             );
-            let _ = child.kill();
+            PtyEnder::of(child.as_ref()).end();
             let status = child.wait();
             tracing::info!(?status, "sign-in: Claude Code ended");
             if finish(&slots, Plan::Claude, id) {
                 conclude_claude(&backend, &report, read, &use_);
             }
         });
-        Ok(Running::Pty { keys, killer })
+        Ok(Running::Pty { keys, ender })
     }
 
     /// Inside WSL (Windows): over plain pipes, every one read or written,
@@ -764,7 +762,10 @@ impl Logins {
     /// Types the code the browser page shows (or the address of that page)
     /// into `claude setup-token`, then Enter.
     pub fn code(&self, plan: Plan, code: &str) -> Result<(), String> {
-        let code = callback::pasted_code(code);
+        let code: String = callback::pasted_code(code)
+            .chars()
+            .filter(|c| !c.is_control())
+            .collect();
         if code.is_empty() {
             return Err("Paste the code the sign-in page shows.".into());
         }
@@ -778,14 +779,24 @@ impl Logins {
             Some(Running::Pty { keys, .. } | Running::Wsl { keys, .. }) => Arc::clone(keys),
             _ => return Err("that sign-in isn't waiting for a code".into()),
         };
-        type_in(&keys, code.as_bytes())?;
-        tracing::info!(?plan, "sign-in: a code was pasted");
+        let (typed, was_typed) = mpsc::channel();
+        // The code and its Enter go in together: a second paste waits.
         std::thread::spawn(move || {
-            std::thread::sleep(ENTER_AFTER);
-            if let Err(e) = type_in(&keys, b"\r") {
-                tracing::warn!(?plan, error = %e, "sign-in: couldn't press Enter after the code");
+            let mut keys = keys.lock().expect("keys");
+            let code_in = type_in(&mut *keys, code.as_bytes());
+            let go_on = code_in.is_ok();
+            let _ = typed.send(code_in);
+            if go_on {
+                std::thread::sleep(ENTER_AFTER);
+                if let Err(e) = type_in(&mut *keys, b"\r") {
+                    tracing::warn!(?plan, error = %e, "sign-in: couldn't press Enter after the code");
+                }
             }
         });
+        was_typed
+            .recv()
+            .map_err(|_| "the sign-in stopped taking keys".to_string())??;
+        tracing::info!(?plan, "sign-in: a code was pasted");
         Ok(())
     }
 
@@ -808,9 +819,32 @@ impl Logins {
     }
 }
 
+/// Ends a program on a pseudo-terminal and what it started: it leads its
+/// own session, so a process it left holding the terminal goes too, and
+/// with it the reader waiting on that terminal.
+struct PtyEnder {
+    pid: Option<u32>,
+    killer: Box<dyn ChildKiller + Send + Sync>,
+}
+
+impl PtyEnder {
+    fn of(child: &(dyn portable_pty::Child + Send + Sync)) -> Self {
+        Self {
+            pid: child.process_id(),
+            killer: child.clone_killer(),
+        }
+    }
+
+    fn end(mut self) {
+        if let Some(pid) = self.pid {
+            deadline::kill_tree_of(pid);
+        }
+        let _ = self.killer.kill();
+    }
+}
+
 /// Types `bytes` into a sign-in.
-fn type_in(keys: &Keys, bytes: &[u8]) -> Result<(), String> {
-    let mut keys = keys.lock().expect("keys");
+fn type_in(keys: &mut (dyn Write + Send), bytes: &[u8]) -> Result<(), String> {
     keys.write_all(bytes)
         .and_then(|()| keys.flush())
         .map_err(|e| e.to_string())
@@ -1116,6 +1150,21 @@ mod tests {
             Err("Claude sign-in ended without a token: Error: the browser sign-in failed".into())
         );
         assert!(start.elapsed() < Duration::from_secs(10));
+
+        let group = format!("-{}", child.process_id().unwrap());
+        let held = std::process::Command::new("kill")
+            .args(["-0", "--", &group])
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        assert!(held, "what the CLI started still holds its terminal");
+        PtyEnder::of(child.as_ref()).end();
+        let reader_ended = loop {
+            if let Err(e) = chunks.recv_timeout(Duration::from_secs(10)) {
+                break e;
+            }
+        };
+        assert_eq!(reader_ended, RecvTimeoutError::Disconnected);
     }
 }
 

@@ -98,7 +98,7 @@ pub fn shown(text: &str, ended: bool) -> Shown {
         asks_for_code: asks_for_code(text),
         refused: refused(text),
         failure: failure(text, &whole),
-        token: claude_token(&whole),
+        token: claude_token(text, ended),
     }
 }
 
@@ -167,7 +167,7 @@ fn before_code(text: &str) -> &str {
 
 /// What the CLI says of a code it turns down while still waiting for one
 /// (Claude Code 2.1.330's own words, on the left), and what Desk says.
-const REFUSED: [(&str, &str); 5] = [
+const REFUSED: [(&str, &str); 4] = [
     (
         "That address only works in a browser on this machine",
         "That address only works in the browser it came back to. Paste the code the last page shows instead.",
@@ -184,10 +184,6 @@ const REFUSED: [(&str, &str); 5] = [
         "That doesn't look like the full code",
         "That isn't the whole code. Copy all of it, including the # in the middle.",
     ),
-    (
-        "That code is not from this sign-in",
-        "That code is from another sign-in. Paste the one this sign-in's page shows.",
-    ),
 ];
 
 fn refused(text: &str) -> Option<&'static str> {
@@ -198,8 +194,8 @@ fn refused(text: &str) -> Option<&'static str> {
 }
 
 /// Why the CLI can't go on, in its words: the error drawn above "Press
-/// Enter to retry" (nothing Desk can give retries it), or an account on
-/// hold once its row is `whole`.
+/// Enter to retry" (nothing Desk can give retries it), never a code prompt
+/// and the code it may echo, or an account on hold once its row is `whole`.
 fn failure(text: &str, whole: &str) -> Option<String> {
     let rows: Vec<&str> = text.lines().map(str::trim).collect();
     let error = rows
@@ -210,7 +206,7 @@ fn failure(text: &str, whole: &str) -> Option<String> {
                 .iter()
                 .rev()
                 .skip_while(|r| r.is_empty())
-                .take_while(|r| !r.is_empty())
+                .take_while(|r| !r.is_empty() && !asks_for_code(r))
                 .map(|r| said(r))
                 .collect();
             block.into_iter().rev().collect::<Vec<_>>().join(" ")
@@ -239,14 +235,37 @@ fn said(row: &str) -> String {
 
 const CLAUDE_TOKEN_PREFIX: &str = "sk-ant-oat";
 
-/// The Claude OAuth token the screen shows.
-fn claude_token(text: &str) -> Option<String> {
-    let start = text.find(CLAUDE_TOKEN_PREFIX)?;
-    let token: String = text[start..]
-        .chars()
-        .take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
-        .collect();
-    (token.len() > CLAUDE_TOKEN_PREFIX.len() + 40).then_some(token)
+/// What the CLI draws below the token once the token's row is done.
+const TOKEN_DRAWN: &str = "Store this token securely";
+
+/// The Claude OAuth token the screen shows: on the row above "Store this
+/// token securely", or on any row once the CLI has `ended`. A row still
+/// being drawn over an earlier screen shows the old screen past its end.
+fn claude_token(text: &str, ended: bool) -> Option<String> {
+    let rows: Vec<&str> = text.lines().collect();
+    let drawn: Vec<&str> = match rows.iter().position(|r| r.contains(TOKEN_DRAWN)) {
+        Some(at) => rows[..at]
+            .iter()
+            .rfind(|r| !r.trim().is_empty())
+            .copied()
+            .into_iter()
+            .collect(),
+        None if ended => rows,
+        None => Vec::new(),
+    };
+    drawn.into_iter().find_map(token_on)
+}
+
+/// A token alone on `row`: a space or the row's end follows it.
+fn token_on(row: &str) -> Option<String> {
+    let from = &row[row.find(CLAUDE_TOKEN_PREFIX)?..];
+    let end = from
+        .find(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        .unwrap_or(from.len());
+    let (token, after) = from.split_at(end);
+    (token.len() > CLAUDE_TOKEN_PREFIX.len() + 40
+        && after.chars().next().is_none_or(char::is_whitespace))
+    .then(|| token.to_string())
 }
 
 /// Claude Code 2.1.330's screens, drawn as its renderer draws them.
@@ -346,6 +365,23 @@ mod tests {
     }
 
     #[test]
+    fn a_token_drawn_over_the_page_is_taken_only_once_the_rows_below_it_are() {
+        let frame = format!(
+            "\x1b[A\x1b[2G\x1b[33m{TOKEN}\x1b[39m\x1b[K\x1b[2G\x1b[B\x1b[2KStore this token securely. You won't be able to see it again."
+        )
+        .into_bytes();
+        let cut = frame.windows(10).position(|w| w == b"sk-ant-oat").unwrap() + 50;
+        let mut s = screen(&[&waiting(FULL), &frame[..cut]]);
+        let partial = s.text();
+        assert!(partial.contains(&format!("{}ient_id", &TOKEN[..50])));
+        assert_eq!(shown(&partial, false).token, None);
+        s.feed(&frame[cut..]);
+        assert_eq!(shown(&s.text(), false).token.as_deref(), Some(TOKEN));
+        let stale = format!("{TOKEN}ab/cd\nStore this token securely.");
+        assert_eq!(shown(&stale, true).token, None);
+    }
+
+    #[test]
     fn a_page_still_being_drawn_isnt_shown_until_its_row_is_whole() {
         let s = screen(&[format!("Use the url below:\r\n{}", &FULL[..60]).as_bytes()]);
         assert_eq!(shown(&s.text(), false).page, None);
@@ -373,7 +409,7 @@ mod tests {
             Some("https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c&state=x")
         );
         assert!(seen.asks_for_code);
-        let printed = format!("Your token:\n\n{TOKEN}\n\nStore it");
+        let printed = format!("Your token:\n\n{TOKEN}\n\nStore this token securely.");
         assert_eq!(
             shown(&screen(&[printed.as_bytes()]).text(), false)
                 .token
@@ -382,7 +418,8 @@ mod tests {
         );
         assert_eq!(
             shown(
-                &screen(&[b"Your token:\n\nsk-ant-oat01-short\n\nStore it"]).text(),
+                &screen(&[b"Your token:\n\nsk-ant-oat01-short\n\nStore this token securely."])
+                    .text(),
                 true
             )
             .token,
@@ -465,6 +502,21 @@ mod tests {
             Some(
                 "OAuth error: That code wasn't accepted. It may be incomplete, expired, already used, or from an earlier sign-in attempt. Sign in again to get a new code."
             )
+        );
+    }
+
+    #[test]
+    fn an_error_never_repeats_the_code_prompt_or_the_code_it_echoes() {
+        let s = screen(&[
+            &waiting(FULL),
+            b" abc#secret",
+            &row(2, "OAuth error: That code wasn't accepted."),
+            &row(2, "Press Enter to retry"),
+        ]);
+        let seen = shown(&s.text(), false);
+        assert_eq!(
+            seen.failure.as_deref(),
+            Some("OAuth error: That code wasn't accepted.")
         );
     }
 
