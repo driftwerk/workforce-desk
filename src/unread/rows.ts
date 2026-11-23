@@ -1,5 +1,5 @@
 import type { Agent, HubAccount } from "../chat/types";
-import type { Brief, Engine, ReadPoint, Room, RoomMessage, Session } from "../hub/types";
+import type { Brief, Engine, ReadPoint, Room, RoomMessage, Session, SessionUnread } from "../hub/types";
 import type { ConversationUnread } from "../hubs/surface";
 import type { Target } from "../shell/navigate";
 import { authorOf } from "../rooms/names";
@@ -56,6 +56,17 @@ export const firstLine = (text: string | null | undefined): string =>
     ?.trim()
     .slice(0, 200) ?? "";
 const before = (at: string | null): ReadPoint | null => (at ? { at: justBefore(at), message: null } : null);
+
+/** What Mark read writes for a DM: through its newest message. */
+export const dmReadPoint = (u: ConversationUnread): ReadPoint =>
+  u.last ? { at: u.last.at, message: u.last.message_id } : { at: new Date(0).toISOString(), message: null };
+
+/** What Mark read writes for a session: through what made it unread. */
+export const sessionReadPoint = (u: SessionUnread): ReadPoint => ({ at: u.since, message: null });
+
+/** What Mark unread writes for a session read already: from before it
+ *  began, so what it did since is unread again. */
+export const sessionUnreadPoint = (s: Pick<Session, "createdAt">): ReadPoint => ({ at: justBefore(s.createdAt), message: null });
 export const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
 /** Whether `s` reads as an id rather than a name: a uuid, or a long run of
@@ -112,7 +123,7 @@ export const unreadRows = (s: RowSources): UnreadRow[] => {
       line: `${u.capped ? "100 or more new messages" : plural(u.count, "new message")} from ${listed ?? (looksLikeId(agent) ? "an agent" : agent)}`,
       mark: { kind: "agent", agent: key, name },
       open: { kind: "agent", key },
-      read: u.last ? { at: u.last.at, message: u.last.message_id } : { at: new Date(0).toISOString(), message: null },
+      read: dmReadPoint(u),
       unread: before(u.last?.at ?? null),
     });
   }
@@ -177,7 +188,7 @@ export const unreadRows = (s: RowSources): UnreadRow[] => {
       line: firstLine(session.lastReply) || firstLine(session.goal) || (session.state === "done" ? "Finished, ready for you to look over." : `It ${ended}.`),
       mark: { kind: "session", name: name || "session", engine: session.engine },
       open: { kind: "session", sessionId: u.id },
-      read: { at: u.since, message: null },
+      read: sessionReadPoint(u),
       unread: before(u.since),
     });
   }

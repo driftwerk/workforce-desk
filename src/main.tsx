@@ -24,6 +24,7 @@ import { thisWindow } from "./grids/windows";
 import { loadHost } from "./shell/host";
 import { followInput } from "./updates/away";
 import { DeskRichHost } from "./shell/richHost";
+import { followSelectAll } from "./shell/selectAll";
 import "./styles/app.css";
 import "./styles/crew.css";
 import "./styles/problem.css";
@@ -61,6 +62,9 @@ if (!secret) {
   void deskState.register(DRAIN_PREFIX);
   void deskState.register(SIDEBAR_PREFIX);
 }
+
+// The Edit menu's Select All, in every window: what has focus decides.
+followSelectAll();
 
 // A detached grid's window shows that grid alone (see grids/GridWindow).
 const grid = detachedGrid();

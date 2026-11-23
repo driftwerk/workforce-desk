@@ -23,6 +23,9 @@ import { clearSelection, useSelection } from "./selection";
 import { DEFAULT_HOST, useHost } from "../shell/host";
 import type { Closing } from "../hub/types";
 import { plainError } from "../ui/plainError";
+import { useUnread } from "../unread/summary";
+import { useReads } from "../unread/reads";
+import { instant } from "../rooms/time";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -193,7 +196,7 @@ describe("groups in the sidebar", () => {
     groups();
     fireEvent.keyDown(row("web-release"), { key: "F10", shiftKey: true });
     const menu = screen.getByRole("menu", { name: "web-release options" });
-    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["RenameF2", "Move to group▸", "Add to grid▸", "Open", "Continue in…", "Select", "End session…", "Remove…⌫"]);
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["RenameF2", "Move to group▸", "Add to grid▸", "Open", "Continue in…", "End session…", "Remove…⌫"]);
     expect(document.activeElement?.textContent).toBe("RenameF2");
     fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
     fireEvent.keyDown(document.activeElement!, { key: "ArrowRight" });
@@ -266,11 +269,11 @@ describe("groups in the sidebar", () => {
     expect(vi.mocked(invoke)).toHaveBeenCalledWith("boss_status", { group: "acme" });
   });
 
-  it("Ungrouped has no handle or rename, and its options only select sessions or clear finished ones", () => {
+  it("Ungrouped has no handle or rename, and its options only select its rows or clear finished sessions", () => {
     groups();
     fireEvent.click(screen.getByRole("button", { name: "Ungrouped options" }));
     const menu = screen.getByRole("menu", { name: "Ungrouped options" });
-    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Select sessions", "Clear finished sessions…"]);
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["Select all in Ungrouped", "Clear finished sessions…"]);
     fireEvent.keyDown(document.activeElement!, { key: "Escape" });
     fireEvent.keyDown(header("Ungrouped"), { key: "F2" });
     expect(screen.queryByRole("textbox")).toBeNull();
@@ -580,11 +583,14 @@ describe("a machine's sessions, in the same groups", () => {
   });
 });
 
-describe("picking sessions to close together", () => {
+describe("picking rows and acting on them together", () => {
   const devbox = { id: "devbox", name: "devbox", target: "devbox", version: null, state: { kind: "ready" } } as never;
   const nothing: Closing = { folder: "/tmp", work: null, changes: null, pulls: [], tickets: [] };
+  const unreachable = new Error("devbox didn't answer");
   const here = {
     end: vi.fn((id: string) => Promise.resolve(session(id, id, { state: "closed" }))),
+    remove: vi.fn((_id: string, _transcript: boolean) => Promise.resolve({ transcript: false })),
+    stop: vi.fn((_id: string) => Promise.resolve()),
     closing: vi.fn((id: string): Promise<Closing> =>
       Promise.resolve(
         id === "s1"
@@ -593,13 +599,17 @@ describe("picking sessions to close together", () => {
       ),
     ),
   };
-  const unreachable = new Error("devbox didn't answer");
   const there = {
     end: vi.fn(() => Promise.reject(unreachable)),
+    remove: vi.fn((_id: string, _transcript: boolean) => Promise.reject(unreachable)),
+    stop: vi.fn((_id: string) => Promise.resolve()),
     closing: vi.fn(() => Promise.reject(new Error("an older Desk"))),
   };
-  const picked = () => [...useSelection.getState().keys];
-  const bar = () => screen.queryByRole("toolbar", { name: "Selected sessions" });
+  const picked = () => [...useSelection.getState().keys].sort();
+  const bar = () => screen.queryByRole("toolbar", { name: "Selection" });
+  const cmd = (...names: string[]) => names.forEach((name) => fireEvent.click(row(name), { metaKey: true }));
+  const buttons = () => within(bar()!).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent);
+  const labels = (menu: HTMLElement) => within(menu).getAllByRole("menuitem").map((m) => m.textContent);
 
   beforeEach(() => {
     Object.values(here).forEach((f) => f.mockClear());
@@ -618,81 +628,174 @@ describe("picking sessions to close together", () => {
     useHost.setState(DEFAULT_HOST);
     useMachines.setState({ machines: [], listed: false });
     useDesk.setState({ engines: {}, hub: null });
+    useUnread.setState({ local: null, machines: {}, dms: {} });
+    useReads.setState({ local: {}, dms: {} });
   });
 
-  it("picks one with cmd-click and a range with shift-click, in the order shown, opening none; Escape lets go", () => {
+  it("picks the row clicked alone and opens it, letting go of every other", () => {
     groups();
-    fireEvent.click(row("api-e7"), { metaKey: true });
-    expect(row("api-e7").className).toContain("selected");
-    expect(row("api-e7").getAttribute("aria-pressed")).toBe("true");
-    expect(bar()?.textContent).toContain("1 selected");
+    cmd("acme-web", "web-release");
+    expect(bar()?.textContent).toContain("2 selected");
+    fireEvent.click(row("api-e7"));
+    expect(picked()).toEqual(["session:s1"]);
+    expect(useDesk.getState().openId).toBe("s1");
+    expect(bar()).toBeNull();
+    expect(screen.getAllByRole("button").some((b) => b.classList.contains("selected"))).toBe(false);
+  });
+
+  it("adds with cmd-click and a range with shift-click, opening none, and draws them picked only once two are; Escape lets go", () => {
+    groups();
+    cmd("api-e7");
+    expect(picked()).toEqual(["session:s1"]);
+    expect(bar()).toBeNull();
+    expect(row("api-e7").hasAttribute("aria-pressed")).toBe(false);
     fireEvent.click(row("web-release"), { shiftKey: true });
-    expect(picked()).toEqual(["session:s1", "session:devbox/d1", "session:s2"]);
-    expect(bar()?.textContent).toContain("3 selected");
-    fireEvent.click(row("acme-web"), { metaKey: true });
-    expect(picked()).toEqual(["session:s1", "session:s2"]);
+    expect(picked()).toEqual(["agent:remote/ada", "session:devbox/d1", "session:s1", "session:s2"]);
+    expect(bar()?.textContent).toContain("4 selected");
+    expect(row("Ada").className).toContain("selected");
+    cmd("acme-web");
+    expect(picked()).toEqual(["agent:remote/ada", "session:s1", "session:s2"]);
     expect(row("acme-web").getAttribute("aria-pressed")).toBe("false");
     // Ctrl on a Mac isn't the pick: only ⌘ is.
+    expect(useDesk.getState().openId).toBeNull();
     fireEvent.click(row("acme-web"), { ctrlKey: true });
-    expect(picked()).toHaveLength(2);
+    expect(picked()).toEqual(["session:devbox/d1"]);
     expect(useDesk.getState().openId).toBe("devbox/d1");
+    cmd("api-e7");
     fireEvent.keyDown(window, { key: "Escape" });
     expect(bar()).toBeNull();
-    expect(row("api-e7").className).not.toContain("selected");
-    expect(row("api-e7").hasAttribute("aria-pressed")).toBe(false);
+    // The row open is picked again, so the next ⌘-click adds to it.
+    expect(picked()).toEqual(["session:devbox/d1"]);
+    cmd("api-e7");
+    expect(bar()?.textContent).toContain("2 selected");
   });
 
-  it("picks with Ctrl on Windows, keeps the picks as the sidebar is drawn again, and lets go of one that leaves it", () => {
+  it("lets the only row picked be ⌘-clicked off, as Finder does", () => {
+    groups();
+    fireEvent.click(row("api-e7"));
+    cmd("api-e7");
+    expect(picked()).toEqual([]);
+    cmd("web-release");
+    expect(picked()).toEqual(["session:s2"]);
+  });
+
+  it("keeps focus on a row picked with a modifier, so the keys that act on picks reach it", () => {
+    groups();
+    cmd("api-e7", "web-release");
+    expect(document.activeElement).toBe(row("web-release"));
+    fireEvent.click(row("acme-web"), { shiftKey: true });
+    expect(document.activeElement).toBe(row("acme-web"));
+    fireEvent.keyDown(document.activeElement!, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu", { name: "4 selected" })).toBeTruthy();
+  });
+
+  it("picks with Ctrl on Windows, any row (agents, and sessions whose machine can't be reached), and keeps the picks as the sidebar is drawn again", () => {
     useHost.setState({ platform: "windows" });
+    useMachines.setState({ machines: [{ ...(devbox as object), state: { kind: "unreachable" } } as never] });
     const { unmount } = groups();
-    fireEvent.click(row("api-e7"), { ctrlKey: true });
-    fireEvent.click(row("web-release"), { ctrlKey: true });
-    act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s1: { ...s.sessions.s1!, state: "working" } } })));
-    expect(bar()?.textContent).toContain("2 selected");
+    for (const name of ["Scout", "acme-web", "web-release"]) fireEvent.click(row(name), { ctrlKey: true });
+    expect(picked()).toEqual(["agent:local/scout", "session:devbox/d1", "session:s2"]);
     unmount();
     groups();
-    expect(row("web-release").className).toContain("selected");
-    act(() =>
-      useDesk.setState((s) => {
-        const { s2: _closed, ...rest } = s.sessions;
-        return { sessions: rest };
-      }),
-    );
-    expect(picked()).toEqual(["session:s1"]);
-    expect(bar()?.textContent).toContain("1 selected");
+    expect(row("acme-web").className).toContain("selected");
+    // Only a session whose machine is there can be removed or closed.
+    expect(buttons()).toEqual(["Actions ▾", "Clear selection", "Close 1 session", "Remove 1 session"]);
   });
 
-  it("never picks a session whose machine can't be reached, as it can't be removed", () => {
-    useMachines.setState({ machines: [{ ...(devbox as object), state: { kind: "unreachable" } } as never] });
+  it("pins the bar above the rows, saying how many and what each choice is for", () => {
     groups();
-    fireEvent.click(row("api-e7"), { metaKey: true });
-    fireEvent.click(row("acme-web"), { metaKey: true });
-    fireEvent.click(row("web-release"), { shiftKey: true });
-    expect(picked()).toEqual(["session:s1", "session:s2"]);
-    expect(row("acme-web").hasAttribute("aria-pressed")).toBe(false);
-    expect(bar()?.textContent).toContain("2 selected");
-  });
-
-  it("is reachable without a keyboard: Select sessions from a group's menu, then a click picks", () => {
-    groups();
-    fireEvent.click(screen.getByRole("button", { name: "Ungrouped options" }));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Select sessions" }));
-    expect(bar()?.textContent).toContain("0 selected");
-    expect(within(bar()!).getByRole("button", { name: "Close" })).toHaveProperty("disabled", true);
-    fireEvent.click(row("web-release"));
-    expect(useDesk.getState().openId).toBeNull();
-    expect(bar()?.textContent).toContain("1 selected");
-    fireEvent.contextMenu(row("api-e7"));
-    fireEvent.click(screen.getByRole("menuitem", { name: "Select" }));
-    expect(picked()).toEqual(["session:s2", "session:s1"]);
-    fireEvent.click(within(bar()!).getByRole("button", { name: "Clear" }));
+    cmd("Scout", "api-e7", "acme-web");
+    const body = screen.getByRole("region", { name: "Groups" }).querySelector(".side-section-body")!;
+    expect(body.firstElementChild).toBe(bar());
+    expect(bar()?.textContent).toContain("3 selected");
+    expect(buttons()).toEqual(["Actions ▾", "Clear selection", "Close 2 sessions", "Remove 2 sessions"]);
+    expect(within(bar()!).getByRole("button", { name: "Remove 2 sessions" }).textContent).toBe("Remove 2");
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Actions" }));
+    expect(screen.getByRole("menu", { name: "3 selected" })).toBeTruthy();
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Clear selection" }));
     expect(bar()).toBeNull();
+  });
+
+  it("right-click on a picked row acts on them all; on another, picks it alone and acts on it", () => {
+    useDesk.setState((s) => ({ sessions: { ...s.sessions, s1: { ...s.sessions.s1!, live: true }, s2: { ...s.sessions.s2!, live: true } } }));
+    groups();
+    cmd("Scout", "api-e7", "web-release");
+    fireEvent.contextMenu(row("api-e7"));
+    const menu = screen.getByRole("menu", { name: "3 selected" });
+    expect(labels(menu)).toEqual([
+      "Move 3 to group▸",
+      "Add 3 to grid▸",
+      "Remove 2 from group · 1 can’t",
+      "Stop 2 sessions · 1 can’t",
+      "Notifications for 1 agent▸",
+      "Close 2 sessions… · 1 can’t be closed",
+      "Remove 2 sessions… · 1 can’t be removed⌫",
+      "Clear selectionEsc",
+    ]);
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /Stop 2 sessions/ }));
+    expect(here.stop.mock.calls.map(([id]) => id).sort()).toEqual(["s1", "s2"]);
+    expect(picked()).toEqual(["agent:local/scout", "session:s1", "session:s2"]);
+
+    fireEvent.contextMenu(row("acme-web"));
+    expect(picked()).toEqual(["session:devbox/d1"]);
+    expect(screen.getByRole("menu", { name: "acme-web options" })).toBeTruthy();
+    expect(bar()).toBeNull();
+  });
+
+  it("moves them all to a group, and back out of theirs", async () => {
+    groups();
+    cmd("api-e7", "web-release");
+    fireEvent.contextMenu(row("api-e7"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Move 2 to group" }));
+    fireEvent.click(within(screen.getByRole("menu", { name: "Move 2 to group" })).getByRole("menuitem", { name: "Beta" }));
+    await act(async () => {});
+    expect(rows("Beta")).toEqual(["api-e7", "web-release"]);
+    expect(picked()).toEqual(["session:s1", "session:s2"]);
+    fireEvent.contextMenu(row("api-e7"));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Remove 2 from group" }));
+    await act(async () => {});
+    expect(rows("Beta")).toEqual([]);
+    expect(rows("Ungrouped")).toEqual(expect.arrayContaining(["api-e7", "web-release"]));
+  });
+
+  it("marks those with something unread read, and those read already that left something unread again", () => {
+    useDesk.setState((s) => ({ sessions: { ...s.sessions, s1: { ...s.sessions.s1!, state: "done" } } }));
+    useUnread.setState({
+      local: { rooms: [], sessions: [{ id: "s2", since: "2026-10-29T09:00:00Z", urgency: "forYou" }], activity: { count: 0, lastAt: null }, brief: null, update: null, floor: "2026-01-01T00:00:00Z" },
+    });
+    groups();
+    cmd("api-e7", "web-release", "Scout");
+    fireEvent.contextMenu(row("api-e7"));
+    const menu = screen.getByRole("menu", { name: "3 selected" });
+    expect(labels(menu)).toEqual(expect.arrayContaining(["Mark 1 read · 2 can’t", "Mark 1 unread · 2 can’t"]));
+    fireEvent.click(within(menu).getByRole("menuitem", { name: /Mark 1 read/ }));
+    expect(useReads.getState().local["session:s2"]).toEqual({ at: "2026-10-29T09:00:00Z", message: null });
+    fireEvent.contextMenu(row("api-e7"));
+    fireEvent.click(screen.getByRole("menuitem", { name: /Mark 1 unread/ }));
+    expect(instant(useReads.getState().local["session:s1"]!.at) < instant("2026-10-29T08:00:00Z")).toBe(true);
+  });
+
+  it("removes them in one confirm with the count, and keeps the refused picked saying why", async () => {
+    useDesk.setState((s) => ({ sessions: { ...s.sessions, s2: { ...s.sessions.s2!, origin: "external", state: "working" } } }));
+    groups();
+    cmd("Scout", "api-e7", "acme-web", "web-release");
+    fireEvent.keyDown(row("Scout"), { key: "Delete" });
+    const dialog = screen.getByRole("dialog");
+    expect(within(dialog).getByRole("heading").textContent).toBe("Remove 3 sessions?");
+    expect(dialog.textContent).toContain("1 of them keeps running in their own terminals; Desk stops tracking them.");
+    expect(within(dialog).getByText("Runs in its own terminal: it keeps running there, and Desk stops tracking it.")).toBeTruthy();
+    fireEvent.click(within(dialog).getByRole("button", { name: "Remove 3" }));
+    expect(await within(screen.getByRole("dialog")).findByText(plainError(unreachable))).toBeTruthy();
+    expect(here.remove.mock.calls.map(([id]) => id).sort()).toEqual(["s1", "s2"]);
+    expect(there.remove).toHaveBeenCalledWith("d1", false);
+    expect(picked()).toEqual(["session:devbox/d1"]);
+    expect(await within(screen.getByRole("dialog")).findByText(/1 of 3 weren’t removed/)).toBeTruthy();
   });
 
   it("closes them in one confirm that says what each would leave, as End session does, and keeps the refused saying why", async () => {
     groups();
-    for (const name of ["api-e7", "acme-web", "web-release"]) fireEvent.click(row(name), { metaKey: true });
-    fireEvent.click(within(bar()!).getByRole("button", { name: "Close" }));
+    cmd("api-e7", "acme-web", "web-release");
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Close 3 sessions" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("heading").textContent).toBe("Close 3 sessions?");
     expect(await within(dialog).findByText("it's working · 2 uncommitted files · PR #12 still open · MAN-491 still open")).toBeTruthy();
@@ -707,7 +810,41 @@ describe("picking sessions to close together", () => {
     expect(here.end.mock.calls.map(([id]) => id).sort()).toEqual(["s1", "s2"]);
     expect(there.end).toHaveBeenCalledWith("d1");
     expect(picked()).toEqual(["session:devbox/d1"]);
-    expect(screen.getByRole("dialog").textContent).toContain("1 of 3 weren’t closed");
+    expect(await within(screen.getByRole("dialog")).findByText(/1 of 3 weren’t closed/)).toBeTruthy();
     expect(within(screen.getByRole("dialog")).getByRole("heading").textContent).toBe("Close 1 session?");
+  });
+
+  it("keeps the refused picked when the row open was among those closed", async () => {
+    groups();
+    fireEvent.click(row("api-e7"));
+    cmd("acme-web", "web-release");
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Close 3 sessions" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close 3" }));
+    expect(await within(screen.getByRole("dialog")).findByText(plainError(unreachable))).toBeTruthy();
+    act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s1: { ...s.sessions.s1!, state: "closed" } } })));
+    expect(picked()).toEqual(["session:devbox/d1"]);
+    expect(within(screen.getByRole("dialog")).getByRole("heading").textContent).toBe("Close 1 session?");
+  });
+
+  it("lets go of rows out of sight, and picks a whole group from its menu", () => {
+    groups();
+    cmd("api-e7", "web-release");
+    fireEvent.click(header("Acme"));
+    expect(picked()).toEqual(["session:s2"]);
+    fireEvent.click(screen.getByRole("button", { name: "Acme options" }));
+    fireEvent.click(screen.getByRole("menuitem", { name: "Select all in Acme" }));
+    expect(picked()).toEqual(["agent:local/scout", "session:devbox/d1", "session:s1"]);
+    expect(rows("Acme")).toEqual(["Scout", "api-e7", "acme-web"]);
+    expect(bar()?.textContent).toContain("3 selected");
+  });
+
+  it("follows the row opened from elsewhere while one or none is picked", () => {
+    groups();
+    fireEvent.click(row("api-e7"));
+    act(() => useDesk.setState({ openId: "s2" }));
+    expect(picked()).toEqual(["session:s2"]);
+    cmd("api-e7");
+    act(() => useDesk.setState({ openId: null }));
+    expect(picked()).toEqual(["session:s1", "session:s2"]);
   });
 });

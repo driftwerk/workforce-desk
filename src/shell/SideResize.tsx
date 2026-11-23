@@ -16,6 +16,7 @@ export function SideResize() {
   return (
     <div
       className="side-resize"
+      data-keeps-selection=""
       role="separator"
       aria-orientation="vertical"
       aria-label="Sidebar width"
