@@ -608,6 +608,7 @@ describe("picking rows and acting on them together", () => {
   const picked = () => [...useSelection.getState().keys].sort();
   const bar = () => screen.queryByRole("toolbar", { name: "Selection" });
   const cmd = (...names: string[]) => names.forEach((name) => fireEvent.click(row(name), { metaKey: true }));
+  const buttons = () => within(bar()!).getAllByRole("button").map((b) => b.getAttribute("aria-label") ?? b.textContent);
   const labels = (menu: HTMLElement) => within(menu).getAllByRole("menuitem").map((m) => m.textContent);
 
   beforeEach(() => {
@@ -663,7 +664,20 @@ describe("picking rows and acting on them together", () => {
     cmd("api-e7");
     fireEvent.keyDown(window, { key: "Escape" });
     expect(bar()).toBeNull();
-    expect(picked()).toEqual([]);
+    // The row open is picked again, so the next ⌘-click adds to it.
+    expect(picked()).toEqual(["session:devbox/d1"]);
+    cmd("api-e7");
+    expect(bar()?.textContent).toContain("2 selected");
+  });
+
+  it("keeps focus on a row picked with a modifier, so the keys that act on picks reach it", () => {
+    groups();
+    cmd("api-e7", "web-release");
+    expect(document.activeElement).toBe(row("web-release"));
+    fireEvent.click(row("acme-web"), { shiftKey: true });
+    expect(document.activeElement).toBe(row("acme-web"));
+    fireEvent.keyDown(document.activeElement!, { key: "F10", shiftKey: true });
+    expect(screen.getByRole("menu", { name: "4 selected" })).toBeTruthy();
   });
 
   it("picks with Ctrl on Windows, any row (agents, and sessions whose machine can't be reached), and keeps the picks as the sidebar is drawn again", () => {
@@ -676,7 +690,7 @@ describe("picking rows and acting on them together", () => {
     groups();
     expect(row("acme-web").className).toContain("selected");
     // Only a session whose machine is there can be removed or closed.
-    expect(within(bar()!).getAllByRole("button").map((b) => b.textContent)).toEqual(["Clear", "Close 1", "Remove 1", "Actions"]);
+    expect(buttons()).toEqual(["Clear selection", "Actions ▾", "Close 1 session", "Remove 1 session"]);
   });
 
   it("pins the bar above the rows, saying how many and what each choice is for", () => {
@@ -685,10 +699,10 @@ describe("picking rows and acting on them together", () => {
     const body = screen.getByRole("region", { name: "Groups" }).querySelector(".side-section-body")!;
     expect(body.firstElementChild).toBe(bar());
     expect(bar()?.textContent).toContain("3 selected");
-    expect(within(bar()!).getAllByRole("button").map((b) => b.textContent)).toEqual(["Clear", "Close 2", "Remove 2", "Actions"]);
+    expect(buttons()).toEqual(["Clear selection", "Actions ▾", "Close 2 sessions", "Remove 2 sessions"]);
     fireEvent.click(within(bar()!).getByRole("button", { name: "Actions" }));
     expect(screen.getByRole("menu", { name: "3 selected" })).toBeTruthy();
-    fireEvent.click(within(bar()!).getByRole("button", { name: "Clear" }));
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Clear selection" }));
     expect(bar()).toBeNull();
   });
 
@@ -771,7 +785,7 @@ describe("picking rows and acting on them together", () => {
   it("closes them in one confirm that says what each would leave, as End session does, and keeps the refused saying why", async () => {
     groups();
     cmd("api-e7", "acme-web", "web-release");
-    fireEvent.click(within(bar()!).getByRole("button", { name: "Close 3" }));
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Close 3 sessions" }));
     const dialog = screen.getByRole("dialog");
     expect(within(dialog).getByRole("heading").textContent).toBe("Close 3 sessions?");
     expect(await within(dialog).findByText("it's working · 2 uncommitted files · PR #12 still open · MAN-491 still open")).toBeTruthy();
@@ -794,7 +808,7 @@ describe("picking rows and acting on them together", () => {
     groups();
     fireEvent.click(row("api-e7"));
     cmd("acme-web", "web-release");
-    fireEvent.click(within(bar()!).getByRole("button", { name: "Close 3" }));
+    fireEvent.click(within(bar()!).getByRole("button", { name: "Close 3 sessions" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Close 3" }));
     expect(await within(screen.getByRole("dialog")).findByText(plainError(unreachable))).toBeTruthy();
     act(() => useDesk.setState((s) => ({ sessions: { ...s.sessions, s1: { ...s.sessions.s1!, state: "closed" } } })));

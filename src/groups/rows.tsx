@@ -164,7 +164,13 @@ export function SortRow({
             aria-current={on ? "true" : undefined}
             aria-pressed={selected}
             {...data}
-            onClick={(e) => onPick?.(e) || onOpen()}
+            onClick={(e) => {
+              // A pick keeps focus here, so the keys that act on it (⌘A,
+              // Delete, Shift+F10) reach the sidebar; WebKit doesn't focus a
+              // clicked button itself.
+              if (onPick?.(e)) e.currentTarget.focus({ preventScroll: true });
+              else onOpen();
+            }}
             onPointerEnter={() => onHover?.(true)}
             onPointerLeave={() => onHover?.(false)}
             onDoubleClick={(e) => {

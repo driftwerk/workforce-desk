@@ -93,6 +93,27 @@ export function CloseSessions({ sessions, onClose }: { sessions: Closable[]; onC
 function CloseRow({ c, check, refused }: { c: Closable; check: Check; refused: string | null }) {
   const left = typeof check === "object" ? leftBehind(check) : [];
   const folder = typeof check === "object" ? check.folder : c.session.cwd;
+  const why: Why = refused
+    ? { text: refused, warn: true }
+    : check === "checking"
+      ? { text: "Checking what it would leave…" }
+      : check === "unread"
+        ? { text: "What it would leave couldn’t be checked." }
+        : left.length
+          ? { text: left.join(" · "), warn: true }
+          : { text: "Nothing left behind." };
+  return <PickedRow c={c} why={why} folder={folder} />;
+}
+
+/** What a picked session's row says about it: a warning, or a quiet note. */
+interface Why {
+  text: string;
+  warn?: boolean;
+}
+
+/** A picked session in a confirm's list: its dot, name and machine, then
+ *  what the confirm says about it, and where it works. */
+function PickedRow({ c, why, folder }: { c: Closable; why: Why | null; folder?: string | null }) {
   return (
     <li className="close-row">
       <span className="close-row-head">
@@ -100,21 +121,21 @@ function CloseRow({ c, check, refused }: { c: Closable; check: Check; refused: s
         <span className="close-row-name mono">{c.name}</span>
         <MachineTag machine={machineOf(c.session)} />
       </span>
-      {refused ? (
-        <span className="close-row-why small state-blocked">{refused}</span>
-      ) : check === "checking" ? (
-        <span className="close-row-why small faint">Checking what it would leave…</span>
-      ) : check === "unread" ? (
-        <span className="close-row-why small faint">What it would leave couldn’t be checked.</span>
-      ) : left.length ? (
-        <span className="close-row-why small state-blocked">{left.join(" · ")}</span>
-      ) : (
-        <span className="close-row-why small faint">Nothing left behind.</span>
-      )}
+      {why && <span className={`close-row-why small ${why.warn ? "state-blocked" : "faint"}`}>{why.text}</span>}
       {folder && <span className="close-row-folder small faint mono">{homeShort(folder)}</span>}
     </li>
   );
 }
+
+/** What removing `c` does that it should know, or why it wasn't. */
+const removeWhy = (c: Closable, refused: string | undefined): Why | null =>
+  refused
+    ? { text: refused, warn: true }
+    : c.session.live
+      ? { text: "Running: it stops, and its transcript is kept." }
+      : runsElsewhere(c.session)
+        ? { text: "Runs in its own terminal: it keeps running there, and Desk stops tracking it." }
+        : null;
 
 /** One confirm for removing every picked session, as Remove removes one:
  *  Desk forgets each, and deletes the transcripts of those not running when
@@ -137,22 +158,7 @@ export function RemoveSessions({ sessions, onClose }: { sessions: Closable[]; on
       </p>
       <ul className="close-list" aria-label="Sessions to remove">
         {sessions.map((c) => (
-          <li key={c.key} className="close-row">
-            <span className="close-row-head">
-              <span className={`dot dot-${lookOf(c.session)}`} aria-hidden="true" />
-              <span className="close-row-name mono">{c.name}</span>
-              <MachineTag machine={machineOf(c.session)} />
-            </span>
-            {refused[c.key] ? (
-              <span className="close-row-why small state-blocked">{refused[c.key]}</span>
-            ) : (
-              runs(c.session) && (
-                <span className="close-row-why small faint">
-                  {c.session.live ? "Running: it stops, and its transcript is kept." : "Runs in its own terminal: it keeps running there, and Desk stops tracking it."}
-                </span>
-              )
-            )}
-          </li>
+          <PickedRow key={c.key} c={c} why={removeWhy(c, refused[c.key])} />
         ))}
       </ul>
       <label className="confirm-check small">

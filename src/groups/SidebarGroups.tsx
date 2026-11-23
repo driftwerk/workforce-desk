@@ -334,6 +334,11 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     if (openKey) only(openKey);
     else clearSelection();
   }, [openKey]);
+  // Let go of, the row open is picked again: the next ⌘-click adds to it.
+  const empty = picked.size === 0;
+  useEffect(() => {
+    if (empty && openKey && !asked) only(openKey);
+  }, [empty, asked]);
   const selection = visible.filter((key) => picked.has(key));
   /** The sessions among `keys` that can be closed or removed. */
   const sessionsOf = (keys: readonly ItemKey[]): Closable[] =>
@@ -459,16 +464,26 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
   /** What a move of `keys` says they are: the one's name, or how many. */
   const called = (keys: readonly ItemKey[]): string => (keys.length === 1 ? nameOf(items.get(keys[0]!)) : plural(keys.length, "item"));
 
-  /** Moves each of `keys` not in `to` already, one after another: a move
-   *  the hub asks about is answered before the next is made. */
-  const moveAll = async (keys: readonly ItemKey[], to: string, say = true): Promise<void> => {
-    const moving = keys.filter((key) => groupOf(key) !== to);
-    for (const key of moving) {
-      await placeIn(key, to, null, () => "", false);
+  /** What a move of several says: how many of them moved. */
+  const movedSay = (moved: number, keys: readonly ItemKey[], where: string): string =>
+    moved === keys.length ? `Moved ${called(keys)} to ${where}` : `Moved ${moved} of ${keys.length} to ${where}`;
+
+  /** Puts each of `keys` in `to` before `before`, one after another: a
+   *  move the hub asks about is answered before the next is made. Says how
+   *  many moved (a move can be cancelled), and answers it. */
+  const placeAll = async (keys: readonly ItemKey[], to: string, before: ItemKey | null, say = true): Promise<number> => {
+    for (const key of keys) {
+      await placeIn(key, to, before, () => "", false);
       await moveAnswered();
     }
-    if (say && moving.length) setSaid(`Moved ${called(moving)} to ${groupName(to) || "the group"}`);
+    const moved = keys.filter((key) => groupOf(key) === to).length;
+    if (say && moved) setSaid(movedSay(moved, keys, groupName(to) || "the group"));
+    return moved;
   };
+
+  /** Moves each of `keys` not in `to` already to its end. */
+  const moveAll = (keys: readonly ItemKey[], to: string, say = true): Promise<number> =>
+    placeAll(keys.filter((key) => groupOf(key) !== to), to, null, say);
 
   /** Takes `key` out of its group, as any move is. */
   const ungroup = (key: ItemKey, focus = true): Promise<void> => {
@@ -532,8 +547,8 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     if (!leaving.length) return setSaid(`Moved ${called(with_)} to a new group`);
     void made.then(async (kept) => {
       if (!kept) return;
-      await moveAll(leaving, id, false);
-      setSaid(`Moved ${called(with_)} to a new group`);
+      const moved = await moveAll(leaving, id, false);
+      setSaid(movedSay(with_.length - leaving.length + moved, with_, "a new group"));
     });
   };
 
@@ -603,19 +618,21 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
 
   /** Mark read for a row with something unread; Mark unread for a session
    *  read already whose state leaves something to read. */
-  const marksOf = (key: ItemKey): { read?: () => void; unread?: () => void } => {
+  const marksOf = (key: ItemKey): Choice[] => {
     const item = items.get(key);
     const failed = useDesk.getState().fail;
+    const read = (run: () => Promise<void>): Choice[] => [{ label: "Mark read", counted: (n) => `Mark ${n} read`, run: () => void run().catch(failed) }];
     if (item?.kind === "agent") {
       const u = badges.dms[agentKey(item.agent)];
-      const place = { kind: "dm" as const, hub: item.agent.hubId, agent: item.agent.id };
-      return u?.count ? { read: () => void advance(place, dmReadPoint(u)).catch(failed) } : {};
+      return u?.count ? read(() => advance({ kind: "dm", hub: item.agent.hubId, agent: item.agent.id }, dmReadPoint(u))) : [];
     }
-    if (item?.kind !== "session") return {};
+    if (item?.kind !== "session") return [];
     const place = { kind: "session" as const, session: sessionKey(item.session) };
     const u = badges.sessions.find((x) => x.id === place.session);
-    if (u) return { read: () => void advance(place, sessionReadPoint(u)).catch(failed) };
-    return LEAVES_UNREAD.has(item.session.state) ? { unread: () => void markUnread(place, sessionUnreadPoint(item.session)).catch(failed) } : {};
+    if (u) return read(() => advance(place, sessionReadPoint(u)));
+    return LEAVES_UNREAD.has(item.session.state)
+      ? [{ label: "Mark unread", counted: (n) => `Mark ${n} unread`, run: () => void markUnread(place, sessionUnreadPoint(item.session)).catch(failed) }]
+      : [];
   };
 
   /** Who runs a session: the boss its group's grant names on another hub,
@@ -711,6 +728,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
       },
       hover: (key, over) => hover(over ? key : null),
       pick: (key, e) => {
+        if (justDragged.current) return true;
         const how = pickOf(e, useHost.getState().platform);
         if (how === "range") extend(key);
         else if (how === "toggle") toggle(key);
@@ -758,7 +776,6 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
             ...(choices.stop ? [{ kind: "item" as const, label: "Stop overseeing", onSelect: () => stop(item.agent) }] : []),
           ]
         : [];
-    const marks = marksOf(key);
     return [
       ...(item.kind === "session" ? [{ kind: "item" as const, label: "Rename", kbd: "F2", onSelect: () => startRename(item) }] : []),
       moving,
@@ -767,8 +784,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
       ...overseeing,
       { kind: "separator" },
       { kind: "item", label: "Open", onSelect: () => openItem(item) },
-      ...(marks.read ? [{ kind: "item" as const, label: "Mark read", onSelect: marks.read }] : []),
-      ...(marks.unread ? [{ kind: "item" as const, label: "Mark unread", onSelect: marks.unread }] : []),
+      ...marksOf(key).map((c): MenuEntry => ({ kind: "item", label: c.label, onSelect: c.run })),
       ...(item.kind === "session"
         ? [
             ...sessionActions(item.session).map((a): MenuEntry => ({ kind: "item", label: a.label, onSelect: a.run })),
@@ -805,10 +821,6 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     const agents = kinds.flatMap((item) => (item?.kind === "agent" ? [item.agent] : []));
     const grouped = keys.filter((key) => groupOfItem.get(key) !== UNGROUPED);
     const gridded = keys.filter((key) => contentOfItem(key));
-    const marks = keys.map(marksOf);
-    const reads = marks.flatMap((m) => (m.read ? [m.read] : []));
-    const unreads = marks.flatMap((m) => (m.unread ? [m.unread] : []));
-    const all = (runs: readonly (() => void)[]) => () => runs.forEach((run) => run());
     const places = agents.map((a) => ({ kind: "dm" as const, hub: a.hubId, agent: a.id }));
     const targets = shown.filter((g) => g.id !== UNGROUPED);
     return [
@@ -826,8 +838,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
         : []),
       ...(grouped.length ? [{ kind: "item" as const, label: `Remove ${grouped.length} from group`, hint: cannot(grouped.length, n), onSelect: () => void ungroupAll(grouped) }] : []),
       { kind: "separator" },
-      ...(reads.length ? [{ kind: "item" as const, label: `Mark ${reads.length} read`, hint: cannot(reads.length, n), onSelect: all(reads) }] : []),
-      ...(unreads.length ? [{ kind: "item" as const, label: `Mark ${unreads.length} unread`, hint: cannot(unreads.length, n), onSelect: all(unreads) }] : []),
+      ...tally(keys.map(marksOf)).map((t) => talliedEntry(t, n)),
       ...tally(sessions.map(sessionActions)).map((t) => talliedEntry(t, n)),
       ...tally(sessions.map(chargeOf)).map((t) => talliedEntry(t, n)),
       ...(agents.length
@@ -944,6 +955,13 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
 
   const sameDrop = (a: Drop | null, b: Drop | null) => JSON.stringify(a) === JSON.stringify(b);
 
+  /** Where the selection dropped before `before` in `group` lands: before
+   *  the first row from there on that isn't picked, else last. */
+  const outside = (group: string, before: ItemKey | null): ItemKey | null => {
+    const rows = shown.find((g) => g.id === group)?.items ?? [];
+    return before === null ? null : (rows.slice(rows.indexOf(before)).find((key) => !picked.has(key)) ?? null);
+  };
+
   return (
     <DragDropProvider
       sensors={SENSORS}
@@ -978,6 +996,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
         if (!s || !d) return;
         if (d.kind === "item") {
           const key = end(s).id;
+          if (inBulk(key)) return void placeAll(selection, d.group, outside(d.group, d.before));
           return placeIn(key, d.group, d.before, (next) => `Moved ${nameOf(items.get(key))} to ${where(next, key)}`, false);
         }
         dropItem(present, end(s).id, d);
@@ -1073,6 +1092,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
           const id = String(source.id);
           if (source.type === "group") return <DragChip>{groupName(id.slice(6))}</DragChip>;
           const item = items.get(id);
+          if (item && bulk && picked.has(id)) return <DragChip>{selection.length} selected</DragChip>;
           return item ? (
             <DragChip mono={item.kind !== "agent"}>
               {item.kind === "agent" ? <AgentMark agent={agentKey(item.agent)} name={item.agent.name} size="sm" /> : <span className={`dot dot-${dotOf(item)}`} />}
@@ -1423,8 +1443,8 @@ function ItemRowOf({
 }
 
 /** What is picked and what can be done with it, pinned above the rows:
- *  closed or removed together, every other choice under Actions (as a
- *  right-click on one of them), or let go (as Escape does). */
+ *  every choice under Actions (as a right-click on one of them), closed or
+ *  removed together, or let go (as Escape does). */
 function SelectionBar({
   count,
   closing,
@@ -1447,24 +1467,30 @@ function SelectionBar({
         <span className="side-select-count" aria-live="polite">
           {count} selected
         </span>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={clearSelection} title="Clear the selection (Esc)">
-          Clear
+        <button type="button" className="icon-btn-sm side-select-clear" aria-label="Clear selection" title="Clear selection (Esc)" onClick={clearSelection}>
+          <span aria-hidden="true">×</span>
         </button>
       </div>
       <div className="side-select-acts">
+        <button type="button" className="btn btn-sm side-select-more" aria-haspopup="menu" onClick={(e) => onMore(below(e.currentTarget), e.currentTarget)}>
+          Actions <span aria-hidden="true">▾</span>
+        </button>
         {closing > 0 && (
-          <button type="button" className="btn btn-sm" onClick={onClose}>
-            Close {closing}
+          <button type="button" className="btn btn-sm" aria-label={`Close ${plural(closing, "session")}`} title={`Close ${plural(closing, "session")}`} onClick={onClose}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.5" aria-hidden="true">
+              <rect x="2.5" y="2.5" width="7" height="7" rx="1.5" />
+            </svg>
+            {closing}
           </button>
         )}
         {removing > 0 && (
-          <button type="button" className="btn btn-danger btn-sm" onClick={onRemove}>
-            Remove {removing}
+          <button type="button" className="btn btn-danger btn-sm" aria-label={`Remove ${plural(removing, "session")}`} title={`Remove ${plural(removing, "session")}`} onClick={onRemove}>
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M2 3.5h8M4.5 3.5V2.2h3v1.3M3 3.5l.6 6.3h4.8L9 3.5" />
+            </svg>
+            {removing}
           </button>
         )}
-        <button type="button" className="btn btn-sm" aria-haspopup="menu" onClick={(e) => onMore(below(e.currentTarget), e.currentTarget)}>
-          Actions
-        </button>
       </div>
     </div>
   );

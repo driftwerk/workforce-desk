@@ -14,7 +14,8 @@ import { DeleteRoom } from "../rooms/DeleteRoom";
 import { markRoomRead } from "../unread/reads";
 import { NOTIFY_LEVELS, levelOf, setLevel } from "../unread/prefs";
 import { SidebarGroups } from "../groups/SidebarGroups";
-import { clearSelection, modHeld, selectAll, typedIn } from "../groups/selection";
+import { clearSelection, modHeld, typedIn } from "../groups/selection";
+import { selectAllAt } from "./selectAll";
 import { useHost } from "./host";
 import { useDesk } from "../hub/store";
 import { useSettings } from "../settings/store";
@@ -157,7 +158,7 @@ function useSidebarSelection(): (nav: HTMLElement | null) => void {
     const onKey = (e: KeyboardEvent) => {
       if (e.key.toLowerCase() !== "a" || e.shiftKey || e.altKey || !modHeld(e, useHost.getState().platform) || typedIn(e.target)) return;
       e.preventDefault();
-      selectAll();
+      selectAllAt(e.target instanceof Element ? e.target : null);
     };
     nav.addEventListener("mousedown", onDown);
     nav.addEventListener("click", onClick);
@@ -239,10 +240,10 @@ export function Sidebar({
     [saved, edges],
   );
   return (
-    <nav ref={selecting} className="sidebar" aria-label="Desk" style={{ "--side-w": `${sideWidth}px` } as React.CSSProperties}>
+    <nav ref={selecting} className="sidebar" aria-label="Desk" data-selects-rows="" style={{ "--side-w": `${sideWidth}px` } as React.CSSProperties}>
       <SideResize />
       <div className="side-top">
-        <div className="wordmark" onMouseDown={dragWindow}>
+        <div className="wordmark" data-keeps-selection="" onMouseDown={dragWindow}>
           <span>desk</span>
           <span className="wordmark-dot" />
         </div>

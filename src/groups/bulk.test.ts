@@ -21,6 +21,12 @@ describe("acting on picked rows together", () => {
     expect(talliedEntry({ label: "Resume", runs: [a] }, 1)).toMatchObject({ label: "Resume 1 session", hint: undefined });
   });
 
+  it("says a choice for several as it asks to be said", () => {
+    const run = vi.fn();
+    const [read] = tally([[{ label: "Mark read", run, counted: (n) => `Mark ${n} read` }], [{ label: "Mark read", run, counted: (n) => `Mark ${n} read` }]]);
+    expect(talliedEntry(read!, 4)).toMatchObject({ label: "Mark 2 read", hint: "2 can’t" });
+  });
+
   it("says nothing when every row can", () => {
     expect(cannot(3, 3)).toBeUndefined();
     expect(cannot(3, 5, "removed")).toBe("2 can’t be removed");

@@ -824,6 +824,10 @@ describe("picking rows in the sidebar", () => {
     fireEvent.mouseDown(bar);
     fireEvent.click(bar);
     expect(picked()).toEqual(["session:a", "session:b"]);
+    const resize = screen.getByRole("separator", { name: "Sidebar width" });
+    fireEvent.mouseDown(resize);
+    fireEvent.click(resize);
+    expect(picked()).toEqual(["session:a", "session:b"]);
     const groups = screen.getByRole("region", { name: "Groups" });
     fireEvent.mouseDown(bar);
     fireEvent.click(groups);
