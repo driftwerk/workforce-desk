@@ -59,6 +59,7 @@ const api = (services: ServicePicks[], over: Partial<ConnectionsApi> = {}): Conn
   reconnect: vi.fn(),
   rename: vi.fn(),
   test: vi.fn(),
+  renew: vi.fn(),
   disconnect: vi.fn(),
   saveApp: vi.fn(),
   start: vi.fn(),
@@ -470,6 +471,25 @@ it("says Saved only once every save is in and none failed since", async () => {
   await act(async () => answers.shift()!());
   expect(screen.getByRole("status").textContent).toBe("Saved.");
   expect(within(box("Jira")).getByText("2 of 2 on")).toBeTruthy();
+});
+
+it("shows a bank's connections as read only, with nothing to allow writes to", async () => {
+  const BANK = svc({
+    id: "bank",
+    name: "Bank",
+    readsOnly: true,
+    renewable: true,
+    connections: [
+      pick({ id: "agent~allan~natwest", name: "NatWest", account: "NatWest", level: "agent", picked: true, write: false, default: true }),
+      pick({ id: "agent~allan~revolut", name: "Revolut", account: "Revolut", level: "agent", picked: true, write: false, status: "needs_reconnect" }),
+    ],
+  });
+  await show(api([BANK]));
+  const bank = box("Bank");
+  expect(within(bank).getAllByText("read only")).toHaveLength(2);
+  expect(within(bank).getByText("Needs renewing")).toBeTruthy();
+  expect(within(bank).queryByRole("button", { name: /read only|read and write/ })).toBeNull();
+  expect(within(bank).getByText("NatWest", { selector: ".conn-pick-default-name" })).toBeTruthy();
 });
 
 describe("approving a lapsed connection again", () => {

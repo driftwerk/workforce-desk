@@ -433,8 +433,10 @@ function ServiceChoice({
                 {p.level === "agent" && <span className="conn-tag">its own</span>}
               </span>
             </label>
-            {p.status !== "connected" && <span className="small state-blocked">{statusLine(p)}</span>}
-            {p.picked ? (
+            {p.status !== "connected" && <span className="small state-blocked">{statusLine(p, !!s.renewable)}</span>}
+            {p.picked && s.readsOnly ? (
+              <span className="small muted">read only</span>
+            ) : p.picked ? (
               <button
                 type="button"
                 className="link small conn-pick-write"

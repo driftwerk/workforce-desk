@@ -282,6 +282,26 @@
   {
     "kind": "http",
     "method": "GET",
+    "path": "/api/desk/computer/activity?agent=allan&decided_by=on_its_own"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
+    "path": "/api/desk/computer/on-its-own?agent=allan"
+  },
+  {
+    "kind": "http",
+    "method": "PUT",
+    "path": "/api/desk/computer/on-its-own"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/computer/on-its-own/ask-again"
+  },
+  {
+    "kind": "http",
+    "method": "GET",
     "path": "/api/desk/computer/disk-access"
   },
   {
