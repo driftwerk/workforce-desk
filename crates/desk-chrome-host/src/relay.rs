@@ -5,8 +5,10 @@
 //! its reconnecting would start a host each time.
 
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::time::Duration;
 
+use desk_core::logs;
 use eyre::{Result, WrapErr, eyre};
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
@@ -121,30 +123,20 @@ fn greet(hello: &[u8]) {
 }
 
 /// Logs to `logs/chrome-host.log` in Desk's folder: stdout is Chrome's
-/// channel, and stderr goes nowhere anyone reads. Never the token.
-fn init_logging() {
-    let Ok(paths) = desk_core::Paths::new() else {
-        return;
-    };
+/// channel, and stderr goes nowhere anyone reads. Never the token. The
+/// log's path when it is being written.
+fn init_logging() -> Option<PathBuf> {
+    let paths = desk_core::Paths::new().ok()?;
     let log = paths.logs().join("chrome-host.log");
-    if std::fs::create_dir_all(paths.logs()).is_err() {
-        return;
-    }
-    if std::fs::metadata(&log).is_ok_and(|m| m.len() > 5 * 1024 * 1024) {
-        let _ = std::fs::rename(&log, log.with_extension("log.1"));
-    }
-    let Ok(file) = std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(&log)
-    else {
-        return;
-    };
-    let _ = tracing_subscriber::fmt()
+    std::fs::create_dir_all(paths.logs()).ok()?;
+    let file = logs::append_log(&log, logs::LOG_LIMIT).ok()?;
+    tracing_subscriber::fmt()
         .with_ansi(false)
         .with_max_level(tracing::Level::INFO)
         .with_writer(std::sync::Mutex::new(file))
-        .try_init();
+        .try_init()
+        .ok()
+        .map(|()| log)
 }
 
 /// The hub's `/ws/desk/chrome` for `gateway_url`, and nothing else.
@@ -178,7 +170,7 @@ pub fn run(args: &[String], hub: impl Fn() -> Result<Option<Hub>> + Send + Sync 
         );
         return 2;
     }
-    init_logging();
+    let log = init_logging();
     let Ok(rt) = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -186,6 +178,13 @@ pub fn run(args: &[String], hub: impl Fn() -> Result<Option<Hub>> + Send + Sync 
     else {
         return 1;
     };
+    if let Some(log) = log {
+        rt.spawn(logs::keep_capped(
+            vec![log],
+            logs::LOG_LIMIT,
+            logs::CAP_EVERY,
+        ));
+    }
     rt.block_on(relay(hub))
 }
 

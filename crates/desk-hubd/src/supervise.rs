@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use desk_core::backend_install::PLUGIN;
 use desk_core::host::Host;
 use desk_core::install::Install;
+use desk_core::logs::{self, LOG_LIMIT, append_log};
 use desk_core::{HubPorts, KeyStore, Paths, Secret, Secrets, read_ports, write_ports};
 use eyre::{Context, Result};
 use postgresql_embedded::{PostgreSQL, Settings};
@@ -306,19 +307,9 @@ fn too_old_for_this_desk(status: std::process::ExitStatus) -> Option<&'static st
     )
 }
 
-/// A log file to append to, moved aside to `<name>.1` first once it is
-/// over `limit` bytes so logs can't fill the disk.
-pub fn append_log(path: &Path, limit: u64) -> Result<std::fs::File> {
-    if std::fs::metadata(path).is_ok_and(|m| m.len() > limit) {
-        let _ = std::fs::rename(path, path.with_extension("log.1"));
-    }
-    Ok(std::fs::OpenOptions::new()
-        .create(true)
-        .append(true)
-        .open(path)?)
-}
-
-pub const LOG_LIMIT: u64 = 20 * 1024 * 1024;
+/// The logs the hub, its memory store, the PTY holder and this helper write
+/// for as long as they run, kept under [`LOG_LIMIT`] while they do.
+const CAPPED_LOGS: [&str; 4] = ["hub.log", "memory.log", "pty-holder.log", "desk-hubd.log"];
 
 /// `workforce serve` on the hub's config, with `env` and, on a pipe, the
 /// secrets. The pipe is kept open by what this returns beside the command.
@@ -833,6 +824,14 @@ async fn run_helper(
     let install = Install::of(&exe, &process_env, &paths);
     let updated = replaced(install.watched(&programs), Duration::from_secs(10));
     tokio::pin!(updated);
+    let _capped = AbortOnDrop(tokio::spawn(logs::keep_capped(
+        CAPPED_LOGS
+            .iter()
+            .map(|log| paths.logs().join(log))
+            .collect(),
+        LOG_LIMIT,
+        logs::CAP_EVERY,
+    )));
     // A machine's folder says so, so what is asked over SSH later
     // (`connection --json`, `--remove-everything`) finds its secrets where
     // this helper keeps them: Desk's private file.
@@ -1357,16 +1356,6 @@ mod tests {
             .await
             .expect("noticed")
             .unwrap();
-    }
-
-    #[test]
-    fn logs_over_their_limit_are_moved_aside() {
-        let dir = tempfile::tempdir().unwrap();
-        let log = dir.path().join("hub.log");
-        std::fs::write(&log, "x".repeat(100)).unwrap();
-        append_log(&log, 10).unwrap();
-        assert_eq!(std::fs::metadata(&log).unwrap().len(), 0);
-        assert!(dir.path().join("hub.log.1").is_file());
     }
 
     /// Four saved ports, written as a Desk home would hold them. Whether

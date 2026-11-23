@@ -9,6 +9,7 @@ pub mod holder;
 pub mod host;
 pub mod image_size;
 pub mod install;
+pub mod logs;
 pub mod machine;
 pub mod machine_backend;
 pub mod net;

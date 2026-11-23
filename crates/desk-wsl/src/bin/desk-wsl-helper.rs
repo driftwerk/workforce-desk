@@ -36,12 +36,14 @@ fn main() -> std::process::ExitCode {
         return ExitCode::FAILURE;
     };
     let _ = std::fs::create_dir_all(paths.logs());
+    let log_path = paths.logs().join("desk-helper.log");
     let log = std::sync::Mutex::new(
-        std::fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(paths.logs().join("desk-helper.log"))
-            .ok(),
+        desk_core::logs::append_log(&log_path, desk_core::logs::LOG_LIMIT).ok(),
+    );
+    desk_core::logs::keep_capped_on_thread(
+        vec![log_path],
+        desk_core::logs::LOG_LIMIT,
+        desk_core::logs::CAP_EVERY,
     );
     let say = |line: &str| {
         let at = std::time::SystemTime::now()
