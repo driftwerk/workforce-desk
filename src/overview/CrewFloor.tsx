@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { FloorShell as Shell, useSubHeading } from "../floor/FloorShell";
 import { SetupFloor } from "../setup/slot";
 import { useChat } from "../chat/store";
@@ -254,10 +254,11 @@ export function CrewFloor({ overview, onNewSession, heading }: { overview: Overv
     handOff.current = false;
     (activityOpen ? railClose : tab).current?.focus();
   }, [activityOpen]);
-  const showActivity = (open: boolean) => {
+  const showActivity = useCallback((open: boolean) => {
     handOff.current = true;
     useUi.getState().setActivityOpen(open);
-  };
+  }, []);
+  const closeActivity = useCallback(() => showActivity(false), [showActivity]);
 
   return (
     <Shell heading={heading} className="crew-floor">
@@ -281,7 +282,7 @@ export function CrewFloor({ overview, onNewSession, heading }: { overview: Overv
         <FloorColumn overview={overview} read={read} />
         {activitySupport !== "no" &&
           (activityOpen ? (
-            <ActivityRail managerName={managerName} sections={sections} closeRef={railClose} onClose={() => showActivity(false)} />
+            <ActivityRail managerName={managerName} sections={sections} closeRef={railClose} onClose={closeActivity} />
           ) : (
             <DockStrip label="Docked">
               <DockTab

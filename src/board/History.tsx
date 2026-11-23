@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { LOCAL, machineOf, type MachineId } from "../hub/machines";
 import { engineListeners, useHubOf, type EngineEvent } from "../hub/store";
 import type { ActivityEvent } from "../hub/types";
-import { ActivityRow } from "../overview/ActivityRail";
+import { ActivityRow, useRowWords } from "../overview/ActivityRail";
 import { plainError } from "../ui/plainError";
 
 /** What a session or an agent did, and had done to it, newest first, as
@@ -12,6 +12,7 @@ export function SubjectHistory({ subject, label, machine = LOCAL }: { subject: s
   const [events, setEvents] = useState<ActivityEvent[] | null>(null);
   const [more, setMore] = useState(false);
   const [problem, setProblem] = useState<string | null>(null);
+  const words = useRowWords();
   useEffect(() => {
     if (!hub) return;
     let live = true;
@@ -56,7 +57,7 @@ export function SubjectHistory({ subject, label, machine = LOCAL }: { subject: s
       ) : (
         <ol className="ev-list">
           {events.map((e) => (
-            <ActivityRow key={e.id} event={e} />
+            <ActivityRow key={e.id} event={e} words={words} />
           ))}
         </ol>
       )}

@@ -20,6 +20,19 @@ export interface Feed {
 
 export const PAGE = 100;
 
+/** `feed` with the live event `e` in its place. A live event never makes a
+ *  list longer than a page, or than what Show earlier read into it: the
+ *  oldest goes, to be read again. While an earlier page is on its way,
+ *  which follows the oldest shown, nothing goes. */
+export const heard = (feed: Feed, e: ActivityEvent): Feed => {
+  const events = mergeEvents(feed.events, [e]);
+  const keep = Math.max(PAGE, feed.events.length);
+  return events.length > keep && feed.earlier !== "loading" ? { ...feed, events: events.slice(0, keep), more: true } : { ...feed, events };
+};
+
+/** Whether two readings of the overview say the same. */
+const same = (a: Overview | null, b: Overview): boolean => JSON.stringify(a) === JSON.stringify(b);
+
 interface OverviewStore {
   overview: Overview | null;
   overviewSupport: Support;
@@ -78,7 +91,7 @@ export const useOverview = create<OverviewStore>((set, get) => ({
     if (!hub) return;
     try {
       const overview = await hub.overview();
-      if (hubNow() === hub) set({ overview, overviewSupport: "yes" });
+      if (hubNow() === hub) set((s) => ({ overview: same(s.overview, overview) ? s.overview : overview, overviewSupport: "yes" }));
     } catch (e) {
       // Anything else keeps what's shown; the next event or tick asks again.
       if (missing(e) && hubNow() === hub) set({ overview: null, overviewSupport: "no" });
@@ -122,10 +135,7 @@ export const useOverview = create<OverviewStore>((set, get) => ({
   receive: (e) => {
     set((s) => ({
       feeds: Object.fromEntries(
-        Object.entries(s.feeds).map(([filter, feed]) => [
-          filter,
-          matches(filter as ActivityFilter, e) ? { ...feed, events: mergeEvents(feed.events, [e]) } : feed,
-        ]),
+        Object.entries(s.feeds).map(([filter, feed]) => [filter, matches(filter as ActivityFilter, e) ? heard(feed, e) : feed]),
       ),
     }));
     if (get().overviewSupport === "yes") soon("overview", () => void get().loadOverview(), 1000);

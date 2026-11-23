@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type Ref } from "react";
+import { memo, useEffect, useMemo, useRef, useState, type Ref } from "react";
 import { useMainHidden } from "../panels/Stage";
 import { badgeOfFloor } from "../unread/badges";
 import { Marks } from "../unread/Marks";
@@ -14,7 +14,7 @@ import { usePlacer } from "../floor/FloorSection";
 import { sectionName, sectionOfEvent, type Section } from "../floor/sections";
 import { clock, dayName } from "../floor/time";
 import { useSessionNames } from "../groups/names";
-import type { ActivityEvent, ActivityFilter } from "../hub/types";
+import type { ActivityEvent, ActivityFilter, Room } from "../hub/types";
 import { radioKeys } from "../ui/Dialog";
 import { agentNamer, eventTarget, lineOf, needStates, toneOf, type NeedState } from "./activity";
 import { useDesk } from "../hub/store";
@@ -27,11 +27,26 @@ import { useSubHeading } from "../floor/FloorShell";
 /** "allowed by you 16:31", "no longer waiting". */
 const resolvedText = (state: Extract<NeedState, { open: false }>): string => (state.at ? `${state.how} ${clock(state.at)}` : state.how);
 
-export function ActivityRow({ event, need }: { event: ActivityEvent; need?: NeedState }) {
+/** What Activity's rows name and place things by, read once for a list:
+ *  a row reads nothing of its own, so a change elsewhere costs it nothing. */
+export interface RowWords {
+  names: Readonly<Record<string, string>>;
+  agentName: (id: string) => string | undefined;
+  rooms: Readonly<Record<string, Room>>;
+}
+
+export const useRowWords = (): RowWords => {
+  const names = useSessionNames();
   const roster = useChat((s) => s.roster);
   const localHub = useChat((s) => s.hubs.find((h) => h.local)?.id);
-  const line = lineOf(event, useSessionNames(), agentNamer(roster, localHub));
   const rooms = useDesk((s) => s.rooms);
+  const agentName = useMemo(() => agentNamer(roster, localHub), [roster, localHub]);
+  return useMemo(() => ({ names, agentName, rooms }), [names, agentName, rooms]);
+};
+
+export const ActivityRow = memo(function ActivityRow({ event, need, words }: { event: ActivityEvent; need?: NeedState; words: RowWords }) {
+  const { rooms } = words;
+  const line = lineOf(event, words.names, words.agentName);
   const target = eventTarget(event, rooms);
   const where = event.place ? placeLabel(event.place, rooms) : null;
   const thread = event.place?.kind === "room" && event.place.thread ? " ▸ thread" : "";
@@ -71,7 +86,7 @@ export function ActivityRow({ event, need }: { event: ActivityEvent; need?: Need
       {event.ticket && <EventTicketChip id={event.ticket} />}
     </li>
   );
-}
+});
 
 const NO_EVENTS: ActivityEvent[] = [];
 
@@ -124,7 +139,7 @@ function OpenNeeds({ needs, now }: { needs: readonly FloorNeed[]; now: number })
  *  you" is what's still waiting on you on every hub, and everything shows it
  *  above what happened, each past request marked with what became of it.
  *  Closing it docks it as a tab. */
-export function ActivityRail({
+export const ActivityRail = memo(function ActivityRail({
   managerName,
   sections = null,
   onClose,
@@ -184,18 +199,18 @@ export function ActivityRail({
   const activity = useUnread((s) => s.local?.activity);
   const brief = useUnread((s) => s.local?.brief);
   const floorBadge = badgeOfFloor(allNeeds, activity, brief);
+  const words = useRowWords();
   // Who allowed or denied it, as they are called now.
-  const roster = useChat((s) => s.roster);
   const states = useMemo(
     () =>
       floorOn && shown === "all"
         ? needStates(
             events,
             needs.filter((n) => n.hubId === localId),
-            agentNamer(roster, localId),
+            words.agentName,
           )
         : new Map<string, NeedState>(),
-    [floorOn, shown, events, needs, localId, roster],
+    [floorOn, shown, events, needs, localId, words.agentName],
   );
 
   const log = (
@@ -213,7 +228,7 @@ export function ActivityRail({
         <p className="faint small activity-note">{EMPTY[shown]}</p>
       ) : (
         <ol className="ev-list" aria-label={`Activity: ${options[current]?.label ?? "All"}`}>
-          {events.map((e, i) => {
+          {events.flatMap((e, i) => {
             const day = dayName(e.at);
             const heading = day !== "Today" && day !== (i > 0 ? dayName(events[i - 1]!.at) : "Today");
             return [
@@ -222,7 +237,7 @@ export function ActivityRail({
                   {day}
                 </li>
               ),
-              <ActivityRow key={e.id} event={e} need={states.get(e.id)} />,
+              <ActivityRow key={e.id} event={e} need={states.get(e.id)} words={words} />,
             ];
           })}
         </ol>
@@ -309,7 +324,7 @@ export function ActivityRail({
       </div>
     </aside>
   );
-}
+});
 
 /** Activity for one group's section alone, or all of them. */
 function GroupFilter({ sections, group, onPick }: { sections: readonly Section[]; group: string | null; onPick: (id: string | null) => void }) {
