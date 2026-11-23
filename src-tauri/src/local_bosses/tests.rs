@@ -195,6 +195,7 @@ fn wanted(machines: &[(&str, Vec<WantedGrant>, &[&str])]) -> Wanted {
     Wanted {
         grant_version: 1,
         plans_known: true,
+        ungrouped_known: false,
         machines: machines
             .iter()
             .map(|(m, g, listed)| {
@@ -203,6 +204,7 @@ fn wanted(machines: &[(&str, Vec<WantedGrant>, &[&str])]) -> Wanted {
                     MachineWanted {
                         grants: g.clone(),
                         listed: listed.iter().map(|s| s.to_string()).collect(),
+                        ungrouped_known: true,
                     },
                 )
             })
@@ -257,6 +259,85 @@ impl Engine for &Machine {
     ) -> impl Future<Output = Result<NativeAnswer, String>> + Send {
         (*self).call(method, target, body)
     }
+}
+
+#[tokio::test]
+async fn the_main_overseer_is_asked_once_for_a_machine_s_ungrouped_sessions() {
+    let f = files();
+    let devbox = Machine::new("devbox");
+    let mut g = acme(&[S1], "act");
+    g.group = "ungrouped".into();
+    g.agent = "desk".into();
+    g.agent_name = "Desk".into();
+    g.grant["boss"] = json!("local:desk");
+    g.grant["name"] = json!("Ungrouped");
+    let w = wanted(&[("devbox", vec![g.clone()], &[S1])]);
+    let (title, body, _) = say(&f, &w, true).await.expect("asked");
+    assert!(title.contains("“Desk”"), "{title}");
+    assert!(
+        body.starts_with("“Desk” oversees your ungrouped sessions on this computer"),
+        "{body}"
+    );
+    assert!(body.contains("1 session on “devbox”"), "{body}");
+    let s = sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    assert_eq!(s.failed, vec![]);
+    assert_eq!(
+        content(&devbox.grant("ungrouped").unwrap()),
+        content(&g.grant)
+    );
+    // What the page hands devbox's ungrouped sessions to.
+    let desk = BTreeMap::from([("ungrouped".to_string(), "desk".to_string())]);
+    assert_eq!(s.carried["devbox"], desk);
+
+    // The hub restarted, or Desk asks again after a while: devbox's
+    // sessions aren't read yet, so its grant is left as it is, still handed
+    // to its boss.
+    let unread = |known: bool| {
+        let mut w = wanted(&[("devbox", vec![], &[S1])]);
+        w.machines.get_mut("devbox").unwrap().ungrouped_known = known;
+        w
+    };
+    let before = devbox.writes().len();
+    let s = sync(&f.bosses, &f.kept, &unread(false), &on(&[&devbox])).await;
+    assert_eq!(devbox.writes().len(), before, "{:?}", devbox.writes());
+    assert!(devbox.grant("ungrouped").is_some());
+    assert_eq!(s.carried["devbox"], desk);
+    // A machine the hub doesn't say at all is left as it is too.
+    let s = sync(&f.bosses, &f.kept, &wanted(&[]), &on(&[&devbox])).await;
+    assert!(devbox.grant("ungrouped").is_some());
+    assert_eq!(s.carried.get("devbox"), Some(&desk));
+    // Read, with nothing in Ungrouped there: it goes.
+    sync(&f.bosses, &f.kept, &unread(true), &on(&[&devbox])).await;
+    assert!(devbox.grant("ungrouped").is_none());
+}
+
+#[tokio::test]
+async fn a_machine_s_ungrouped_grant_goes_once_there_is_no_main_overseer() {
+    let f = files();
+    let devbox = Machine::new("devbox");
+    let mut g = acme(&[S1], "act");
+    g.group = "ungrouped".into();
+    g.agent = "desk".into();
+    g.grant["boss"] = json!("local:desk");
+    let w = wanted(&[("devbox", vec![g], &[S1])]);
+    say(&f, &w, true).await.expect("asked");
+    sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    assert!(devbox.grant("ungrouped").is_some());
+
+    // The main overseer is gone: devbox, with no other grant, isn't listed
+    // at all, and every machine's Ungrouped grant is said to be none.
+    let gone = Wanted {
+        ungrouped_known: true,
+        ..wanted(&[])
+    };
+    let s = sync(&f.bosses, &f.kept, &gone, &on(&[&devbox])).await;
+    assert_eq!(s.failed, vec![]);
+    assert!(devbox.grant("ungrouped").is_none(), "{:?}", devbox.writes());
+    assert!(
+        s.carried.get("devbox").is_none_or(BTreeMap::is_empty),
+        "{:?}",
+        s.carried
+    );
 }
 
 #[tokio::test]
@@ -354,8 +435,12 @@ async fn a_group_bossed_from_another_hub_is_never_written() {
                        "level": "suggest", "sees": "replies", "recall": false, "folders": [], "repos": [],
                        "members": [S1], "act": {}});
     devbox.hold("acme", allan.clone(), Value::Null);
-    sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    let s = sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
     assert!(devbox.writes().is_empty(), "{:?}", devbox.writes());
+    assert!(
+        s.carried["devbox"].is_empty(),
+        "not this computer's to hand to"
+    );
     assert_eq!(
         devbox.grant("acme").unwrap()["boss"],
         "remote:driftwerk/allan"
@@ -394,6 +479,25 @@ async fn a_group_bossed_from_another_hub_is_never_written() {
     assert_eq!(asked, Ok(false));
 }
 
+/// A grant the machine wouldn't take is never one the page hands its
+/// sessions to.
+#[tokio::test]
+async fn a_grant_the_machine_refused_hands_it_nothing() {
+    let f = files();
+    let devbox = Machine::new("devbox");
+    let w = wanted(&[("devbox", vec![acme(&[S1], "act")], &[S1])]);
+    say(&f, &w, true).await;
+    // Another home's grant there holds S1: Acme's is refused whole.
+    let globex = json!({"grantVersion": 1, "revision": 1, "name": "Globex", "boss": "remote:driftwerk/allan",
+                        "level": "suggest", "sees": "replies", "recall": false, "folders": [], "repos": [],
+                        "members": [S1], "act": {}});
+    devbox.hold("globex", globex, Value::Null);
+    let s = sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    assert_eq!(s.failed.len(), 1, "{:?}", s.failed);
+    assert!(devbox.grant("acme").is_none());
+    assert!(s.carried["devbox"].is_empty(), "{:?}", s.carried);
+}
+
 fn stop(from: &str, at: DateTime<Utc>) -> Value {
     json!({"at": at, "from": from})
 }
@@ -416,6 +520,10 @@ async fn a_boss_taken_off_has_its_grant_deleted_and_a_machine_s_stop_is_never_li
     assert!(
         s.stopped_there
             .contains(&("devbox".to_string(), "acme".to_string()))
+    );
+    assert!(
+        s.carried["devbox"].is_empty(),
+        "stopped there: no one's to hand to"
     );
     assert!(
         devbox
@@ -466,7 +574,11 @@ async fn a_stop_desk_made_before_the_persons_yes_is_lifted_with_it_and_one_after
         .left
         .insert("acme".into(), (4, stop("desk", before)));
     say(&f, &w, true).await;
-    sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    let s = sync(&f.bosses, &f.kept, &w, &on(&[&devbox])).await;
+    assert!(
+        s.carried["devbox"].contains_key("acme"),
+        "held for its boss"
+    );
     let g = devbox.grant("acme").unwrap();
     assert_eq!(g["stopped"], Value::Null, "lifted by the yes");
     assert_eq!(g["revision"], 5);
@@ -480,11 +592,17 @@ async fn a_stop_desk_made_before_the_persons_yes_is_lifted_with_it_and_one_after
     let lower = wanted(&[("devbox", vec![acme(&[S1], "watch")], &[S1])]);
     let s = sync(&f.bosses, &f.kept, &lower, &on(&[&devbox])).await;
     assert!(s.stopped_since_yes.contains_key("acme"));
+    assert!(
+        s.carried["devbox"].is_empty(),
+        "stopped: its boss runs nothing"
+    );
     let g = devbox.grant("acme").unwrap();
     assert_eq!((&g["level"], &g["stopped"]), (&json!("watch"), &after));
-    // A Cancel leaves it stopped and isn't asked again.
+    // A Cancel leaves it stopped and isn't asked again; written as it was,
+    // it is still not carried.
     say(&f, &lower, false).await.expect("asked again");
-    sync(&f.bosses, &f.kept, &lower, &on(&[&devbox])).await;
+    let s = sync(&f.bosses, &f.kept, &lower, &on(&[&devbox])).await;
+    assert!(s.carried["devbox"].is_empty(), "{:?}", s.carried);
     assert_eq!(devbox.grant("acme").unwrap()["stopped"], after);
     assert!(say(&f, &lower, true).await.is_none());
 
@@ -730,17 +848,21 @@ async fn narrowing_reaches_every_machine_before_anything_widens() {
 fn a_meet_is_no_more_than_either_side() {
     let held = json!({"grantVersion": 1, "name": "Acme", "boss": "local:sarah", "level": "full",
         "sees": "replies", "recall": false, "folders": [], "repos": [], "members": [S1, S2],
-        "act": {"nudge": true, "interrupt": false, "parallel": 6, "budget_usd_per_day": 25.0}});
+        "act": {"nudge": true, "interrupt": false, "parallel": 6, "budget_usd_per_day": 25.0,
+                "hold_minutes": 2, "answer_after_minutes": 30}});
     let wanted = json!({"grantVersion": 1, "name": "Acme", "boss": "local:sarah", "level": "act",
         "sees": "everything", "recall": false, "folders": [], "repos": [], "members": [S2, S3],
-        "act": {"nudge": true, "interrupt": true, "parallel": 4}});
+        "act": {"nudge": true, "interrupt": true, "parallel": 4,
+                "hold_minutes": 5, "answer_after_minutes": 10}});
     let m = meet(&held, &wanted);
     assert_eq!(m["level"], "act");
     assert_eq!(m["sees"], "replies");
     assert_eq!(m["members"], json!([S2]));
+    // The person's input holds a session the longer of the two.
     assert_eq!(
         m["act"],
-        json!({"nudge": true, "interrupt": false, "parallel": 4})
+        json!({"nudge": true, "interrupt": false, "parallel": 4,
+               "hold_minutes": 5, "answer_after_minutes": 30})
     );
     assert_eq!(m["boss"], "local:sarah");
     let mut other = wanted.clone();
@@ -770,8 +892,12 @@ fn only_a_grant_for_a_boss_here_with_nothing_wider_is_carried() {
     assert!(!bad(|g| g.grant["grantVersion"] = json!(2)));
     assert!(!bad(|g| g.grant["level"] = json!("root")));
     assert!(!bad(|g| g.grant["members"] = json!(["../x"])));
-    assert!(!bad(|g| g.group = "ungrouped".into()));
     assert!(!bad(|g| g.group = "a/b".into()));
+    let mut ungrouped = acme(&[S1], "act");
+    ungrouped.group = "ungrouped".into();
+    assert!(carried(&ungrouped), "Ungrouped's, the main overseer's");
+    ungrouped.plan = Some(PLAN.into());
+    assert!(!carried(&ungrouped), "never marked as a plan's");
 }
 
 const PLAN: &str = "44444444-4444-4444-8444-444444444444";

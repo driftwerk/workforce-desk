@@ -76,6 +76,7 @@
     "allow-key-copies-kept",
     "allow-boss-offer",
     "allow-boss-status",
+    "allow-local-boss-grants",
     "allow-boss-link",
     "allow-boss-set",
     "allow-boss-pause",

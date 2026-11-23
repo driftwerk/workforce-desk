@@ -524,10 +524,14 @@ fn sessions_in(items: &Value, into: &mut BTreeMap<String, Vec<String>>) {
     }
 }
 
+/// The sidebar's sessions in no group, as the layout names them: the main
+/// overseer's, on machines too.
+pub const UNGROUPED: &str = "ungrouped";
+
 /// Group `id` in `layout` (`GET /api/desk/layout`), or why it can't have a
 /// boss on another hub.
 pub fn group_of(layout: &Value, id: &str) -> Result<Group, String> {
-    if id == "ungrouped" {
+    if id == UNGROUPED {
         return Err(
             "Ungrouped's boss stays on this computer: put the sessions in a group first.".into(),
         );
@@ -546,7 +550,7 @@ pub fn group_of(layout: &Value, id: &str) -> Result<Group, String> {
     for other in groups.into_iter().flatten().filter(|o| o["id"] != id) {
         sessions_in(&other["items"], &mut elsewhere);
     }
-    sessions_in(&layout["ungrouped"]["items"], &mut elsewhere);
+    sessions_in(&layout[UNGROUPED]["items"], &mut elsewhere);
     Ok(Group {
         id: id.to_string(),
         name: if name.is_empty() {

@@ -446,7 +446,13 @@ fn session_of(v: &Value) -> Option<Value> {
         "createdAt": text("createdAt"),
         "lastReply": reply,
         "bossHas": text("bossHas"),
+        "bossAnswers": v.get("bossAnswers").filter(|b| b.is_boolean()).cloned().unwrap_or(Value::Null),
     });
+    // Which grant holds it, none as null, only as the machine's Desk says:
+    // one that doesn't is told apart from one that says none does.
+    if let Some(g) = v.get("grant").filter(|g| g.is_string() || g.is_null()) {
+        s["grant"] = g.clone();
+    }
     if let Some(e) = v.get("exited").filter(|e| e.is_object()) {
         let field = |k: &str| e.get(k).cloned().unwrap_or(Value::Null);
         s["exited"] = json!({
@@ -1909,7 +1915,7 @@ mod tests {
             json!({"status": "ok", "body": {
                 "id": SESSION, "name": "VEL-3", "displayName": null,
                 "cwd": "/home/dev/vellev", "state": "starting", "lastReply": null,
-                "createdAt": "2026-11-14T08:00:00Z", "bossHas": null,
+                "createdAt": "2026-11-14T08:00:00Z", "bossHas": null, "bossAnswers": null,
             }})
         );
         let sent = fake.desk_sent.lock().unwrap().clone();
@@ -1965,7 +1971,7 @@ mod tests {
     async fn a_plans_start_under_its_grant_says_that_grant_and_the_calls_boss_alone() {
         let plan = "plan-6f9619ff-8b86-4d01-b42d-00cf4fc964ff";
         let made = json!({"id": SESSION, "name": "VEL-3", "cwd": "/x", "state": "starting",
-                          "bossHas": "desk"});
+                          "bossHas": "desk", "bossAnswers": true, "grant": "plan-6f9619ff-8b86-4d01-b42d-00cf4fc964ff"});
         let (fake, mut rx) = with_desk(
             vec![Does::Says(200, made.clone()), Does::Says(200, made)],
             None,
@@ -1980,6 +1986,11 @@ mod tests {
         let stop = start(&fake.polled(vec![planned]));
         let (_, answer) = next(&mut rx).await;
         assert_eq!(answer["body"]["bossHas"], "desk");
+        assert_eq!(
+            answer["body"]["bossAnswers"], true,
+            "its answerer's word comes back"
+        );
+        assert_eq!(answer["body"]["grant"], plan, "and the grant that holds it");
         let _ = stop.send(true);
         let stop = start(&fake.polled(vec![odd]));
         next(&mut rx).await;
@@ -2163,6 +2174,20 @@ mod tests {
         assert!(older.get("exited").is_none(), "{older}");
         let none = session_of(&json!({"id": SESSION, "state": "idle", "exited": null})).unwrap();
         assert!(none.get("exited").is_none(), "{none}");
+    }
+
+    /// Which grant holds a machine's session goes with it only as its Desk
+    /// says, none as null; a Desk that doesn't say leaves it out.
+    #[test]
+    fn a_session_carries_its_grant_only_where_its_desk_says() {
+        let of = |v: Value| session_of(&v).unwrap().get("grant").cloned();
+        assert_eq!(
+            of(json!({"id": SESSION, "grant": "g-globex"})),
+            Some(json!("g-globex"))
+        );
+        assert_eq!(of(json!({"id": SESSION, "grant": null})), Some(Value::Null));
+        assert_eq!(of(json!({"id": SESSION})), None, "an older Desk there");
+        assert_eq!(of(json!({"id": SESSION, "grant": 3})), None);
     }
 
     /// A plan's listing reads the machine's sessions, each as much as a
