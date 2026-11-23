@@ -320,6 +320,51 @@ pub fn append_log(path: &Path, limit: u64) -> Result<std::fs::File> {
 
 pub const LOG_LIMIT: u64 = 20 * 1024 * 1024;
 
+/// The logs the hub, its memory store, the PTY holder and this helper write
+/// for as long as they run, kept under [`LOG_LIMIT`] while they do.
+const CAPPED_LOGS: [&str; 4] = ["hub.log", "memory.log", "pty-holder.log", "desk-hubd.log"];
+
+/// How often the running logs are checked against their limit.
+const CAP_EVERY: Duration = Duration::from_secs(60);
+
+/// `path`, which a running process appends to, copied aside to `<name>.1`
+/// and emptied in place once it is over `limit` bytes: it can't be moved
+/// aside, as [`append_log`] does at a start, while the process holds it
+/// open, and its next line goes at the start of the emptied file (it was
+/// opened to append). Whether it was over.
+fn cap_log(path: &Path, limit: u64) -> std::io::Result<bool> {
+    if !std::fs::metadata(path).is_ok_and(|m| m.len() > limit) {
+        return Ok(false);
+    }
+    std::fs::copy(path, path.with_extension("log.1"))?;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(path)?
+        .set_len(0)?;
+    Ok(true)
+}
+
+/// Keeps each of `logs` under `limit` while what writes it runs, looking
+/// every `every`.
+async fn keep_capped(logs: Vec<PathBuf>, limit: u64, every: Duration) {
+    let mut tick = tokio::time::interval(every);
+    tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+    loop {
+        tick.tick().await;
+        for log in &logs {
+            match cap_log(log, limit) {
+                Ok(true) => {
+                    tracing::info!(log = %log.display(), "a log reached its limit; the older part is kept beside it")
+                }
+                Ok(false) => {}
+                Err(e) => {
+                    tracing::warn!(log = %log.display(), error = %e, "couldn't keep a log under its limit")
+                }
+            }
+        }
+    }
+}
+
 /// `workforce serve` on the hub's config, with `env` and, on a pipe, the
 /// secrets. The pipe is kept open by what this returns beside the command.
 fn hub_command(
@@ -833,6 +878,14 @@ async fn run_helper(
     let install = Install::of(&exe, &process_env, &paths);
     let updated = replaced(install.watched(&programs), Duration::from_secs(10));
     tokio::pin!(updated);
+    let _capped = AbortOnDrop(tokio::spawn(keep_capped(
+        CAPPED_LOGS
+            .iter()
+            .map(|log| paths.logs().join(log))
+            .collect(),
+        LOG_LIMIT,
+        CAP_EVERY,
+    )));
     // A machine's folder says so, so what is asked over SSH later
     // (`connection --json`, `--remove-everything`) finds its secrets where
     // this helper keeps them: Desk's private file.
@@ -1357,6 +1410,33 @@ mod tests {
             .await
             .expect("noticed")
             .unwrap();
+    }
+
+    #[test]
+    fn a_log_written_to_as_it_runs_is_kept_under_its_limit() {
+        use std::io::Write;
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("hub.log");
+        let mut writer = append_log(&log, LOG_LIMIT).unwrap();
+        writer.write_all(&[b'x'; 100]).unwrap();
+        assert!(
+            !cap_log(&log, 1000).unwrap(),
+            "under its limit: left as it is"
+        );
+        assert_eq!(std::fs::metadata(&log).unwrap().len(), 100);
+        assert!(cap_log(&log, 10).unwrap());
+        assert_eq!(
+            std::fs::read(dir.path().join("hub.log.1")).unwrap(),
+            [b'x'; 100]
+        );
+        assert_eq!(std::fs::metadata(&log).unwrap().len(), 0);
+        // What it writes next starts the emptied file, never past a gap.
+        writer.write_all(b"next line\n").unwrap();
+        assert_eq!(std::fs::read(&log).unwrap(), b"next line\n");
+        assert!(
+            !cap_log(&dir.path().join("memory.log"), 10).unwrap(),
+            "none yet"
+        );
     }
 
     #[test]
