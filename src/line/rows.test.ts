@@ -72,6 +72,8 @@ describe("a line's rows", () => {
     expect(boss({ delivery: "queued", waiting: "mode_ending" })).toBe("Waiting: Desk is putting it back in its own mode");
     expect(boss({ delivery: "withdrawn" })).toBe("Not delivered: withdrawn before it went in");
     expect(boss({ delivery: "queued", waiting: "next_call" })).toBe("Sent now: it reads this with its next tool call");
+    expect(boss({ delivery: "queued", waiting: "awaited" })).toBe("Waiting: its call takes this as its answer");
+    expect(boss({ delivery: "queued", waiting: "behind" })).toBe("Waiting behind one on its way in");
     expect(boss({ delivery: "noted" })).toBe("A note here only: not typed in");
     // One a newer hub sends that this Desk doesn't know says nothing.
     expect(boss({ delivery: "later" as never })).toBeNull();

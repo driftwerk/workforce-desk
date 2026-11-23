@@ -1444,7 +1444,13 @@ export type LineWait =
   | "mode_ending"
   /** Sent now into its running turn: it reads it with its next tool
    *  call's result (or at the turn's end, if no call comes first). */
-  | "next_call";
+  | "next_call"
+  /** Its session's call waits on it, the answer to what it asked: that
+   *  call takes it as its result. */
+  | "awaited"
+  /** One sent before it is on its way in and not yet said to be there:
+   *  one goes at a time, in the order they were sent. */
+  | "behind";
 /** What you can do with a message waiting to go into a session, as the
  *  hub says per row (absent from older hubs): Send now into its running
  *  turn, Edit (your own words), Withdraw (yours, or a boss's). */
