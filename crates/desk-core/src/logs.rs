@@ -48,9 +48,10 @@ pub enum Capped {
     Under,
     /// Its older part is kept at [`rotated`], and it was emptied.
     Kept,
-    /// Its older part couldn't be kept (why), and it was emptied all the
-    /// same: it was past twice its limit.
-    Dropped(io::Error),
+    /// Its older part couldn't be kept, and it was emptied all the same: it
+    /// was past twice its limit. Why, unless a copy already failed and is
+    /// waited out.
+    Dropped(Option<io::Error>),
 }
 
 /// `log`, which a running process appends to, kept under `limit`: once
@@ -67,7 +68,7 @@ pub fn cap(log: &Path, limit: u64) -> io::Result<Capped> {
     };
     match keep(log) {
         Ok(()) => emptied(log).map(|()| Capped::Kept),
-        Err(e) if size > limit * OVER_AT_MOST => emptied(log).map(|()| Capped::Dropped(e)),
+        Err(e) if size > limit * OVER_AT_MOST => emptied(log).map(|()| Capped::Dropped(Some(e))),
         Err(e) => Err(e),
     }
 }
@@ -112,8 +113,9 @@ enum Looked {
     Fine { again: bool },
     /// Over its limit, its next copy still waited out.
     Waiting,
-    /// Past twice its limit and emptied without its older part (why).
-    Dropped(io::Error),
+    /// Past twice its limit and emptied without its older part (why, unless
+    /// a copy already failed and is waited out).
+    Dropped(Option<io::Error>),
     /// Its older part couldn't be kept (why, said once while it fails).
     Failed { first: bool, why: io::Error },
 }
@@ -130,9 +132,9 @@ fn look(log: &Path, limit: u64, failing: &mut HashMap<PathBuf, Failing>) -> Look
         Some(f) => {
             f.wait -= 1;
             match size(log) {
-                Ok(Some(s)) if s > limit * OVER_AT_MOST => emptied(log).map(|()| {
-                    Capped::Dropped(io::Error::other("its older part couldn't be kept before"))
-                }),
+                Ok(Some(s)) if s > limit * OVER_AT_MOST => {
+                    emptied(log).map(|()| Capped::Dropped(None))
+                }
                 Ok(Some(s)) if s > limit => return Looked::Waiting,
                 Ok(_) => Ok(Capped::Under),
                 Err(e) => Err(e),
@@ -158,6 +160,19 @@ fn failed(failing: &mut HashMap<PathBuf, Failing>, log: &Path) {
     let f = failing.entry(log.to_path_buf()).or_default();
     f.times += 1;
     f.wait = 2u32.saturating_pow(f.times).min(BACKOFF_AT_MOST);
+}
+
+/// [`keep_capped`] on a thread of its own, for a process with no runtime of
+/// its own: it ends with the process.
+pub fn keep_capped_on_thread(logs: Vec<PathBuf>, limit: u64, every: Duration) {
+    std::thread::spawn(move || {
+        if let Ok(rt) = tokio::runtime::Builder::new_current_thread()
+            .enable_time()
+            .build()
+        {
+            rt.block_on(keep_capped(logs, limit, every));
+        }
+    });
 }
 
 /// Keeps each of `logs` under `limit` while what writes them runs,
@@ -188,16 +203,17 @@ pub async fn keep_capped(logs: Vec<PathBuf>, limit: u64, every: Duration) {
         };
         failing = kept;
         for (log, l) in looked {
+            let log = log.display();
             match l {
-                Looked::Fine { again: true } => {
-                    tracing::info!(log = %log.display(), "a log is kept under its limit again")
-                }
+                Looked::Fine { again: true } => tracing::info!(%log, "back under its limit"),
                 Looked::Fine { again: false } | Looked::Waiting => {}
-                Looked::Dropped(e) => {
-                    tracing::warn!(log = %log.display(), error = %e, "a log at twice its limit was emptied: its older part couldn't be kept")
-                }
+                Looked::Dropped(why) => tracing::warn!(
+                    %log,
+                    error = why.as_ref().map(tracing::field::display),
+                    "emptied at twice its limit without its older part"
+                ),
                 Looked::Failed { first: true, why } => {
-                    tracing::warn!(log = %log.display(), error = %why, "couldn't keep a log under its limit")
+                    tracing::warn!(%log, error = %why, "couldn't be kept under its limit")
                 }
                 Looked::Failed { first: false, .. } => {}
             }
@@ -253,7 +269,7 @@ mod tests {
         assert_eq!(std::fs::metadata(&log).unwrap().len(), 15, "left to grow");
         assert_eq!(std::fs::read(rotated(&log)).unwrap(), b"older");
         std::fs::write(&log, [b'x'; 25]).unwrap();
-        assert!(matches!(cap(&log, 10).unwrap(), Capped::Dropped(_)));
+        assert!(matches!(cap(&log, 10).unwrap(), Capped::Dropped(Some(_))));
         assert_eq!(std::fs::metadata(&log).unwrap().len(), 0);
         assert_eq!(std::fs::read(rotated(&log)).unwrap(), b"older");
     }
@@ -289,7 +305,10 @@ mod tests {
         assert!(matches!(look(&log, 10, &mut failing), Looked::Waiting));
         assert_eq!(failing[&log].wait, 1);
         std::fs::write(&log, [b'x'; 25]).unwrap();
-        assert!(matches!(look(&log, 10, &mut failing), Looked::Dropped(_)));
+        assert!(matches!(
+            look(&log, 10, &mut failing),
+            Looked::Dropped(None)
+        ));
         assert_eq!(
             std::fs::metadata(&log).unwrap().len(),
             0,
@@ -323,5 +342,43 @@ mod tests {
             })
             .collect();
         assert_eq!(waits, [2, 4, 8, 16, 32, 60, 60, 60]);
+    }
+
+    #[tokio::test]
+    async fn a_log_kept_capped_is_emptied_under_its_writer_and_the_writer_goes_on() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("chrome-host.log");
+        let mut writer = append_log(&log, LOG_LIMIT).unwrap();
+        writer.write_all(&[b'x'; 100]).unwrap();
+        let task = tokio::spawn(keep_capped(
+            vec![log.clone()],
+            10,
+            Duration::from_millis(10),
+        ));
+        for _ in 0..200 {
+            if std::fs::metadata(&log).unwrap().len() == 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+        task.abort();
+        assert_eq!(std::fs::read(rotated(&log)).unwrap(), [b'x'; 100]);
+        writer.write_all(b"next\n").unwrap();
+        assert_eq!(std::fs::read(&log).unwrap(), b"next\n");
+    }
+
+    #[test]
+    fn a_log_kept_capped_on_a_thread_is_emptied() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join("desk-helper.log");
+        let mut writer = append_log(&log, LOG_LIMIT).unwrap();
+        writer.write_all(&[b'x'; 100]).unwrap();
+        keep_capped_on_thread(vec![log.clone()], 10, Duration::from_millis(10));
+        let emptied = (0..200).any(|_| {
+            std::thread::sleep(Duration::from_millis(10));
+            std::fs::metadata(&log).unwrap().len() == 0
+        });
+        assert!(emptied);
+        assert_eq!(std::fs::read(rotated(&log)).unwrap(), [b'x'; 100]);
     }
 }
