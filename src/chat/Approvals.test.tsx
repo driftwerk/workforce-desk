@@ -218,6 +218,25 @@ describe("Desk's own card for a call on this computer", () => {
     expect(screen.getByRole("button", { name: "Allow once" }).className).toContain("btn-approve");
   });
 
+  it("offers letting it do that kind on its own there, as a lasting answer", () => {
+    const cases: [import("../hub/client").OnItsOwnKind, string, string, Record<string, string>][] = [
+      ["network", "devbox", "Always let it reach devbox", facts],
+      ["browser", "shop.example", "Always let it use shop.example", { effect: "connector", connector: "chrome-visit:https://shop.example", why: "Opens a new site in your Chrome" }],
+      ["commands", "~/dev/acme-web", "Let it run commands in acme-web on its own", facts],
+      ["files", "~/dev", "Let it change files in dev on its own", { effect: "write", why: "Can't be undone" }],
+      ["delete", "~/dev", "Let it move to the Trash in dev on its own", { effect: "trash", why: "Moves to the Trash" }],
+    ];
+    for (const [kind, target, label, f] of cases) {
+      const onAnswer = vi.fn(() => true);
+      render(<PromptCard prompt={ask({ allow_in_folder: target, allow_scope: kind, facts: f as never })} onAnswer={onAnswer} />);
+      fireEvent.click(screen.getByRole("button", { name: label }));
+      expect(onAnswer).toHaveBeenCalledWith("allow_in_folder");
+      cleanup();
+    }
+    render(<PromptCard prompt={ask({ facts: { effect: "trash", paths: ["~/dev/old.txt"], why: "Moves to the Trash" } })} onAnswer={() => true} />);
+    expect(screen.getByText("Wants to move to the Trash")).toBeTruthy();
+  });
+
   it("names the connector a write would always be allowed to", () => {
     render(
       <PromptCard

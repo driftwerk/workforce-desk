@@ -24,6 +24,8 @@ import { CheckingIn, HowTheyRemember, HowTheyWork } from "./AgentAbilities";
 import { BossPlans } from "./PlanRow";
 import { UpdatesSettings } from "./Updates";
 import { OverseesTheCrew } from "./OverseesTheCrew";
+import { MailSorting, useMailSorting } from "./MailSorting";
+import { reachesEmail } from "./sortRules";
 import { WhatTheySee } from "./WhatTheySee";
 import { VoiceCard, VoiceDialog } from "./VoiceDialog";
 import { AgentRoute } from "../hubs/RunMyWorkOn";
@@ -46,10 +48,12 @@ const lower = (s: string) => s.charAt(0).toLowerCase() + s.slice(1);
 export function AgentSettings({ agent, hub, onOpenFiles }: { agent: Agent; hub: HubAccount | undefined; onOpenFiles: () => void }) {
   const local = hub?.local ?? false;
   const { BossOfAGroup } = useContext(MainWindowParts);
+  const config = useAgentConfigs((s) => s.configs[agentKey(agent)]);
+  const mail = useMailSorting(hub, agent.id, !local || reachesEmail(config));
   return (
     <div className="agent-page">
       <div className="agent-settings">
-        {local && <SectionLinks />}
+        {local && <SectionLinks mail={mail.load !== "missing"} />}
         {local && <ChangedElsewhere agent={agent} />}
         <About agent={agent} hub={hub} local={local} />
         {local ? <Thinking agent={agent} /> : <ThinkingElsewhere agent={agent} hub={hub} />}
@@ -58,6 +62,7 @@ export function AgentSettings({ agent, hub, onOpenFiles }: { agent: Agent; hub: 
         {local && <HowTheyRemember agent={agent} ago={ago} />}
         {local && <HowTheyWork agent={agent} />}
         <WhatTheySee agent={agent} hub={hub} />
+        <MailSorting agent={agent} mail={mail} />
         {local && (
           <CheckingIn
             agent={agent}
@@ -88,15 +93,16 @@ const SECTIONS: { id: string; name: string }[] = [
   { id: "remember", name: "How they remember" },
   { id: "work", name: "How they work" },
   { id: "sees", name: "What they see" },
+  { id: "mail", name: "Mail sorting" },
   { id: "checkin", name: "Checking in" },
   { id: "tune", name: "Fine-tuning" },
 ];
 
 /** Links to each section of a long Settings tab. */
-function SectionLinks() {
+function SectionLinks({ mail }: { mail: boolean }) {
   return (
     <nav className="section-links" aria-label="Sections">
-      {SECTIONS.map((s) => (
+      {SECTIONS.filter((s) => mail || s.id !== "mail").map((s) => (
         <a
           key={s.id}
           href={`#${s.id}`}

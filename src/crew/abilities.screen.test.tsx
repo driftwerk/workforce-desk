@@ -186,9 +186,17 @@ describe("The Settings tab", () => {
       "How they remember",
       "How they work",
       "What they see",
+      "Mail sorting",
       "Checking in",
       "Fine-tuning",
     ]);
     expect(screen.getByText("Soul, Agents, Identity, Welcome and Heartbeat")).toBeTruthy();
+  });
+
+  it("leaves Mail sorting out for an agent the email connector doesn't reach", () => {
+    show(fakeHub(), `${START}\n[skills]\nenabled = ["linear"]\n`);
+    const links = within(screen.getByRole("navigation", { name: "Sections" })).getAllByRole("link");
+    expect(links.map((l) => l.textContent)).not.toContain("Mail sorting");
+    expect(screen.queryByRole("heading", { name: "Mail sorting" })).toBeNull();
   });
 });

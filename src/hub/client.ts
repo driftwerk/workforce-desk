@@ -146,6 +146,24 @@ export interface ComputerGrant {
   created_at: string;
 }
 
+/** A kind of action an agent may take on its own on this computer. */
+export type OnItsOwnKind = "commands" | "network" | "browser" | "files" | "delete";
+
+/** How far it does that kind on its own; no level is "ask each time". */
+export type OnItsOwnLevel = "in_folders" | "anywhere";
+
+/** Where a level holds: the whole kind, or one folder (as you read it),
+ *  host or site. */
+export type OnItsOwnScope = { kind: "whole" } | { kind: "folder" | "host" | "site"; value: string };
+
+/** One level or override the person set for an agent. */
+export interface OnItsOwnRow {
+  kind: OnItsOwnKind;
+  scope: OnItsOwnScope;
+  level: OnItsOwnLevel;
+  created_at: string;
+}
+
 /** One call an agent made here, as Desk recorded it. */
 export interface ComputerActivityRow {
   id: string;
@@ -155,7 +173,7 @@ export interface ComputerActivityRow {
   doing: string;
   folder: string | null;
   tool: string;
-  decided_by: "rule" | "grant" | "session" | "person" | "classifier";
+  decided_by: "rule" | "grant" | "session" | "person" | "classifier" | "on_its_own";
   outcome: { outcome: "ran" | "refused" | "allowed" | "declined" | "not_answered" | "unattended" };
   reason: string | null;
   /** A browser's row: the page, what it pressed or typed into, which
@@ -358,6 +376,43 @@ export const hubRequest = async <T>(hub: HubRef, method: string, path: string, b
 /** One call to paired hub `hub`'s API: its JSON answer, nothing for a 204. */
 export const hubCall = async <T>(hub: HubRef, method: string, path: string, body?: unknown): Promise<T> =>
   (await hubRequest<T>(hub, method, path, body)).body;
+
+/** One of the person's standing rules for sorting new mail, as its hub
+ *  keeps it: a monitor that moves, archives, marks read or flags what
+ *  matches. `says` is the rule in a sentence; `watched_by` names the other
+ *  monitors that read the same mail. */
+export interface SortRule {
+  rule_id: string;
+  owner: string | null;
+  says: string;
+  enabled: boolean;
+  watched_by: string[];
+}
+
+const sortRulePath = (rule: Pick<SortRule, "rule_id" | "owner">, rest = ""): string =>
+  `/api/monitors/${encodeURIComponent(rule.rule_id)}${rest}${rule.owner === null ? "" : `?owner=${encodeURIComponent(rule.owner)}`}`;
+
+/** The person's mail sorting rules on hub `hub`. */
+export const sortRulesOf = (hub: HubRef) => ({
+  list: async (): Promise<SortRule[]> => (await hubCall<{ rules?: SortRule[] }>(hub, "GET", "/api/monitors/sort-rules")).rules ?? [],
+  setEnabled: (rule: SortRule, enabled: boolean): Promise<unknown> => hubCall(hub, "PUT", sortRulePath(rule, "/enabled"), { enabled }),
+  remove: (rule: SortRule): Promise<unknown> => hubCall(hub, "DELETE", sortRulePath(rule)),
+});
+
+export type SortRulesApi = ReturnType<typeof sortRulesOf>;
+
+/** Whether hub `hub` has email for agent `agentId`: whether it gives the
+ *  agent the email skill's inbox, which it does only once an account is
+ *  set up, deferred or not. Asked by name alone, so no schema is sent. A
+ *  hub that won't say is taken to have none. */
+export const sortsMail = (hub: HubRef, agentId: string): Promise<boolean> =>
+  hubCall<{ tools?: { name: string }[] }>(hub, "GET", `/api/agents/${encodeURIComponent(agentId)}/tools?names=true`).then(
+    (r) => (r.tools ?? []).some((t) => t.name === "email.inbox"),
+    (e: unknown) => {
+      if (e instanceof HubError && (e.status === 401 || e.status === 403)) return false;
+      throw e;
+    },
+  );
 
 /** A Desk route; in the browser preview, the dev bridge answers the ones
  *  the running hub doesn't have yet. */
@@ -613,14 +668,23 @@ export class DeskHub {
   forgetSession = (sessionId: string): Promise<void> =>
     this.call("POST", `/api/desk/computer/sessions/${encodeURIComponent(sessionId)}/forget`);
   /** What agents did here, newest first; `next` goes on from the page. */
-  computerActivity = (f: { agent?: string; kind?: string; before?: string } = {}): Promise<ComputerActivityPage> => {
+  computerActivity = (f: { agent?: string; kind?: string; decided_by?: ComputerActivityRow["decided_by"]; before?: string } = {}): Promise<ComputerActivityPage> => {
     const q = new URLSearchParams();
     if (f.agent) q.set("agent", f.agent);
     if (f.kind) q.set("kind", f.kind);
+    if (f.decided_by) q.set("decided_by", f.decided_by);
     if (f.before) q.set("before", f.before);
     const qs = q.toString();
     return this.call("GET", `/api/desk/computer/activity${qs ? `?${qs}` : ""}`);
   };
+  /** What an agent does on its own here: its levels and overrides. */
+  onItsOwn = (agent: string): Promise<OnItsOwnRow[]> => this.call("GET", `/api/desk/computer/on-its-own?agent=${encodeURIComponent(agent)}`);
+  /** Sets one level or override; `null` asks each time again. */
+  setOnItsOwn = (agent: string, kind: OnItsOwnKind, scope: OnItsOwnScope, level: OnItsOwnLevel | null): Promise<void> =>
+    this.call("PUT", "/api/desk/computer/on-its-own", { agent, kind, scope, level });
+  /** Forgets every level and "Always allow" for the agent: it asks again. */
+  askAgain = async (agent: string): Promise<number> =>
+    (await this.call<{ cleared: number }>("POST", "/api/desk/computer/on-its-own/ask-again", { agent })).cleared;
   /** Whether macOS lets agents read other apps' files here. */
   diskAccess = async (): Promise<DiskAccess> => (await this.call<{ state: DiskAccess }>("GET", "/api/desk/computer/disk-access")).state;
 

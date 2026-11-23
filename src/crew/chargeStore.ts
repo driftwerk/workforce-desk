@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { create } from "zustand";
 import { useChat } from "../chat/store";
 import { keyOf, LOCAL, machineOf, splitKey, type MachineId } from "../hub/machines";
@@ -7,8 +8,12 @@ import { withWheel } from "../line/rows";
 import { useLine } from "../line/store";
 import { useOverview } from "../overview/store";
 import { useLocalAgent } from "../overview/people";
+import { invoke } from "../platform";
+import { bossOfGroup } from "../groups/bosses";
+import { UNGROUPED } from "../groups/model";
+import { useLayout } from "../groups/store";
 import { takenBack, type Boss, type ChargeVerb } from "./charge";
-import { isServed, useGrantBossOf } from "./grantBoss";
+import { groupOfSession, isServed, useGrantBossOf } from "./grantBoss";
 
 interface ChargeState {
   /** The sessions a boss runs now, by session key (see `keyOf`): each
@@ -143,16 +148,77 @@ export const useTakenBack = (sessionId: string | null | undefined): ChargeView |
 
 /** The boss session `s` can be handed to: the one its group's grant names
  *  on another hub, wherever the session runs (machines' sessions too); else
- *  this computer's, for its own sessions. A machine has no boss of its own
- *  (its hub serves no agents), so its other sessions are handed to none
- *  and ask the person. */
+ *  this computer's, for its own sessions and a machine's alike. A machine
+ *  has no boss of its own (its hub serves no agents): its sessions go to
+ *  the boss here of their group, which the machine's grant names. */
 export const useBossOf = (s: { id: string; machine?: MachineId | null } | null | undefined): Boss | null => {
   const local = useBoss();
+  const home = useHomeBossOf(s);
   const granted = useGrantBossOf(s);
   if (granted.boss) return granted.boss;
   // Linked to a boss on another hub that doesn't run sessions now: no one.
   if (granted.bossed) return null;
-  return machineOf(s) === LOCAL ? local : null;
+  return machineOf(s) === LOCAL ? local : home;
+};
+
+/** What a machine's grant names this computer's boss as. */
+const HOME = "home";
+
+/** How long what Desk keeps on the machines, as read, is taken as still so. */
+export const CARRIED_FRESH_MS = 25_000;
+
+interface HomeGrantsState {
+  /** Each machine's groups whose grant Desk keeps there for a boss on this
+   *  computer, with that boss's agent id, as last read. */
+  byMachine: Record<string, Record<string, string>>;
+  /** When the last read was asked for: what it read was so by then. */
+  readAt: number;
+  /** Reads them again unless they were read just now. */
+  ensure: () => void;
+}
+
+let readingCarried = false;
+
+export const useHomeGrants = create<HomeGrantsState>((set, get) => ({
+  byMachine: {},
+  readAt: 0,
+  ensure: () => {
+    if (readingCarried || Date.now() - get().readAt < CARRIED_FRESH_MS) return;
+    readingCarried = true;
+    const readAt = Date.now();
+    invoke<Record<string, Record<string, string>> | null>("local_boss_grants")
+      // A Desk with no native side to ask (the browser) keeps none.
+      .then((byMachine) => set({ byMachine: byMachine ?? {}, readAt }))
+      // Kept as last read, and not asked again until it would be anyway.
+      .catch(() => set({ readAt }))
+      .finally(() => {
+        readingCarried = false;
+      });
+  },
+}));
+
+/** The boss here of `s`'s group (the main overseer for Ungrouped), while
+ *  the machine holds the grant Desk keeps there for it, which names it
+ *  there (`home/<agent>`); no one otherwise. */
+const useHomeBossOf = (s: { id: string; machine?: MachineId | null } | null | undefined): Boss | null => {
+  const layout = useLayout();
+  const manager = useOverview((st) => st.manager);
+  const group = s ? groupOfSession(layout, s) : UNGROUPED;
+  const machine = machineOf(s);
+  const own = group === UNGROUPED ? manager : bossOfGroup(manager, group);
+  const carried = useHomeGrants((st) => st.byMachine[machine]?.[group]);
+  // Read while shown, and again as what was read goes stale.
+  useEffect(() => {
+    if (machine === LOCAL) return;
+    const { ensure } = useHomeGrants.getState();
+    ensure();
+    const again = setInterval(ensure, CARRIED_FRESH_MS);
+    return () => clearInterval(again);
+  }, [machine]);
+  const agent = useLocalAgent(own?.agentId);
+  if (!own?.agentId || machine === LOCAL || carried !== own.agentId) return null;
+  const name = agent?.name ?? ("name" in own ? own.name : null) ?? own.agentId;
+  return { id: `${HOME}/${own.agentId}`, name, level: own.level, served: true };
 };
 
 /** The boss sessions can be handed to: the overseer, by its name. */
@@ -160,7 +226,7 @@ export const useBoss = (): Boss | null => {
   const manager = useOverview((s) => s.manager);
   const agent = useLocalAgent(manager?.agentId);
   if (!manager?.agentId) return null;
-  return { id: manager.agentId, name: agent?.name ?? "", level: manager.level };
+  return { id: manager.agentId, name: agent?.name ?? manager.agentId, level: manager.level };
 };
 
 const onEvent = (e: EngineEvent) => {

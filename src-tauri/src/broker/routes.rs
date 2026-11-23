@@ -226,9 +226,13 @@ const HTTP: &[Route] = &[
     with_query(
         "GET",
         "/api/desk/computer/activity",
-        &["agent", "kind", "before"],
+        &["agent", "kind", "decided_by", "before"],
     ),
     route("GET", "/api/desk/computer/disk-access"),
+    // What an agent does on its own here.
+    with_query("GET", "/api/desk/computer/on-its-own", &["agent"]),
+    route("PUT", "/api/desk/computer/on-its-own"),
+    route("POST", "/api/desk/computer/on-its-own/ask-again"),
     // The providers agents think with.
     route("GET", "/api/desk/providers"),
     route("POST", "/api/desk/providers/{}/connect"),
@@ -341,7 +345,7 @@ pub fn native_only(method: &str, target: &str) -> bool {
 const NATIVE_LOCAL: &[Route] = &[
     route("POST", "/api/desk/accounts/{}/hand-over"),
     route("GET", "/api/desk/engine-key"),
-    with_query("GET", "/api/desk/machine-grants", &["plans"]),
+    with_query("GET", "/api/desk/machine-grants", &["plans", "ungrouped"]),
 ];
 
 /// `method target` as one of the native side's own requests to this
@@ -1142,6 +1146,7 @@ mod tests {
             assert!(relay_machine(method, &target).is_err(), "{method} {target}");
         }
         assert!(native_local("GET", &format!("{path}?plans=1")).is_ok());
+        assert!(native_local("GET", crate::local_bosses::WANTED_PATH).is_ok());
         assert!(native_local("GET", &format!("{path}?token=t")).is_err());
         assert!(native_local("PUT", path).is_err());
         assert!(native_local("GET", &format!("{path}/devbox")).is_err());
