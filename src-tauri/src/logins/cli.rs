@@ -12,7 +12,7 @@ use desk_core::host::{Host, Invocation, Wsl};
 use desk_wsl::install::quote;
 use eyre::Result;
 
-use super::deadline;
+use super::{deadline, scan};
 
 /// How long a quick look inside WSL (is the CLI there, stop a sign-in) may
 /// take: a WSL that doesn't answer must not hold a sign-in up for ever.
@@ -125,33 +125,47 @@ fn sign_in_pidfile(w: &Wsl, program: &str, attempt: &str) -> String {
     format!("{}/{program}-sign-in-{attempt}.pid", w.root())
 }
 
-/// The script that runs `program args…` inside WSL for a sign-in.
+/// The script that runs `program args…` with `env` added inside WSL for a
+/// sign-in.
 ///
 /// Windows gives it no console: `wsl.exe` runs over plain pipes, and
-/// util-linux's `script` gives the CLI a terminal of Linux's own (wide, so
-/// a token is never wrapped). A Windows pseudo-console (ConPTY) asks the
-/// terminal where its cursor is and waits for the answer before it lets
-/// `wsl.exe` start, so a sign-in through one stalled until Desk closed.
+/// util-linux's `script` gives the CLI a terminal of Linux's own, the size
+/// Desk reads it at ([`scan::COLS`] wide, so a token is never wrapped). A
+/// Windows pseudo-console (ConPTY) asks the terminal where its cursor is
+/// and waits for the answer before it lets `wsl.exe` start, so a sign-in
+/// through one stalled until Desk closed.
 ///
 /// `BROWSER=true` makes the CLI's own attempt to open a browser a no-op
 /// (Claude Code still prints the page, 3 s later): Desk opens the page on
 /// Windows itself. The shell writes its pid (which `exec` hands to
 /// `script`) where [`stop_sign_in`] finds it, and the command `script`
 /// runs starts with this attempt's [`marker`], so only it is ever ended.
-fn sign_in_script(w: &Wsl, program: &str, args: &[&str], attempt: &str) -> String {
+fn sign_in_script(
+    w: &Wsl,
+    program: &str,
+    args: &[&str],
+    env: &[(&str, &str)],
+    attempt: &str,
+) -> String {
     let words: Vec<String> = std::iter::once(program)
         .chain(args.iter().copied())
         .map(quote)
         .collect();
+    let exports: String = std::iter::once(("BROWSER", "true"))
+        .chain(env.iter().copied())
+        .map(|(k, v)| format!("{k}={}; export {k}; ", quote(v)))
+        .collect();
     let inner = format!(
-        "{} stty cols 1000 rows 50 2>/dev/null; exec {}",
+        "{} stty cols {} rows {} 2>/dev/null; exec {}",
         marker(attempt),
+        scan::COLS,
+        scan::ROWS,
         words.join(" ")
     );
     wsl_script(&format!(
         "command -v script >/dev/null || {{ echo \"Signing in needs the script command (util-linux) in {distro}: sudo apt install util-linux\" >&2; exit 127; }}; \
          mkdir -p {root} && echo $$ >{pidfile}; \
-         BROWSER=true; export BROWSER; \
+         {exports}\
          exec script -q -e -f -c {inner} /dev/null",
         distro = w.distro.replace(['"', '\\', '$', '`'], ""),
         root = quote(&w.root()),
@@ -192,9 +206,15 @@ fn stop_script(w: &Wsl, program: &str, attempt: Option<&str>) -> String {
     )
 }
 
-/// `program args…` for sign-in `attempt` inside WSL; see
+/// `program args…` with `env` added for sign-in `attempt` inside WSL; see
 /// [`sign_in_script`].
-pub fn wsl_sign_in(backend: &Backend, program: &str, args: &[&str], attempt: &str) -> Result<Cli> {
+pub fn wsl_sign_in(
+    backend: &Backend,
+    program: &str,
+    args: &[&str],
+    env: &[(&str, &str)],
+    attempt: &str,
+) -> Result<Cli> {
     let Host::Wsl(w) = &backend.host else {
         eyre::bail!("not a WSL backend");
     };
@@ -204,7 +224,7 @@ pub fn wsl_sign_in(backend: &Backend, program: &str, args: &[&str], attempt: &st
     Ok(Cli {
         invocation: backend
             .host
-            .login_invocation(&sign_in_script(w, program, args, attempt)),
+            .login_invocation(&sign_in_script(w, program, args, env, attempt)),
         env: None,
         cwd: None,
     })
@@ -387,12 +407,20 @@ mod tests {
         let Host::Wsl(w) = wsl().host else {
             unreachable!()
         };
-        let script = sign_in_script(&w, "claude", &["setup-token"], "41-7");
+        let script = sign_in_script(
+            &w,
+            "claude",
+            &["setup-token"],
+            &[("CLAUDE_CODE_FULL_SIGN_IN_LINK", "1")],
+            "41-7",
+        );
         assert!(script.starts_with(WSL_INSTALL_PATH));
         assert!(
             script.contains("echo $$ >'/home/sarah/.local/share/Desk/claude-sign-in-41-7.pid'")
         );
-        assert!(script.contains("BROWSER=true; export BROWSER;"));
+        assert!(script.contains(
+            "BROWSER='true'; export BROWSER; CLAUDE_CODE_FULL_SIGN_IN_LINK='1'; export CLAUDE_CODE_FULL_SIGN_IN_LINK; exec script"
+        ));
         assert!(script.contains(
             r#"exec script -q -e -f -c ': desk-sign-in-41-7; stty cols 1000 rows 50 2>/dev/null; exec '\''claude'\'' '\''setup-token'\''' /dev/null"#
         ));
@@ -496,12 +524,15 @@ mod tests {
                 return;
             }
             let (_dir, w) = home(FAKE);
-            let mut child = sh(&w, &sign_in_script(&w, "claude", &["setup-token"], "1-0"))
-                .stdin(Stdio::piped())
-                .stdout(Stdio::piped())
-                .stderr(Stdio::piped())
-                .spawn()
-                .unwrap();
+            let mut child = sh(
+                &w,
+                &sign_in_script(&w, "claude", &["setup-token"], &[], "1-0"),
+            )
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .unwrap();
             let mut stdin = child.stdin.take().unwrap();
             let mut stdout = child.stdout.take().unwrap();
             let text = read_until(&mut stdout, "Paste code");
@@ -524,12 +555,15 @@ mod tests {
             }
             let (_dir, w) = home(FAKE);
             let waiting = |attempt: &str| {
-                let mut child = sh(&w, &sign_in_script(&w, "claude", &["setup-token"], attempt))
-                    .stdin(Stdio::piped())
-                    .stdout(Stdio::piped())
-                    .stderr(Stdio::null())
-                    .spawn()
-                    .unwrap();
+                let mut child = sh(
+                    &w,
+                    &sign_in_script(&w, "claude", &["setup-token"], &[], attempt),
+                )
+                .stdin(Stdio::piped())
+                .stdout(Stdio::piped())
+                .stderr(Stdio::null())
+                .spawn()
+                .unwrap();
                 let mut stdout = child.stdout.take().unwrap();
                 read_until(&mut stdout, "Paste code");
                 (child, stdout)

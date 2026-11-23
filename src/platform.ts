@@ -397,7 +397,8 @@ export type PlanName = "claude" | "chatgpt";
 export type LoginProgress =
   | { state: "starting" }
   | { state: "browser"; url: string }
-  | { state: "needs-code" }
+  /** `problem`: why the CLI turned down the code pasted last; it waits for another. */
+  | { state: "needs-code"; problem?: string }
   | { state: "saving" }
   /** `account`: the Desk account a Claude sign-in went to, if it went to one. */
   | { state: "done"; account?: string }

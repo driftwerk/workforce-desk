@@ -160,3 +160,15 @@ export const afterMove = async (kind: MoveSubject["kind"]): Promise<void> => {
       .then((rooms) => useDesk.setState((d) => ({ rooms: { ...d.rooms, ...Object.fromEntries(rooms.map((r) => [r.id, r])) } })))
       .catch(() => {});
 };
+
+/** Once the move dialog is answered, when a move just opened it; at once
+ *  when none is open. */
+export const moveAnswered = (): Promise<void> =>
+  new Promise((done) => {
+    if (!useMove.getState().asking) return done();
+    const stop = useMove.subscribe((s) => {
+      if (s.asking) return;
+      stop();
+      done();
+    });
+  });

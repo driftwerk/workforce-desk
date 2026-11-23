@@ -91,7 +91,7 @@ export function usePlanLogin(plan: PlanName | undefined, onConnected: (account?:
       case "browser":
         return "Finish signing in in your browser.";
       case "needs-code":
-        return "Finish signing in in your browser. If the page shows a code, paste it here.";
+        return progress.problem ?? "Finish signing in in your browser. If the page shows a code, paste it here.";
       case "saving":
         return "Connecting…";
       case "done":
@@ -220,7 +220,7 @@ export function PlanLoginAction({ login, label, signal = true }: { login: PlanLo
           value={login.code}
           autoFocus
           aria-label="Code from the sign-in page"
-          placeholder="Code from the page"
+          placeholder="Code or address from the page"
           onChange={(e) => login.setCode(e.target.value)}
         />
         <button type="button" className="btn btn-signal" disabled={!login.code.trim()} onClick={() => void login.send()}>

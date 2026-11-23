@@ -20,6 +20,7 @@ import { servePictures } from "../pictures/testing";
 import { useFloor } from "../floor/store";
 import { agent, need, ready, session as asker, view as floorView } from "../floor/testing";
 import type { Session } from "../hub/types";
+import { clearSelection, useSelection } from "../groups/selection";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(() => Promise.resolve()) }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(() => Promise.resolve(() => {})), emitTo: vi.fn(() => Promise.resolve()) }));
@@ -788,5 +789,51 @@ describe("unread in the sidebar", () => {
     expect(within(row).getByText("1 needs you")).toBeTruthy();
     fireEvent.click(row);
     expect(useDesk.getState()).toMatchObject({ view: "rooms", inbox: true });
+  });
+});
+
+describe("picking rows in the sidebar", () => {
+  const s = (id: string): Session => ({ id, engine: "claude", name: id, goal: "", cwd: "/tmp", state: "idle", live: false, origin: "desk", createdAt: "", updatedAt: "" }) as Session;
+  const row = (name: string) => screen.getAllByRole("button").find((b) => b.dataset.item && b.querySelector(".gi-name")?.textContent === name)!;
+  const picked = () => [...useSelection.getState().keys].sort();
+
+  beforeEach(() => {
+    useChat.setState({ hubs: [], roster: [] });
+    useDesk.setState({ sessions: { a: s("a"), b: s("b"), c: s("c") }, openId: null });
+    useSettings.setState({ groups: [{ id: "g", name: "Acme", collapsed: false, items: ["session:a", "session:b"] }] });
+  });
+  afterEach(clearSelection);
+
+  it("picks every row in sight with ⌘A while focus is in it, but not in a field", () => {
+    sidebar();
+    fireEvent.keyDown(row("a"), { key: "a", metaKey: true });
+    expect(picked()).toEqual(["session:a", "session:b", "session:c"]);
+    clearSelection();
+    fireEvent.keyDown(row("a"), { key: "a", ctrlKey: true });
+    expect(picked()).toEqual([]);
+    fireEvent.doubleClick(row("a"));
+    fireEvent.keyDown(screen.getByRole("textbox"), { key: "a", metaKey: true });
+    expect(picked()).toEqual([]);
+  });
+
+  it("lets go when anywhere in it but a row or the selection's bar is clicked", () => {
+    sidebar();
+    fireEvent.click(row("a"), { metaKey: true });
+    fireEvent.click(row("b"), { metaKey: true });
+    const bar = screen.getByRole("toolbar", { name: "Selection" });
+    fireEvent.mouseDown(bar);
+    fireEvent.click(bar);
+    expect(picked()).toEqual(["session:a", "session:b"]);
+    const resize = screen.getByRole("separator", { name: "Sidebar width" });
+    fireEvent.mouseDown(resize);
+    fireEvent.click(resize);
+    expect(picked()).toEqual(["session:a", "session:b"]);
+    const groups = screen.getByRole("region", { name: "Groups" });
+    fireEvent.mouseDown(bar);
+    fireEvent.click(groups);
+    expect(picked()).toEqual(["session:a", "session:b"]);
+    fireEvent.mouseDown(groups);
+    fireEvent.click(groups);
+    expect(picked()).toEqual([]);
   });
 });

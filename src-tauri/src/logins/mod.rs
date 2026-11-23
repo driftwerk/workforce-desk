@@ -12,12 +12,15 @@ mod scan;
 
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::process::{Child, ChildStdin, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, RecvTimeoutError};
 use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use desk_core::backend::Backend;
 use desk_core::host::Host;
+use desk_machine::callback;
 use portable_pty::{ChildKiller, PtySize, native_pty_system};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter};
@@ -45,7 +48,12 @@ pub enum Progress {
     Browser {
         url: String,
     },
-    NeedsCode,
+    /// `problem`: why the CLI turned down the code pasted last, while it
+    /// still waits for one.
+    NeedsCode {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        problem: Option<String>,
+    },
     Saving,
     /// `account`: the Desk account the sign-in went to, when it went to one.
     Done {
@@ -104,17 +112,20 @@ struct Event {
     progress: Progress,
 }
 
+/// Where what's typed into a sign-in goes.
+type Keys = Arc<Mutex<dyn Write + Send>>;
+
 /// A sign-in that's running, and how to end it.
 enum Running {
     /// `claude setup-token` on a pseudo-terminal here (macOS, Linux).
     Pty {
-        writer: Box<dyn Write + Send>,
-        killer: Box<dyn ChildKiller + Send + Sync>,
+        keys: Keys,
+        ender: PtyEnder,
     },
     /// `claude setup-token` inside WSL: `wsl.exe` over plain pipes, with a
     /// terminal of Linux's own inside (see `cli::wsl_sign_in`).
     Wsl {
-        stdin: ChildStdin,
+        keys: Keys,
         child: Arc<Mutex<Child>>,
         backend: Backend,
         /// Names its pidfile inside WSL.
@@ -130,16 +141,14 @@ impl Running {
     /// Linux side too, which isn't in Windows' process tree.
     fn end(self) {
         match self {
-            Running::Pty { mut killer, .. } => {
-                let _ = killer.kill();
-            }
+            Running::Pty { ender, .. } => ender.end(),
             Running::Wsl {
-                stdin,
+                keys,
                 child,
                 backend,
                 attempt,
             } => {
-                drop(stdin);
+                drop(keys);
                 deadline::kill_tree(&mut child.lock().expect("child"));
                 cli::stop_sign_in(&backend, Plan::Claude.program(), Some(&attempt));
             }
@@ -178,9 +187,18 @@ type Report = Arc<dyn Fn(Progress) + Send + Sync>;
 /// Opens a sign-in page in this computer's browser.
 type Open = Arc<dyn Fn(&str) + Send + Sync>;
 
+/// Reports a sign-in's progress to the page, and to Desk's log: a page by
+/// its shape only, since its query holds the sign-in's state.
 fn reporter(app: &AppHandle, plan: Plan) -> Report {
     let app = app.clone();
     Arc::new(move |progress| {
+        match &progress {
+            Progress::Browser { url } => {
+                tracing::info!(?plan, page = %callback::page_shape(url), "sign-in: its page is shown");
+            }
+            Progress::Failed { message } => tracing::info!(?plan, %message, "sign-in failed"),
+            other => tracing::info!(?plan, progress = ?other, "sign-in"),
+        }
         let _ = app.emit("login-progress", Event { plan, progress });
     })
 }
@@ -330,60 +348,112 @@ fn keep_account(backend: &Backend, account: &AccountUse, token: &str) -> eyre::R
         .ok_or_else(|| eyre::eyre!("the hub didn't say which account it kept"))
 }
 
-/// The screen up to the code prompt: what follows it may echo the code the
-/// person pasted, which no message repeats.
-fn before_code(text: &str) -> &str {
-    let lower = text.to_lowercase();
-    match lower.find("paste code") {
-        // Lowercasing can move byte offsets; cut only on a boundary.
-        Some(i) if text.is_char_boundary(i) => &text[..i],
-        Some(_) => "",
-        None => text,
+/// What `claude setup-token` runs with: the sign-in page's whole address
+/// shown (Claude Code 2.1.330 shows a shortened one otherwise).
+const SETUP_TOKEN_ENV: &[(&str, &str)] = &[("CLAUDE_CODE_FULL_SIGN_IN_LINK", "1")];
+
+/// How long a Claude sign-in waits for the browser before Desk ends it.
+const SIGN_IN_WITHIN: Duration = Duration::from_secs(10 * 60);
+/// How often a sign-in with nothing new on its screen looks whether its CLI
+/// has ended.
+const LOOK_EVERY: Duration = Duration::from_millis(250);
+/// How long what the CLI drew last may take to arrive once it has ended.
+const LAST_DRAWN_WITHIN: Duration = Duration::from_millis(500);
+/// The pause between a pasted code and its Enter, so the CLI takes the code
+/// as one paste and the Enter as a key of its own, as a person's are.
+const ENTER_AFTER: Duration = Duration::from_millis(200);
+
+/// What `from` gives, a read at a time, read on a thread of its own so the
+/// sign-in can keep an eye on its clock and its CLI meanwhile.
+fn chunks(mut from: impl Read + Send + 'static) -> mpsc::Receiver<Vec<u8>> {
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        while let Ok(n) = from.read(&mut buf) {
+            if n == 0 || tx.send(buf[..n].to_vec()).is_err() {
+                break;
+            }
+        }
+    });
+    rx
+}
+
+/// Reports what the screen shows now that wasn't told yet, opening the
+/// page when `open` says Desk does; what has been told since.
+fn tell(told: scan::Shown, now: &scan::Shown, report: &Report, open: Option<&Open>) -> scan::Shown {
+    if let Some(url) = now.page.as_ref().filter(|u| told.page.as_ref() != Some(*u)) {
+        if let Some(open) = open
+            && scan::opens_itself(url)
+        {
+            tracing::info!("sign-in: Desk opened its page");
+            open(url);
+        }
+        report(Progress::Browser { url: url.clone() });
+    }
+    if now.asks_for_code && (!told.asks_for_code || now.refused != told.refused) {
+        report(Progress::NeedsCode {
+            problem: now.refused.map(str::to_string),
+        });
+    }
+    scan::Shown {
+        page: now.page.clone().or(told.page),
+        asks_for_code: now.asks_for_code,
+        refused: now.refused,
+        ..scan::Shown::default()
     }
 }
 
-fn tail(text: &str) -> String {
-    let lines: Vec<&str> = text
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .collect();
-    lines[lines.len().saturating_sub(3)..].join(" ")
-}
-
-/// Follows `claude setup-token`'s screen until it prints the token (`Ok`)
-/// or ends (`Err` with what it showed), reporting the page to open and when
-/// it asks for a code. With `open`, Desk opens the page itself.
+/// Follows `claude setup-token`'s screen until it shows the token (`Ok`) or
+/// can't go on (`Err` with why): it failed, it ended (`ended` says so: its
+/// terminal can stay open after it, held by what it started), or nobody
+/// finished within `within`. Reports the page to open and when it waits
+/// for a code; with `open`, Desk opens the page itself.
 fn follow_claude(
-    reader: &mut dyn Read,
+    chunks: &mpsc::Receiver<Vec<u8>>,
+    mut ended: impl FnMut() -> bool,
     report: &Report,
     open: Option<&Open>,
+    within: Duration,
 ) -> Result<String, String> {
-    let (mut text, mut url_sent, mut code_asked, mut buf) =
-        (String::new(), false, false, [0u8; 4096]);
-    while let Ok(n) = reader.read(&mut buf) {
-        if n == 0 {
-            break;
-        }
-        text.push_str(&scan::plain(&String::from_utf8_lossy(&buf[..n])));
-        if !url_sent && let Some(url) = scan::sign_in_url(&text) {
-            url_sent = true;
-            if let Some(open) = open
-                && scan::opens_itself(&url)
-            {
-                open(&url);
+    let start = Instant::now();
+    let mut screen = scan::Screen::default();
+    let mut told = scan::Shown::default();
+    loop {
+        let over = match chunks.recv_timeout(LOOK_EVERY) {
+            Ok(bytes) => {
+                screen.feed(&bytes);
+                ended()
             }
-            report(Progress::Browser { url });
+            Err(RecvTimeoutError::Timeout) => ended(),
+            Err(RecvTimeoutError::Disconnected) => true,
+        };
+        if over {
+            while let Ok(bytes) = chunks.recv_timeout(LAST_DRAWN_WITHIN) {
+                screen.feed(&bytes);
+            }
         }
-        if !code_asked && scan::wants_code(&text) {
-            code_asked = true;
-            report(Progress::NeedsCode);
-        }
-        if let Some(token) = scan::claude_token(&text) {
+        let text = screen.text();
+        let now = scan::shown(&text, over);
+        if let Some(token) = now.token {
             return Ok(token);
         }
+        if let Some(why) = now.failure {
+            return Err(why);
+        }
+        told = tell(told, &now, report, open);
+        if over {
+            return Err(match scan::last_words(&text) {
+                Some(words) => format!("Claude sign-in ended without a token: {words}"),
+                None => "Claude sign-in ended without a token.".into(),
+            });
+        }
+        if start.elapsed() >= within {
+            return Err(format!(
+                "Nobody finished signing in within {} minutes, so Desk stopped it. Sign in again.",
+                within.as_secs() / 60
+            ));
+        }
     }
-    Err(text)
 }
 
 /// Where a Claude token goes, as `use_` asks: the agents' plan, a Desk
@@ -424,11 +494,8 @@ fn conclude_claude(
             report(Progress::Saving);
             report(keep_claude(backend, use_, &token));
         }
-        Err(text) => report(Progress::Failed {
-            message: format!(
-                "Claude sign-in ended without a token. {}",
-                tail(before_code(&text))
-            ),
+        Err(why) => report(Progress::Failed {
+            message: desk_core::redact::redact(&why, &[]),
         }),
     }
 }
@@ -485,13 +552,17 @@ impl Logins {
         id: u64,
         use_: ClaudeUse,
     ) -> eyre::Result<Running> {
-        let cli = cli::cli(&backend, Plan::Claude.program(), &["setup-token"], &[])
-            .map_err(|_| eyre::eyre!("Claude Code isn't installed on this computer"))?;
-        // Wide, so the token is never wrapped across lines.
+        let cli = cli::cli(
+            &backend,
+            Plan::Claude.program(),
+            &["setup-token"],
+            SETUP_TOKEN_ENV,
+        )
+        .map_err(|_| eyre::eyre!("Claude Code isn't installed on this computer"))?;
         let pair = native_pty_system()
             .openpty(PtySize {
-                rows: 50,
-                cols: 1000,
+                rows: scan::ROWS,
+                cols: scan::COLS,
                 pixel_width: 0,
                 pixel_height: 0,
             })
@@ -501,26 +572,34 @@ impl Logins {
             .spawn_command(cli.pty())
             .map_err(|e| eyre::eyre!("{e}"))?;
         drop(pair.slave);
-        let killer = child.clone_killer();
-        let mut reader = pair
-            .master
-            .try_clone_reader()
-            .map_err(|e| eyre::eyre!("{e}"))?;
-        let writer = pair.master.take_writer().map_err(|e| eyre::eyre!("{e}"))?;
+        let ender = PtyEnder::of(child.as_ref());
+        let chunks = chunks(
+            pair.master
+                .try_clone_reader()
+                .map_err(|e| eyre::eyre!("{e}"))?,
+        );
+        let keys: Keys = Arc::new(Mutex::new(
+            pair.master.take_writer().map_err(|e| eyre::eyre!("{e}"))?,
+        ));
         let slots = Arc::clone(&self.running);
         std::thread::spawn(move || {
             let _master = pair.master;
             // The CLI opens the browser itself here.
-            let read = follow_claude(&mut reader, &report, None);
-            if read.is_ok() {
-                let _ = child.kill();
-            }
-            let _ = child.wait();
+            let read = follow_claude(
+                &chunks,
+                || !matches!(child.try_wait(), Ok(None)),
+                &report,
+                None,
+                SIGN_IN_WITHIN,
+            );
+            PtyEnder::of(child.as_ref()).end();
+            let status = child.wait();
+            tracing::info!(?status, "sign-in: Claude Code ended");
             if finish(&slots, Plan::Claude, id) {
                 conclude_claude(&backend, &report, read, &use_);
             }
         });
-        Ok(Running::Pty { writer, killer })
+        Ok(Running::Pty { keys, ender })
     }
 
     /// Inside WSL (Windows): over plain pipes, every one read or written,
@@ -534,8 +613,14 @@ impl Logins {
         use_: ClaudeUse,
     ) -> eyre::Result<Running> {
         let attempt = format!("{}-{id}", std::process::id());
-        let cli = cli::wsl_sign_in(&backend, Plan::Claude.program(), &["setup-token"], &attempt)
-            .map_err(|_| eyre::eyre!("Claude Code isn't installed on this computer"))?;
+        let cli = cli::wsl_sign_in(
+            &backend,
+            Plan::Claude.program(),
+            &["setup-token"],
+            SETUP_TOKEN_ENV,
+            &attempt,
+        )
+        .map_err(|_| eyre::eyre!("Claude Code isn't installed on this computer"))?;
         let mut command = cli.command();
         deadline::isolate(&mut command);
         let mut child = command
@@ -544,7 +629,7 @@ impl Logins {
             .stderr(Stdio::piped())
             .spawn()?;
         let stdin = child.stdin.take().ok_or_else(|| eyre::eyre!("no stdin"))?;
-        let mut stdout = child
+        let stdout = child
             .stdout
             .take()
             .ok_or_else(|| eyre::eyre!("no stdout"))?;
@@ -557,6 +642,7 @@ impl Logins {
             let _ = stderr.read_to_end(&mut out);
             scan::plain(&String::from_utf8_lossy(&out))
         });
+        let chunks = chunks(stdout);
         let child = Arc::new(Mutex::new(child));
         let (waiting, slots, b, mine) = (
             Arc::clone(&child),
@@ -565,29 +651,29 @@ impl Logins {
             attempt.clone(),
         );
         std::thread::spawn(move || {
-            let read = follow_claude(&mut stdout, &report, Some(&open));
-            let done = read.is_ok();
-            if done {
-                deadline::kill_tree(&mut waiting.lock().expect("child"));
-                cli::stop_sign_in(&b, Plan::Claude.program(), Some(&mine));
-            }
-            // stdout closed: the program has ended or is about to.
-            loop {
-                if !matches!(waiting.lock().expect("child").try_wait(), Ok(None)) {
-                    break;
+            let read = follow_claude(
+                &chunks,
+                || !matches!(waiting.lock().expect("child").try_wait(), Ok(None)),
+                &report,
+                Some(&open),
+                SIGN_IN_WITHIN,
+            );
+            deadline::kill_tree(&mut waiting.lock().expect("child"));
+            cli::stop_sign_in(&b, Plan::Claude.program(), Some(&mine));
+            let status = waiting.lock().expect("child").wait();
+            tracing::info!(?status, "sign-in: Claude Code ended");
+            let read = read.map_err(|why| {
+                match errors.join().ok().as_deref().and_then(scan::last_words) {
+                    Some(said) => format!("{why} {said}"),
+                    None => why,
                 }
-                std::thread::sleep(std::time::Duration::from_millis(100));
-            }
-            let read = read.map_err(|text| match errors.join() {
-                Ok(e) if !e.trim().is_empty() => format!("{text}\n{e}"),
-                _ => text,
             });
             if finish(&slots, Plan::Claude, id) {
                 conclude_claude(&b, &report, read, &use_);
             }
         });
         Ok(Running::Wsl {
-            stdin,
+            keys: Arc::new(Mutex::new(stdin)),
             child,
             backend,
             attempt,
@@ -673,19 +759,45 @@ impl Logins {
         Ok(Running::Chatgpt { child })
     }
 
-    /// Sends the code the browser page shows back to `claude setup-token`.
+    /// Types the code the browser page shows (or the address of that page)
+    /// into `claude setup-token`, then Enter.
     pub fn code(&self, plan: Plan, code: &str) -> Result<(), String> {
-        let line = format!("{}\r", code.trim());
-        let mut slots = self.running.lock().expect("logins");
-        let writer: &mut dyn Write = match slots.get_mut(&plan).and_then(|s| s.running.as_mut()) {
-            Some(Running::Pty { writer, .. }) => writer.as_mut(),
-            Some(Running::Wsl { stdin, .. }) => stdin,
+        let code: String = callback::pasted_code(code)
+            .chars()
+            .filter(|c| !c.is_control())
+            .collect();
+        if code.is_empty() {
+            return Err("Paste the code the sign-in page shows.".into());
+        }
+        let keys = match self
+            .running
+            .lock()
+            .expect("logins")
+            .get(&plan)
+            .and_then(|s| s.running.as_ref())
+        {
+            Some(Running::Pty { keys, .. } | Running::Wsl { keys, .. }) => Arc::clone(keys),
             _ => return Err("that sign-in isn't waiting for a code".into()),
         };
-        writer
-            .write_all(line.as_bytes())
-            .and_then(|()| writer.flush())
-            .map_err(|e| e.to_string())
+        let (typed, was_typed) = mpsc::channel();
+        // The code and its Enter go in together: a second paste waits.
+        std::thread::spawn(move || {
+            let mut keys = keys.lock().expect("keys");
+            let code_in = type_in(&mut *keys, code.as_bytes());
+            let go_on = code_in.is_ok();
+            let _ = typed.send(code_in);
+            if go_on {
+                std::thread::sleep(ENTER_AFTER);
+                if let Err(e) = type_in(&mut *keys, b"\r") {
+                    tracing::warn!(?plan, error = %e, "sign-in: couldn't press Enter after the code");
+                }
+            }
+        });
+        was_typed
+            .recv()
+            .map_err(|_| "the sign-in stopped taking keys".to_string())??;
+        tracing::info!(?plan, "sign-in: a code was pasted");
+        Ok(())
     }
 
     /// Ends the plan's sign-in, if one is running. With the backend, a
@@ -705,6 +817,37 @@ impl Logins {
             cli::stop_sign_in(backend, Plan::Claude.program(), None);
         }
     }
+}
+
+/// Ends a program on a pseudo-terminal and what it started: it leads its
+/// own session, so a process it left holding the terminal goes too, and
+/// with it the reader waiting on that terminal.
+struct PtyEnder {
+    pid: Option<u32>,
+    killer: Box<dyn ChildKiller + Send + Sync>,
+}
+
+impl PtyEnder {
+    fn of(child: &(dyn portable_pty::Child + Send + Sync)) -> Self {
+        Self {
+            pid: child.process_id(),
+            killer: child.clone_killer(),
+        }
+    }
+
+    fn end(mut self) {
+        if let Some(pid) = self.pid {
+            deadline::kill_tree_of(pid);
+        }
+        let _ = self.killer.kill();
+    }
+}
+
+/// Types `bytes` into a sign-in.
+fn type_in(keys: &mut (dyn Write + Send), bytes: &[u8]) -> Result<(), String> {
+    keys.write_all(bytes)
+        .and_then(|()| keys.flush())
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -769,6 +912,7 @@ mod save_tests {
 
 #[cfg(test)]
 mod tests {
+    use super::scan::fixtures::{FULL, TOKEN, row, token_frame, waiting};
     use super::*;
 
     #[test]
@@ -828,17 +972,199 @@ mod tests {
         );
     }
 
+    /// What a sign-in reported, and the way to report it.
+    fn reports() -> (Arc<Mutex<Vec<Progress>>>, Report) {
+        let seen = Arc::new(Mutex::new(Vec::new()));
+        let into = Arc::clone(&seen);
+        (seen, Arc::new(move |p| into.lock().unwrap().push(p)))
+    }
+
+    /// A sign-in's screen as `drawn`, read a draw at a time, then (with
+    /// `ends`) its CLI gone.
+    fn follow(
+        drawn: &[Vec<u8>],
+        ends: bool,
+        within: Duration,
+    ) -> (Result<String, String>, Vec<Progress>) {
+        let (tx, rx) = mpsc::channel();
+        for d in drawn {
+            tx.send(d.clone()).unwrap();
+        }
+        let (seen, report) = reports();
+        let mut looked = 0;
+        let ended = || {
+            looked += 1;
+            ends && looked > drawn.len()
+        };
+        let read = follow_claude(&rx, ended, &report, None, within);
+        drop(tx);
+        let seen = seen.lock().unwrap().clone();
+        (read, seen)
+    }
+
     #[test]
-    fn a_failure_never_repeats_what_followed_the_code_prompt() {
-        let screen = "Opening browser\nhttps://claude.ai/oauth\nPaste code here if prompted > abc#secret\nOAuth error: invalid code";
-        let said = tail(before_code(screen));
-        assert!(!said.contains("abc#secret"), "{said}");
-        assert!(!said.contains("Paste code"), "{said}");
-        assert_eq!(said, "Opening browser https://claude.ai/oauth");
+    fn claude_code_2_1_330s_sign_in_shows_its_page_asks_for_a_code_and_gives_its_token() {
+        let (read, seen) = follow(&[waiting(FULL), token_frame(TOKEN)], false, SIGN_IN_WITHIN);
+        assert_eq!(read.as_deref(), Ok(TOKEN));
         assert_eq!(
-            tail(before_code("Error: not logged in")),
-            "Error: not logged in"
+            seen,
+            [
+                Progress::Browser { url: FULL.into() },
+                Progress::NeedsCode { problem: None }
+            ]
         );
+        assert_eq!(
+            serde_json::to_value(&seen[1]).unwrap(),
+            serde_json::json!({ "state": "needs-code" })
+        );
+    }
+
+    #[test]
+    fn a_code_turned_down_is_said_and_the_sign_in_waits_for_another() {
+        let refused = row(
+            2,
+            "That's a web address, not the code. If it's a sign-in link, open it in your browser.",
+        );
+        let (read, seen) = follow(
+            &[waiting(FULL), refused, token_frame(TOKEN)],
+            false,
+            SIGN_IN_WITHIN,
+        );
+        assert_eq!(read.as_deref(), Ok(TOKEN));
+        assert_eq!(
+            seen[1..],
+            [
+                Progress::NeedsCode { problem: None },
+                Progress::NeedsCode {
+                    problem: Some(
+                        "That's a web address, not the code. Paste the code the last page shows."
+                            .into()
+                    )
+                }
+            ]
+        );
+    }
+
+    #[test]
+    fn a_cli_that_ended_without_a_token_ends_the_sign_in_with_its_last_words() {
+        let (read, _) = follow(
+            &[b"\x1b[31mError: not logged in\x1b[39m\n".to_vec()],
+            true,
+            SIGN_IN_WITHIN,
+        );
+        assert_eq!(
+            read,
+            Err("Claude sign-in ended without a token: Error: not logged in".into())
+        );
+        let (read, _) = follow(&[], true, SIGN_IN_WITHIN);
+        assert_eq!(read, Err("Claude sign-in ended without a token.".into()));
+    }
+
+    #[test]
+    fn an_error_the_cli_waits_on_ends_the_sign_in_while_it_still_runs() {
+        let error = [
+            waiting(FULL),
+            b"\x1b[2J\x1b[H".to_vec(),
+            row(
+                1,
+                "\u{2717} OAuth error: Couldn't finish signing in. Try again.",
+            ),
+            row(1, "Press Enter to retry"),
+        ];
+        let (read, _) = follow(&error, false, SIGN_IN_WITHIN);
+        assert_eq!(
+            read,
+            Err("OAuth error: Couldn't finish signing in. Try again.".into())
+        );
+    }
+
+    #[test]
+    fn an_account_on_hold_ends_the_sign_in_and_its_appeal_page_is_never_offered_as_the_sign_in() {
+        let on_hold = [
+            waiting(FULL),
+            b"\x1b[2J\x1b[H".to_vec(),
+            row(
+                2,
+                "\u{26a0} Your account is on hold and can't sign in to Claude Code. View details or appeal: https://claude.ai/restricted",
+            ),
+        ];
+        let (read, seen) = follow(&on_hold, true, SIGN_IN_WITHIN);
+        assert_eq!(
+            read,
+            Err("Your account is on hold and can't sign in to Claude Code. View details or appeal: https://claude.ai/restricted".into())
+        );
+        assert_eq!(
+            seen,
+            [
+                Progress::Browser { url: FULL.into() },
+                Progress::NeedsCode { problem: None }
+            ]
+        );
+    }
+
+    #[test]
+    fn nobody_finishing_in_time_ends_the_sign_in() {
+        let (read, seen) = follow(&[waiting(FULL)], false, Duration::ZERO);
+        assert_eq!(
+            read,
+            Err(
+                "Nobody finished signing in within 0 minutes, so Desk stopped it. Sign in again."
+                    .into()
+            )
+        );
+        assert_eq!(seen.len(), 2);
+    }
+
+    /// The Mac's stall: the CLI ends, but what it started holds its
+    /// terminal open, so no end of output ever comes.
+    #[cfg(unix)]
+    #[test]
+    fn a_cli_that_ends_is_noticed_though_its_terminal_stays_open() {
+        let pair = native_pty_system()
+            .openpty(PtySize {
+                rows: scan::ROWS,
+                cols: scan::COLS,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .unwrap();
+        let mut command = portable_pty::CommandBuilder::new("/bin/sh");
+        command.args([
+            "-c",
+            "trap '' HUP; sleep 30 & echo 'Error: the browser sign-in failed'; exit 3",
+        ]);
+        let mut child = pair.slave.spawn_command(command).unwrap();
+        drop(pair.slave);
+        let chunks = chunks(pair.master.try_clone_reader().unwrap());
+        let (_, report) = reports();
+        let start = Instant::now();
+        let read = follow_claude(
+            &chunks,
+            || !matches!(child.try_wait(), Ok(None)),
+            &report,
+            None,
+            SIGN_IN_WITHIN,
+        );
+        assert_eq!(
+            read,
+            Err("Claude sign-in ended without a token: Error: the browser sign-in failed".into())
+        );
+        assert!(start.elapsed() < Duration::from_secs(10));
+
+        let group = format!("-{}", child.process_id().unwrap());
+        let held = std::process::Command::new("kill")
+            .args(["-0", "--", &group])
+            .stderr(Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success());
+        assert!(held, "what the CLI started still holds its terminal");
+        PtyEnder::of(child.as_ref()).end();
+        let reader_ended = loop {
+            if let Err(e) = chunks.recv_timeout(Duration::from_secs(10)) {
+                break e;
+            }
+        };
+        assert_eq!(reader_ended, RecvTimeoutError::Disconnected);
     }
 }
 

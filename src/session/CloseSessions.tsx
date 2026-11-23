@@ -8,8 +8,9 @@ import { MachineTag } from "../machines/OnMachine";
 import { Confirm } from "../ui/Confirm";
 import { homeShort } from "../ui/paths";
 import { plainError } from "../ui/plainError";
-import { endable } from "./actions";
-import { endSessionNow } from "./lifecycle";
+import { plural } from "../unread/rows";
+import { endable, runs, runsElsewhere } from "./actions";
+import { endSessionNow, removeSession } from "./lifecycle";
 
 /** A picked session, by its sidebar row's key, as the sidebar names it. */
 export interface Closable {
@@ -39,6 +40,18 @@ const end = (c: Closable): Promise<void> => {
   return why ? Promise.reject(new Error(why)) : endSessionNow(sessionKey(c.session));
 };
 
+/** Does `act` to every picked session at once. All done, the selection is
+ *  let go; otherwise only those refused stay picked, each saying why. */
+export async function settle(sessions: readonly Closable[], act: (c: Closable) => Promise<unknown>, done: string, said: (refused: Record<string, string>) => void): Promise<void> {
+  const tried = await Promise.allSettled(sessions.map(act));
+  const refused = Object.fromEntries(tried.flatMap((r, i) => (r.status === "rejected" ? [[sessions[i]!.key, plainError(r.reason)]] : [])));
+  said(refused);
+  const left = Object.keys(refused).length;
+  if (!left) return clearSelection();
+  keepOnly((key) => key in refused);
+  throw new Error(`${left} of ${sessions.length} weren’t ${done}: each says why.`);
+}
+
 /** One confirm for closing every picked session: what each would leave, as
  *  its own hub reads it (a machine's on that machine), then each ended as
  *  End session ends one. Those refused stay picked, each saying why. */
@@ -64,19 +77,9 @@ export function CloseSessions({ sessions, onClose }: { sessions: Closable[]; onC
     };
   }, [ids]);
 
-  const close = async () => {
-    const tried = await Promise.allSettled(sessions.map(end));
-    const now = Object.fromEntries(tried.flatMap((r, i) => (r.status === "rejected" ? [[sessions[i]!.key, plainError(r.reason)]] : [])));
-    setRefused(now);
-    const left = Object.keys(now).length;
-    if (!left) return clearSelection();
-    keepOnly((key) => key in now);
-    throw new Error(`${left} of ${sessions.length} weren’t closed: each says why.`);
-  };
-
   const n = sessions.length;
   return (
-    <Confirm title={`Close ${n} session${n === 1 ? "" : "s"}?`} action={`Close ${n}`} disabled={!n} onConfirm={close} onClose={onClose}>
+    <Confirm title={`Close ${plural(n, "session")}?`} action={`Close ${n}`} disabled={!n} onConfirm={() => settle(sessions, end, "closed", setRefused)} onClose={onClose}>
       <p className="muted">Each is ended as End session ends one: it stops, leaves the sidebar, and you can resume it later from Settings → Sessions.</p>
       <ul className="close-list" aria-label="Sessions to close">
         {sessions.map((c) => (
@@ -90,6 +93,27 @@ export function CloseSessions({ sessions, onClose }: { sessions: Closable[]; onC
 function CloseRow({ c, check, refused }: { c: Closable; check: Check; refused: string | null }) {
   const left = typeof check === "object" ? leftBehind(check) : [];
   const folder = typeof check === "object" ? check.folder : c.session.cwd;
+  const why: Why = refused
+    ? { text: refused, warn: true }
+    : check === "checking"
+      ? { text: "Checking what it would leave…" }
+      : check === "unread"
+        ? { text: "What it would leave couldn’t be checked." }
+        : left.length
+          ? { text: left.join(" · "), warn: true }
+          : { text: "Nothing left behind." };
+  return <PickedRow c={c} why={why} folder={folder} />;
+}
+
+/** What a picked session's row says about it: a warning, or a quiet note. */
+interface Why {
+  text: string;
+  warn?: boolean;
+}
+
+/** A picked session in a confirm's list: its dot, name and machine, then
+ *  what the confirm says about it, and where it works. */
+function PickedRow({ c, why, folder }: { c: Closable; why: Why | null; folder?: string | null }) {
   return (
     <li className="close-row">
       <span className="close-row-head">
@@ -97,18 +121,53 @@ function CloseRow({ c, check, refused }: { c: Closable; check: Check; refused: s
         <span className="close-row-name mono">{c.name}</span>
         <MachineTag machine={machineOf(c.session)} />
       </span>
-      {refused ? (
-        <span className="close-row-why small state-blocked">{refused}</span>
-      ) : check === "checking" ? (
-        <span className="close-row-why small faint">Checking what it would leave…</span>
-      ) : check === "unread" ? (
-        <span className="close-row-why small faint">What it would leave couldn’t be checked.</span>
-      ) : left.length ? (
-        <span className="close-row-why small state-blocked">{left.join(" · ")}</span>
-      ) : (
-        <span className="close-row-why small faint">Nothing left behind.</span>
-      )}
+      {why && <span className={`close-row-why small ${why.warn ? "state-blocked" : "faint"}`}>{why.text}</span>}
       {folder && <span className="close-row-folder small faint mono">{homeShort(folder)}</span>}
     </li>
+  );
+}
+
+/** What removing `c` does that it should know, or why it wasn't. */
+const removeWhy = (c: Closable, refused: string | undefined): Why | null =>
+  refused
+    ? { text: refused, warn: true }
+    : c.session.live
+      ? { text: "Running: it stops, and its transcript is kept." }
+      : runsElsewhere(c.session)
+        ? { text: "Runs in its own terminal: it keeps running there, and Desk stops tracking it." }
+        : null;
+
+/** One confirm for removing every picked session, as Remove removes one:
+ *  Desk forgets each, and deletes the transcripts of those not running when
+ *  asked. Those refused stay picked, each saying why. */
+export function RemoveSessions({ sessions, onClose }: { sessions: Closable[]; onClose: () => void }) {
+  const [transcripts, setTranscripts] = useState(false);
+  const [refused, setRefused] = useState<Record<string, string>>({});
+  const running = sessions.filter((c) => runs(c.session)).length;
+  const stopping = sessions.filter((c) => c.session.live).length;
+  const elsewhere = sessions.filter((c) => runsElsewhere(c.session)).length;
+  const n = sessions.length;
+  const remove = (c: Closable) => removeSession(sessionKey(c.session), transcripts && !runs(c.session));
+  return (
+    <Confirm title={`Remove ${plural(n, "session")}?`} action={`Remove ${n}`} disabled={!n} onConfirm={() => settle(sessions, remove, "removed", setRefused)} onClose={onClose}>
+      <p className="muted">
+        Desk forgets each — its card, its Floor turns, its unread and its Activity — and won't pick it up again.
+        {stopping ? ` ${stopping === n ? "They're" : `${stopping} of them ${stopping === 1 ? "is" : "are"}`} running in Desk, so they stop.` : ""}
+        {elsewhere ? ` ${elsewhere === n ? "They keep" : `${elsewhere} of them ${elsewhere === 1 ? "keeps" : "keep"}`} running in their own terminals; Desk stops tracking them.` : ""} You
+        can track them again from Settings → Sessions.
+      </p>
+      <ul className="close-list" aria-label="Sessions to remove">
+        {sessions.map((c) => (
+          <PickedRow key={c.key} c={c} why={removeWhy(c, refused[c.key])} />
+        ))}
+      </ul>
+      <label className="confirm-check small">
+        <input type="checkbox" checked={transcripts && running < n} disabled={running === n} onChange={(e) => setTranscripts(e.target.checked)} />
+        <span>
+          Also delete their transcripts
+          {running === n ? " (not while they run)" : transcripts ? " — they can't be resumed after this" : ""}
+        </span>
+      </label>
+    </Confirm>
   );
 }

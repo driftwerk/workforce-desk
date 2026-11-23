@@ -19,6 +19,7 @@ import { monoStack } from "../theme/tokens";
 import { minimumContrast, xtermTheme } from "../theme/xterm";
 import { linkClicks } from "./linkClicks";
 import { Viewer } from "./viewer";
+import { registerTerminal } from "../shell/selectAll";
 
 /** What a link a program prints in a terminal does when clicked (Claude
  *  Code's sign-in page, say, printed as an OSC 8 link): the native side
@@ -109,6 +110,7 @@ export function Terminal({
     x.loadAddon(fit);
     x.open(host.current);
     term.current = x;
+    const unregister = x.element ? registerTerminal(x.element, x) : () => {};
     let ws: DeskSocket | null = null;
     const isOpen = () => ws?.readyState === WebSocket.OPEN;
     const encoder = new TextEncoder();
@@ -260,6 +262,7 @@ export function Terminal({
       input.dispose();
       links.dispose();
       ws?.close();
+      unregister();
       x.dispose();
       term.current = null;
       viewerRef.current = null;
