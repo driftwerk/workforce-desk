@@ -35,6 +35,10 @@ export const whyWaiting = (m: LineMessage, session: Session, now = Date.now()): 
       return `You're driving ${name}: its boss's messages go in once you hand it back.${forHow}`;
     case "mode_ending":
       return `Desk is starting ${name} again in its own mode: this goes in after that.${forHow}`;
+    case "awaited":
+      return `${name}'s call waits on this answer: it takes it as the call's result.`;
+    case "behind":
+      return `An earlier message is on its way into ${name} and hasn't been said to be there yet: this goes in after it, in the order they were sent.${forHow}`;
     default:
       return `This goes in as soon as ${name} can take it.${forHow}`;
   }
