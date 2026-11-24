@@ -5,7 +5,9 @@
 //!
 //! - macOS: the running process's own code signature (`codesign --verify`
 //!   on its pid, which checks the process, not the file on disk) must be
-//!   Google's (team `EQHXZ8M8AV`).
+//!   Google's (team `EQHXZ8M8AV`) for one of Chrome's channels. Its program
+//!   is in a Chrome app, or in the code-sign clone (`….app.bundle`) Chrome
+//!   runs from once an update replaced its app on disk under it.
 //! - Windows: the program must be named `chrome.exe`, wherever it is
 //!   installed (machine-wide under Program Files, or per person under
 //!   AppData, common without admin rights), and its Authenticode signature
@@ -22,26 +24,23 @@
 
 use std::path::{Path, PathBuf};
 
+/// Chrome's channels' programs on macOS.
+const MAC_CHANNELS: [&str; 4] = [
+    "Google Chrome",
+    "Google Chrome Beta",
+    "Google Chrome Dev",
+    "Google Chrome Canary",
+];
+
 /// Whether `exe` is Google Chrome's program on `os`. A development build
 /// also takes Chrome for Testing, which the end-to-end test runs.
 pub fn is_chrome(os: &str, exe: &Path, development: bool) -> bool {
     let s = exe.to_string_lossy();
     match os {
-        "macos" => {
-            let channels = [
-                "Google Chrome",
-                "Google Chrome Beta",
-                "Google Chrome Dev",
-                "Google Chrome Canary",
-            ];
-            channels
-                .iter()
-                .any(|c| s.ends_with(&format!("/{c}.app/Contents/MacOS/{c}")))
-                || (development
-                    && s.ends_with(
-                        "/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing",
-                    ))
-        }
+        "macos" => MAC_CHANNELS
+            .iter()
+            .chain(development.then_some(&"Google Chrome for Testing"))
+            .any(|program| is_mac_program(&s, program)),
         "linux" => {
             [
                 "/opt/google/chrome/chrome",
@@ -57,6 +56,14 @@ pub fn is_chrome(os: &str, exe: &Path, development: bool) -> bool {
         }
         _ => false,
     }
+}
+
+/// Whether `exe` is the macOS `program`, in its app or in Chrome's
+/// code-sign clone of it.
+fn is_mac_program(exe: &str, program: &str) -> bool {
+    ["app", "app.bundle"]
+        .iter()
+        .any(|app| exe.ends_with(&format!("/{program}.{app}/Contents/MacOS/{program}")))
 }
 
 /// Whether `exe`, on Windows, is the `cmd.exe` Chrome starts a host
@@ -102,8 +109,51 @@ pub fn ancestry() -> Vec<Up> {
     out
 }
 
-/// Whether this host was started by Google Chrome.
-pub fn started_by_chrome() -> bool {
+impl std::fmt::Display for Up {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?} (pid {})", self.exe, self.pid)
+    }
+}
+
+/// Why this host isn't taken as started by Google Chrome, with the
+/// processes above it that were seen; it reads after "started by".
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotChrome {
+    /// None of them is Chrome's program.
+    Other(Vec<Up>),
+    /// Chrome's program, but not signed by Google.
+    Unsigned(Up),
+    /// They changed while they were checked.
+    Changed(Vec<Up>),
+}
+
+impl std::fmt::Display for NotChrome {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let chain = |up: &[Up]| {
+            up.iter()
+                .map(Up::to_string)
+                .collect::<Vec<_>>()
+                .join(" under ")
+        };
+        match self {
+            Self::Other(up) if up.is_empty() => {
+                write!(f, "started by a process whose program couldn't be read")
+            }
+            Self::Other(up) => write!(f, "started by {}, not Google Chrome", chain(up)),
+            Self::Unsigned(chrome) => {
+                write!(f, "started by {chrome}, which isn't signed by Google")
+            }
+            Self::Changed(up) => write!(
+                f,
+                "started by {}, which changed while it was checked",
+                chain(up)
+            ),
+        }
+    }
+}
+
+/// Whether this host was started by Google Chrome, and why not.
+pub fn started_by_chrome() -> Result<(), NotChrome> {
     let os = std::env::consts::OS;
     let development = cfg!(debug_assertions);
     let up = ancestry();
@@ -121,17 +171,22 @@ pub fn started_by_chrome() -> bool {
         _ => None,
     };
     let Some(chrome) = chrome else {
-        return false;
+        return Err(NotChrome::Other(up));
     };
     if !signed_by_google(chrome) {
-        return false;
+        return Err(NotChrome::Unsigned(chrome.clone()));
     }
     // Still the processes checked: one that exited meanwhile, its pid
     // reused by another, or this host left to the system, is refused.
-    ancestry()
+    if ancestry()
         .iter()
         .map(|u| u.pid)
         .eq(up.iter().map(|u| u.pid))
+    {
+        Ok(())
+    } else {
+        Err(NotChrome::Changed(up))
+    }
 }
 
 /// On macOS, in a release, the running Chrome's signature is Google's own:
@@ -144,7 +199,9 @@ fn signed_by_google(chrome: &Up) -> bool {
     std::process::Command::new("/usr/bin/codesign")
         .args([
             "--verify",
-            "-R=anchor apple generic and certificate leaf[subject.OU] = EQHXZ8M8AV",
+            "-R=anchor apple generic and certificate leaf[subject.OU] = EQHXZ8M8AV \
+             and (identifier \"com.google.Chrome\" or identifier \"com.google.Chrome.beta\" \
+             or identifier \"com.google.Chrome.dev\" or identifier \"com.google.Chrome.canary\")",
         ])
         .arg(chrome.pid.to_string())
         .stdout(std::process::Stdio::null())
@@ -445,11 +502,75 @@ mod tests {
     }
 
     #[test]
+    fn chrome_run_from_its_code_sign_clone_counts() {
+        let mac = |p: &str, dev| is_chrome("macos", Path::new(p), dev);
+        let clone = |program: &str| {
+            format!(
+                "/private/var/folders/yz/4c7q1g7x04v6pg45_vpscr3w0000gn/X/com.google.Chrome.code_sign_clone/code_sign_clone.aCurHr/{program}.app.bundle/Contents/MacOS/{program}"
+            )
+        };
+        for program in MAC_CHANNELS {
+            assert!(mac(&clone(program), false), "{program}");
+        }
+        let cft = clone("Google Chrome for Testing");
+        assert!(!mac(&cft, false), "not in a release");
+        assert!(mac(&cft, true));
+        for bad in [
+            clone("Google Chrome").replace("/MacOS/Google Chrome", "/MacOS/evil"),
+            clone("Google Chrome").replace(".app.bundle", ".bundle"),
+            clone("Google Chrome").replace("Google Chrome.app.bundle", "Evil.app.bundle"),
+            format!("{}.bak", clone("Google Chrome")),
+        ] {
+            assert!(!mac(&bad, false), "{bad}");
+        }
+    }
+
+    #[test]
+    fn a_refusal_says_what_started_the_host() {
+        let up = |pid, exe: &str| Up {
+            pid,
+            exe: PathBuf::from(exe),
+        };
+        let shell = up(41, "/bin/zsh");
+        let term = up(
+            40,
+            "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal",
+        );
+        assert_eq!(
+            NotChrome::Other(vec![shell.clone(), term]).to_string(),
+            r#"started by "/bin/zsh" (pid 41) under "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal" (pid 40), not Google Chrome"#
+        );
+        assert_eq!(
+            NotChrome::Other(Vec::new()).to_string(),
+            "started by a process whose program couldn't be read"
+        );
+        assert_eq!(
+            NotChrome::Unsigned(shell.clone()).to_string(),
+            r#"started by "/bin/zsh" (pid 41), which isn't signed by Google"#
+        );
+        assert_eq!(
+            NotChrome::Changed(vec![shell]).to_string(),
+            r#"started by "/bin/zsh" (pid 41), which changed while it was checked"#
+        );
+    }
+
+    #[test]
+    fn a_parents_path_cannot_forge_a_log_line() {
+        let forged = Up {
+            pid: 7,
+            exe: PathBuf::from("/tmp/x\n2026-11-24 INFO Desk's Chrome extension said hello"),
+        };
+        let said = NotChrome::Other(vec![forged]).to_string();
+        assert!(!said.contains('\n'), "{said}");
+        assert!(said.contains(r"/tmp/x\n2026-11-24"), "{said}");
+    }
+
+    #[test]
     fn this_process_has_a_parent_to_check() {
         // Run by cargo, never by Chrome: it is read, and it isn't Chrome.
         if cfg!(any(target_os = "linux", target_os = "macos", windows)) {
             assert!(!ancestry().is_empty());
-            assert!(!started_by_chrome());
+            assert!(started_by_chrome().is_err());
         }
     }
 }

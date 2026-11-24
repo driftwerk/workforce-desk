@@ -67,14 +67,22 @@ export class Link {
     this.set({ state: "connecting", label: me.label });
     const port = this.connect();
     this.port = port;
+    // Desk Helper's own refusal is the first it says, before it exits; once
+    // it relays, it always says `expects` first.
+    let heard = false;
+    let helperRefused = false;
     port.onDisconnect((why) => {
       if (this.port !== port) return;
       this.port = null;
-      this.set({ state: "no-desk", why: why ?? "Desk isn't running on this computer.", activity: null });
+      this.set(helperRefused ? { activity: null } : { state: "no-desk", why: why ?? "Desk isn't running on this computer.", activity: null });
       this.later(() => void this.start(), this.retry);
       this.retry = Math.min(this.retry * 2, 60_000);
     });
-    port.onMessage((raw) => void this.take(raw, me, port));
+    port.onMessage((raw) => {
+      if (!heard) helperRefused = fromHub(raw)?.type === "refused";
+      heard = true;
+      void this.take(raw, me, port);
+    });
     port.post({ type: "hello", protocol: PROTOCOL, revision: this.revision, version: this.version, key: me.publicKey, label: me.label });
   }
 

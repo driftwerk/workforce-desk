@@ -101,6 +101,23 @@ fn refusal(why: &str) -> Vec<u8> {
     serde_json::to_vec(&serde_json::json!({ "type": "refused", "why": why })).unwrap_or_default()
 }
 
+/// Why the host won't relay for `origin`, if it won't: what it logs, with
+/// what it saw, and what it tells the extension.
+fn refused(origin: &str) -> Option<(String, &'static str)> {
+    if !called_by(origin, &extension_ids()) {
+        return Some((
+            format!("Chrome started it for {origin:?}, which isn't Desk's extension"),
+            "Desk serves its own extension only.",
+        ));
+    }
+    parent::started_by_chrome().err().map(|e| {
+        (
+            format!("it was {e}"),
+            "Desk Helper was started by something other than Google Chrome.",
+        )
+    })
+}
+
 /// Whether `frame` is the extension's hello: it is said again to the hub
 /// on every new connection.
 fn is_hello(frame: &[u8]) -> bool {
@@ -169,20 +186,13 @@ pub fn socket_url(gateway_url: &str) -> Result<String> {
 /// Runs the host for Chrome: `args` as Chrome gave them (the caller's
 /// origin first), `hub` reading the local hub. The process's exit code.
 pub fn run(args: &[String], hub: impl Fn() -> Result<Option<Hub>> + Send + Sync + 'static) -> i32 {
-    let mut stdout = std::io::stdout();
     let origin = args.first().map(String::as_str).unwrap_or_default();
-    if !called_by(origin, &extension_ids()) {
-        let _ = write_frame(&mut stdout, &refusal("Desk serves its own extension only."));
-        return 2;
-    }
-    if !parent::started_by_chrome() {
-        let _ = write_frame(
-            &mut stdout,
-            &refusal("Desk Helper was started by something other than Google Chrome."),
-        );
-        return 2;
-    }
     let log = init_logging();
+    if let Some((logged, told)) = refused(origin) {
+        tracing::warn!("Desk Helper refused to relay: {logged}");
+        let _ = write_frame(&mut std::io::stdout(), &refusal(told));
+        return 2;
+    }
     let Ok(rt) = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)
         .enable_all()
@@ -390,6 +400,26 @@ async fn connect(hub: &Hub) -> Result<Socket> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_refusal_is_logged_with_what_was_seen() {
+        let (logged, told) =
+            refused("chrome-extension://pppppppppppppppppppppppppppppppp/").unwrap();
+        assert_eq!(
+            logged,
+            r#"Chrome started it for "chrome-extension://pppppppppppppppppppppppppppppppp/", which isn't Desk's extension"#
+        );
+        assert_eq!(told, "Desk serves its own extension only.");
+        // Run by cargo, never by Chrome: its parent is named.
+        let (logged, told) = refused(&crate::origin_of(crate::STORE_ID)).unwrap();
+        assert!(logged.starts_with("it was started by "), "{logged}");
+        assert_eq!(
+            told,
+            "Desk Helper was started by something other than Google Chrome."
+        );
+        let v: serde_json::Value = serde_json::from_slice(&refusal(told)).unwrap();
+        assert_eq!(v, serde_json::json!({ "type": "refused", "why": told }));
+    }
 
     #[test]
     fn frames_are_a_length_then_json() {
