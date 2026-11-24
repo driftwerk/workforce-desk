@@ -40,7 +40,7 @@ export const chromeLine = (c: BrowserSettingsView["chrome"]): { text: string; to
   const pending = c.profiles.some((p) => p.state === "pending" && p.connected);
   if (pending) return { text: "A Chrome is asking to connect. Check its code below, then confirm it.", tone: "blocked" };
   const used = c.profiles.find((p) => p.connected && p.outdated);
-  if (used?.outdated === "reload") return { text: "Desk’s extension in your Chrome is an old build that can’t update itself. Reload it once, below: from then on it keeps itself up to date.", tone: "blocked" };
+  if (used?.outdated === "reload") return { text: "Desk’s extension in your Chrome is an older build than this Desk needs, and it didn’t update itself. Reload it once, below.", tone: "blocked" };
   if (used?.outdated === "updating") return { text: "Desk’s extension in your Chrome is updating itself.", tone: "" };
   if (c.connected) return { text: "Connected. Desk works in a window of its own in your Chrome, signed in as you.", tone: "done" };
   if (c.profiles.some((p) => p.state === "confirmed")) return { text: "Not connected now: open Chrome and Desk connects by itself.", tone: "" };

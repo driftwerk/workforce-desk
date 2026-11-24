@@ -153,7 +153,7 @@ it("lists the confirmed Chromes: which is connected, which Desk uses, and forget
 it("asks the person to reload an extension too old to update itself, opening Chrome's page for it", async () => {
   const page = "chrome://extensions/?id=dghneofijcmcoipiebmbhehamminngmd";
   await show(api(view({}, { connected: true, profiles: [profile({ outdated: "reload", reload_at: page })] })));
-  expect(screen.getByText(/old build that can’t update itself/).className).toContain("state-blocked");
+  expect(screen.getByText(/older build than this Desk needs, and it didn’t update itself/).className).toContain("state-blocked");
   expect(screen.getByText(/press the reload arrow on Desk’s card/)).toBeTruthy();
   fireEvent.click(screen.getByRole("button", { name: "Open Chrome’s page for it" }));
   expect(inChrome).toEqual([page]);

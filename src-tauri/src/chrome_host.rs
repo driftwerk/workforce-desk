@@ -100,13 +100,15 @@ pub fn open_chrome_extensions(page: String) -> crate::CommandResult<()> {
         .map_err(|e| format!("Desk couldn't open Chrome: {e}"))
 }
 
-/// Whether `page` is Chrome's extensions page, or it for one of Desk's.
+/// Whether `page` is Chrome's extensions page, or it for one extension.
+/// Any id shaped like one is: an unpacked build's comes from its folder's
+/// path, so no list holds it, and the page only shows the extension.
 fn is_extensions_page(page: &str) -> bool {
     match page.strip_prefix("chrome://extensions/") {
         Some("") => true,
         Some(rest) => rest
             .strip_prefix("?id=")
-            .is_some_and(|id| desk_chrome_host::extension_ids().contains(&id)),
+            .is_some_and(desk_chrome_host::is_extension_id),
         None => false,
     }
 }
@@ -171,13 +173,21 @@ mod extensions_page {
     use super::*;
 
     #[test]
-    fn only_chromes_page_for_desks_extension_is_opened() {
+    fn only_chromes_page_for_an_extension_is_opened() {
         assert!(is_extensions_page("chrome://extensions/"));
-        for id in desk_chrome_host::extension_ids() {
+        // An unpacked build's id, from its folder's path
+        // (/Users/sarah/Desk/extension/dist), is in no list.
+        let unpacked = "jnfacggogodlefcelomggcoebafiefom";
+        for id in desk_chrome_host::extension_ids()
+            .into_iter()
+            .chain([unpacked])
+        {
             assert!(is_extensions_page(&format!("chrome://extensions/?id={id}")));
         }
         for page in [
-            "chrome://extensions/?id=pppppppppppppppppppppppppppppppp",
+            "chrome://extensions/?id=qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+            "chrome://extensions/?id=jnfacggogodlefcelomggcoebafiefo",
+            "chrome://extensions/?id=jnfacggogodlefcelomggcoebafiefom&x=1",
             "chrome://settings/",
             "chrome://extensions/?id=",
             "https://chrome://extensions/",

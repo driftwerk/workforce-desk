@@ -34,6 +34,7 @@
     "allow-local-hub-socket-open",
     "allow-machine-fetch",
     "allow-open-terminal-link",
+    "allow-open-chrome-extensions",
     "allow-machine-socket-open",
     "allow-machines-list",
     "allow-machine-public-key",

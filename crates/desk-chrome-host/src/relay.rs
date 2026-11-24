@@ -225,6 +225,9 @@ async fn relay(
     });
     let hub = std::sync::Arc::new(hub);
     let mut hello: Option<Vec<u8>> = None;
+    // The extension's word that its update didn't take, said again to a hub
+    // that comes back, as its hello is.
+    let mut stuck: Option<Vec<u8>> = None;
     let mut wait = Duration::from_secs(1);
     let me = Program::now();
     loop {
@@ -261,10 +264,12 @@ async fn relay(
                             Some(f) if is_hello(&f) => {
                                 greet(&f);
                                 hello = Some(stamped(&f, extension));
+                                stuck = None;
                             }
                             Some(f) => {
                                 if let Some(line) = revision::updating(&f) {
                                     tracing::info!("{line}");
+                                    stuck = revision::for_hub(&f).then_some(f);
                                 }
                             }
                             None => return 0,
@@ -277,12 +282,23 @@ async fn relay(
         };
         wait = Duration::from_secs(1);
         let (mut to_hub, mut from_hub) = ws.split();
-        if let Some(h) = &hello
-            && to_hub
-                .send(Message::text(String::from_utf8_lossy(h).into_owned()))
+        // Said again: its hello, then an update of its that didn't take.
+        let again: Vec<&Vec<u8>> = match &hello {
+            Some(h) => std::iter::once(h).chain(&stuck).collect(),
+            None => Vec::new(),
+        };
+        let mut lost = false;
+        for f in again {
+            if to_hub
+                .send(Message::text(String::from_utf8_lossy(f).into_owned()))
                 .await
                 .is_err()
-        {
+            {
+                lost = true;
+                break;
+            }
+        }
+        if lost {
             continue;
         }
         // The hub may stay up through an install that replaced this
@@ -304,11 +320,17 @@ async fn relay(
                             greet(&f);
                             let f = stamped(&f, extension);
                             hello = Some(f.clone());
+                            stuck = None;
                             f
                         } else if let Some(line) = revision::updating(&f) {
-                            // Between the extension and Desk Helper alone.
                             tracing::info!("{line}");
-                            continue;
+                            stuck = revision::for_hub(&f).then(|| f.clone());
+                            // Between the extension and Desk Helper alone,
+                            // but for an update that didn't take.
+                            if stuck.is_none() {
+                                continue;
+                            }
+                            f
                         } else {
                             f
                         };

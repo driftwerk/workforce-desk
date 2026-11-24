@@ -4,8 +4,9 @@
 //! `extension/dist`. Desk Helper is built with the revision beside it
 //! (`extension/protocol/desk-helper.json`) and says it to the extension on
 //! every hello; one older and unpacked reloads itself, once per revision,
-//! and says so first. That message, and this one, are between the two of
-//! them: neither reaches the hub.
+//! and says so first. Those messages are between the two of them, but one
+//! saying its update didn't take: the hub hears that, and asks the person
+//! to reload it ([`for_hub`]).
 //!
 //! What's logged is plain: which revision Chrome runs, which Desk expects,
 //! and what the extension did about it.
@@ -80,6 +81,15 @@ pub fn updating(frame: &[u8]) -> Option<String> {
             "Desk's extension reloaded itself for revision {r} already and is still older: its folder (extension/dist) wasn't rebuilt. Run `npm run extension` and reload it in chrome://extensions."
         ),
         _ => "Desk's extension said something about updating that Desk doesn't know.".to_string(),
+    })
+}
+
+/// Whether the extension's answer `frame` goes on to the hub: it says its
+/// update didn't take (its folder isn't built at the revision, or it
+/// reloaded once and is still older), so it is reloaded by hand.
+pub fn for_hub(frame: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(frame).is_ok_and(|v| {
+        v["type"] == "updating" && matches!(v["outcome"].as_str(), Some("unbuilt" | "tried"))
     })
 }
 
@@ -160,20 +170,23 @@ mod tests {
     }
 
     #[test]
-    fn the_extensions_answer_is_known_and_logged_never_relayed() {
+    fn the_extensions_answer_is_logged_and_only_an_update_that_didnt_take_relayed() {
         let f = fixture();
-        for (k, says) in [
-            ("reloading", "reloads itself"),
-            ("store", "Web Store"),
-            ("unbuilt", "isn't built"),
-            ("tried", "wasn't rebuilt"),
+        for (k, says, relayed) in [
+            ("reloading", "reloads itself", false),
+            ("store", "Web Store", false),
+            ("unbuilt", "isn't built", true),
+            ("tried", "wasn't rebuilt", true),
         ] {
             let frame = serde_json::to_vec(&f["from_chrome"][k]).unwrap();
             let line = updating(&frame).unwrap();
             assert!(line.contains(says), "{k}: {line}");
+            assert_eq!(for_hub(&frame), relayed, "{k}");
         }
         assert_eq!(updating(br#"{"type":"result","id":1}"#), None);
         assert_eq!(updating(b"not json"), None);
+        assert!(!for_hub(br#"{"type":"result","id":1,"outcome":"tried"}"#));
+        assert!(!for_hub(b"not json"));
     }
 
     #[test]
