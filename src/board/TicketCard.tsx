@@ -1,7 +1,7 @@
 import { useId, useState, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 import { ChargeBadge } from "../crew/ChargeBadge";
 import { useCharge } from "../crew/chargeStore";
-import { lookOf, waitsOnYou } from "../floor/background";
+import { heldFor, lookOf, waitsOnYou } from "../floor/background";
 import { useSessionName } from "../groups/names";
 import { useHubLayout } from "../groups/hubLayout";
 import { askMove, ticketSubject } from "../groups/move";
@@ -47,6 +47,8 @@ export function Assignee({ who, waiting, mark }: { who: ActivityParty; waiting: 
       {mark}
       {waiting && session && waitsOnYou(session) ? (
         <span className="state-blocked">{session.state === "asking" ? "asked you something" : "needs you"}</span>
+      ) : session && heldFor(session) ? (
+        <span className="state-blocked">{heldFor(session)}</span>
       ) : (
         <ChargeBadge charge={charge} session={who.kind === "session" ? who.id : null} />
       )}

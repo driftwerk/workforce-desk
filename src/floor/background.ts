@@ -60,5 +60,11 @@ export const lookOf = (s: Pick<Session, "state" | "background"> & { bossHas?: st
  *  and no boss has it (one that does deals with it first). */
 export const waitsOnYou = (s: Pick<Session, "state"> & { bossHas?: string | null }): boolean => stopped(s) && !s.bossHas;
 
+/** What its boss holds a session for, as the person's to answer, while it
+ *  is stopped on nothing it asked itself: "Desk asks you: Ship the small
+ *  scope or the whole ticket?" (DW-755). */
+export const heldFor = (s: Pick<Session, "state"> & { bossHas?: string | null; waitsOnYou?: string | null }): string | null =>
+  !stopped(s) && !s.bossHas && s.waitsOnYou ? s.waitsOnYou : null;
+
 /** What a session its boss deals with says: "Desk has it". */
 export const handledText = (s: { bossHas?: string | null }): string => `${s.bossHas || "Your boss"} has it`;
