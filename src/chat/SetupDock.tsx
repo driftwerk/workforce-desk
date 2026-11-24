@@ -90,7 +90,7 @@ export function Dock({
     };
   }, [api, anchor, every.busy, every.idle]);
 
-  const mine = setups.filter((s) => ownerOf(s.id) === anchor && !closed.has(s.id) && (!settled(s) || kept.has(s.id)));
+  const mine = setups.filter((s) => s.ended == null && ownerOf(s.id) === anchor && !closed.has(s.id) && (!settled(s) || kept.has(s.id)));
   const fresh = mine.filter((s) => !settled(s) && !kept.has(s.id)).map((s) => s.id);
   // One a message shows now is the message's: once it settles there, it
   // doesn't come back here.

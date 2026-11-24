@@ -107,6 +107,18 @@ fn is_hello(frame: &[u8]) -> bool {
     serde_json::from_slice::<serde_json::Value>(frame).is_ok_and(|v| v["type"] == "hello")
 }
 
+/// `hello` as the hub is told it: with the `extension`'s id, from the origin
+/// Chrome started Desk Helper for, so Desk can open Chrome's page for it.
+fn stamped(hello: &[u8], extension: &str) -> Vec<u8> {
+    match serde_json::from_slice::<serde_json::Value>(hello) {
+        Ok(mut v) if v.is_object() => {
+            v["extension"] = serde_json::json!(extension);
+            serde_json::to_vec(&v).unwrap_or_else(|_| hello.to_vec())
+        }
+        _ => hello.to_vec(),
+    }
+}
+
 /// The extension said hello (once per port): it is told the revision Desk
 /// expects, straight away, hub or no hub, and how it stands is logged.
 fn greet(hello: &[u8]) {
@@ -185,10 +197,16 @@ pub fn run(args: &[String], hub: impl Fn() -> Result<Option<Hub>> + Send + Sync 
             logs::CAP_EVERY,
         ));
     }
-    rt.block_on(relay(hub))
+    let extension = origin
+        .trim_start_matches("chrome-extension://")
+        .trim_end_matches('/');
+    rt.block_on(relay(hub, extension))
 }
 
-async fn relay(hub: impl Fn() -> Result<Option<Hub>> + Send + Sync + 'static) -> i32 {
+async fn relay(
+    hub: impl Fn() -> Result<Option<Hub>> + Send + Sync + 'static,
+    extension: &str,
+) -> i32 {
     // Chrome's messages, read on a thread of their own.
     let (from_chrome, mut chrome_rx) = mpsc::channel::<Vec<u8>>(64);
     std::thread::spawn(move || {
@@ -207,6 +225,9 @@ async fn relay(hub: impl Fn() -> Result<Option<Hub>> + Send + Sync + 'static) ->
     });
     let hub = std::sync::Arc::new(hub);
     let mut hello: Option<Vec<u8>> = None;
+    // The extension's word that its update didn't take, said again to a hub
+    // that comes back, as its hello is.
+    let mut stuck: Option<Vec<u8>> = None;
     let mut wait = Duration::from_secs(1);
     let me = Program::now();
     loop {
@@ -242,11 +263,13 @@ async fn relay(hub: impl Fn() -> Result<Option<Hub>> + Send + Sync + 'static) ->
                         frame = chrome_rx.recv() => match frame {
                             Some(f) if is_hello(&f) => {
                                 greet(&f);
-                                hello = Some(f);
+                                hello = Some(stamped(&f, extension));
+                                stuck = None;
                             }
                             Some(f) => {
                                 if let Some(line) = revision::updating(&f) {
                                     tracing::info!("{line}");
+                                    stuck = revision::for_hub(&f).then_some(f);
                                 }
                             }
                             None => return 0,
@@ -259,12 +282,23 @@ async fn relay(hub: impl Fn() -> Result<Option<Hub>> + Send + Sync + 'static) ->
         };
         wait = Duration::from_secs(1);
         let (mut to_hub, mut from_hub) = ws.split();
-        if let Some(h) = &hello
-            && to_hub
-                .send(Message::text(String::from_utf8_lossy(h).into_owned()))
+        // Said again: its hello, then an update of its that didn't take.
+        let again: Vec<&Vec<u8>> = match &hello {
+            Some(h) => std::iter::once(h).chain(&stuck).collect(),
+            None => Vec::new(),
+        };
+        let mut lost = false;
+        for f in again {
+            if to_hub
+                .send(Message::text(String::from_utf8_lossy(f).into_owned()))
                 .await
                 .is_err()
-        {
+            {
+                lost = true;
+                break;
+            }
+        }
+        if lost {
             continue;
         }
         // The hub may stay up through an install that replaced this
@@ -282,14 +316,24 @@ async fn relay(hub: impl Fn() -> Result<Option<Hub>> + Send + Sync + 'static) ->
                 }
                 frame = chrome_rx.recv() => match frame {
                     Some(f) => {
-                        if is_hello(&f) {
+                        let f = if is_hello(&f) {
                             greet(&f);
+                            let f = stamped(&f, extension);
                             hello = Some(f.clone());
+                            stuck = None;
+                            f
                         } else if let Some(line) = revision::updating(&f) {
-                            // Between the extension and Desk Helper alone.
                             tracing::info!("{line}");
-                            continue;
-                        }
+                            stuck = revision::for_hub(&f).then(|| f.clone());
+                            // Between the extension and Desk Helper alone,
+                            // but for an update that didn't take.
+                            if stuck.is_none() {
+                                continue;
+                            }
+                            f
+                        } else {
+                            f
+                        };
                         if to_hub.send(Message::text(String::from_utf8_lossy(&f).into_owned())).await.is_err() {
                             break;
                         }
@@ -417,6 +461,14 @@ mod tests {
     #[test]
     fn only_the_hello_is_said_again() {
         assert!(is_hello(br#"{"type":"hello","key":"k"}"#));
+        let told: serde_json::Value = serde_json::from_slice(&stamped(
+            br#"{"type":"hello","key":"k"}"#,
+            "abcdefghijklmnopabcdefghijklmnop",
+        ))
+        .unwrap();
+        assert_eq!(told["extension"], "abcdefghijklmnopabcdefghijklmnop");
+        assert_eq!(told["key"], "k");
+        assert_eq!(stamped(b"not json", "x"), b"not json");
         assert!(!is_hello(br#"{"type":"result","id":1}"#));
         assert!(!is_hello(b"not json"));
     }

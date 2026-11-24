@@ -355,6 +355,12 @@
   gap: 4px;
   margin-left: auto;
 }
+.setup-stop {
+  margin-left: auto;
+}
+.setup-dots + .setup-stop {
+  margin-left: 0;
+}
 .setup-dots i {
   width: 18px;
   height: 4px;

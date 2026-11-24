@@ -708,6 +708,15 @@ describe("a bank", () => {
     expect(within(service("Bank")).getByText(/^Approved until about .* \(5 days\)$/).className).toContain("state-blocked");
   });
 
+  it("never says an approval lapsed from Desk's own estimate: only BankSync says that", async () => {
+    await show(api([bank(-3)]));
+    expect(within(service("Bank")).queryByText(/lapsed/i)).toBeNull();
+    expect(within(service("Bank")).getByText(/^\(renewal due about .*\)$/)).toBeTruthy();
+    expect(within(service("Bank")).queryByText(/needs renewing/i)).toBeNull();
+    fireEvent.click(within(service("Bank")).getByRole("button", { name: "Manage" }));
+    expect(within(service("Bank")).getByText(/^Renewal due about /).className).toContain("state-blocked");
+  });
+
   it("is told apart by the hub's renewal, not by an approval date", async () => {
     const plain = connector({ id: "jira", name: "Jira", connections: [connection({ id: "all~~acme", name: "Acme" })] });
     const undated = connector({ ...bank(40), connections: [connection({ id: "agent~kat~natwest", name: "NatWest" })] });

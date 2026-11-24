@@ -132,7 +132,8 @@ export interface Expects {
   revision: number;
 }
 
-/** The extension, to Desk Helper alone (it isn't relayed): what it did
+/** The extension, to Desk Helper (relayed to the hub only when its update
+ *  didn't take: `unbuilt`, `tried`): what it did
  *  about being older than Desk expects. `reloading`: it reloads itself from
  *  disk now; `store`: a Web Store install, which Chrome updates; `unbuilt`:
  *  the files on disk aren't that revision yet, so it waits; `tried`: it

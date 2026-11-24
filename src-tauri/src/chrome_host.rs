@@ -85,6 +85,59 @@ pub fn native_hub() -> eyre::Result<Option<desk_chrome_host::Hub>> {
     }))
 }
 
+/// Opens `page`, Chrome's page for Desk's extension, in Google Chrome:
+/// where the person reloads a build too old to update itself. Only
+/// `chrome://extensions/`, or it for an extension id Desk ships. Chrome
+/// opens its own pages when started with one; the default browser can't.
+#[tauri::command]
+pub fn open_chrome_extensions(page: String) -> crate::CommandResult<()> {
+    if !is_extensions_page(&page) {
+        return Err("That isn't Chrome's page for Desk's extension.".into());
+    }
+    chrome_with(&page)
+        .spawn()
+        .map(drop)
+        .map_err(|e| format!("Desk couldn't open Chrome: {e}"))
+}
+
+/// Whether `page` is Chrome's extensions page, or it for one extension.
+/// Any id shaped like one is: an unpacked build's comes from its folder's
+/// path, so no list holds it, and the page only shows the extension.
+fn is_extensions_page(page: &str) -> bool {
+    match page.strip_prefix("chrome://extensions/") {
+        Some("") => true,
+        Some(rest) => rest
+            .strip_prefix("?id=")
+            .is_some_and(desk_chrome_host::is_extension_id),
+        None => false,
+    }
+}
+
+/// Google Chrome started on `page`.
+fn chrome_with(page: &str) -> std::process::Command {
+    #[cfg(target_os = "macos")]
+    {
+        let mut c = std::process::Command::new("open");
+        c.args(["-a", "Google Chrome", page]);
+        c
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mut c = std::process::Command::new("cmd");
+        c.args(["/C", "start", "", "chrome", page])
+            .creation_flags(CREATE_NO_WINDOW);
+        c
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let mut c = std::process::Command::new("google-chrome");
+        c.arg(page);
+        c
+    }
+}
+
 #[cfg(all(test, not(windows)))]
 mod tests {
     use super::*;
@@ -112,5 +165,35 @@ mod tests {
             .unwrap(),
             image
         );
+    }
+}
+
+#[cfg(test)]
+mod extensions_page {
+    use super::*;
+
+    #[test]
+    fn only_chromes_page_for_an_extension_is_opened() {
+        assert!(is_extensions_page("chrome://extensions/"));
+        // An unpacked build's id, from its folder's path
+        // (/Users/sarah/Desk/extension/dist), is in no list.
+        let unpacked = "jnfacggogodlefcelomggcoebafiefom";
+        for id in desk_chrome_host::extension_ids()
+            .into_iter()
+            .chain([unpacked])
+        {
+            assert!(is_extensions_page(&format!("chrome://extensions/?id={id}")));
+        }
+        for page in [
+            "chrome://extensions/?id=qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+            "chrome://extensions/?id=jnfacggogodlefcelomggcoebafiefo",
+            "chrome://extensions/?id=jnfacggogodlefcelomggcoebafiefom&x=1",
+            "chrome://settings/",
+            "chrome://extensions/?id=",
+            "https://chrome://extensions/",
+            "chrome://extensions",
+        ] {
+            assert!(!is_extensions_page(page), "{page}");
+        }
     }
 }

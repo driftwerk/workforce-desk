@@ -3,7 +3,8 @@
 // isolated world (page scripts can't see or replace them). Each is
 // self-contained: Chrome serialises the function alone, so nothing here may
 // reach outside its own body. Each returns plain data, capped, never a DOM
-// object, and never posts a message.
+// object, and never posts a message. One given a selector Chrome can't
+// parse (Playwright's `:has-text()`, say) answers "bad_selector".
 
 /** The page's address, title and text or HTML, each capped. `all` is the
  *  text with every field's value too, for the hub's check for a secret
@@ -27,7 +28,12 @@ export function readPage(what: "text" | "html" | "all", maxText: number, maxHtml
  *  autocomplete hint and placeholder, and its form's action. What the hub's
  *  never-list reads. */
 export function shownOf(selector: string | null, form: boolean): string {
-  const el = (selector ? document.querySelector(selector) : document.activeElement) as HTMLInputElement | null;
+  let el: HTMLInputElement | null;
+  try {
+    el = (selector ? document.querySelector(selector) : document.activeElement) as HTMLInputElement | null;
+  } catch {
+    return "bad_selector";
+  }
   if (!el) return "";
   const button = el.tagName === "BUTTON" || (el.tagName === "INPUT" && /^(submit|button|reset)$/i.test(el.type || ""));
   const first = el.labels && el.labels.length ? (el.labels[0] as HTMLElement) : null;
@@ -53,8 +59,13 @@ export function shownOf(selector: string | null, form: boolean): string {
 /** Clicks the element `selector` names where it shows: at its centre, and
  *  only if that point is the element (or inside it), not something laid
  *  over it. */
-export function clickOn(selector: string): "ok" | "missing" | "hidden" | "covered" {
-  const el = document.querySelector(selector) as HTMLElement | null;
+export function clickOn(selector: string): "ok" | "missing" | "hidden" | "covered" | "bad_selector" {
+  let el: HTMLElement | null;
+  try {
+    el = document.querySelector(selector) as HTMLElement | null;
+  } catch {
+    return "bad_selector";
+  }
   if (!el) return "missing";
   if (typeof el.scrollIntoView === "function") el.scrollIntoView({ block: "center", inline: "center" });
   const r = el.getBoundingClientRect();
@@ -77,9 +88,14 @@ export function clickOn(selector: string): "ok" | "missing" | "hidden" | "covere
  *  leave it: through the field's own setter, then `input` and `change`.
  *  Only on `origin`, the one the hub resolved `value` for: a page that
  *  moved since is left as it is. */
-export function fillField(selector: string, value: string, origin: string | null): "ok" | "missing" | "moved" {
+export function fillField(selector: string, value: string, origin: string | null): "ok" | "missing" | "moved" | "bad_selector" {
   if (origin === null || location.origin !== origin) return "moved";
-  const el = document.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement | null;
+  let el: HTMLInputElement | HTMLTextAreaElement | null;
+  try {
+    el = document.querySelector(selector) as HTMLInputElement | HTMLTextAreaElement | null;
+  } catch {
+    return "bad_selector";
+  }
   if (!el) return "missing";
   el.focus();
   if ((el as HTMLElement).isContentEditable) {
@@ -98,9 +114,14 @@ export function fillField(selector: string, value: string, origin: string | null
 /** Types `text` at the end of what the field `selector` names (the focused
  *  element without a selector) holds, a character at a time; only on
  *  `origin`, as [`fillField`]. */
-export function typeText(selector: string | null, text: string, origin: string | null): "ok" | "missing" | "moved" {
+export function typeText(selector: string | null, text: string, origin: string | null): "ok" | "missing" | "moved" | "bad_selector" {
   if (origin === null || location.origin !== origin) return "moved";
-  const el = (selector ? document.querySelector(selector) : document.activeElement) as HTMLInputElement | HTMLElement | null;
+  let el: HTMLInputElement | HTMLElement | null;
+  try {
+    el = (selector ? document.querySelector(selector) : document.activeElement) as HTMLInputElement | HTMLElement | null;
+  } catch {
+    return "bad_selector";
+  }
   if (!el) return "missing";
   if (typeof el.focus === "function") el.focus();
   const editable = (el as HTMLElement).isContentEditable;
@@ -126,8 +147,13 @@ export function typeText(selector: string | null, text: string, origin: string |
 /** Presses `key` (Enter, Tab, Escape, an arrow, or a character) on the
  *  element `selector` names, or the focused one. Enter in a form's field
  *  submits the form, as a browser does, unless the page stopped it. */
-export function pressKey(selector: string | null, key: string): boolean {
-  const el = (selector ? document.querySelector(selector) : document.activeElement || document.body) as HTMLElement | null;
+export function pressKey(selector: string | null, key: string): boolean | "bad_selector" {
+  let el: HTMLElement | null;
+  try {
+    el = (selector ? document.querySelector(selector) : document.activeElement || document.body) as HTMLElement | null;
+  } catch {
+    return "bad_selector";
+  }
   if (!el) return false;
   if (selector && typeof el.focus === "function") el.focus();
   const init = { key, code: key.length === 1 ? `Key${key.toUpperCase()}` : key, bubbles: true, cancelable: true };
@@ -147,8 +173,13 @@ export function pressKey(selector: string | null, key: string): boolean {
 
 /** Chooses the option of the select `selector` names whose value or text
  *  is `value`. */
-export function selectOption(selector: string, value: string): boolean {
-  const sel = document.querySelector(selector) as HTMLSelectElement | null;
+export function selectOption(selector: string, value: string): boolean | "bad_selector" {
+  let sel: HTMLSelectElement | null;
+  try {
+    sel = document.querySelector(selector) as HTMLSelectElement | null;
+  } catch {
+    return "bad_selector";
+  }
   if (!sel || !sel.options) return false;
   const opt = Array.from(sel.options).find((o) => o.value === value || o.text === value);
   if (!opt) return false;
@@ -174,7 +205,7 @@ export function readKey(
   paths: string[],
   max: number,
   shape: string | null = null,
-): { value: string; origin: string; path: string } | { refused: string } {
+): { value: string; origin: string; path: string } | { refused: string } | "bad_selector" {
   const here = { origin: location.origin, path: location.pathname };
   const under = (path: string, prefix: string) => {
     const p = prefix.replace(/\/+$/, "");
@@ -206,7 +237,11 @@ export function readKey(
   };
   let el: HTMLElement | null = null;
   if (selector) {
-    el = document.querySelector(selector) as HTMLElement | null;
+    try {
+      el = document.querySelector(selector) as HTMLElement | null;
+    } catch {
+      return "bad_selector";
+    }
     if (!el) return { refused: "missing" };
   } else {
     let whole: RegExp;
@@ -276,20 +311,33 @@ export function hrefNow(): string {
 }
 
 /** Whether `selector` names an element now. */
-export function present(selector: string): boolean {
-  return document.querySelector(selector) !== null;
+export function present(selector: string): boolean | "bad_selector" {
+  try {
+    return document.querySelector(selector) !== null;
+  } catch {
+    return "bad_selector";
+  }
 }
 
 /** Whether the element `selector` names has the focus. */
-export function focused(selector: string): boolean {
-  const el = document.querySelector(selector);
-  return !!el && document.activeElement === el;
+export function focused(selector: string): boolean | "bad_selector" {
+  try {
+    const el = document.querySelector(selector);
+    return !!el && document.activeElement === el;
+  } catch {
+    return "bad_selector";
+  }
 }
 
 /** Gives the file input `selector` names these files, as choosing them
  *  would. */
-export function setFiles(selector: string, files: { name: string; type: string; base64: string }[]): boolean {
-  const input = document.querySelector(selector) as HTMLInputElement | null;
+export function setFiles(selector: string, files: { name: string; type: string; base64: string }[]): boolean | "bad_selector" {
+  let input: HTMLInputElement | null;
+  try {
+    input = document.querySelector(selector) as HTMLInputElement | null;
+  } catch {
+    return "bad_selector";
+  }
   if (!input || input.tagName !== "INPUT" || input.type !== "file") return false;
   const dt = new DataTransfer();
   for (const f of files) {

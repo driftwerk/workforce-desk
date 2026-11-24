@@ -8,7 +8,8 @@ import { useChat } from "./store";
 
 vi.mock("@tauri-apps/plugin-notification", () => ({}));
 const opened: string[] = [];
-vi.mock("../platform", async (real) => ({ ...(await real<object>()), openUrl: (u: string) => opened.push(u) }));
+const inChrome: string[] = [];
+vi.mock("../platform", async (real) => ({ ...(await real<object>()), openUrl: (u: string) => opened.push(u), openChromeExtensions: (p: string) => inChrome.push(p) }));
 
 afterEach(() => {
   cleanup();
@@ -112,7 +113,7 @@ it("is one card saying the one thing to do now: use the sign-in on this computer
   expect(region.className).toContain("setup-needs");
   expect(screen.getByText("GitHub is signed in on this computer as sarah")).toBeTruthy();
   expect(screen.getByText(/repo, read:org/)).toBeTruthy();
-  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Use it", "Sign in another way"]);
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Stop", "Use it", "Sign in another way"]);
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "Use it" }));
   });
@@ -188,7 +189,7 @@ it("asks the person to sign in in Desk's window, with no 'I'm signed in' button 
   useChat.setState({ send: (_k: string, c: string) => (sent.push(c), true) } as never);
   const a = api([signIn]);
   await show(a);
-  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Show the page"]);
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Stop", "Show the page"]);
   useUi.setState({ settings: null });
   onScreen = false;
   await act(async () => {
@@ -233,6 +234,35 @@ it("stops asking once it is connected", async () => {
     await vi.advanceTimersByTimeAsync(10_000);
   });
   expect(a.setups).toHaveBeenCalledTimes(1);
+});
+
+it("is stopped from the card at any stage, and goes with it; a settled one offers no Stop", async () => {
+  const stopped = setup({ ended: "stopped", now: now({ kind: "ended", title: "This GitHub setup was stopped" }) });
+  const a = api([setup({ now: CODE })], { choose: vi.fn(async () => stopped) });
+  await show(a);
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "Stop" }));
+  });
+  expect(a.choose).toHaveBeenCalledWith("s1", "stop");
+  expect(screen.queryByRole("region")).toBeNull();
+  cleanup();
+  await show(api([setup({ now: CONNECTED })]));
+  expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+});
+
+it("asks the person to reload Desk's old extension, opening Chrome's page for it", async () => {
+  const page = "chrome://extensions/?id=dghneofijcmcoipiebmbhehamminngmd";
+  await show(
+    api([
+      setup({
+        way: "browser",
+        now: now({ kind: "step", title: "Reload Desk's extension in Chrome", detail: "press the reload arrow", url: page, action: "reload_extension" }),
+      }),
+    ]),
+  );
+  fireEvent.click(screen.getByRole("button", { name: "Open Chrome’s page for it" }));
+  expect(inChrome).toEqual([page]);
+  expect(opened).toEqual([]);
 });
 
 it("never shows a setup a newer one replaced", async () => {
@@ -332,7 +362,7 @@ it("offers a token of the person's own beside the primary action, pasted on the 
     pasteToken: vi.fn(async () => setup({ way: "browser", now: CONNECTED })),
   });
   await show(a);
-  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Copy code and open GitHub", "Paste a token"]);
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Stop", "Copy code and open GitHub", "Paste a token"]);
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "Paste a token" }));
   });
@@ -356,7 +386,7 @@ it("says what was wrong with a pasted token, and keeps nothing of it on screen",
     pasteToken: vi.fn(async () => Promise.reject(new HubError(400, "That doesn't look like a GitHub token: it starts github_pat_ or ghp_."))),
   });
   await show(a);
-  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Use it", "Paste a token", "Sign in another way"]);
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Stop", "Use it", "Paste a token", "Sign in another way"]);
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "Paste a token" }));
   });
@@ -388,7 +418,7 @@ const STEP = now({
 it("opens the provider's page to approve, named for the service", async () => {
   await show(api([setup({ ...FREEAGENT, now: APPROVE })]));
   expect(screen.getByRole("region", { name: "Setting up FreeAgent · FreeAgent" }).className).toContain("setup-needs");
-  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Open FreeAgent"]);
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Stop", "Open FreeAgent"]);
   fireEvent.click(screen.getByRole("button", { name: "Open FreeAgent" }));
   expect(opened).toEqual(["https://api.freeagent.com/v2/approve_app?client_id=x"]);
 });
@@ -400,7 +430,7 @@ it("shows a step Kat couldn't do with its instruction, the page to open and Done
   await show(a);
   expect(screen.getByText("Step 5 of 11: Set up Desk’s sign-in screen")).toBeTruthy();
   expect(screen.getByText("Under Branding, type Desk as the app name, then save.")).toBeTruthy();
-  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Open the page", "I’ll do this step"]);
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Stop", "Open the page", "I’ll do this step"]);
   fireEvent.click(screen.getByRole("button", { name: "Open the page" }));
   expect(opened).toEqual(["https://console.cloud.google.com/auth/branding"]);
   fireEvent.click(screen.getByRole("button", { name: "I’ll do this step" }));
@@ -422,7 +452,7 @@ it("takes the app's identifier and secret on the card, to the hub alone and in t
   await show(a);
   expect(screen.queryByLabelText("OAuth secret")).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "I’ll do this step" }));
-  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Open the page", "Save"]);
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Stop", "Open the page", "Save"]);
   const id = screen.getByLabelText("OAuth identifier") as HTMLInputElement;
   const secret = screen.getByLabelText("OAuth secret") as HTMLInputElement;
   expect([id.type, secret.type]).toEqual(["password", "password"]);
@@ -463,7 +493,7 @@ it("offers no Open button for a step without a page, and still lets the person t
   expect(screen.queryByRole("button", { name: "Open the page" })).toBeNull();
   expect(screen.queryByRole("button", { name: "Done" })).toBeNull();
   fireEvent.click(screen.getByRole("button", { name: "I’ll do this step" }));
-  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Done"]);
+  expect(screen.getAllByRole("button").map((b) => b.textContent)).toEqual(["Stop", "Done"]);
   await act(async () => {
     fireEvent.click(screen.getByRole("button", { name: "Done" }));
   });

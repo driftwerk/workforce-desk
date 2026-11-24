@@ -139,7 +139,7 @@ export class Link {
     }
     if (outcome !== "unbuilt") this.checking = null;
     if (outcome === "current") return;
-    // Desk Helper logs it; it isn't relayed to the hub.
+    // Desk Helper logs it, and tells the hub of an update that didn't take.
     if (outcome !== said) port.post({ type: "updating", revision: expected, outcome });
     if (outcome === "unbuilt") {
       this.later(() => void this.upToDate(expected, port, outcome), RECHECK_MS);
