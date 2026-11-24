@@ -513,6 +513,24 @@ describe("the link to Desk", () => {
     expect(link.state.state).toBe("no-desk");
     expect(later).toHaveLength(1);
   });
+
+  it("shows what Desk Helper said when it refused, not that it exited", async () => {
+    const [first, second] = [port(), port()];
+    const ports = [first, second];
+    const later: (() => void)[] = [];
+    const link = new Link(() => ports.shift()!, async () => me, new DeskTabs(new FakeChrome()), execOn(), "0.1.0", (f) => later.push(f));
+    await link.start();
+    const why = "Desk Helper was started by something other than Google Chrome.";
+    await first.hub({ type: "refused", why });
+    first.drop("Native host has exited.");
+    expect(link.state).toMatchObject({ state: "refused", why });
+    expect(later).toHaveLength(1);
+    // Tried again, and gone without a word: Desk isn't there.
+    later[0]!();
+    await new Promise((r) => setTimeout(r, 0));
+    second.drop("Native host has exited.");
+    expect(link.state).toMatchObject({ state: "no-desk", why: "Native host has exited." });
+  });
 });
 
 describe("bringing an unpacked build up to date", () => {

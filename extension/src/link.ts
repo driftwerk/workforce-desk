@@ -70,7 +70,9 @@ export class Link {
     port.onDisconnect((why) => {
       if (this.port !== port) return;
       this.port = null;
-      this.set({ state: "no-desk", why: why ?? "Desk isn't running on this computer.", activity: null });
+      // Refused, Desk Helper exits: what it said stays, not Chrome's word that it exited.
+      const refused = this.state.state === "refused";
+      this.set(refused ? { activity: null } : { state: "no-desk", why: why ?? "Desk isn't running on this computer.", activity: null });
       this.later(() => void this.start(), this.retry);
       this.retry = Math.min(this.retry * 2, 60_000);
     });
