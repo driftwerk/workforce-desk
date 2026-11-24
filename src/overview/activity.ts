@@ -105,15 +105,23 @@ const howResolved = (e: ActivityEvent, agentName: (id: string) => string | undef
   return e.kind === "approved" ? `allowed by ${by}` : e.kind === "denied" ? `denied by ${by}` : "answered in its terminal";
 };
 
+const sameState = (a: NeedState, b: NeedState): boolean => (a.open ? b.open : !b.open && a.at === b.at && a.how === b.how);
+
 /** For every event in `events` that needed the person: still open (one of
  *  `needs`, this hub's open needs), or resolved — by the later event that
  *  answered its approval (when, and how), else no longer waiting. Only a
- *  subject's latest question can be its open one. */
+ *  subject's latest question can be its open one. A state that says what
+ *  it did in `was` is that one, so its row is left as it is. */
 export const needStates = (
   events: readonly ActivityEvent[],
   needs: readonly Pick<Need, "id" | "kind" | "who">[],
   agentName: (id: string) => string | undefined = () => undefined,
+  was: ReadonlyMap<string, NeedState> = new Map(),
 ): Map<string, NeedState> => {
+  const kept = (id: string, state: NeedState): [string, NeedState] => {
+    const before = was.get(id);
+    return [id, before && sameState(before, state) ? before : state];
+  };
   const latestQuestion = new Map<string, ActivityEvent>();
   for (const e of events)
     if (e.kind === "question" && e.subject && (latestQuestion.get(e.subject.id)?.at ?? "") < e.at) latestQuestion.set(e.subject.id, e);
@@ -122,9 +130,9 @@ export const needStates = (
       .filter((e) => NEEDS_YOU.has(e.kind))
       .map((e): [string, NeedState] => {
         const current = e.kind === "needs_you" || (e.subject && latestQuestion.get(e.subject.id)?.id === e.id);
-        if (current && needs.some((n) => isNeedOf(e, n))) return [e.id, { open: true }];
+        if (current && needs.some((n) => isNeedOf(e, n))) return kept(e.id, { open: true });
         const answer = e.approvalId ? events.find((a) => a.approvalId === e.approvalId && RESOLVED_BY.has(a.kind) && a.at >= e.at && a.id !== e.id) : undefined;
-        return [e.id, answer ? { open: false, at: answer.at, how: howResolved(answer, agentName) } : { open: false, at: null, how: "no longer waiting" }];
+        return kept(e.id, answer ? { open: false, at: answer.at, how: howResolved(answer, agentName) } : { open: false, at: null, how: "no longer waiting" });
       }),
   );
 };

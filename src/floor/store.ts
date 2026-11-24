@@ -339,7 +339,6 @@ export const useMerged = (): Merged => {
   const posts = useDesk((s) => yourPosts(s.timelines));
   // Under a pane showing one group's Floor: that group's alone.
   const scope = useFloorScope();
-  // Its groups only: the rest of the layout is made afresh on every read.
   const groups = useLayout().groups;
   const day = useFloor((s) => s.day);
   return useMemo(() => {

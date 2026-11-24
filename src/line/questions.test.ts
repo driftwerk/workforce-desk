@@ -77,6 +77,9 @@ describe("the slim bar's words", () => {
     expect(barText({ questions: [], waiting: [tell({ delivery: "handed", text: "x" })] }, "s1")).toBe("1 message from Sarah is on its way in · “x”");
     expect(barText({ questions: [], waiting: [tell({ waiting: "person_driving", text: "x" })] }, "s1")).toBe("1 message from Sarah waits until you hand it back · “x”");
     expect(barText({ questions: [], waiting: [tell({ waiting: "dialog", text: "x" })] }, "s1")).toBe("1 message from Sarah waits for the dialog in its terminal · “x”");
+    expect(barText({ questions: [], waiting: [tell({ waiting: "behind", text: "x" })] }, "s1")).toBe("1 message from Sarah waits behind one on its way in · “x”");
+    expect(barText({ questions: [], waiting: [tell({ waiting: "behind", text: "x" }), tell({ id: "m2", waiting: "behind" })] }, "s1")).toMatch(/^2 messages from Sarah wait behind one on its way in · /);
+    expect(barText({ questions: [], waiting: [tell({ waiting: "awaited", text: "x" })] }, "s1")).toBe("1 message from Sarah goes in as the answer its call waits on · “x”");
     // Its questions come first.
     expect(barText({ questions: [lapsed("a", "x")], waiting: [working] }, "s1")).toBe("x · went ahead without an answer");
   });

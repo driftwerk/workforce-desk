@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { memo, useState } from "react";
 import { useChat } from "../chat/store";
 import { useSessionName } from "../groups/names";
 import { useDesk } from "../hub/store";
@@ -51,7 +51,7 @@ const useOpens = (item: OverviewItem): boolean => {
 
 /** An agent or a session on the Floor: who, what they're doing, and what
  *  they need from you, answered in place. */
-export function ItemTile({ item: listed }: { item: OverviewItem }) {
+export const ItemTile = memo(function ItemTile({ item: listed, now }: { item: OverviewItem; now: number }) {
   const sessionName = useSessionName(listed.kind === "session" ? listed.id : null, listed.name);
   const agent = useLocalAgent(listed.kind === "agent" ? listed.id : null);
   const named = agent?.name ?? sessionName;
@@ -63,7 +63,7 @@ export function ItemTile({ item: listed }: { item: OverviewItem }) {
   return (
     <article className={`tile ov-tile ov-tile-${tone}`}>
       <span className="tile-flow" aria-hidden="true" />
-      <TileHead item={item} tone={tone} opens={opens} />
+      <TileHead item={item} tone={tone} opens={opens} now={now} />
       {item.task && <span className="ov-task">{item.task}</span>}
       {item.state !== "needs_you" && item.detail && <span className="mono ov-detail">{item.detail}</span>}
       {item.state === "needs_you" &&
@@ -85,9 +85,9 @@ export function ItemTile({ item: listed }: { item: OverviewItem }) {
         ))}
     </article>
   );
-}
+});
 
-function TileHead({ item, tone, opens }: { item: OverviewItem; tone: string; opens: boolean }) {
+function TileHead({ item, tone, opens, now }: { item: OverviewItem; tone: string; opens: boolean; now: number }) {
   const inner = (
     <>
       {item.kind === "agent" ? (
@@ -97,7 +97,7 @@ function TileHead({ item, tone, opens }: { item: OverviewItem; tone: string; ope
       )}
       <span className="tile-name">
         <span className={item.kind === "session" ? "mono tile-title" : "display tile-title"}>{item.name}</span>
-        <span className={`tile-state ov-state-${tone}`}>{stateLine(item)}</span>
+        <span className={`tile-state ov-state-${tone}`}>{stateLine(item, now)}</span>
       </span>
     </>
   );
