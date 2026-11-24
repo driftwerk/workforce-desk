@@ -3,6 +3,7 @@ import { useChat } from "../chat/store";
 import { HubError } from "../hub/client";
 import { floorOf } from "../hub/floor";
 import { deskListeners, useDesk } from "../hub/store";
+import { revisionOf } from "./plan";
 import type { BossPlan, BossPlanDetail, BossPlanEdit, DeskEvent, OnPlanDrop, PlanBudget } from "../hub/types";
 
 /** What the person was told of a plan after the hub refused them: a newer
@@ -73,9 +74,17 @@ const without = <V>(r: Record<string, V>, id: string): Record<string, V> => {
   return rest;
 };
 
+/** A detail's goal as words: an older hub sends its progress under `goal`
+ *  too (DW-749). */
+export const sound = (d: BossPlanDetail, known?: string): BossPlanDetail =>
+  typeof d.goal === "string" ? d : { ...d, goal: revisionOf(d, d.revision)?.snapshot.goal ?? known ?? "" };
+
 export const usePlans = create<PlanState>((set, get) => {
-  const keep = (d: BossPlanDetail) =>
-    set((s) => ({ details: { ...s.details, [d.id]: d }, plans: { ...s.plans, [d.id]: summaryOf(d) }, unread: without(s.unread, d.id) }));
+  const keep = (raw: BossPlanDetail) =>
+    set((s) => {
+      const d = sound(raw, s.plans[raw.id]?.goal);
+      return { details: { ...s.details, [d.id]: d }, plans: { ...s.plans, [d.id]: summaryOf(d) }, unread: without(s.unread, d.id) };
+    });
 
   /** Does `request` about plan `id`, keeping the plan it answers with. A
    *  refusal reads the plan again; a newer revision found then is said as
