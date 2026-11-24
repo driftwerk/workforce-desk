@@ -3,6 +3,7 @@ import { useChat } from "../chat/store";
 import { HubError } from "../hub/client";
 import { floorOf } from "../hub/floor";
 import { deskListeners, useDesk } from "../hub/store";
+import { revisionOf } from "./plan";
 import type { BossPlan, BossPlanDetail, BossPlanEdit, DeskEvent, OnPlanDrop, PlanBudget } from "../hub/types";
 
 /** What the person was told of a plan after the hub refused them: a newer
@@ -73,21 +74,17 @@ const without = <V>(r: Record<string, V>, id: string): Record<string, V> => {
   return rest;
 };
 
-/** A plan detail whose `goal` is the goal's words. A hub from before
- *  DW-749 sends the goal's progress (`{parts}`) under `goal` too, and the
- *  later key wins: rendered as text, that object stopped all of Desk. Such
- *  a plan is shown by its result's words, or none, until the hub is new. */
-export const sound = (d: BossPlanDetail): BossPlanDetail => {
-  if (typeof d.goal === "string") return d;
-  const words = (d as { result?: { words?: unknown } }).result?.words;
-  return { ...d, goal: typeof words === "string" ? words : "" };
-};
+/** A detail's goal as words: an older hub sends its progress under `goal`
+ *  too (DW-749). */
+export const sound = (d: BossPlanDetail, known?: string): BossPlanDetail =>
+  typeof d.goal === "string" ? d : { ...d, goal: revisionOf(d, d.revision)?.snapshot.goal ?? known ?? "" };
 
 export const usePlans = create<PlanState>((set, get) => {
-  const keep = (raw: BossPlanDetail) => {
-    const d = sound(raw);
-    set((s) => ({ details: { ...s.details, [d.id]: d }, plans: { ...s.plans, [d.id]: summaryOf(d) }, unread: without(s.unread, d.id) }));
-  };
+  const keep = (raw: BossPlanDetail) =>
+    set((s) => {
+      const d = sound(raw, s.plans[raw.id]?.goal);
+      return { details: { ...s.details, [d.id]: d }, plans: { ...s.plans, [d.id]: summaryOf(d) }, unread: without(s.unread, d.id) };
+    });
 
   /** Does `request` about plan `id`, keeping the plan it answers with. A
    *  refusal reads the plan again; a newer revision found then is said as
