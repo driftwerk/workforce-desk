@@ -531,6 +531,17 @@ describe("the link to Desk", () => {
     second.drop("Native host has exited.");
     expect(link.state).toMatchObject({ state: "no-desk", why: "Native host has exited." });
   });
+
+  it("shows that Desk went away when the hub had refused, not the hub's refusal", async () => {
+    const p = port();
+    const link = new Link(() => p, async () => me, new DeskTabs(new FakeChrome()), execOn(), "0.1.0", () => undefined);
+    await link.start();
+    await p.hub({ type: "expects", revision: REVISION });
+    await p.hub({ type: "refused", why: "This Chrome was removed in Desk." });
+    expect(link.state).toMatchObject({ state: "refused", why: "This Chrome was removed in Desk." });
+    p.drop("Native host has exited.");
+    expect(link.state).toMatchObject({ state: "no-desk", why: "Native host has exited." });
+  });
 });
 
 describe("bringing an unpacked build up to date", () => {

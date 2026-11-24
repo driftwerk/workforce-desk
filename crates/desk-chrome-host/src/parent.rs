@@ -5,9 +5,9 @@
 //!
 //! - macOS: the running process's own code signature (`codesign --verify`
 //!   on its pid, which checks the process, not the file on disk) must be
-//!   Google's (team `EQHXZ8M8AV`). Its program is in a Chrome app, or in
-//!   the code-sign clone Chrome runs from once an update replaced its app
-//!   on disk under it.
+//!   Google's (team `EQHXZ8M8AV`) for one of Chrome's channels. Its program
+//!   is in a Chrome app, or in the code-sign clone (`….app.bundle`) Chrome
+//!   runs from once an update replaced its app on disk under it.
 //! - Windows: the program must be named `chrome.exe`, wherever it is
 //!   installed (machine-wide under Program Files, or per person under
 //!   AppData, common without admin rights), and its Authenticode signature
@@ -24,16 +24,13 @@
 
 use std::path::{Path, PathBuf};
 
-/// Chrome's channels on macOS: each one's program, and its bundle id.
-const MAC_CHANNELS: [(&str, &str); 4] = [
-    ("Google Chrome", "com.google.Chrome"),
-    ("Google Chrome Beta", "com.google.Chrome.beta"),
-    ("Google Chrome Dev", "com.google.Chrome.dev"),
-    ("Google Chrome Canary", "com.google.Chrome.canary"),
+/// Chrome's channels' programs on macOS.
+const MAC_CHANNELS: [&str; 4] = [
+    "Google Chrome",
+    "Google Chrome Beta",
+    "Google Chrome Dev",
+    "Google Chrome Canary",
 ];
-
-/// Chrome for Testing on macOS, which only a development build takes.
-const MAC_TESTING: (&str, &str) = ("Google Chrome for Testing", "com.google.chrome.for.testing");
 
 /// Whether `exe` is Google Chrome's program on `os`. A development build
 /// also takes Chrome for Testing, which the end-to-end test runs.
@@ -42,8 +39,8 @@ pub fn is_chrome(os: &str, exe: &Path, development: bool) -> bool {
     match os {
         "macos" => MAC_CHANNELS
             .iter()
-            .chain(development.then_some(&MAC_TESTING))
-            .any(|&(program, bundle_id)| is_mac_program(&s, program, bundle_id)),
+            .chain(development.then_some(&"Google Chrome for Testing"))
+            .any(|program| is_mac_program(&s, program)),
         "linux" => {
             [
                 "/opt/google/chrome/chrome",
@@ -61,31 +58,12 @@ pub fn is_chrome(os: &str, exe: &Path, development: bool) -> bool {
     }
 }
 
-/// Whether `exe` is the macOS `program` of the Chrome with `bundle_id`: in
-/// its app, wherever that is, or in the code-sign clone of it Chrome runs
-/// from once an update has replaced the app on disk under it
-/// (`/var/folders/<a>/<b>/X/<bundle id>.code_sign_clone/code_sign_clone.<6
-/// letters or digits>/<program>.app.bundle/Contents/MacOS/<program>`).
-fn is_mac_program(exe: &str, program: &str, bundle_id: &str) -> bool {
-    let folder =
-        |p: &str| !p.is_empty() && p.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_');
-    let random = |p: &str| p.len() == 6 && p.bytes().all(|b| b.is_ascii_alphanumeric());
-    let parts: Vec<&str> = exe
-        .strip_prefix("/private")
-        .unwrap_or(exe)
-        .split('/')
-        .collect();
-    exe.ends_with(&format!("/{program}.app/Contents/MacOS/{program}"))
-        || matches!(
-            parts.as_slice(),
-            ["", "var", "folders", a, b, "X", clones, clone, app, "Contents", "MacOS", name]
-                if folder(a)
-                    && folder(b)
-                    && clones.strip_suffix(".code_sign_clone") == Some(bundle_id)
-                    && clone.strip_prefix("code_sign_clone.").is_some_and(random)
-                    && app.strip_suffix(".app.bundle") == Some(program)
-                    && *name == program
-        )
+/// Whether `exe` is the macOS `program`, in its app or in Chrome's
+/// code-sign clone of it.
+fn is_mac_program(exe: &str, program: &str) -> bool {
+    ["app", "app.bundle"]
+        .iter()
+        .any(|app| exe.ends_with(&format!("/{program}.{app}/Contents/MacOS/{program}")))
 }
 
 /// Whether `exe`, on Windows, is the `cmd.exe` Chrome starts a host
@@ -133,7 +111,7 @@ pub fn ancestry() -> Vec<Up> {
 
 impl std::fmt::Display for Up {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{} (pid {})", self.exe.display(), self.pid)
+        write!(f, "{:?} (pid {})", self.exe, self.pid)
     }
 }
 
@@ -221,7 +199,9 @@ fn signed_by_google(chrome: &Up) -> bool {
     std::process::Command::new("/usr/bin/codesign")
         .args([
             "--verify",
-            "-R=anchor apple generic and certificate leaf[subject.OU] = EQHXZ8M8AV",
+            "-R=anchor apple generic and certificate leaf[subject.OU] = EQHXZ8M8AV \
+             and (identifier \"com.google.Chrome\" or identifier \"com.google.Chrome.beta\" \
+             or identifier \"com.google.Chrome.dev\" or identifier \"com.google.Chrome.canary\")",
         ])
         .arg(chrome.pid.to_string())
         .stdout(std::process::Stdio::null())
@@ -524,40 +504,22 @@ mod tests {
     #[test]
     fn chrome_run_from_its_code_sign_clone_counts() {
         let mac = |p: &str, dev| is_chrome("macos", Path::new(p), dev);
-        let clone = |bundle: &str, random: &str, program: &str| {
+        let clone = |program: &str| {
             format!(
-                "/private/var/folders/yz/4c7q1g7x04v6pg45_vpscr3w0000gn/X/{bundle}.code_sign_clone/code_sign_clone.{random}/{program}.app.bundle/Contents/MacOS/{program}"
+                "/private/var/folders/yz/4c7q1g7x04v6pg45_vpscr3w0000gn/X/com.google.Chrome.code_sign_clone/code_sign_clone.aCurHr/{program}.app.bundle/Contents/MacOS/{program}"
             )
         };
-        for (program, bundle) in MAC_CHANNELS {
-            assert!(mac(&clone(bundle, "aCurHr", program), false), "{program}");
+        for program in MAC_CHANNELS {
+            assert!(mac(&clone(program), false), "{program}");
         }
-        assert!(mac(
-            "/var/folders/yz/4c7q1g7x04v6pg45_vpscr3w0000gn/X/com.google.Chrome.code_sign_clone/code_sign_clone.aCurHr/Google Chrome.app.bundle/Contents/MacOS/Google Chrome",
-            false
-        ));
-        let cft = clone(
-            "com.google.chrome.for.testing",
-            "x1Y2z3",
-            "Google Chrome for Testing",
-        );
+        let cft = clone("Google Chrome for Testing");
         assert!(!mac(&cft, false), "not in a release");
         assert!(mac(&cft, true));
         for bad in [
-            clone("com.google.Chrome.beta", "aCurHr", "Google Chrome"),
-            clone("com.evil.Chrome", "aCurHr", "Google Chrome"),
-            clone("com.google.Chrome", "aCurH", "Google Chrome"),
-            clone("com.google.Chrome", "aCurHr7", "Google Chrome"),
-            clone("com.google.Chrome", "aCu.Hr", "Google Chrome"),
-            clone("com.google.Chrome", "aCurHr", "Google Chrome Beta"),
-            clone("com.google.Chrome", "aCurHr", "Google Chrome").replace("/X/", "/T/"),
-            clone("com.google.Chrome", "aCurHr", "Google Chrome").replace("/yz/", "/../"),
-            clone("com.google.Chrome", "aCurHr", "Google Chrome").replace("/yz/", "/yz/extra/"),
-            clone("com.google.Chrome", "aCurHr", "Google Chrome")
-                .replace("/private/var/folders", "/Users/sarah/folders"),
-            clone("com.google.Chrome", "aCurHr", "Google Chrome").replace("/MacOS/Google Chrome", "/MacOS/evil"),
-            format!("/tmp{}", clone("com.google.Chrome", "aCurHr", "Google Chrome")),
-            "/Users/sarah/X/com.google.Chrome.code_sign_clone/code_sign_clone.aCurHr/Google Chrome.app.bundle/Contents/MacOS/Google Chrome".into(),
+            clone("Google Chrome").replace("/MacOS/Google Chrome", "/MacOS/evil"),
+            clone("Google Chrome").replace(".app.bundle", ".bundle"),
+            clone("Google Chrome").replace("Google Chrome.app.bundle", "Evil.app.bundle"),
+            format!("{}.bak", clone("Google Chrome")),
         ] {
             assert!(!mac(&bad, false), "{bad}");
         }
@@ -576,7 +538,7 @@ mod tests {
         );
         assert_eq!(
             NotChrome::Other(vec![shell.clone(), term]).to_string(),
-            "started by /bin/zsh (pid 41) under /System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal (pid 40), not Google Chrome"
+            r#"started by "/bin/zsh" (pid 41) under "/System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal" (pid 40), not Google Chrome"#
         );
         assert_eq!(
             NotChrome::Other(Vec::new()).to_string(),
@@ -584,12 +546,23 @@ mod tests {
         );
         assert_eq!(
             NotChrome::Unsigned(shell.clone()).to_string(),
-            "started by /bin/zsh (pid 41), which isn't signed by Google"
+            r#"started by "/bin/zsh" (pid 41), which isn't signed by Google"#
         );
         assert_eq!(
             NotChrome::Changed(vec![shell]).to_string(),
-            "started by /bin/zsh (pid 41), which changed while it was checked"
+            r#"started by "/bin/zsh" (pid 41), which changed while it was checked"#
         );
+    }
+
+    #[test]
+    fn a_parents_path_cannot_forge_a_log_line() {
+        let forged = Up {
+            pid: 7,
+            exe: PathBuf::from("/tmp/x\n2026-11-24 INFO Desk's Chrome extension said hello"),
+        };
+        let said = NotChrome::Other(vec![forged]).to_string();
+        assert!(!said.contains('\n'), "{said}");
+        assert!(said.contains(r"/tmp/x\n2026-11-24"), "{said}");
     }
 
     #[test]
