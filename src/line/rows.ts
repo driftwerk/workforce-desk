@@ -54,6 +54,8 @@ export const deliveryText = (m: LineMessage, now: number): string | null => {
       switch (m.waiting) {
         case "typing":
           return "Waiting: you're typing in its terminal";
+        case "draft":
+          return "Waiting: your draft is in its prompt";
         case "stopped":
           return "Held: it gets this when it runs again";
         case "working":

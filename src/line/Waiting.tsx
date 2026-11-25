@@ -24,7 +24,9 @@ export const whyWaiting = (m: LineMessage, session: Session, now = Date.now()): 
     case "stopped":
       return `${name} isn't running: this goes in when it runs again.${forHow}`;
     case "typing":
-      return `You're typing in its terminal: this goes in once you've sent or cleared what you typed.${forHow}`;
+      return `You're typing in its terminal: this goes in a minute or two after you stop typing.${forHow}`;
+    case "draft":
+      return `Your draft is waiting in its prompt: this goes in once you send or clear it.${forHow}`;
     case "paused":
       return `Desk's breaker paused ${name}: only your own messages go in until you let it go on.${forHow}`;
     case "asking":

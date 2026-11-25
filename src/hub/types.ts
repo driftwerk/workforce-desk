@@ -1433,7 +1433,12 @@ export type LineAsked = "open" | "escalated" | "answered" | "withdrawn" | "lapse
 export type LineWait =
   | "stopped"
   | "working"
+  /** You typed in its terminal within the last minute or two, since its
+   *  last turn started: this goes in once you've stopped for that long. */
   | "typing"
+  /** Your draft, put in its prompt by Desk, waits there unsent: this goes
+   *  in once you send or clear it. */
+  | "draft"
   | "paused"
   /** Its turn ended asking you something: until it's answered, only your
    *  messages go in, or its boss's answer, or the messages of the boss
