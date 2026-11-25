@@ -22,4 +22,13 @@ describe("why a message waits", () => {
     );
     expect(waiting("awaited")).toBe("acme-web's call waits on this answer: it takes it as the call's result.");
   });
+
+  it("tells the person's typing, which holds briefly, from their draft, which holds until they send or clear it", () => {
+    const session = lined({ name: "acme-web" });
+    const at = new Date().toISOString();
+    const waiting = (waiting: "typing" | "draft") =>
+      whyWaiting(msg({ from: DESK, to: S1, kind: "tell", asked: null, delivery: "queued", deliveredAt: null, at, waiting }), session, Date.parse(at));
+    expect(waiting("typing")).toBe("You're typing in its terminal: this goes in a minute or two after you stop typing.");
+    expect(waiting("draft")).toBe("Your draft is waiting in its prompt: this goes in once you send or clear it.");
+  });
 });

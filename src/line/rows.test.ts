@@ -17,6 +17,7 @@ describe("a line's rows", () => {
     const to = (m: Parameters<typeof msg>[0]) => deliveryText(msg({ from: YOU, to: S1, kind: "tell", ...m }), NOW);
     expect(to({ delivery: "queued", waiting: "working" })).toBe("Waiting for it to finish its turn");
     expect(to({ delivery: "queued", waiting: "typing" })).toBe("Waiting: you're typing in its terminal");
+    expect(to({ delivery: "queued", waiting: "draft" })).toBe("Waiting: your draft is in its prompt");
     expect(to({ delivery: "queued", waiting: "paused" })).toBe("Waiting: Desk's breaker paused it");
     expect(to({ delivery: "queued", waiting: "asking" })).toBe("Waiting: its turn ended asking you something");
     expect(to({ delivery: "queued", waiting: "dialog" })).toBe("Waiting: a dialog in its terminal");

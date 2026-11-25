@@ -55,6 +55,8 @@ export const waitPhrase = (m: LineMessage, many = false): string => {
       return `${waits} for it to run again`;
     case "typing":
       return `${waits} while you type in its terminal`;
+    case "draft":
+      return `${waits} on your draft in its prompt`;
     case "paused":
       return `${waits}: Desk's breaker paused it`;
     case "asking":
