@@ -8,7 +8,7 @@ import { useLocalAgent } from "../overview/people";
 import { useOverview } from "../overview/store";
 import { requestFocus } from "../shell/focus";
 import { useHost } from "../shell/host";
-import { waitsOnYou } from "../floor/background";
+import { heldFor, waitsOnYou } from "../floor/background";
 import { useNeedCounts } from "../floor/store";
 import { agentItem, sessionItem } from "../groups/model";
 import { PLUGINS, SENSORS, DragChip, MoreIcon, below, type Operation } from "../groups/rows";
@@ -68,7 +68,7 @@ export const useWaiting = (): ((t: Ticket) => boolean) => {
       if (!a || t.state === "done" || t.state === "dropped") return false;
       if (a.kind === "session") {
         const s = sessions[a.id];
-        return needs.has(sessionItem(a.id)) || (!!s && waitsOnYou(s));
+        return needs.has(sessionItem(a.id)) || (!!s && (waitsOnYou(s) || !!heldFor(s)));
       }
       return a.kind === "agent" && !!localHub && needs.has(agentItem({ hubId: localHub, id: a.id }));
     },

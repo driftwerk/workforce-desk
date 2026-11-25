@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backgroundLine, bossHandles, lookOf, restartedLine, shownState, statusOf, waitsLine, waitsOnYou } from "./background";
+import { backgroundLine, bossHandles, heldFor, lookOf, restartedLine, shownState, statusOf, waitsLine, waitsOnYou } from "./background";
 import { clock } from "./time";
 import { NOW, at } from "./testing";
 
@@ -50,6 +50,14 @@ describe("a session its boss has", () => {
     expect(waitsOnYou({ state: "asking", bossHas: undefined })).toBe(true);
     expect(lookOf({ state: "asking" })).toBe("blocked");
     expect(statusOf({ state: "blocked" }, labels)).toBe("needs you");
+  });
+
+  it("held on the person's word, it says what it asks them", () => {
+    const asks = "Desk asks you: Ship the small scope or the whole ticket?";
+    expect(heldFor({ state: "idle", waitsOnYou: asks })).toBe(asks);
+    expect(heldFor({ state: "idle", waitsOnYou: asks, bossHas: "Desk" })).toBeNull();
+    expect(heldFor({ state: "asking", waitsOnYou: "You're driving it." })).toBeNull();
+    expect(heldFor({ state: "idle" })).toBeNull();
   });
 
   it("only changes what it waits on: working is working", () => {
