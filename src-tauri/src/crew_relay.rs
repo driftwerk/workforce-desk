@@ -101,6 +101,11 @@ const START_FIELDS: &[&str] = &[
 /// starts (a plan's ticket): a boolean, beside [`START_FIELDS`], forwarded
 /// when `true`.
 const START_DEPS: &str = "deps";
+/// Whether the start is its plan's start of its ticket again, whose boss's
+/// own earlier session of it, resting in its worktree there, gives way (hub
+/// #531): a boolean, forwarded when `true` like [`START_DEPS`]. A machine
+/// older than that ignores it.
+const START_FREE_RESTING: &str = "free_resting";
 /// The person's machines, as Desk has them: answered here.
 const MACHINES: &str = "desk.machines";
 /// The folders in a folder on a machine (`path`), as the folder picker
@@ -542,10 +547,14 @@ async fn carry_desk<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &
     {
         return refused("That start's id couldn't be read.".to_string());
     }
-    let deps = match given.get(START_DEPS) {
-        None | Some(Value::Null) => false,
-        Some(Value::Bool(b)) => *b,
-        Some(_) => return refused(format!("That start's {START_DEPS} couldn't be read.")),
+    let flag = |k: &str| match given.get(k) {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(b)) => Ok(*b),
+        Some(_) => Err(refused(format!("That start's {k} couldn't be read."))),
+    };
+    let (deps, free_resting) = match (flag(START_DEPS), flag(START_FREE_RESTING)) {
+        (Ok(d), Ok(f)) => (d, f),
+        (Err(e), _) | (_, Err(e)) => return e,
     };
     let mut start: serde_json::Map<String, Value> = START_FIELDS
         .iter()
@@ -553,6 +562,9 @@ async fn carry_desk<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &
         .collect();
     if deps {
         start.insert(START_DEPS.into(), true.into());
+    }
+    if free_resting {
+        start.insert(START_FREE_RESTING.into(), true.into());
     }
     if let (Some(grant), Some(boss)) = (
         call.group
@@ -1905,7 +1917,7 @@ mod tests {
         let input = json!({
             "engine": "claude", "name": "VEL-3", "cwd": "/home/dev/vellev", "goal": "g",
             "prompt": "p", "model": "opus", "worktree": "vel-3", "deps": true,
-            "env": {"EVIL": "1"}, "account": null, "group": "g1",
+            "free_resting": true, "env": {"EVIL": "1"}, "account": null, "group": "g1",
         });
         let stop = start(&fake.polled(vec![desk_call(A, "desk.session_start", input)]));
         let (id, answer) = next(&mut rx).await;
@@ -1926,6 +1938,7 @@ mod tests {
                 Some(json!({
                     "engine": "claude", "name": "VEL-3", "cwd": "/home/dev/vellev", "goal": "g",
                     "prompt": "p", "model": "opus", "worktree": "vel-3", "deps": true,
+                    "free_resting": true,
                     "env": {"CLAUDE_CODE_PLUGIN_DIRS": "/home/dev/.local/share/Desk/bin/current/claude-plugin"},
                 }))
             )]
@@ -1935,7 +1948,8 @@ mod tests {
         let _ = stop.send(true);
     }
 
-    /// A start's `deps` that is `false` or `null` is forwarded as absent.
+    /// A start's `deps` or `free_resting` that is `false` or `null` is
+    /// forwarded as absent.
     #[tokio::test]
     async fn a_starts_deps_false_or_null_is_forwarded_as_absent() {
         let made = json!({"id": SESSION, "name": "VEL-3", "cwd": "/x", "state": "starting"});
@@ -1946,7 +1960,7 @@ mod tests {
                 desk_call(
                     id,
                     "desk.session_start",
-                    json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "deps": deps}),
+                    json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "deps": deps, "free_resting": deps}),
                 )
             })
             .collect();
