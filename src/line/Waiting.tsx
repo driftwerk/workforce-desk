@@ -37,6 +37,8 @@ export const whyWaiting = (m: LineMessage, session: Session, now = Date.now()): 
       return `You're driving ${name}: its boss's messages go in once you hand it back.${forHow}`;
     case "mode_ending":
       return `Desk is starting ${name} again in its own mode: this goes in after that.${forHow}`;
+    case "restarting":
+      return `Desk is starting ${name} again with its new permissions: this goes in after that.${forHow}`;
     case "awaited":
       return `${name}'s call waits on this answer: it takes it as the call's result.`;
     case "behind":

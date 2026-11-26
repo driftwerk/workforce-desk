@@ -70,6 +70,8 @@ export const deliveryText = (m: LineMessage, now: number): string | null => {
           return "Waiting: you're driving";
         case "mode_ending":
           return "Waiting: Desk is putting it back in its own mode";
+        case "restarting":
+          return "Waiting: Desk is starting it again with its new permissions";
         case "next_call":
           return "Sent now: it reads this with its next tool call";
         case "awaited":
