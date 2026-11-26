@@ -1454,6 +1454,9 @@ export type LineWait =
   /** It still runs in auto or bypass mode from a boss no longer unbound
    *  over it: Desk starts it again in its own mode first. */
   | "mode_ending"
+  /** Its boss's charge changed what a Codex session may do: Desk starts it
+   *  again in the new permissions, keeping its conversation, first. */
+  | "restarting"
   /** Sent now into its running turn: it reads it with its next tool
    *  call's result (or at the turn's end, if no call comes first). */
   | "next_call"

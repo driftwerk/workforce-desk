@@ -67,6 +67,8 @@ export const waitPhrase = (m: LineMessage, many = false): string => {
       return `${waits} until you hand it back`;
     case "mode_ending":
       return `${waits} for Desk to put it back in its own mode`;
+    case "restarting":
+      return `${waits} for Desk to start it again with its new permissions`;
     case "awaited":
       return many ? "go in as the answers its calls wait on" : "goes in as the answer its call waits on";
     case "behind":

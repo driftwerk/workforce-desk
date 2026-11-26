@@ -71,6 +71,7 @@ describe("a line's rows", () => {
     const boss = (m: Parameters<typeof msg>[0]) => deliveryText(msg({ from: DESK, to: S1, kind: "tell", asked: null, ...m }), NOW);
     expect(boss({ delivery: "queued", waiting: "person_driving" })).toBe("Waiting: you're driving");
     expect(boss({ delivery: "queued", waiting: "mode_ending" })).toBe("Waiting: Desk is putting it back in its own mode");
+    expect(boss({ delivery: "queued", waiting: "restarting" })).toBe("Waiting: Desk is starting it again with its new permissions");
     expect(boss({ delivery: "withdrawn" })).toBe("Not delivered: withdrawn before it went in");
     expect(boss({ delivery: "unreceived" })).toBe("Not received: Desk couldn't show it reached the session");
     expect(boss({ delivery: "queued", waiting: "next_call" })).toBe("Sent now: it reads this with its next tool call");
