@@ -61,19 +61,19 @@ export const setStarter = (run: (() => void) | null): void => {
 };
 const startIt = (): Fix => (starter ? { label: "Start it", run: starter } : ASK);
 
-/** Opens the session Desk lists by the name it shows (`label`), if it does:
- *  the main window registers it. */
-let sessionOpener: ((label: string) => (() => void) | null) | null = null;
-export const setSessionOpener = (find: ((label: string) => (() => void) | null) | null): void => {
+/** What opens the session `id`, if Desk lists it: the main window
+ *  registers it. */
+let sessionOpener: ((id: string) => (() => void) | null) | null = null;
+export const setSessionOpener = (find: ((id: string) => (() => void) | null) | null): void => {
   sessionOpener = find;
 };
 
-/** What frees a worktree another session holds: that session, opened, when
- *  the hub's words name one Desk lists. */
-const holderFix = (raw: string): Fix => {
-  const held = /is in use: (.+) still runs in it/.exec(raw)?.[1]?.trim();
-  const run = held ? sessionOpener?.(held) : null;
-  return run ? { label: "Open that session", run } : ASK;
+/** A worktree held: by the session the hub names, opened from its button
+ *  when Desk lists it; else by something else in its folder. */
+const worktreeTaken = (e: HubError, raw: string): Problem => {
+  if (!e.holder) return { plain: "Something else is in that branch’s folder.", fix: ASK, details: raw };
+  const run = sessionOpener?.(e.holder);
+  return { plain: "That branch’s copy is in use by another session.", fix: run ? { label: "Open that session", run } : ASK, details: raw };
 };
 
 /** Words that belong to the machinery: a headline never carries them. */
@@ -176,7 +176,7 @@ export function explain(e: unknown, o: ExplainOptions = {}): Problem {
     const s = e.status;
     // The provider's reason with its fix, already in the person's words.
     if (s === 400 && e.code === KEY_REFUSED && raw.trim()) return { plain: raw.trim(), ...(o.what ? { what: o.what } : {}) };
-    if (s === 409 && e.code === WORKTREE_TAKEN) return done({ plain: "That branch’s copy is in use by another session.", fix: holderFix(raw), details: raw });
+    if (s === 409 && e.code === WORKTREE_TAKEN) return done(worktreeTaken(e, raw));
     if (s === 401) return done({ plain: "You’re signed out of this workspace.", fix: settings("Sign in again", "hubs"), details: raw });
     if (s === 403) return done({ plain: "Desk wasn’t allowed to do that.", fix: askOr(settings("Open settings", "computer")), details: raw });
     if (s === 404) return done({ plain: "That isn’t there any more.", details: raw, ...(o.retry ? { fix: { label: "Retry", run: o.retry } } : {}) });

@@ -165,14 +165,12 @@ export function App() {
     setStarter(startLocalHelper);
     return () => setStarter(null);
   }, []);
-  // A worktree another session holds: that session, found by the name the
-  // hub's refusal gives it, opens from the problem's button.
+  // A worktree another session holds: that session, as the hub's refusal
+  // names it, opens from the problem's button.
   useEffect(() => {
-    setSessionOpener((label) => {
-      const held = Object.values(useDesk.getState().sessions).find(
-        (x) => x.state !== "closed" && (x.displayName || x.name) === label,
-      );
-      return held ? () => openSession(held.id) : null;
+    setSessionOpener((holder) => {
+      const held = Object.entries(useDesk.getState().sessions).find(([key, x]) => key === holder || x.id === holder);
+      return held ? () => openSession(held[0]) : null;
     });
     return () => setSessionOpener(null);
   }, []);
