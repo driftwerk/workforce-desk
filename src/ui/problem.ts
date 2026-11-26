@@ -1,4 +1,4 @@
-import { HubError, KEY_REFUSED } from "../hub/client";
+import { HubError, KEY_REFUSED, WORKTREE_TAKEN } from "../hub/client";
 import { useUi, type SettingsSection } from "../shell/ui";
 import { paneFix, permissionOf } from "./privacy";
 
@@ -60,6 +60,21 @@ export const setStarter = (run: (() => void) | null): void => {
   starter = run;
 };
 const startIt = (): Fix => (starter ? { label: "Start it", run: starter } : ASK);
+
+/** Opens the session Desk lists by the name it shows (`label`), if it does:
+ *  the main window registers it. */
+let sessionOpener: ((label: string) => (() => void) | null) | null = null;
+export const setSessionOpener = (find: ((label: string) => (() => void) | null) | null): void => {
+  sessionOpener = find;
+};
+
+/** What frees a worktree another session holds: that session, opened, when
+ *  the hub's words name one Desk lists. */
+const holderFix = (raw: string): Fix => {
+  const held = /is in use: (.+) still runs in it/.exec(raw)?.[1]?.trim();
+  const run = held ? sessionOpener?.(held) : null;
+  return run ? { label: "Open that session", run } : ASK;
+};
 
 /** Words that belong to the machinery: a headline never carries them. */
 const INTERNAL = /\bhubs?\b|desk-hubd|hubd|\b[45]\d\d\b|\[[a-z_.]+\]|[{}`]|\b[a-z]+_[a-z_]+\b|\bbody is\b|\bfields?\b|Error:|\bat \S+:\d+|\n|https?:\/\/|\b[a-z][a-z0-9_]*(?:\.[a-z][a-z0-9_]*)+\b|(?:^|[\s(])(?:~|\.{1,2})?\/[\w.-]+\/|\b[A-Za-z]:\\/i;
@@ -161,6 +176,7 @@ export function explain(e: unknown, o: ExplainOptions = {}): Problem {
     const s = e.status;
     // The provider's reason with its fix, already in the person's words.
     if (s === 400 && e.code === KEY_REFUSED && raw.trim()) return { plain: raw.trim(), ...(o.what ? { what: o.what } : {}) };
+    if (s === 409 && e.code === WORKTREE_TAKEN) return done({ plain: "That branch’s copy is in use by another session.", fix: holderFix(raw), details: raw });
     if (s === 401) return done({ plain: "You’re signed out of this workspace.", fix: settings("Sign in again", "hubs"), details: raw });
     if (s === 403) return done({ plain: "Desk wasn’t allowed to do that.", fix: askOr(settings("Open settings", "computer")), details: raw });
     if (s === 404) return done({ plain: "That isn’t there any more.", details: raw, ...(o.retry ? { fix: { label: "Retry", run: o.retry } } : {}) });

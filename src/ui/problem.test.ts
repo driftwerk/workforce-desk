@@ -3,7 +3,7 @@ import { HubError } from "../hub/client";
 import { useDesk } from "../hub/store";
 import { useUi } from "../shell/ui";
 import { plainError } from "./plainError";
-import { explain, readable, setSettingsOpener, setStarter } from "./problem";
+import { explain, readable, setSessionOpener, setSettingsOpener, setStarter } from "./problem";
 
 const j = (...p: string[]): string => p.join("");
 const INTERNAL = /\bhub\b|desk-hubd|\b[45]\d\d\b|\[[a-z_.]+\]|[{}`]/i;
@@ -228,5 +228,29 @@ describe("a key the provider refused", () => {
     expect(p.details).toBeUndefined();
     // Without the mark, the same words are treated as any refusal.
     expect(explain(new HubError(400, said)).plain).not.toBe(said);
+  });
+});
+
+describe("a worktree another session holds", () => {
+  it("says so plainly, and opens the session holding it", async () => {
+    const { HubError, WORKTREE_TAKEN } = await import("../hub/client");
+    const said = "/dev/crm/.worktrees/man-515 is in use: MAN-515 still runs in it";
+    const opened: string[] = [];
+    setSessionOpener((label) => (label === "MAN-515" ? () => opened.push(label) : null));
+    try {
+      const p = explain(new HubError(409, said, WORKTREE_TAKEN), { what: "starting a session" });
+      expect(p.plain).toBe("That branch’s copy is in use by another session.");
+      expect(p.details).toBe(said);
+      expect(p.fix?.label).toBe("Open that session");
+      p.fix?.run?.();
+      expect(opened).toEqual(["MAN-515"]);
+      // Held by nothing Desk lists (a folder, another branch): Desk is asked.
+      const folder = "/dev/crm/.worktrees/man-9 is there already on main, not man-9: move it away";
+      const q = explain(new HubError(409, folder, WORKTREE_TAKEN));
+      expect(q.plain).toBe("That branch’s copy is in use by another session.");
+      expect(q.fix?.ask).toBe(true);
+    } finally {
+      setSessionOpener(null);
+    }
   });
 });

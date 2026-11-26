@@ -299,6 +299,10 @@ export class HubError extends Error {
  *  routes would put a session in another boss's group. Never retried; the
  *  person is asked with the move dialog instead. */
 export const CROSSES_BOSS = "crosses_boss";
+/** The hub's code for a start or resume whose worktree (the branch's own
+ *  copy of the project) another session, or something else, holds. Never
+ *  retried: it stays so until that is moved. */
+export const WORKTREE_TAKEN = "worktree_taken";
 /** A key the provider refused when the hub tried it: its error is written
  *  for the person, the fix included. */
 export const KEY_REFUSED = "key_refused";
