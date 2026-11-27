@@ -204,6 +204,9 @@ describe("a plan's progress", () => {
     expect(screen.getByText("Waiting for you")).toBeTruthy();
     rerender(<PlanProgressCard plan={{ ...checkout, state: "paused", pausedWhy: "budget" }} />);
     expect(screen.getByRole("group", { name: "Plan: Checkout v2" }).textContent).toContain("3 of 8 done · 3 running · paused: budget");
+    rerender(<PlanProgressCard plan={{ ...checkout, state: "paused", paused: "plan_limit", pausedWhy: "by plan limit until Fri 09:00: your weekly ChatGPT plan is at 88%, over your 80% limit" }} />);
+    expect(screen.getByRole("group", { name: "Plan: Checkout v2" }).textContent).toContain("3 of 8 done · 3 running · paused by plan limit until Fri 09:00");
+    expect(screen.getByRole("group", { name: "Plan: Checkout v2" }).textContent).not.toContain("88%");
     expect(screen.queryByText("ACM-16")).toBeNull();
   });
 });

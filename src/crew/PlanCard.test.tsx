@@ -313,6 +313,26 @@ describe("a running plan", () => {
     expect(within(card()).getByText("Paused: start failed")).toBeTruthy();
   });
 
+  it("paused by the plan limit, says until when and answers the ask's buttons through its item", async () => {
+    Object.assign(plans.plan, {
+      state: "paused",
+      paused: "plan_limit",
+      pausedWhy: "by plan limit until Fri 09:00: your weekly ChatGPT plan is at 88%, over your 80% limit",
+      ask: { itemId: "item-1", options: ["Raise to 95%", "Keep"] },
+    });
+    const answer = vi.spyOn(useDesk.getState().hub!, "answerItem").mockResolvedValue({ done: "Raised." });
+    await show();
+    expect(within(card()).getByText("Paused by plan limit until Fri 09:00")).toBeTruthy();
+    expect(within(card()).getByText("· new starts paused by plan limit until Fri 09:00")).toBeTruthy();
+    expect(within(card()).getByText(/^Paused by plan limit until Fri 09:00: .*It goes on by itself once that's past\.$/)).toBeTruthy();
+    expect(within(card()).queryByRole("button", { name: "Resume" })).toBeNull();
+    const asks = within(card()).getByRole("group", { name: /^Your answer: your plan limit for / });
+    expect(within(asks).getAllByRole("button").map((b) => b.textContent)).toEqual(["Raise to 95%", "Keep", "Hold, I'll look"]);
+    await act(async () => fireEvent.click(within(asks).getByRole("button", { name: "Raise to 95%" })));
+    expect(answer).toHaveBeenCalledWith("item-1", "Raise to 95%");
+    await waitFor(() => expect(within(card()).getByText("You answered: Raise to 95%")).toBeTruthy());
+  });
+
   it("shows a change of scope the boss proposes, and runs on as approved until it is approved", async () => {
     plans.bossAdds("Fix the flaky payment test");
     await show(2);

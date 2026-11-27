@@ -20,6 +20,7 @@ import {
   withoutTicket,
   liveCard,
   isCardText,
+  pausedLabel,
   type PlanTicket,
 } from "./plan";
 
@@ -113,6 +114,18 @@ describe("the plan card's words", () => {
     expect(standing(running).text).toBe("Running");
     expect(standing({ ...running, revision: 2 })).toEqual({ text: "A change waits for you", look: "blocked" });
     expect(awaiting({ ...running, state: "dropped", revision: 2 })).toBe(false);
+  });
+
+  it("says a plan-limit pause as a sentence until when, and every other with its reason after a colon", () => {
+    const limit = { paused: "plan_limit", pausedWhy: "by plan limit until 09:00: your weekly ChatGPT plan is at 88%, over your 80% limit" } as const;
+    expect(pausedLabel(limit)).toBe("Paused by plan limit until 09:00");
+    expect(pausedLabel(limit, "paused")).toBe("paused by plan limit until 09:00");
+    expect(pausedLabel(limit, "Paused", true)).toBe("Paused by plan limit until 09:00: your weekly ChatGPT plan is at 88%, over your 80% limit");
+    expect(pausedLabel({ paused: "plan_limit", pausedWhy: null })).toBe("Paused by plan limit");
+    expect(pausedLabel({ paused: "person", pausedWhy: null })).toBe("Paused: you paused it");
+    const failing = { paused: "start_failing", pausedWhy: "DES-1 couldn't start 5 times: /gone is not a folder" } as const;
+    expect(pausedLabel(failing)).toBe("Paused: DES-1 couldn't start 5 times: /gone is not a folder");
+    expect(pausedLabel({ pausedWhy: "budget" }, "paused")).toBe("paused: budget");
   });
 
   it("shows the newest card posted for a plan whole", () => {
