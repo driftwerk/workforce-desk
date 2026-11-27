@@ -2436,8 +2436,12 @@ export type BossPlanProgress = PlanTally;
 export interface BossPlan {
   id: string;
   board: string;
-  /** The board's group when it was made; null is ungrouped. */
+  /** The group its work belongs to, where its sessions start; null is
+   *  Ungrouped. */
   group: string | null;
+  /** What the person calls its group; absent in Ungrouped and from an older
+   *  hub. */
+  groupName?: string | null;
   /** The boss's agent id. */
   boss: string;
   bossName: string;

@@ -53,6 +53,8 @@ interface PlanState {
   pause: (id: string) => Promise<void>;
   resume: (id: string) => Promise<void>;
   drop: (id: string, sessions: OnPlanDrop) => Promise<void>;
+  /** Moves plan `id` to group `group` (null: Ungrouped). */
+  regroup: (id: string, group: string | null) => Promise<void>;
   /** Forgets what was refused about plan `id`. */
   clear: (id: string) => void;
 }
@@ -185,6 +187,7 @@ export const usePlans = create<PlanState>((set, get) => {
     pause: (id) => act(id, () => hubNow()!.pausePlan(id)),
     resume: (id) => act(id, () => hubNow()!.resumePlan(id)),
     drop: (id, sessions) => act(id, () => hubNow()!.dropPlan(id, sessions)),
+    regroup: (id, group) => act(id, () => hubNow()!.regroupPlan(id, group)),
     clear: (id) => set((s) => ({ refusals: without(s.refusals, id) })),
   };
 });

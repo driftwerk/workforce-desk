@@ -107,7 +107,7 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/tickets/{}/left-filter"),
     with_query("GET", "/api/desk/tickets/{}/history", &["before"]),
     // A boss's plans: the list, one in full, the person's edit, pausing,
-    // resuming and dropping. Approving one is the person's own (the Floor's
+    // resuming, moving to another group and dropping. Approving one is the person's own (the Floor's
     // decide, as their device), never this token's.
     with_query("GET", "/api/desk/plans", &["state", "group"]),
     route("GET", "/api/desk/plans/{}"),
@@ -115,6 +115,7 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/plans/{}/pause"),
     route("POST", "/api/desk/plans/{}/resume"),
     route("POST", "/api/desk/plans/{}/drop"),
+    route("POST", "/api/desk/plans/{}/group"),
     with_query("GET", "/api/desk/history", &["subject", "before"]),
     route("PUT", "/api/desk/sessions/{}/name"),
     route("GET", "/api/desk/sessions/closed"),
