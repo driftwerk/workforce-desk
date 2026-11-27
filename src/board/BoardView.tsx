@@ -18,7 +18,7 @@ import { useMinute } from "../floor/RightNow";
 import { Menu, type MenuEntry } from "../ui/Menu";
 import { leftFilterOf, syncStatus, targetWords } from "../hub/boardSync";
 import { BoardDialog } from "./BoardDialogs";
-import { BoardPlans } from "./BoardPlans";
+import { BoardPlans, over } from "./BoardPlans";
 import { LeftFilterShelf, SyncBar } from "./SyncBar";
 import { hubNameOf, localSync, syncChoices, useSyncHubs, type SyncChoice } from "./syncStore";
 import {
@@ -245,12 +245,15 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   const plansAll = usePlans((s) => s.plans);
   const details = usePlans((s) => s.details);
   // A plan shows on its own board, and on any board whose tickets it took
-  // on: every plan on the board, going, finished or ended, is read in
-  // full, to know which those are, until it is removed.
+  // on: every plan going is read in full, to know which those are, and a
+  // finished or ended one while Finished is pressed or it is shown.
   const plans = useMemo(() => (board ? plansOn(plansAll, board.id, details) : []), [plansAll, board, details]);
+  const [finished, setFinished] = useState(false);
+  const planShown = useBoard((s) => s.plan);
   useEffect(() => {
-    for (const p of Object.values(plansAll)) if (!usePlans.getState().details[p.id]) void usePlans.getState().fetch(p.id);
-  }, [plansAll]);
+    for (const p of Object.values(plansAll))
+      if ((!over(p) || finished || p.id === planShown) && !usePlans.getState().details[p.id]) void usePlans.getState().fetch(p.id);
+  }, [plansAll, finished, planShown]);
   // The tickets in any plan, wherever the plan shows: none of them can be
   // taken on by another.
   const inAnyPlan = useMemo(
@@ -260,7 +263,6 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   // The plan shown, kept by the store so a plan's card in the boss's DM
   // (Open on board) can show it here. A grid's pane has no header to show
   // it in, so it shows every plan's tickets.
-  const planShown = useBoard((s) => s.plan);
   const setPlan = useBoard((s) => s.showPlan);
   const plan = !pane && planShown && plans.some((p) => p.id === planShown) ? planShown : null;
   // An ended plan's tickets are no longer its own, but while it's shown.
@@ -573,7 +575,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
         />
       )}
       <LeftFilterShelf key={`left:${board.id}`} board={board} tickets={left} />
-      {!pane && <BoardPlans plans={plans} shown={plan} />}
+      {!pane && <BoardPlans plans={plans} shown={plan} finished={finished} onFinished={setFinished} />}
       {picks?.shown && (
         <PickBar
           picked={picked.size}

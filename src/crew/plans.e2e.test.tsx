@@ -364,6 +364,19 @@ describe("a plan's lasting place on its board", () => {
     expect(hub.plans.plan.state).toBe("done");
   });
 
+  it("reads a finished plan in full only once Finished is pressed", async () => {
+    hub.plans.approve(1);
+    hub.plans.plan.state = "done";
+    await onBoard();
+    render(<Board />);
+    const read = () => hub.plans.requests.filter((r) => r.route === `GET /api/desk/plans/${PLAN}`).length;
+    const finished = await screen.findByRole("button", { name: "Finished · 1" });
+    expect(read()).toBe(0);
+    fireEvent.click(finished);
+    await waitFor(() => expect(line().getByText("Done")).toBeTruthy());
+    expect(read()).toBeGreaterThan(0);
+  });
+
   it("opens from the DM's card, which stays whole beside the board's", async () => {
     await onBoard();
     render(<DeskActions extras={{ plan: { id: PLAN, revision: 1 } }} text="Sarah proposes a plan." />);
