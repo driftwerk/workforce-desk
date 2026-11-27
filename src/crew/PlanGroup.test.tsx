@@ -93,13 +93,15 @@ describe("a plan's group on its card", () => {
     expect(choosing()).toBeTruthy();
   });
 
-  it("says on the card when its running sessions stayed where they were", async () => {
-    regroupPlan.mockResolvedValue({ ...detail({ group: "g-mantis" }), unmoved: "Its running sessions stayed where they were: the sidebar refused." });
+  it("notes on the card, as no refusal, when its running sessions stayed where they were", async () => {
+    const said = "Its running sessions stayed where they were: the sidebar refused.";
+    regroupPlan.mockResolvedValue({ ...detail({ group: "g-mantis" }), unmoved: said });
     render(<PlanGroup plan={plan()} />);
     change();
     choose("Mantis");
-    const p = plan();
-    await waitFor(() => expect(usePlans.getState().refusals[p.id]?.text).toBe("Its running sessions stayed where they were: the sidebar refused."));
+    expect((await screen.findByRole("status")).textContent).toBe(said);
+    expect(choosing()).toBeNull();
+    expect(usePlans.getState().refusals).toEqual({});
   });
 
   it("offers no move for a group boss's plan or a finished one", () => {
