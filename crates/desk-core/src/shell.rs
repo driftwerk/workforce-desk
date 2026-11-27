@@ -13,12 +13,18 @@ const TIMEOUT: Duration = Duration::from_secs(20);
 /// The login shell's environment, or this process's own when the shell
 /// can't be read in time.
 pub fn login_env() -> BTreeMap<String, String> {
+    read_login_env().unwrap_or_else(|| std::env::vars().collect())
+}
+
+/// The login shell's environment; none when the shell can't be read in
+/// time.
+pub fn read_login_env() -> Option<BTreeMap<String, String>> {
     let shell = login_shell(
         std::env::var("SHELL").ok().as_deref(),
         account_shell().as_deref(),
         |p| std::path::Path::new(p).is_file(),
     );
-    read(&shell).unwrap_or_else(|| std::env::vars().collect())
+    read(&shell)
 }
 
 /// The shell when neither `$SHELL` nor the account names one.

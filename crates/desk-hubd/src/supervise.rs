@@ -133,6 +133,26 @@ const HUB_ENV: [&str; 41] = [
     PLUGIN_DIRS,
 ];
 
+/// Said in the hub's environment when it isn't the login shell's, which
+/// Desk Helper couldn't read: the hub's Desk keeps the login shell for the
+/// Codex sessions a boss runs then (`LOGIN_ENV_UNREAD` in the hub's `desk`).
+const LOGIN_ENV_UNREAD: &str = "DESK_LOGIN_ENV_UNREAD";
+
+/// The login environment `read`, and the hub's from it ([`hub_env`]);
+/// when the login shell couldn't be read, this process's own, the hub's
+/// said not to be the login shell's ([`LOGIN_ENV_UNREAD`]).
+fn login_and_hub_env(
+    read: Option<BTreeMap<String, String>>,
+) -> (BTreeMap<String, String>, BTreeMap<String, String>) {
+    let unread = read.is_none();
+    let login = read.unwrap_or_else(|| std::env::vars().collect());
+    let mut env = hub_env(&login);
+    if unread {
+        env.insert(LOGIN_ENV_UNREAD.into(), "1".into());
+    }
+    (login, env)
+}
+
 /// Whether the hub is given variable `name` (see [`HUB_ENV`]).
 fn hub_may_have(name: &str) -> bool {
     HUB_ENV.contains(&name) || name.starts_with("LC_") || name.starts_with("XDG_")
@@ -886,8 +906,13 @@ async fn run_helper(
             }
         }
     }
-    let login = desk_core::shell::login_env();
-    let mut env = hub_env(&login);
+    let read = desk_core::shell::read_login_env();
+    if read.is_none() {
+        tracing::warn!(
+            "couldn't read the login shell's environment in time: the hub starts with Desk Helper's own, and Codex sessions a boss runs keep the login shell for their commands"
+        );
+    }
+    let (login, mut env) = login_and_hub_env(read);
     if mode == config::Mode::Machine {
         let plugin = machine_plugin_dir(&install, &exe);
         tracing::info!(plugin = %plugin.display(), "running as a machine: sessions are resumed after a restart");
@@ -1160,6 +1185,24 @@ mod tests {
         // The person's own plugin folders stay; the hub adds Desk's.
         assert_eq!(claude, ["CLAUDE_CODE_PLUGIN_DIRS"]);
         assert_eq!(env["CLAUDE_CODE_PLUGIN_DIRS"], "/mine");
+    }
+
+    /// The hub is told when its environment isn't the login shell's, and
+    /// only then: never because whoever started Desk Helper said so.
+    #[test]
+    fn the_hub_is_told_only_a_login_environment_desk_helper_couldnt_read() {
+        let login = BTreeMap::from([
+            ("PATH".to_string(), "/opt/homebrew/bin:/usr/bin".to_string()),
+            (LOGIN_ENV_UNREAD.to_string(), "1".to_string()),
+        ]);
+        let (kept, env) = login_and_hub_env(Some(login.clone()));
+        assert_eq!(kept, login);
+        assert!(!env.contains_key(LOGIN_ENV_UNREAD));
+        assert!(env["PATH"].starts_with("/opt/homebrew/bin"));
+
+        let (kept, env) = login_and_hub_env(None);
+        assert_eq!(kept, std::env::vars().collect::<BTreeMap<_, _>>());
+        assert_eq!(env[LOGIN_ENV_UNREAD], "1");
     }
 
     #[test]
