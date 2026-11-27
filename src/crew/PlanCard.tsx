@@ -47,6 +47,7 @@ import {
   type PlanChanges,
 } from "./plan";
 import { usePlans } from "./planStore";
+import { PlanGroup } from "./PlanGroup";
 import { openPlanOnBoard } from "./PlanRow";
 import { Answers } from "../rooms/Answers";
 
@@ -383,6 +384,7 @@ function WholePlan({ detail, plan, onBoard }: { detail: BossPlanDetail; plan: Bo
           <span className="muted small">
             {[boardName ? `Board: ${boardName}` : null, `${boss}'s plan`].filter(Boolean).join(" · ")}
           </span>
+          <PlanGroup plan={plan} />
           {/* A dropped plan is on no board's list of plans. */}
           {!onBoard && plan.state !== "dropped" && (
             <button type="button" className="link small pc-open-board" onClick={() => openPlanOnBoard(plan)}>

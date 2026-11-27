@@ -188,6 +188,10 @@ export interface Session {
   restarted?: Restarted | null;
   /** Present only while it runs in a non-asking mode an unbound boss set. */
   mode?: "auto" | "bypassPermissions";
+  /** How its last turn failed, in the hub's words ("It stopped on its
+   *  plan's usage limit"), until its next turn starts; absent while it
+   *  hasn't, and from older hubs. */
+  failed?: string | null;
   /** While it is asking: what, and why Desk read it so; absent from older hubs. */
   asked?: Asked | null;
   /** Why what it waits on is the person's though a boss runs it ("Desk
@@ -2438,8 +2442,12 @@ export type BossPlanProgress = PlanTally;
 export interface BossPlan {
   id: string;
   board: string;
-  /** The board's group when it was made; null is ungrouped. */
+  /** The group its work belongs to, where its sessions start; null is
+   *  Ungrouped. */
   group: string | null;
+  /** What the person calls its group; absent in Ungrouped and from an older
+   *  hub. */
+  groupName?: string | null;
   /** The boss's agent id. */
   boss: string;
   bossName: string;
@@ -2550,6 +2558,12 @@ export interface BossPlanDetail extends BossPlan {
   revisions: BossPlanRevision[];
   /** Where its budget stands now, when it has one and it can be counted. */
   spend?: Standing | null;
+}
+
+/** A plan moved to another group; why its running sessions stayed where
+ *  they were, when they did. */
+export interface RegroupedPlan extends BossPlanDetail {
+  unmoved?: string;
 }
 
 /** A ticket as the person's edit writes it: by its id when the plan has
