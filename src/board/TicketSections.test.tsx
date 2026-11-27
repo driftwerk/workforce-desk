@@ -31,6 +31,7 @@ it("a ticket's session line says each state, drawn as needing the person when it
     const { container } = render(<SessionLine session={s} className="ticket-row-faint" />);
     const line = container.firstElementChild!;
     const said = [line.textContent, line.classList.contains("ticket-session-needs")];
+    expect(line.getAttribute("title")).toBe(line.textContent);
     cleanup();
     return said;
   };

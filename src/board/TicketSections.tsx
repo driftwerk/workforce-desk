@@ -338,10 +338,16 @@ export function SessionName({ id }: { id: string }) {
 }
 
 /** What a ticket's session is doing, failed at or waits on the person
- *  for, in its line's words; drawn as needing the person when it does. */
+ *  for, in its line's words, cut to fit with the whole of it on hover;
+ *  drawn as needing the person when it does. */
 export function SessionLine({ session, className }: { session: Session; className: string }) {
   const needs = !!failedLine(session) || waitsOnYou(session);
-  return <span className={needs ? `${className} ticket-session-needs` : className}>{sessionLine(session)}</span>;
+  const line = sessionLine(session);
+  return (
+    <span className={`${className} ticket-session-line${needs ? " ticket-session-needs" : ""}`} title={line}>
+      {line}
+    </span>
+  );
 }
 
 /** A person there: their mark, and "You" for the person. */
