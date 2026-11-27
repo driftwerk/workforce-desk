@@ -42,7 +42,7 @@ import {
   type FactId,
   type Layout,
 } from "./ticketRich";
-import { ActivityFold, Crumbs, Development, Dotted, EpicChildren, EpicProgress, LinkedWork, Person, SectionHead, SubItems, useEpicProgress } from "./TicketSections";
+import { ActivityFold, Crumbs, Development, Dotted, EpicChildren, EpicProgress, LinkedWork, Person, SectionHead, SessionLine, SubItems, useEpicProgress } from "./TicketSections";
 
 const STATES: TicketState[] = ["backlog", "todo", "doing", "review", "done", "dropped"];
 
@@ -663,7 +663,7 @@ function Facts({ ticket: t, layout, onState }: { ticket: Ticket; layout: Layout;
       value: (
         <>
           {mine(t.assignee)}
-          {!compact && session?.state === "working" && <span className="ticket-there">working</span>}
+          {!compact && session && <SessionLine session={session} className="ticket-there" />}
         </>
       ),
     };

@@ -45,6 +45,15 @@ describe("a tile's log line", () => {
   const since = () => new Date(Date.now() - 3 * 60_000).toISOString();
   const waits = () => ({ words: "waiting for a build slot", since: since() });
 
+  it("says how a finished session's turn failed, over its last reply", () => {
+    const failed = "Codex didn't come up: Sign in with ChatGPT";
+    render(<Tile session={session({ state: "done", lastReply: "Shipped it.", failed })} now={Date.now()} />);
+    expect(logLine()).toBe(failed);
+    cleanup();
+    render(<Tile session={session({ state: "working", currentTool: "Bash", failed })} now={Date.now()} />);
+    expect(logLine()).toBe("● Bash");
+  });
+
   it("says what a working session with a tool waits on and for how long", () => {
     render(<Tile session={session({ currentTool: "Bash", waits: waits() })} now={Date.now()} />);
     expect(logLine()).toBe("● Bash · waiting for a build slot, 3m");

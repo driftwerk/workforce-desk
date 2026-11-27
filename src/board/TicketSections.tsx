@@ -2,7 +2,8 @@ import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useSessionName } from "../groups/names";
 import { SYSTEM_TITLE, targetWords } from "../hub/boardSync";
 import { useDesk } from "../hub/store";
-import type { Board, Ticket, TicketChild, TicketLink, TicketState } from "../hub/types";
+import type { Board, Session, Ticket, TicketChild, TicketLink, TicketState } from "../hub/types";
+import { failedLine, sessionLine, waitsOnYou } from "../floor/background";
 import { openUrl } from "../platform";
 import { Mark } from "../ui/Mark";
 import {
@@ -336,6 +337,19 @@ export function SessionName({ id }: { id: string }) {
   );
 }
 
+/** What a ticket's session is doing, failed at or waits on the person
+ *  for, in its line's words, cut to fit with the whole of it on hover;
+ *  drawn as needing the person when it does. */
+export function SessionLine({ session, className }: { session: Session; className: string }) {
+  const needs = !!failedLine(session) || waitsOnYou(session);
+  const line = sessionLine(session);
+  return (
+    <span className={`${className} ticket-session-line${needs ? " ticket-session-needs" : ""}`} title={line}>
+      {line}
+    </span>
+  );
+}
+
 /** A person there: their mark, and "You" for the person. */
 export function Person({ name, me }: { name: string; me?: string | null }) {
   return (
@@ -402,7 +416,14 @@ function OwnLink({ link: l }: { link: TicketLink }) {
         }}
       >
         <span className="ticket-row-rel">session</span>
-        {session ? <SessionName id={l.session} /> : <span className="ticket-row-title faint">A session since forgotten</span>}
+        {session ? (
+          <>
+            <SessionName id={l.session} />
+            <SessionLine session={session} className="ticket-row-faint" />
+          </>
+        ) : (
+          <span className="ticket-row-title faint">A session since forgotten</span>
+        )}
       </button>
     );
   if (l.kind === "room")

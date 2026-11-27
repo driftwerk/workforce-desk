@@ -188,6 +188,10 @@ export interface Session {
   restarted?: Restarted | null;
   /** Present only while it runs in a non-asking mode an unbound boss set. */
   mode?: "auto" | "bypassPermissions";
+  /** How its last turn failed, in the hub's words ("It stopped on its
+   *  plan's usage limit"), until its next turn starts; absent while it
+   *  hasn't, and from older hubs. */
+  failed?: string | null;
   /** While it is asking: what, and why Desk read it so; absent from older hubs. */
   asked?: Asked | null;
   /** Why what it waits on is the person's though a boss runs it ("Desk

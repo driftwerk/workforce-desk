@@ -1,6 +1,6 @@
 import { memo } from "react";
 import { useSessionName } from "../groups/names";
-import { backgroundLine, backgroundOf, bossHandles, handledText, lookOf, restartedLine, shownState, waitsLine, waitsOnYou } from "./background";
+import { backgroundLine, backgroundOf, bossHandles, failedLine, handledText, lookOf, restartedLine, shownState, STATE_WORDS, waitsLine, waitsOnYou } from "./background";
 import { useDesk } from "../hub/store";
 import type { Session } from "../hub/types";
 import { Approval } from "../session/Approval";
@@ -8,18 +8,6 @@ import { Mark } from "../ui/Mark";
 import { SessionTicketChip } from "../board/TicketChip";
 import { plain } from "../ui/plain";
 import { modelTitle } from "../engines/engines";
-
-const LABEL: Record<Session["state"], string> = {
-  starting: "starting",
-  working: "working",
-  blocked: "needs you",
-  asking: "needs you · asked",
-  done: "done",
-  idle: "idle",
-  interrupted: "interrupted",
-  stopped: "stopped",
-  closed: "closed",
-};
 
 export interface Group {
   title: string;
@@ -44,8 +32,8 @@ const task = (s: Session): string => s.goal || (s.lastPrompt && plain(s.lastProm
 const ONE_TIME_MS = 60_000;
 
 const log = (s: Session, now: number): string | null => {
-  const restarted = restartedLine(s);
-  if (restarted) return restarted;
+  const said = restartedLine(s) ?? failedLine(s);
+  if (said) return said;
   const background = backgroundOf(s);
   const waits = s.waits ? waitsLine(s.waits, now) : null;
   if (background) {
@@ -71,7 +59,7 @@ export const Tile = memo(function Tile({ session, now }: { session: Session; now
         <span className="tile-name">
           <span className="mono tile-title">{name}</span>
           <span className={`tile-state state-${bossHandles(session) ? "handled" : state}`}>
-            {bossHandles(session) ? handledText(session) : LABEL[state]} · {home(session)}
+            {bossHandles(session) ? handledText(session) : STATE_WORDS[state]} · {home(session)}
             {session.model ? ` · ${modelTitle(session.engine, session.model)}` : ""}
           </span>
         </span>
