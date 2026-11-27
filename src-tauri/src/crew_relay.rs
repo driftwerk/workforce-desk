@@ -103,9 +103,11 @@ const START_FIELDS: &[&str] = &[
 const START_DEPS: &str = "deps";
 /// Whether the start is its plan's start of its ticket again, whose boss's
 /// own earlier session of it, resting in its worktree there, gives way (hub
-/// #531): a boolean, forwarded when `true` like [`START_DEPS`]. A machine
-/// older than that ignores it.
+/// #531): a boolean, forwarded when `true` like [`START_DEPS`], with the
+/// session its ticket names now (`assigned`, a UUID), which never gives
+/// way. A machine older than that ignores both.
 const START_FREE_RESTING: &str = "free_resting";
+const START_ASSIGNED: &str = "assigned";
 /// The person's machines, as Desk has them: answered here.
 const MACHINES: &str = "desk.machines";
 /// The folders in a folder on a machine (`path`), as the folder picker
@@ -483,10 +485,22 @@ fn refusal(name: &str, r: &Answer) -> Outcome {
     let why = error_of(r).unwrap_or_else(|| format!("{name} refused it ({})", r.status));
     match code_of(r) {
         Some(code) => {
-            Outcome::Answer(json!({"status": "refused", "body": {"error": why, "code": code}}))
+            let mut body = json!({"error": why, "code": code});
+            if let Some(holder) = holder_of(r) {
+                body["holder"] = holder.into();
+            }
+            Outcome::Answer(json!({"status": "refused", "body": body}))
         }
         None => refused(why),
     }
+}
+
+/// The session a machine's refusal names as holding what it refused (a
+/// worktree another session works in), when it names one by its id.
+fn holder_of(reply: &Answer) -> Option<String> {
+    let v: Value = serde_json::from_str(&reply.body).ok()?;
+    let h = v.get("holder")?.as_str()?;
+    uuid_ok(h).then(|| h.to_string())
 }
 
 /// A plan's call on `machine`'s sessions (`tool`, one of [`SESSIONS`] and
@@ -565,6 +579,13 @@ async fn carry_desk<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &
     }
     if free_resting {
         start.insert(START_FREE_RESTING.into(), true.into());
+        match given.get(START_ASSIGNED) {
+            None | Some(Value::Null) => {}
+            Some(Value::String(a)) if uuid_ok(a) => {
+                start.insert(START_ASSIGNED.into(), a.clone().into());
+            }
+            Some(_) => return refused(format!("That start's {START_ASSIGNED} couldn't be read.")),
+        }
     }
     if let (Some(grant), Some(boss)) = (
         call.group
@@ -1917,7 +1938,8 @@ mod tests {
         let input = json!({
             "engine": "claude", "name": "VEL-3", "cwd": "/home/dev/vellev", "goal": "g",
             "prompt": "p", "model": "opus", "worktree": "vel-3", "deps": true,
-            "free_resting": true, "env": {"EVIL": "1"}, "account": null, "group": "g1",
+            "free_resting": true, "assigned": "0f0e0d0c-0b0a-4909-8807-0605040302aa",
+            "env": {"EVIL": "1"}, "account": null, "group": "g1",
         });
         let stop = start(&fake.polled(vec![desk_call(A, "desk.session_start", input)]));
         let (id, answer) = next(&mut rx).await;
@@ -1938,7 +1960,7 @@ mod tests {
                 Some(json!({
                     "engine": "claude", "name": "VEL-3", "cwd": "/home/dev/vellev", "goal": "g",
                     "prompt": "p", "model": "opus", "worktree": "vel-3", "deps": true,
-                    "free_resting": true,
+                    "free_resting": true, "assigned": "0f0e0d0c-0b0a-4909-8807-0605040302aa",
                     "env": {"CLAUDE_CODE_PLUGIN_DIRS": "/home/dev/.local/share/Desk/bin/current/claude-plugin"},
                 }))
             )]
@@ -2024,6 +2046,75 @@ mod tests {
                 json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "id": SESSION}),
             ]
         );
+    }
+
+    /// A start refused as its worktree taken says the session holding it
+    /// when the machine names one by its id; anything else there is left
+    /// out.
+    #[tokio::test]
+    async fn a_start_refused_as_taken_says_its_holder() {
+        let holder = "0f0e0d0c-0b0a-4909-8807-0605040302d1";
+        let (fake, mut rx) = with_desk(
+            vec![
+                Does::Says(
+                    409,
+                    json!({"error": "In use.", "code": "worktree_taken", "holder": holder}),
+                ),
+                Does::Says(
+                    409,
+                    json!({"error": "In use.", "code": "worktree_taken", "holder": "not-an-id"}),
+                ),
+            ],
+            None,
+        );
+        let input = json!({"engine": "codex", "name": "VEL-1", "cwd": "/x"});
+        for (id, body) in [
+            (
+                A,
+                json!({"error": "In use.", "code": "worktree_taken", "holder": holder}),
+            ),
+            (B, json!({"error": "In use.", "code": "worktree_taken"})),
+        ] {
+            let stop =
+                start(&fake.polled(vec![desk_call(id, "desk.session_start", input.clone())]));
+            let (_, answer) = next(&mut rx).await;
+            assert_eq!(answer, json!({"status": "refused", "body": body}));
+            let _ = stop.send(true);
+        }
+    }
+
+    /// A start's `assigned` goes with `free_resting` alone, as an id.
+    #[tokio::test]
+    async fn a_starts_assigned_goes_only_with_free_resting_and_as_an_id() {
+        let made = json!({"id": SESSION, "name": "VEL-3", "cwd": "/x", "state": "starting"});
+        let (fake, mut rx) = with_desk(vec![Does::Says(200, made); 2], None);
+        let id = "0f0e0d0c-0b0a-4909-8807-0605040302e1";
+        let calls = vec![
+            desk_call(
+                A,
+                "desk.session_start",
+                json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "assigned": id}),
+            ),
+            desk_call(
+                B,
+                "desk.session_start",
+                json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "free_resting": true, "assigned": "nope"}),
+            ),
+        ];
+        let stop = start(&fake.polled(calls));
+        let mut answers = [next(&mut rx).await, next(&mut rx).await];
+        answers.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(answers[0].1["status"], "ok");
+        assert_eq!(answers[1].1["status"], "refused", "{:?}", answers[1]);
+        let sent = fake.desk_sent.lock().unwrap().clone();
+        assert_eq!(
+            sent,
+            vec![(
+                "devbox".to_string(),
+                Some(json!({"engine": "codex", "name": "VEL-3", "cwd": "/x"}))
+            )]
+        );
+        let _ = stop.send(true);
     }
 
     /// A start is sent once: refused there, it is said; maybe there but
