@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { useBoard } from "../board/store";
 import { useChat } from "../chat/store";
 import { HubError } from "../hub/client";
 import { floorOf } from "../hub/floor";
@@ -53,6 +54,12 @@ interface PlanState {
   pause: (id: string) => Promise<void>;
   resume: (id: string) => Promise<void>;
   drop: (id: string, sessions: OnPlanDrop) => Promise<void>;
+  /** Ends plan `id`, leaving its tickets as they are. */
+  end: (id: string) => Promise<void>;
+  /** Takes finished or ended plan `id` off the board. */
+  remove: (id: string) => Promise<void>;
+  /** Forgets plan `id`, taken off the board here or elsewhere. */
+  forget: (id: string) => void;
   /** Forgets what was refused about plan `id`. */
   clear: (id: string) => void;
 }
@@ -120,6 +127,21 @@ export const usePlans = create<PlanState>((set, get) => {
     }
   };
 
+  /** Forgets plan `id`: taken off the board. */
+  const forget = (id: string) => {
+    heardOf.delete(id);
+    set((s) => ({
+      plans: without(s.plans, id),
+      details: without(s.details, id),
+      unread: without(s.unread, id),
+      refusals: without(s.refusals, id),
+      cards: without(s.cards, id),
+      seen: without(s.seen, id),
+      looking: without(s.looking, id),
+    }));
+    if (useBoard.getState().plan === id) useBoard.getState().showPlan(null);
+  };
+
   return {
     supported: null,
     plans: {},
@@ -185,6 +207,18 @@ export const usePlans = create<PlanState>((set, get) => {
     pause: (id) => act(id, () => hubNow()!.pausePlan(id)),
     resume: (id) => act(id, () => hubNow()!.resumePlan(id)),
     drop: (id, sessions) => act(id, () => hubNow()!.dropPlan(id, sessions)),
+    end: (id) => act(id, () => hubNow()!.endPlan(id)),
+    remove: async (id) => {
+      const hub = hubNow();
+      if (!hub) throw new Error("Desk isn't ready yet. Try again in a moment.");
+      try {
+        await hub.removePlan(id);
+      } catch (e) {
+        if (!(e instanceof HubError) || e.status !== 404) throw e;
+      }
+      forget(id);
+    },
+    forget,
     clear: (id) => set((s) => ({ refusals: without(s.refusals, id) })),
   };
 });
@@ -200,6 +234,9 @@ const onEvent = (e: DeskEvent) => {
       if (s.details[p.id]) void s.fetch(p.id);
       break;
     }
+    case "planRemoved":
+      s.forget(e.id);
+      break;
     case "snapshot":
       void s.load();
       break;
@@ -214,7 +251,7 @@ useDesk.subscribe((now, before) => {
   if (now.hub !== before.hub) usePlans.setState({ supported: null, plans: {}, details: {}, unread: {}, refusals: {}, seen: {} });
 });
 
-/** The plans on board `board` that aren't dropped, newest first. */
+/** The plans on board `board`, newest first: going, finished or ended. */
 export const plansOn = (
   plans: Readonly<Record<string, BossPlan>>,
   board: string,
@@ -223,5 +260,5 @@ export const plansOn = (
   details?: Readonly<Record<string, Pick<BossPlanDetail, "tickets">>>,
 ): BossPlan[] =>
   Object.values(plans)
-    .filter((p) => p.state !== "dropped" && (p.board === board || !!details?.[p.id]?.tickets.some((t) => t.board === board)))
+    .filter((p) => p.board === board || !!details?.[p.id]?.tickets.some((t) => t.board === board))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));

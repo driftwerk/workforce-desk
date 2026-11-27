@@ -319,6 +319,51 @@ describe("a plan's lasting place on its board", () => {
     await waitFor(() => expect(line().getByText("Running")).toBeTruthy());
   });
 
+  it("ends from its line once asked, leaving its tickets, and is removed from under Finished", async () => {
+    hub.plans.approve(1);
+    const states = hub.plans.plan.tickets.map((t) => t.state);
+    await onBoard();
+    render(<Board />);
+    await waitFor(() => expect(line().getByText("Running")).toBeTruthy());
+    expect(screen.queryByRole("button", { name: /^Finished/ })).toBeNull();
+    fireEvent.click(line().getByRole("button", { name: `More for the plan: ${hub.plans.plan.goal}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /End plan/ }));
+    const ask = screen.getByRole("dialog", { name: "End this plan?" });
+    await act(async () => fireEvent.click(within(ask).getByRole("button", { name: "End plan" })));
+    await waitFor(() => expect(hub.plans.plan.state).toBe("dropped"));
+    expect(hub.plans.plan.tickets.map((t) => t.state)).toEqual(states);
+    // Over, it leaves the list, to be seen under Finished.
+    await waitFor(() => expect(screen.queryByRole("group", { name: `Plan: ${hub.plans.plan.goal}` })).toBeNull());
+    const finished = screen.getByRole("button", { name: "Finished · 1" });
+    expect(finished.getAttribute("aria-pressed")).toBe("false");
+    fireEvent.click(finished);
+    await waitFor(() => expect(line().getByText("Dropped")).toBeTruthy());
+    fireEvent.click(line().getByRole("button", { name: `More for the plan: ${hub.plans.plan.goal}` }));
+    expect(screen.queryByRole("menuitem", { name: /End plan/ })).toBeNull();
+    await act(async () => fireEvent.click(screen.getByRole("menuitem", { name: /Remove/ })));
+    await waitFor(() => expect(screen.queryByRole("region", { name: "Plans" })).toBeNull());
+    expect(hub.plans.removed).toBe(true);
+    expect(usePlans.getState().plans[PLAN]).toBeUndefined();
+    expect(screen.queryByRole("combobox", { name: "Plan" })).toBeNull();
+  });
+
+  it("isn't ended once it finished meanwhile: it is shown done, under Finished", async () => {
+    hub.plans.approve(1);
+    await onBoard();
+    render(<Board />);
+    await waitFor(() => expect(line().getByText("Running")).toBeTruthy());
+    fireEvent.click(line().getByRole("button", { name: `More for the plan: ${hub.plans.plan.goal}` }));
+    fireEvent.click(screen.getByRole("menuitem", { name: /End plan/ }));
+    hub.plans.plan.state = "done";
+    const ask = screen.getByRole("dialog", { name: "End this plan?" });
+    await act(async () => fireEvent.click(within(ask).getByRole("button", { name: "End plan" })));
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "End this plan?" })).toBeNull());
+    expect(ask.isConnected).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Finished · 1" }));
+    await waitFor(() => expect(line().getByText("Done")).toBeTruthy());
+    expect(hub.plans.plan.state).toBe("done");
+  });
+
   it("opens from the DM's card, which stays whole beside the board's", async () => {
     await onBoard();
     render(<DeskActions extras={{ plan: { id: PLAN, revision: 1 } }} text="Sarah proposes a plan." />);

@@ -115,6 +115,8 @@ const HTTP: &[Route] = &[
     route("POST", "/api/desk/plans/{}/pause"),
     route("POST", "/api/desk/plans/{}/resume"),
     route("POST", "/api/desk/plans/{}/drop"),
+    route("POST", "/api/desk/plans/{}/end"),
+    route("POST", "/api/desk/plans/{}/remove"),
     with_query("GET", "/api/desk/history", &["subject", "before"]),
     route("PUT", "/api/desk/sessions/{}/name"),
     route("GET", "/api/desk/sessions/closed"),

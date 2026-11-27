@@ -901,6 +901,10 @@ export class DeskHub {
   /** Drops a plan, stopping the sessions on it or leaving them as yours. */
   dropPlan = (id: string, sessions: OnPlanDrop): Promise<BossPlanDetail> =>
     this.call("POST", `/api/desk/plans/${encodeURIComponent(id)}/drop`, { sessions });
+  /** Ends a running or paused plan, leaving its tickets as they are. */
+  endPlan = (id: string): Promise<BossPlanDetail> => this.call("POST", `/api/desk/plans/${encodeURIComponent(id)}/end`);
+  /** Takes a finished or ended plan off the board; its tickets stay. */
+  removePlan = (id: string): Promise<{ removed: string }> => this.call("POST", `/api/desk/plans/${encodeURIComponent(id)}/remove`);
   /** A page of a ticket's history, newest first. */
   ticketHistory = (id: string, before?: string): Promise<ActivityPage> =>
     this.call("GET", `/api/desk/tickets/${encodeURIComponent(id)}/history${before ? `?before=${encodeURIComponent(before)}` : ""}`);

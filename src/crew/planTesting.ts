@@ -83,6 +83,8 @@ export class PlanHub {
   /** Whether it keeps a ticket's model (a hub before per-session models
    *  doesn't say it back). */
   keepsModel = true;
+  /** Taken off the board: no longer listed or read. */
+  removed = false;
 
   constructor(tickets: BossPlanTicket[] = refunds(), over: Partial<BossPlanDetail> = {}) {
     this.plan = {
@@ -241,9 +243,9 @@ export class PlanHub {
     const b = (body ?? {}) as Record<string, unknown>;
     switch (route) {
       case "GET /api/desk/plans":
-        return json([this.summary()]);
+        return json(this.removed ? [] : [this.summary()]);
       case `GET ${base}`:
-        return json(this.plan);
+        return this.removed ? json({ error: "not found" }, 404) : json(this.plan);
       case `PATCH ${base}`:
         return this.edit(b as { revision?: number; tickets?: DraftTicket[] });
       // The gateway's token has no one to approve as: only the person's
@@ -265,6 +267,16 @@ export class PlanHub {
         Object.assign(this.plan, { state: "dropped", paused: null });
         this.touch();
         return json(this.plan);
+      case `POST ${base}/end`:
+        if (this.plan.state !== "running" && this.plan.state !== "paused") return json({ error: "Only a running or paused plan can be ended." }, 409);
+        Object.assign(this.plan, { state: "dropped", paused: null });
+        this.touch();
+        return json(this.plan);
+      case `POST ${base}/remove`:
+        if (this.plan.state !== "done" && this.plan.state !== "dropped") return json({ error: "End the plan first: only a finished or ended plan can be removed." }, 409);
+        this.removed = true;
+        this.say({ type: "planRemoved", id: PLAN });
+        return json({ removed: PLAN });
       case "POST /api/desk/needs/decide": {
         const at = (b.at ?? {}) as { kind?: string; plan?: string; revision?: number };
         if (at.kind !== "plan" || at.plan !== PLAN) return null;

@@ -248,7 +248,7 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   // on: every plan still going is read in full, to know which those are.
   const plans = useMemo(() => (board ? plansOn(plansAll, board.id, details) : []), [plansAll, board, details]);
   useEffect(() => {
-    for (const p of plans) if (!usePlans.getState().details[p.id]) void usePlans.getState().fetch(p.id);
+    for (const p of plans) if (p.state !== "dropped" && !usePlans.getState().details[p.id]) void usePlans.getState().fetch(p.id);
   }, [plans]);
   useEffect(() => {
     for (const p of Object.values(plansAll)) if (p.state !== "done" && p.state !== "dropped" && !usePlans.getState().details[p.id]) void usePlans.getState().fetch(p.id);
@@ -265,7 +265,9 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   const planShown = useBoard((s) => s.plan);
   const setPlan = useBoard((s) => s.showPlan);
   const plan = !pane && planShown && plans.some((p) => p.id === planShown) ? planShown : null;
-  const ticketPlans = useMemo(() => planOfTickets(plans.map((p) => details[p.id]).filter((d) => !!d)), [plans, details]);
+  // An ended plan's tickets are no longer its own, but while it's shown.
+  const kept = useMemo(() => plans.filter((p) => p.state !== "dropped" || p.id === plan), [plans, plan]);
+  const ticketPlans = useMemo(() => planOfTickets(kept.map((p) => details[p.id]).filter((d) => !!d)), [kept, details]);
   const planTickets = useMemo(() => (plan ? new Set([...ticketPlans].filter(([, p]) => p === plan).map(([t]) => t)) : null), [plan, ticketPlans]);
   const planNames = useMemo(() => new Map(plans.map((p) => [p.id, p.goal])), [plans]);
   const planChips = useMemo(
@@ -529,10 +531,10 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
           ))}
         </div>
         {board.sync && <FacetChips system={board.sync.system} tickets={onBoard} facets={facets} onChange={setFacet} />}
-        {plans.length > 0 && (
+        {kept.length > 0 && (
           <select className="pc-engine board-plan" aria-label="Plan" value={plan ?? ""} onChange={(e) => setPlan(e.target.value || null)}>
             <option value="">Every plan</option>
-            {plans.map((p) => (
+            {kept.map((p) => (
               <option key={p.id} value={p.id}>
                 Plan: {p.goal}
               </option>

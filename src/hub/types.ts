@@ -460,8 +460,10 @@ export type DeskEvent =
   | { type: "board"; board: Board }
   | { type: "boardRemoved"; id: string }
   /** A boss's plan was made or changed: proposed, approved, edited,
-   *  paused, dropped or done. */
-  | { type: "plan"; plan: BossPlan };
+   *  paused, ended or done. */
+  | { type: "plan"; plan: BossPlan }
+  /** A finished or ended plan was taken off the board; its tickets stay. */
+  | { type: "planRemoved"; id: string };
 
 // ── Engine accounts: several subscription logins per engine ──────────────
 

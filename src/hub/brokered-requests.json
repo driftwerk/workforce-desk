@@ -661,6 +661,16 @@
   },
   {
     "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/plans/p1/end"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
+    "path": "/api/desk/plans/p1/remove"
+  },
+  {
+    "kind": "http",
     "method": "GET",
     "path": "/api/desk/history?subject=s1"
   },
