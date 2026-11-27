@@ -322,8 +322,8 @@ describe("a running plan", () => {
     });
     const answer = vi.spyOn(useDesk.getState().hub!, "answerItem").mockResolvedValue({ done: "Raised." });
     await show();
-    expect(within(card()).getByText("Paused by plan limit until Fri 09:00: your weekly ChatGPT plan is at 88%, over your 80% limit")).toBeTruthy();
-    expect(within(card()).getByText(/new starts paused by plan limit until Fri 09:00/)).toBeTruthy();
+    expect(within(card()).getByText("Paused by plan limit until Fri 09:00")).toBeTruthy();
+    expect(within(card()).getByText("· new starts paused by plan limit until Fri 09:00")).toBeTruthy();
     expect(within(card()).getByText(/^Paused by plan limit until Fri 09:00: .*It goes on by itself once that's past\.$/)).toBeTruthy();
     expect(within(card()).queryByRole("button", { name: "Resume" })).toBeNull();
     const asks = within(card()).getByRole("group", { name: /^Your answer: your plan limit for / });

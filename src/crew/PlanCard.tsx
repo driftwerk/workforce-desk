@@ -48,7 +48,7 @@ import {
 } from "./plan";
 import { usePlans } from "./planStore";
 import { openPlanOnBoard } from "./PlanRow";
-import { Answers } from "../rooms/Overseer";
+import { Answers } from "../rooms/Answers";
 
 /** The engines a plan's ticket may run on, as the hub reads this computer:
  *  each with why it can't, when it can't. */
@@ -560,7 +560,7 @@ function WholePlan({ detail, plan, onBoard }: { detail: BossPlanDetail; plan: Bo
                 )}
                 {plan.state === "paused" && plan.paused && !resumable(plan.paused) && (
                   <span className="pc-note">
-                    {pausedLabel(plan)}.{failing ? " Continue tries again." : " It goes on by itself once that's past."}
+                    {pausedLabel(plan, "Paused", true)}.{failing ? " Continue tries again." : " It goes on by itself once that's past."}
                   </span>
                 )}
                 {plan.state === "paused" && plan.paused === "plan_limit" && plan.ask && (

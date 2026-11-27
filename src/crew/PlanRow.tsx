@@ -30,7 +30,7 @@ export function PlanRow({ plan, open, onToggle, controls }: { plan: BossPlan; op
   // the hub last said of it.
   const now = useMemo(() => (detail ? progress(liveTickets(detail, board).map(ruled)) : plan.progress), [detail, board, plan.progress]);
   const stand = standing(plan);
-  const paused = plan.state === "paused" && plan.paused ? pausedLabel(plan) : null;
+  const paused = plan.state === "paused" && plan.paused ? pausedLabel(plan, "Paused", true) : null;
   const line = [`${now.done} of ${now.total} done`, now.doing > 0 ? `${now.doing} running` : null].filter(Boolean).join(" · ");
 
   const run = async (what: "pause" | "resume") => {

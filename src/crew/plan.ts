@@ -193,10 +193,14 @@ export const pausedWhy = (p: Paused): string => {
   return (PAUSED_WHY as Record<string, string | undefined>)[p.paused] ?? p.paused.replace(/_/g, " ");
 };
 
-/** "Paused by plan limit until Fri 09:00: …", "Paused: you paused it":
- *  `word` and why, as a sentence reads them. */
-export const pausedLabel = (p: Paused, word = "Paused"): string =>
-  `${word}${p.paused === "plan_limit" ? " " : ": "}${pausedWhy(p)}`;
+/** "Paused by plan limit until Fri 09:00", "Paused: you paused it": `word`
+ *  and why, as a sentence reads them. A plan-limit pause says only until
+ *  when, unless `whole`: then what holds it too. */
+export const pausedLabel = (p: Paused, word = "Paused", whole = false): string => {
+  const why = pausedWhy(p);
+  if (p.paused !== "plan_limit") return `${word}: ${why}`;
+  return `${word} ${whole ? why : why.split(": ")[0]}`;
+};
 
 /** The pauses the person lifts with Resume; the others lift themselves. */
 export const resumable = (why: string | null): boolean => why === "person" || why === "no_boss";
