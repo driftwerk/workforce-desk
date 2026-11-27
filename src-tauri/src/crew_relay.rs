@@ -91,11 +91,13 @@ const STATUSES: &[&str] = &["ok", "suggested", "refused"];
 const SESSIONS: &str = "desk.sessions";
 /// A plan's ticket's session started on a machine.
 const SESSION_START: &str = "desk.session_start";
-/// What a plan's start may say, as New session says it, and the session id
-/// its plan gave it (`id`, a UUID), so a start sent again is the same one:
-/// nothing else goes.
+/// What a plan's start may say, as New session says it, the session id
+/// its plan gave it (`id`, a UUID), so a start sent again is the same one,
+/// and what its prompt carries in from outside as the hub judged it
+/// (`outside`, null for nothing; a machine taking a start for a boss
+/// without it counts it as carrying some): nothing else goes.
 const START_FIELDS: &[&str] = &[
-    "engine", "name", "cwd", "goal", "prompt", "view", "worktree", "model", "id",
+    "engine", "name", "cwd", "goal", "prompt", "view", "worktree", "model", "id", "outside",
 ];
 /// Whether the machine installs the start's folder's dependencies as it
 /// starts (a plan's ticket): a boolean, beside [`START_FIELDS`], forwarded
@@ -1940,6 +1942,7 @@ mod tests {
             "prompt": "p", "model": "opus", "worktree": "vel-3", "deps": true,
             "free_resting": true, "assigned": "0f0e0d0c-0b0a-4909-8807-0605040302aa",
             "env": {"EVIL": "1"}, "account": null, "group": "g1",
+            "outside": "VEL-3, a Linear issue not all the person's words",
         });
         let stop = start(&fake.polled(vec![desk_call(A, "desk.session_start", input)]));
         let (id, answer) = next(&mut rx).await;
@@ -1962,6 +1965,7 @@ mod tests {
                     "prompt": "p", "model": "opus", "worktree": "vel-3", "deps": true,
                     "free_resting": true, "assigned": "0f0e0d0c-0b0a-4909-8807-0605040302aa",
                     "env": {"CLAUDE_CODE_PLUGIN_DIRS": "/home/dev/.local/share/Desk/bin/current/claude-plugin"},
+                    "outside": "VEL-3, a Linear issue not all the person's words",
                 }))
             )]
         );
@@ -1971,7 +1975,8 @@ mod tests {
     }
 
     /// A start's `deps` or `free_resting` that is `false` or `null` is
-    /// forwarded as absent.
+    /// forwarded as absent; its `outside` of `null` (nothing carried in) is
+    /// forwarded as said.
     #[tokio::test]
     async fn a_starts_deps_false_or_null_is_forwarded_as_absent() {
         let made = json!({"id": SESSION, "name": "VEL-3", "cwd": "/x", "state": "starting"});
@@ -1982,7 +1987,7 @@ mod tests {
                 desk_call(
                     id,
                     "desk.session_start",
-                    json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "deps": deps, "free_resting": deps}),
+                    json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "deps": deps, "free_resting": deps, "outside": null}),
                 )
             })
             .collect();
@@ -1994,7 +1999,7 @@ mod tests {
         assert_eq!(sent.len(), 2);
         assert!(
             sent.iter()
-                .all(|(_, b)| b == &Some(json!({"engine": "codex", "name": "VEL-3", "cwd": "/x"}))),
+                .all(|(_, b)| b == &Some(json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "outside": null}))),
             "{sent:?}"
         );
         let _ = stop.send(true);
