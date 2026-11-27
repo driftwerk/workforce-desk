@@ -1998,8 +1998,10 @@ mod tests {
         let sent = fake.desk_sent.lock().unwrap().clone();
         assert_eq!(sent.len(), 2);
         assert!(
-            sent.iter()
-                .all(|(_, b)| b == &Some(json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "outside": null}))),
+            sent.iter().all(|(_, b)| b
+                == &Some(
+                    json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "outside": null})
+                )),
             "{sent:?}"
         );
         let _ = stop.send(true);
