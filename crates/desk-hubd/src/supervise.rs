@@ -133,22 +133,23 @@ const HUB_ENV: [&str; 41] = [
     PLUGIN_DIRS,
 ];
 
-/// Said in the hub's environment when it isn't the login shell's, which
-/// Desk Helper couldn't read: the hub's Desk keeps the login shell for the
-/// Codex sessions a boss runs then (`LOGIN_ENV_UNREAD` in the hub's `desk`).
-const LOGIN_ENV_UNREAD: &str = "DESK_LOGIN_ENV_UNREAD";
+/// Said (`1`) in the hub's environment when it is the login shell's, as
+/// Desk Helper read it: only then does the hub's Desk take the login shell
+/// from the Codex sessions a boss runs (`LOGIN_ENV_READ` in the hub's
+/// `desk`), as their commands still find the person's tools without it.
+const LOGIN_ENV_READ: &str = "DESK_LOGIN_ENV_READ";
 
-/// The login environment `read`, and the hub's from it ([`hub_env`]);
-/// when the login shell couldn't be read, this process's own, the hub's
-/// said not to be the login shell's ([`LOGIN_ENV_UNREAD`]).
+/// The login environment `read`, and the hub's from it ([`hub_env`]), said
+/// to be the login shell's ([`LOGIN_ENV_READ`]); when the login shell
+/// couldn't be read, this process's own, with nothing said.
 fn login_and_hub_env(
     read: Option<BTreeMap<String, String>>,
 ) -> (BTreeMap<String, String>, BTreeMap<String, String>) {
-    let unread = read.is_none();
+    let said = read.is_some();
     let login = read.unwrap_or_else(|| std::env::vars().collect());
     let mut env = hub_env(&login);
-    if unread {
-        env.insert(LOGIN_ENV_UNREAD.into(), "1".into());
+    if said {
+        env.insert(LOGIN_ENV_READ.into(), "1".into());
     }
     (login, env)
 }
@@ -1187,22 +1188,25 @@ mod tests {
         assert_eq!(env["CLAUDE_CODE_PLUGIN_DIRS"], "/mine");
     }
 
-    /// The hub is told when its environment isn't the login shell's, and
-    /// only then: never because whoever started Desk Helper said so.
+    /// The hub is told its environment is the login shell's only when
+    /// Desk Helper read it: never because whoever started Desk Helper put
+    /// it in its own environment.
     #[test]
-    fn the_hub_is_told_only_a_login_environment_desk_helper_couldnt_read() {
+    fn the_hub_is_told_only_a_login_environment_desk_helper_read() {
         let login = BTreeMap::from([
             ("PATH".to_string(), "/opt/homebrew/bin:/usr/bin".to_string()),
-            (LOGIN_ENV_UNREAD.to_string(), "1".to_string()),
+            (LOGIN_ENV_READ.to_string(), "0".to_string()),
         ]);
         let (kept, env) = login_and_hub_env(Some(login.clone()));
         assert_eq!(kept, login);
-        assert!(!env.contains_key(LOGIN_ENV_UNREAD));
+        assert_eq!(env[LOGIN_ENV_READ], "1");
         assert!(env["PATH"].starts_with("/opt/homebrew/bin"));
 
         let (kept, env) = login_and_hub_env(None);
         assert_eq!(kept, std::env::vars().collect::<BTreeMap<_, _>>());
-        assert_eq!(env[LOGIN_ENV_UNREAD], "1");
+        assert!(!env.contains_key(LOGIN_ENV_READ));
+        let inherited = BTreeMap::from([(LOGIN_ENV_READ.to_string(), "1".to_string())]);
+        assert!(!hub_env(&inherited).contains_key(LOGIN_ENV_READ));
     }
 
     #[test]
