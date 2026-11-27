@@ -8,7 +8,8 @@ import type { DeskSocket, DeskTransport } from "../hub/transport";
 import type { DeskExtras } from "../hub/types";
 import { Message } from "./Message";
 import { dmOnScreen } from "../unread/presence";
-import { answerOptions, closest, decisionParts, firstSentence, readNeed, readNeedsPost, recommended } from "./Overseer";
+import { answerOptions, closest, recommended } from "./Answers";
+import { decisionParts, firstSentence, readNeed, readNeedsPost } from "./Overseer";
 
 vi.mock("@workforce/rich", () => ({
   RichMarkdown: ({ text }: { text: string }) => text,

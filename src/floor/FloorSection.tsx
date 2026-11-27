@@ -28,6 +28,7 @@ import { Mark } from "../ui/Mark";
 import { openTarget } from "../shell/navigate";
 import { standingText } from "../spend/budgets";
 import { fullBudgetText } from "../crew/oversight";
+import { pausedLabel } from "../crew/plan";
 import { useOverview } from "../overview/store";
 import { AgentMark } from "../ui/Mark";
 import type { Target } from "../shell/navigate";
@@ -184,7 +185,7 @@ export function PlanProgressCard({ plan }: { plan: PlanProgress }) {
               · next <span className="mono">{p.next[0]}</span>
             </>
           )}
-          {plan.state === "paused" && <span className="fsec-paused"> · paused{plan.pausedWhy ? `: ${plan.pausedWhy}` : ""}</span>}
+          {plan.state === "paused" && <span className="fsec-paused"> · {plan.pausedWhy ? pausedLabel(plan, "paused") : "paused"}</span>}
         </span>
       </div>
       <div className="fsec-segbar" role="img" aria-label={said || "No tickets yet"}>
