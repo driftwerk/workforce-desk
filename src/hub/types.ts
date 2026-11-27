@@ -2551,6 +2551,12 @@ export interface BossPlanDetail extends BossPlan {
   spend?: Standing | null;
 }
 
+/** A plan moved to another group; why its running sessions stayed where
+ *  they were, when they did. */
+export interface RegroupedPlan extends BossPlanDetail {
+  unmoved?: string;
+}
+
 /** A ticket as the person's edit writes it: by its id when the plan has
  *  it, what it needs by its place in the list (from 0). */
 export interface DraftTicket {

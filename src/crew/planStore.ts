@@ -187,7 +187,13 @@ export const usePlans = create<PlanState>((set, get) => {
     pause: (id) => act(id, () => hubNow()!.pausePlan(id)),
     resume: (id) => act(id, () => hubNow()!.resumePlan(id)),
     drop: (id, sessions) => act(id, () => hubNow()!.dropPlan(id, sessions)),
-    regroup: (id, group) => act(id, () => hubNow()!.regroupPlan(id, group)),
+    regroup: (id, group) =>
+      act(id, async () => {
+        const now = await hubNow()!.regroupPlan(id, group);
+        const unmoved = now.unmoved;
+        if (unmoved) set((s) => ({ refusals: { ...s.refusals, [id]: { text: unmoved } } }));
+        return now;
+      }),
     clear: (id) => set((s) => ({ refusals: without(s.refusals, id) })),
   };
 });
