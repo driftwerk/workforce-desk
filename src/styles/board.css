@@ -1639,6 +1639,10 @@ button.ticket-row:not(:disabled):hover {
 .ticket-session .mono {
   font-size: 12.5px;
 }
+.ticket-row .ticket-session-needs,
+.ticket-facts .ticket-session-needs {
+  color: var(--blocked);
+}
 .ticket-dotted {
   font-size: 12px;
 }

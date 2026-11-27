@@ -1,5 +1,19 @@
 import type { Background, Session, SessionState } from "../hub/types";
+import { terminalAsk } from "../session/pending";
 import { clock, durationOf } from "./time";
+
+/** A session's state in a word or two, where it is named. */
+export const STATE_WORDS: Readonly<Record<SessionState, string>> = {
+  starting: "starting",
+  working: "working",
+  blocked: "needs you",
+  asking: "needs you · asked",
+  done: "done",
+  idle: "idle",
+  interrupted: "interrupted",
+  stopped: "stopped",
+  closed: "closed",
+};
 
 /** "2 background tasks". */
 export const backgroundTasks = (b: Background): string => `${b.count} background ${b.count === 1 ? "task" : "tasks"}`;
@@ -36,6 +50,20 @@ export const statusOf = (
   const background = backgroundOf(s);
   return background ? backgroundLine(background, now) : bossHandles(s) ? handledText(s) : labels[s.state];
 };
+
+/** How its last turn failed, once that turn is over: "It stopped on its
+ *  plan's usage limit". */
+export const failedLine = (s: Pick<Session, "state"> & { failed?: string | null }): string | null =>
+  s.failed && !["starting", "working", "blocked"].includes(s.state) ? s.failed : null;
+
+/** A session's line where a ticket names it: how its turn failed, what
+ *  it waits on the person for ("needs you · Bash · npm test"), else its
+ *  status. */
+export const sessionLine = (
+  s: Pick<Session, "state" | "background" | "pending"> & { restarted?: Session["restarted"]; bossHas?: string | null; failed?: string | null },
+  now = Date.now(),
+): string =>
+  failedLine(s) ?? (s.pending && waitsOnYou(s) ? `${STATE_WORDS[s.state]} · ${terminalAsk(s.pending)}` : statusOf(s, STATE_WORDS, now));
 
 /** A session's state as Desk shows it: one whose turn ended while work it
  *  started still runs is working, not done. */
