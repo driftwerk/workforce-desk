@@ -2049,11 +2049,13 @@ button.card-icon:hover:not(:disabled) {
 }
 /* As a setting card's action (.link-card-action). */
 .pc-open-board,
+.pc-group-change,
 .plan-row-board {
   font-weight: 600;
   color: var(--signal-soft-text);
 }
 .pc-open-board:hover,
+.pc-group-change:hover,
 .plan-row-board:hover {
   color: var(--text);
 }

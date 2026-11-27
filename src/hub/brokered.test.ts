@@ -170,6 +170,7 @@ const SAMPLES: Record<string, (h: DeskHub) => unknown> = {
   pausePlan: (h) => h.pausePlan("p1"),
   resumePlan: (h) => h.resumePlan("p1"),
   dropPlan: (h) => h.dropPlan("p1", "leave"),
+  regroupPlan: (h) => h.regroupPlan("p1", "g1"),
   endPlan: (h) => h.endPlan("p1"),
   removePlan: (h) => h.removePlan("p1"),
   history: (h) => Promise.all([h.history("s1"), h.history("s1", "e1")]),

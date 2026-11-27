@@ -662,6 +662,11 @@
   {
     "kind": "http",
     "method": "POST",
+    "path": "/api/desk/plans/p1/group"
+  },
+  {
+    "kind": "http",
+    "method": "POST",
     "path": "/api/desk/plans/p1/end"
   },
   {

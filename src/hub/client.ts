@@ -10,6 +10,7 @@ import type {
   BossPlanEdit,
   BossPlanState,
   OnPlanDrop,
+  RegroupedPlan,
   ActivityFilter,
   ActivityPage,
   Decision,
@@ -901,6 +902,9 @@ export class DeskHub {
   /** Drops a plan, stopping the sessions on it or leaving them as yours. */
   dropPlan = (id: string, sessions: OnPlanDrop): Promise<BossPlanDetail> =>
     this.call("POST", `/api/desk/plans/${encodeURIComponent(id)}/drop`, { sessions });
+  /** Moves a plan to group `group` (null: Ungrouped), its running sessions with it. */
+  regroupPlan = (id: string, group: string | null): Promise<RegroupedPlan> =>
+    this.call("POST", `/api/desk/plans/${encodeURIComponent(id)}/group`, { group });
   /** Ends a running or paused plan, leaving its tickets as they are. */
   endPlan = (id: string): Promise<BossPlanDetail> => this.call("POST", `/api/desk/plans/${encodeURIComponent(id)}/end`);
   /** Takes a finished or ended plan off the board; its tickets stay. */
