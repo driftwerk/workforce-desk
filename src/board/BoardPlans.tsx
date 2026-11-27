@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { PlanCard } from "../crew/PlanCard";
 import { PlanRow } from "../crew/PlanRow";
 import type { BossPlan } from "../hub/types";
@@ -15,7 +15,11 @@ export function BoardPlans({ plans, shown }: { plans: readonly BossPlan[]; shown
   const ids = useId();
   const [finished, setFinished] = useState(false);
   const ended = plans.filter(over).length;
-  const rows = plans.filter((p) => over(p) === (finished && ended > 0) || p.id === shown);
+  // None left to show: Finished is off again, for the next one.
+  useEffect(() => {
+    if (ended === 0) setFinished(false);
+  }, [ended]);
+  const rows = plans.filter((p) => over(p) === finished || p.id === shown);
   if (plans.length === 0) return null;
   const show = useBoard.getState().showPlan;
   const open = rows.find((p) => p.id === shown);

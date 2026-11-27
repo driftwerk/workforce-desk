@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import { useBoard } from "../board/store";
 import { useChat } from "../chat/store";
-import { HubError } from "../hub/client";
+import { HubError, type DeskHub } from "../hub/client";
 import { floorOf } from "../hub/floor";
 import { deskListeners, useDesk } from "../hub/store";
 import { revisionOf } from "./plan";
@@ -99,13 +99,13 @@ export const usePlans = create<PlanState>((set, get) => {
   /** Does `request` about plan `id`, keeping the plan it answers with. A
    *  refusal reads the plan again; a newer revision found then is said as
    *  one, else the hub's own words. The refusal is thrown on. */
-  const act = async (id: string, request: () => Promise<BossPlanDetail>): Promise<void> => {
+  const act = async (id: string, request: (hub: DeskHub) => Promise<BossPlanDetail>): Promise<void> => {
     const hub = hubNow();
     if (!hub) throw new Error("Desk isn't ready yet. Try again in a moment.");
     const shown = get().details[id]?.revision ?? get().plans[id]?.revision;
     set((s) => ({ refusals: without(s.refusals, id) }));
     try {
-      keep(await request());
+      keep(await request(hub));
     } catch (e) {
       if (!(e instanceof HubError) || (e.status !== 409 && e.status !== 400 && e.status !== 404 && e.status !== 422)) throw e;
       if (e.status === 404) {
@@ -219,7 +219,7 @@ export const usePlans = create<PlanState>((set, get) => {
       });
       return unmoved;
     },
-    end: (id) => act(id, () => hubNow()!.endPlan(id)),
+    end: (id) => act(id, (hub) => hub.endPlan(id)),
     remove: async (id) => {
       const hub = hubNow();
       if (!hub) throw new Error("Desk isn't ready yet. Try again in a moment.");

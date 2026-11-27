@@ -245,13 +245,11 @@ export function Board({ pane, chrome }: { pane?: BoardInPane; chrome?: BoardChro
   const plansAll = usePlans((s) => s.plans);
   const details = usePlans((s) => s.details);
   // A plan shows on its own board, and on any board whose tickets it took
-  // on: every plan still going is read in full, to know which those are.
+  // on: every plan on the board, going, finished or ended, is read in
+  // full, to know which those are, until it is removed.
   const plans = useMemo(() => (board ? plansOn(plansAll, board.id, details) : []), [plansAll, board, details]);
   useEffect(() => {
-    for (const p of plans) if (p.state !== "dropped" && !usePlans.getState().details[p.id]) void usePlans.getState().fetch(p.id);
-  }, [plans]);
-  useEffect(() => {
-    for (const p of Object.values(plansAll)) if (p.state !== "done" && p.state !== "dropped" && !usePlans.getState().details[p.id]) void usePlans.getState().fetch(p.id);
+    for (const p of Object.values(plansAll)) if (!usePlans.getState().details[p.id]) void usePlans.getState().fetch(p.id);
   }, [plansAll]);
   // The tickets in any plan, wherever the plan shows: none of them can be
   // taken on by another.
