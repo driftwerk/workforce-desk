@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, 
 import { useChat } from "../chat/store";
 import { agentKey, describeAgent, type Agent } from "../chat/types";
 import { contentOfItem, dropOnGrid, endGridDrag, moveGridDrag, startGridDrag, useGridDrag, type GridTarget } from "../grids/drag";
-import { lookOf, statusOf, waitsOnYou } from "../floor/background";
+import { lookOf, STATE_WORDS, statusOf, waitsOnYou } from "../floor/background";
 import { filledPane, flashPanes, shownGrid, useGrids } from "../grids/store";
 import { itemOf, placesOf } from "../grids/where";
 import { InGrid, inGridSays, useGridNames } from "../grids/InGrid";
@@ -107,18 +107,6 @@ import { advance, markUnread } from "../unread/reads";
 import { dmReadPoint, plural, sessionReadPoint, sessionUnreadPoint } from "../unread/rows";
 
 const ENGINE = ENGINE_SHORT;
-
-const STATE: Record<Session["state"], string> = {
-  starting: "starting",
-  working: "working",
-  blocked: "needs you",
-  asking: "needs you · asked",
-  done: "done",
-  idle: "idle",
-  interrupted: "interrupted",
-  stopped: "stopped",
-  closed: "closed",
-};
 
 const NEW_GROUP = "New group";
 
@@ -683,7 +671,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     const away = awayWord(machineOfRow(item));
     if (away) return away;
     if (item.kind === "away") return ENGINE[item.seen.engine];
-    return waitsOnYou(item.session) ? STATE[item.session.state] : ENGINE[item.session.engine];
+    return waitsOnYou(item.session) ? STATE_WORDS[item.session.state] : ENGINE[item.session.engine];
   };
 
   const titleOf = (item: Item): string => {
@@ -697,7 +685,7 @@ export function SidebarGroups({ onNewSession }: { onNewSession?: (group: string)
     const away = awayWord(on);
     const where = on === LOCAL ? "" : ` · on ${machines.find((m) => m.id === on)?.name ?? on}`;
     const engine = ENGINE[item.kind === "away" ? item.seen.engine : item.session.engine];
-    return `${engine}${where} · ${away ?? (item.kind === "session" ? statusOf(item.session, STATE) : "")}`;
+    return `${engine}${where} · ${away ?? (item.kind === "session" ? statusOf(item.session, STATE_WORDS) : "")}`;
   };
 
   // What the rows do: one set of functions for as long as the sidebar is

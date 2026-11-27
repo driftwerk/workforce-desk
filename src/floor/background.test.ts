@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { backgroundLine, bossHandles, heldFor, lookOf, restartedLine, shownState, statusOf, waitsLine, waitsOnYou } from "./background";
+import { backgroundLine, bossHandles, failedLine, heldFor, lookOf, restartedLine, sessionLine, shownState, statusOf, waitsLine, waitsOnYou } from "./background";
 import { clock } from "./time";
 import { NOW, at } from "./testing";
 
@@ -63,5 +63,29 @@ describe("a session its boss has", () => {
   it("only changes what it waits on: working is working", () => {
     expect(bossHandles({ state: "working", bossHas: "Desk" })).toBe(false);
     expect(lookOf({ state: "working", bossHas: "Desk" })).toBe("working");
+  });
+});
+
+describe("a session's line where a ticket names it", () => {
+  const pending = { id: "p1", tool: "Bash", detail: "npm test", since: at(1), answerable: true };
+  const limit = "It stopped on its plan's usage limit";
+
+  it("says how its turn failed once it is over, and not while the next one runs", () => {
+    expect(sessionLine({ state: "done", background: null, pending: null, failed: limit }, NOW)).toBe(limit);
+    expect(failedLine({ state: "idle", failed: "Desk lost sight of this Codex session" })).toBe("Desk lost sight of this Codex session");
+    expect(failedLine({ state: "working", failed: limit })).toBeNull();
+    expect(sessionLine({ state: "working", background: null, pending: null, failed: limit }, NOW)).toBe("working");
+  });
+
+  it("says what it waits on the person for, and only that it waits while its boss has it", () => {
+    expect(sessionLine({ state: "blocked", background: null, pending }, NOW)).toBe("needs you · Bash · npm test");
+    expect(sessionLine({ state: "blocked", background: null, pending, bossHas: "Desk" }, NOW)).toBe("Desk has it");
+    expect(sessionLine({ state: "blocked", background: null, pending: null }, NOW)).toBe("needs you");
+  });
+
+  it("is otherwise its status", () => {
+    expect(sessionLine({ state: "working", background: null, pending: null }, NOW)).toBe("working");
+    expect(sessionLine({ state: "idle", background: null, pending: null, failed: null }, NOW)).toBe("idle");
+    expect(sessionLine({ state: "done", background: { count: 2, since: at(6) }, pending: null }, NOW)).toBe("Waiting on 2 background tasks · 6m");
   });
 });
