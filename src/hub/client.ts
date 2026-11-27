@@ -290,6 +290,9 @@ export class HubError extends Error {
     /** The hubs a room's conversation would go to that the person hasn't
      *  agreed to, when that's what the refusal asks about. */
     readonly hubs?: string[],
+    /** The session holding what the refusal is about, when the hub names
+     *  one (a worktree another session works in). */
+    readonly holder?: string,
   ) {
     super(message);
   }
@@ -299,6 +302,10 @@ export class HubError extends Error {
  *  routes would put a session in another boss's group. Never retried; the
  *  person is asked with the move dialog instead. */
 export const CROSSES_BOSS = "crosses_boss";
+/** The hub's code for a start or resume whose worktree (the branch's own
+ *  copy of the project) another session (its `holder`), or something else,
+ *  holds. Never retried: it stays so until that is moved. */
+export const WORKTREE_TAKEN = "worktree_taken";
 /** A key the provider refused when the hub tried it: its error is written
  *  for the person, the fix included. */
 export const KEY_REFUSED = "key_refused";
@@ -314,18 +321,20 @@ export const refusal = async (res: Response): Promise<HubError> => {
   let message = text.startsWith("<") ? "" : text;
   let code: string | undefined;
   let hubs: string[] | undefined;
+  let holder: string | undefined;
   try {
     const body: unknown = JSON.parse(text);
     if (body && typeof body === "object") {
-      const { error, code: c, hubs: h } = body as { error?: unknown; code?: unknown; hubs?: unknown };
+      const { error, code: c, hubs: h, holder: held } = body as { error?: unknown; code?: unknown; hubs?: unknown; holder?: unknown };
       message = typeof error === "string" && error.trim() ? error : "";
       if (typeof c === "string" && c) code = c;
       if (Array.isArray(h) && h.length && h.every((x) => typeof x === "string")) hubs = h as string[];
+      if (typeof held === "string" && held) holder = held;
     }
   } catch {
     /* a plain-text body */
   }
-  return new HubError(res.status, message || res.statusText || "Desk couldn’t do that.", code, hubs);
+  return new HubError(res.status, message || res.statusText || "Desk couldn’t do that.", code, hubs, holder);
 };
 
 /** Chooses `image` as the picture at `path` on a hub (null: chooses none,

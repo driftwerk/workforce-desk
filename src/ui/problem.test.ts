@@ -3,7 +3,7 @@ import { HubError } from "../hub/client";
 import { useDesk } from "../hub/store";
 import { useUi } from "../shell/ui";
 import { plainError } from "./plainError";
-import { explain, readable, setSettingsOpener, setStarter } from "./problem";
+import { explain, readable, setSessionOpener, setSettingsOpener, setStarter } from "./problem";
 
 const j = (...p: string[]): string => p.join("");
 const INTERNAL = /\bhub\b|desk-hubd|\b[45]\d\d\b|\[[a-z_.]+\]|[{}`]/i;
@@ -228,5 +228,46 @@ describe("a key the provider refused", () => {
     expect(p.details).toBeUndefined();
     // Without the mark, the same words are treated as any refusal.
     expect(explain(new HubError(400, said)).plain).not.toBe(said);
+  });
+});
+
+describe("a worktree another session holds", () => {
+  it("says so plainly, and opens the session the hub names", async () => {
+    const { HubError, WORKTREE_TAKEN } = await import("../hub/client");
+    const said = "/dev/crm/.worktrees/man-515 is in use: MAN-515 still runs in it";
+    const opened: string[] = [];
+    setSessionOpener((id) => (id === "s-515" ? () => opened.push(id) : null));
+    try {
+      const p = explain(new HubError(409, said, WORKTREE_TAKEN, undefined, "s-515"), { what: "starting a session" });
+      expect(p.plain).toBe("That branch’s copy is in use by another session.");
+      expect(p.details).toBe(said);
+      expect(p.fix?.label).toBe("Open that session");
+      p.fix?.run?.();
+      expect(opened).toEqual(["s-515"]);
+      // Named, but not a session Desk lists: Desk is asked.
+      const gone = explain(new HubError(409, said, WORKTREE_TAKEN, undefined, "s-9"));
+      expect(gone.plain).toBe("That branch’s copy is in use by another session.");
+      expect(gone.fix?.ask).toBe(true);
+    } finally {
+      setSessionOpener(null);
+    }
+  });
+
+  it("says something else is in the folder when no session holds it", async () => {
+    const { HubError, WORKTREE_TAKEN } = await import("../hub/client");
+    const folder = "/dev/crm/.worktrees/man-9 is there already on main, not man-9: move it away";
+    const q = explain(new HubError(409, folder, WORKTREE_TAKEN));
+    expect(q.plain).toBe("Something else is in that branch’s folder.");
+    expect(q.details).toBe(folder);
+    expect(q.fix?.ask).toBe(true);
+  });
+
+  it("is read from the hub's refusal with its holder", async () => {
+    const { refusal, WORKTREE_TAKEN } = await import("../hub/client");
+    const res = new Response(JSON.stringify({ error: "in use", code: WORKTREE_TAKEN, holder: "s-1" }), { status: 409 });
+    const e = await refusal(res);
+    expect([e.code, e.holder]).toEqual([WORKTREE_TAKEN, "s-1"]);
+    const none = await refusal(new Response(JSON.stringify({ error: "a folder", code: WORKTREE_TAKEN, holder: null }), { status: 409 }));
+    expect(none.holder).toBeUndefined();
   });
 });

@@ -11,7 +11,7 @@ import { startGridsHere, useGridWindows } from "../grids/windows";
 import { useDesk } from "../hub/store";
 import { nativeMachines, watchMachines } from "../hub/engines";
 import { ProblemNote } from "../ui/ProblemNote";
-import { setStarter } from "../ui/problem";
+import { setSessionOpener, setStarter } from "../ui/problem";
 import { startLocalHelper } from "../hub/helperNote";
 import { DeskReadyBanner, useDeskReady } from "../hub/DeskReady";
 import { followRepliesInThreads } from "../chat/threadReplies";
@@ -80,6 +80,7 @@ import { resumeAfterUpdate } from "../updates/store";
 import { SetupDock } from "../chat/SetupDock";
 import { UpdateNotice, useRestartWhenIdle, useUpdateChecks } from "../updates/UpdateNotice";
 import { useSidebarJumps } from "./jump";
+import { openSession } from "../overview/people";
 
 // An `@` by an agent's name before a rename still reaches them.
 rememberFormerNames();
@@ -163,6 +164,15 @@ export function App() {
   useEffect(() => {
     setStarter(startLocalHelper);
     return () => setStarter(null);
+  }, []);
+  // A worktree another session holds: that session, as the hub's refusal
+  // names it, opens from the problem's button.
+  useEffect(() => {
+    setSessionOpener((holder) => {
+      const held = Object.entries(useDesk.getState().sessions).find(([key, x]) => key === holder || x.id === holder);
+      return held ? () => openSession(held[0]) : null;
+    });
+    return () => setSessionOpener(null);
   }, []);
   // Linking an agent elsewhere for Desk work is this window's alone.
   useEffect(() => {
