@@ -177,17 +177,26 @@ export const PAUSED_WHY: Record<BossPlanPaused, string> = {
   restoring: "Desk is resuming its sessions",
   no_boss: "its group has no boss",
   start_failing: "its sessions keep failing to start",
+  plan_limit: "by plan limit",
 };
+
+/** Why a plan is paused, as its card and the Floor have it. */
+type Paused = { paused?: BossPlan["paused"]; pausedWhy?: string | null };
 
 /** Why `p` is paused, after "Paused: ": the hub's own words when it says
  *  them (a reason Desk doesn't know, such as starts that kept failing),
  *  else Desk's for the reasons it knows, else the reason as named. */
-export const pausedWhy = (p: Pick<BossPlan, "paused" | "pausedWhy">): string => {
-  if (!p.paused) return "";
+export const pausedWhy = (p: Paused): string => {
   const said = p.pausedWhy?.trim();
   if (said) return said;
+  if (!p.paused) return "";
   return (PAUSED_WHY as Record<string, string | undefined>)[p.paused] ?? p.paused.replace(/_/g, " ");
 };
+
+/** "Paused by plan limit until Fri 09:00: …", "Paused: you paused it":
+ *  `word` and why, as a sentence reads them. */
+export const pausedLabel = (p: Paused, word = "Paused"): string =>
+  `${word}${p.paused === "plan_limit" ? " " : ": "}${pausedWhy(p)}`;
 
 /** The pauses the person lifts with Resume; the others lift themselves. */
 export const resumable = (why: string | null): boolean => why === "person" || why === "no_boss";

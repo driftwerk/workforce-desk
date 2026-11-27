@@ -3,7 +3,7 @@ import { useBoard } from "../board/store";
 import { useDesk } from "../hub/store";
 import type { BossPlan } from "../hub/types";
 import { plainError } from "../ui/plainError";
-import { liveTickets, pausedWhy, progress, resumable, ruled, segments, standing } from "./plan";
+import { liveTickets, pausedLabel, progress, resumable, ruled, segments, standing } from "./plan";
 import { usePlans } from "./planStore";
 
 /** Opens plan `p` on its board, in Desk's main area: its card above the
@@ -30,7 +30,7 @@ export function PlanRow({ plan, open, onToggle, controls }: { plan: BossPlan; op
   // the hub last said of it.
   const now = useMemo(() => (detail ? progress(liveTickets(detail, board).map(ruled)) : plan.progress), [detail, board, plan.progress]);
   const stand = standing(plan);
-  const paused = plan.state === "paused" && plan.paused ? pausedWhy(plan) : null;
+  const paused = plan.state === "paused" && plan.paused ? pausedLabel(plan) : null;
   const line = [`${now.done} of ${now.total} done`, now.doing > 0 ? `${now.doing} running` : null].filter(Boolean).join(" · ");
 
   const run = async (what: "pause" | "resume") => {
@@ -71,7 +71,7 @@ export function PlanRow({ plan, open, onToggle, controls }: { plan: BossPlan; op
           <span className="plan-row-goal">{plan.goal}</span>
         </button>
       )}
-      <span className={`chip pc-chip-${stand.look}`} title={paused ? `Paused: ${paused}` : undefined}>
+      <span className={`chip pc-chip-${stand.look}`} title={paused ?? undefined}>
         {stand.text}
       </span>
       <span className="pc-segbar plan-row-bar" role="img" title={line} aria-label={segments(now).map((s) => `${s.n} ${s.kind}`).join(", ") || "nothing yet"}>

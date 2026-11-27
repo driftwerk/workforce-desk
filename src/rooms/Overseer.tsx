@@ -699,7 +699,7 @@ const alwaysHere = new Map<string, string>();
 /** The answers to what the boss asked: settled on the hub when pressed,
  *  the recommended one filled amber, the rest outlined, and Hold, which
  *  leaves it open for later. Drop on one set aside. */
-function Answers({
+export function Answers({
   id,
   label,
   options,

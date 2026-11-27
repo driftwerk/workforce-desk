@@ -30,7 +30,7 @@ import {
   liveTickets,
   needChoices,
   ownWorktrees,
-  pausedWhy,
+  pausedLabel,
   progress,
   progressLine,
   resumable,
@@ -48,6 +48,7 @@ import {
 } from "./plan";
 import { usePlans } from "./planStore";
 import { openPlanOnBoard } from "./PlanRow";
+import { Answers } from "../rooms/Overseer";
 
 /** The engines a plan's ticket may run on, as the hub reads this computer:
  *  each with why it can't, when it can't. */
@@ -373,7 +374,7 @@ function WholePlan({ detail, plan, onBoard }: { detail: BossPlanDetail; plan: Bo
       <div className="pc-head">
         <div className="pc-row">
           <h4 className="pc-title">{plan.goal}</h4>
-          <span className={`chip pc-chip-${stand.look}`}>{plan.state === "paused" && plan.paused ? `Paused: ${pausedWhy(plan)}` : stand.text}</span>
+          <span className={`chip pc-chip-${stand.look}`}>{plan.state === "paused" && plan.paused ? pausedLabel(plan) : stand.text}</span>
           <span className="chip" title={stale ? `Revision ${plan.revision} is being read` : undefined}>
             rev {detail.revision}
           </span>
@@ -430,7 +431,7 @@ function WholePlan({ detail, plan, onBoard }: { detail: BossPlanDetail; plan: Bo
         <div className="pc-progress">
           <span className="muted small">
             {progressLine(now, plan.limit ?? plan.parallel)}
-            {plan.state === "paused" && plan.paused && <span className="pc-paused"> · new starts paused: {pausedWhy(plan)}</span>}
+            {plan.state === "paused" && plan.paused && <span className="pc-paused"> · {pausedLabel(plan, "new starts paused")}</span>}
           </span>
           {detail.spend && (
             <span className="muted small">
@@ -559,8 +560,17 @@ function WholePlan({ detail, plan, onBoard }: { detail: BossPlanDetail; plan: Bo
                 )}
                 {plan.state === "paused" && plan.paused && !resumable(plan.paused) && (
                   <span className="pc-note">
-                    Paused: {pausedWhy(plan)}.{failing ? " Continue tries again." : " It goes on by itself once that's past."}
+                    {pausedLabel(plan)}.{failing ? " Continue tries again." : " It goes on by itself once that's past."}
                   </span>
+                )}
+                {plan.state === "paused" && plan.paused === "plan_limit" && plan.ask && (
+                  <Answers
+                    id={plan.ask.itemId}
+                    label={`your plan limit for ${plan.goal}`}
+                    options={plan.ask.options ?? []}
+                    recommendation={plan.ask.recommendation}
+                    parked={plan.ask.parked}
+                  />
                 )}
                 <button type="button" className="btn" aria-disabled={busy || undefined} onClick={() => !busy && setDropping(sessionsRun ? "ask" : "stop")}>
                   Drop

@@ -1778,6 +1778,8 @@ export interface PlanProgress {
   boss: string;
   bossName: string;
   state: PlanState;
+  /** Why it starts nothing, while it is paused. */
+  paused?: BossPlanPaused | (string & {}) | null;
   /** Why it is paused, in the person's words, while it is. */
   pausedWhy?: string | null;
   progress: PlanTally;
@@ -2428,7 +2430,7 @@ export interface TicketStartText {
 export type BossPlanState = PlanState;
 
 /** Why a plan that would run starts nothing. */
-export type BossPlanPaused = "person" | "budget" | "boss_held" | "restoring" | "no_boss" | "start_failing";
+export type BossPlanPaused = "person" | "budget" | "boss_held" | "restoring" | "no_boss" | "start_failing" | "plan_limit";
 
 export type BossPlanProgress = PlanTally;
 
@@ -2467,6 +2469,9 @@ export interface BossPlan {
    *  as the hub's runner counts them; null while no boss of it oversees,
    *  absent from an older hub. */
   limit?: number | null;
+  /** What its pause asks you while your plan limit holds its boss: Raise or
+   *  Keep, answered as the chat answers it. */
+  ask?: MentionedItem | null;
 }
 
 /** What a plan may spend. */
