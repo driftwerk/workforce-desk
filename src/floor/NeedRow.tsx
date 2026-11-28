@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useDesk } from "../hub/store";
 import type { Choice } from "../hub/floor";
 import type { Session } from "../hub/types";
@@ -19,6 +19,8 @@ import { sessionKeyOfItem } from "./needs";
 import { usePlans } from "../crew/planStore";
 import { budgetText } from "../crew/plan";
 import type { PlanBudget } from "../hub/types";
+import { knowsOf, type KnowsRequest } from "../hub/knows";
+import { localAccount } from "../groups/move";
 
 /** Focus in a row that goes moves to the list it was in. */
 const useFocusKept = () => {
@@ -48,6 +50,18 @@ const BREAKER: Record<"allow" | "deny", { word: string; busy: string; done: stri
 
 const isBreaker = (need: FloorNeed): boolean => need.answer.kind === "decide" && need.answer.at.kind === "breaker";
 
+/** Whether an agent elsewhere may hand the person's boss requests is
+ *  answered Yes or No. */
+const HAND: Record<"allow" | "deny", { word: string; busy: string; done: string }> = {
+  allow: { word: "Yes", busy: "Letting it…", done: "Let it hand your boss requests" },
+  deny: { word: "No", busy: "Keeping it off…", done: "Kept off" },
+};
+
+/** The agent elsewhere a need asks about handing the person's boss
+ *  requests (`<hub>/<agent>`). */
+const handOf = (need: Pick<FloorNeed, "answer">): string | null =>
+  need.answer.kind === "decide" && need.answer.at.kind === "hand" ? need.answer.at.agent : null;
+
 /** A boss's plan to approve, or a change of scope to one: the plan's id. */
 const planOf = (need: Pick<FloorNeed, "answer">): string | null =>
   need.answer.kind === "decide" && need.answer.at.kind === "plan" ? need.answer.at.plan : null;
@@ -73,7 +87,9 @@ const wordsOf = (need: FloorNeed, choice: Choice, ask: PlanAsk = "proposed") =>
       ? TURN_DOWN
       : isBreaker(need) && (choice === "allow" || choice === "deny")
       ? BREAKER[choice]
-      : DECIDING[choice];
+      : handOf(need) && (choice === "allow" || choice === "deny")
+        ? HAND[choice]
+        : DECIDING[choice];
 
 /** The answers a need offers, in the order they read: Codex says its own
  *  (an escalated command offers only Allow and Cancel); the rest allow or
@@ -177,6 +193,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
         {need.why && <span className="floor-need-why faint small">{need.why}</span>}
         {planBudget && <span className="floor-need-why faint small">Capped at {budgetText(planBudget)}.</span>}
       </FloorRow>
+      {handOf(need) && <HeldWords agent={handOf(need)!} />}
       <OptionChips options={need.options} className="floor-need-options" />
       {actions && (
         <span className="floor-need-buttons">
@@ -296,5 +313,33 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
         </span>
       )}
     </div>
+  );
+}
+
+/** What an agent elsewhere holds for the person's word, in their own words:
+ *  read for them here, never given to a boss. */
+function HeldWords({ agent }: { agent: string }) {
+  const [held, setHeld] = useState<KnowsRequest[] | null>(null);
+  useEffect(() => {
+    const h = localAccount();
+    if (!h) return;
+    let shown = true;
+    knowsOf(h)
+      .requests(agent)
+      .then((r) => shown && setHeld(r))
+      .catch(() => shown && setHeld([]));
+    return () => {
+      shown = false;
+    };
+  }, [agent]);
+  if (!held?.length) return null;
+  return (
+    <ul className="floor-need-held faint small" aria-label="What you asked">
+      {held.map((r) => (
+        <li key={r.askedAt + r.words}>
+          “{r.words}” · in {r.place}
+        </li>
+      ))}
+    </ul>
   );
 }

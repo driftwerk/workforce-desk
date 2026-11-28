@@ -147,6 +147,13 @@
 .floor-need-options {
   padding: 0 10px;
 }
+/* The person's own words an agent elsewhere holds for their say. */
+.floor-need-held {
+  list-style: none;
+  margin: 0;
+  padding: 0 10px;
+  overflow-wrap: anywhere;
+}
 .floor-need-buttons {
   display: flex;
   align-items: center;

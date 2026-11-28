@@ -17,6 +17,11 @@ vi.mock("@workforce/rich", () => ({
   RichHostProvider: ({ children }: { children: ReactNode }) => children,
 }));
 vi.mock("../shell/navigate", () => ({ openTarget: vi.fn() }));
+const requests = vi.hoisted(() => vi.fn());
+vi.mock("../hub/knows", async (original) => ({
+  ...(await original<typeof import("../hub/knows")>()),
+  knowsOf: () => ({ requests }),
+}));
 
 const room: Room = { id: "r1", slug: "launch", name: "Launch", members: [], defaultMember: null, createdAt: "", updatedAt: "" };
 
@@ -352,6 +357,24 @@ describe("Right now's needs, answered in place", () => {
       { at: { kind: "breaker", subject: "pool:desk" }, choice: "allow" },
       { at: { kind: "breaker", subject: "session:s-1" }, choice: "deny" },
     ]);
+  });
+
+  it("asks Yes or No whether an agent elsewhere may hand the boss requests, the person's words theirs to read", async () => {
+    requests.mockResolvedValue([{ place: "Slack", words: "keep the launch video on track", askedAt: at(3) }]);
+    const allan = need("hand:dw/allan", { kind: "desk", id: "hand:dw/allan", name: "Allan", engine: null }, {
+      kind: "approval",
+      ask: "Allan on dw asked to pass on a request from Slack. May it hand your boss requests?",
+      place: { kind: "elsewhere" },
+      answer: { kind: "decide", at: { kind: "hand", agent: "dw/allan" } },
+    });
+    show([allan]);
+    render(<RightNow brief={null} />);
+    const [row] = needRows();
+    expect(actions(row!)).toEqual([`Yes “${allan.ask}” for Allan`, `No “${allan.ask}” for Allan`]);
+    expect(await within(row!).findByText("“keep the launch video on track” · in Slack")).toBeTruthy();
+    expect(requests).toHaveBeenCalledWith("dw/allan");
+    await act(async () => fireEvent.click(within(row!).getByRole("button", { name: /^Yes/ })));
+    expect(hubs.local!.decided).toEqual([{ at: { kind: "hand", agent: "dw/allan" }, choice: "allow" }]);
   });
 
   it("allows and denies through the floor's own answer, without opening the row", async () => {

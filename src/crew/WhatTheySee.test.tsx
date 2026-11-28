@@ -12,6 +12,7 @@ const api = {
   rules: vi.fn(),
   rule: vi.fn(),
   setRule: vi.fn(),
+  setHand: vi.fn(),
   choose: vi.fn(),
   log: vi.fn(),
 };
@@ -54,9 +55,13 @@ beforeEach(() => {
   kept = viewOf(ruleOf("local/ledger"));
   api.rule.mockImplementation(() => Promise.resolve(kept));
   api.rules.mockImplementation(() => Promise.resolve([kept.rule]));
-  api.setRule.mockImplementation((agent: string, b: { places: string[]; transcripts: boolean; digest: KnowsRule["digest"]; mayHand?: boolean }) => {
+  api.setRule.mockImplementation((agent: string, b: { places: string[]; transcripts: boolean; digest: KnowsRule["digest"] }) => {
     kept = viewOf(ruleOf(agent, { mayHand: kept.rule.mayHand, ...b }), kept.heldOutside);
     return Promise.resolve({ rule: kept.rule, heldOutside: kept.heldOutside });
+  });
+  api.setHand.mockImplementation((agent: string, on: boolean) => {
+    kept = viewOf(ruleOf(agent, { ...kept.rule, mayHand: on }), kept.heldOutside);
+    return Promise.resolve({ rule: kept.rule });
   });
   api.choose.mockResolvedValue({ choice: "keep", covered: 0 });
   api.log.mockResolvedValue([]);
@@ -133,21 +138,41 @@ describe("What they see", () => {
     await waitFor(() => expect(screen.getByRole("radio", { name: /Everything/ }).getAttribute("aria-checked")).toBe("true"));
   });
 
-  it("hands the boss requests only once switched on, and keeps it when the rest changes", async () => {
-    kept = viewOf(ruleOf("local/ledger", { mayHand: false }));
+  it("says what handing the boss requests does unset, on and off, and switches it on its own", async () => {
+    kept = viewOf(ruleOf("local/ledger", { mayHand: null }));
     await show();
     const hand = () => screen.getByRole("switch", { name: "Hand your boss requests" });
     expect(hand().getAttribute("aria-checked")).toBe("false");
+    expect(screen.getByText(/Not said yet: the first time you ask Ledger elsewhere .* Desk asks you on the Floor/)).toBeTruthy();
     fireEvent.click(hand());
-    await waitFor(() => expect(api.setRule).toHaveBeenLastCalledWith("local/ledger", { places: [], transcripts: false, digest: "off", mayHand: true }));
+    await waitFor(() => expect(api.setHand).toHaveBeenLastCalledWith("local/ledger", true));
     await waitFor(() => expect(hand().getAttribute("aria-checked")).toBe("true"));
+    expect(screen.getByText(/they pass it to your Desk boss in your words/)).toBeTruthy();
+    expect(api.setRule).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("switch", { name: "Include transcripts" }));
     await waitFor(() => expect(api.setRule).toHaveBeenLastCalledWith("local/ledger", { places: [], transcripts: true, digest: "off" }));
     await waitFor(() => expect(screen.getByRole("switch", { name: "Include transcripts" }).getAttribute("aria-checked")).toBe("true"));
     expect(hand().getAttribute("aria-checked")).toBe("true");
     fireEvent.click(hand());
-    await waitFor(() => expect(api.setRule).toHaveBeenLastCalledWith("local/ledger", { places: [], transcripts: true, digest: "off", mayHand: false }));
+    await waitFor(() => expect(api.setHand).toHaveBeenLastCalledWith("local/ledger", false));
     await waitFor(() => expect(hand().getAttribute("aria-checked")).toBe("false"));
+    expect(screen.getByText(/Off: when you ask Ledger elsewhere .* nothing is passed to your Desk boss/)).toBeTruthy();
+  });
+
+  it("goes back when the switch isn't kept", async () => {
+    kept = viewOf(ruleOf("local/ledger", { mayHand: null }));
+    api.setHand.mockRejectedValueOnce(new HubError(500, "Desk couldn't keep that."));
+    await show();
+    const hand = () => screen.getByRole("switch", { name: "Hand your boss requests" });
+    fireEvent.click(hand());
+    await waitFor(() => expect(api.setHand).toHaveBeenCalled());
+    await waitFor(() => expect(hand().getAttribute("aria-checked")).toBe("false"));
+  });
+
+  it("shows no request switch before an agent has a rule kept", async () => {
+    kept = viewOf(ruleOf("local/ledger", { mayHand: null, revision: 0 }));
+    await show();
+    expect(screen.queryByRole("switch", { name: "Hand your boss requests" })).toBeNull();
   });
 
   it("shows no request switch for a hub that doesn't keep it yet", async () => {

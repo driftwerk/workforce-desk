@@ -244,14 +244,14 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
   /** Keeps `next`, one write after another. A rule that shares nothing
    *  with an agent elsewhere needs no link: it is kept by the key read
    *  (the one an earlier link gave, when there was one). */
-  const save = (next: Pick<KnowsRule, "places" | "transcripts" | "digest" | "mayHand">) => {
+  const save = (next: Pick<KnowsRule, "places" | "transcripts" | "digest">) => {
     const k = api();
     if (!k || !view) return;
     const was = view.rule;
     const n = ++seq.current;
     setView({ ...view, rule: { ...view.rule, ...next } });
     setStatus({ state: "saving" });
-    const nothing = next.places.length === 0 && !next.transcripts && next.digest === "off" && !next.mayHand;
+    const nothing = next.places.length === 0 && !next.transcripts && next.digest === "off";
     writes.current = writes.current.then(async () => {
       const back = () => {
         if (n === seq.current && confirmed.current) setView(confirmed.current);
@@ -279,6 +279,27 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
         if (logShown.current) await readLog();
       } catch (e) {
         back();
+        setStatus({ state: "failed", problem: said(e) });
+      }
+    });
+  };
+
+  /** Whether the agent may hand the person's boss requests, as they switch
+   *  it: kept and logged on its own, the rest of the rule as it is. */
+  const hand = (on: boolean) => {
+    const k = api();
+    if (!k || !view) return;
+    const n = ++seq.current;
+    setView({ ...view, rule: { ...view.rule, mayHand: on } });
+    setStatus({ state: "saving" });
+    writes.current = writes.current.then(async () => {
+      try {
+        await k.setHand(keyOf(), on);
+        if (n === seq.current) setStatus({ state: "idle" });
+        await read();
+        if (logShown.current) await readLog();
+      } catch (e) {
+        if (n === seq.current && confirmed.current) setView(confirmed.current);
         setStatus({ state: "failed", problem: said(e) });
       }
     });
@@ -417,21 +438,19 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
                 <span className="switch-knob" />
               </button>
             </div>
-            {typeof rule.mayHand === "boolean" && (
+            {rule.mayHand !== undefined && rule.revision > 0 && (
               <div className="ability-row">
                 <span className="ability-text">
                   <b id={`${ids}-hand`}>Hand your boss requests</b>
-                  <span className="ability-sub">
-                    When you ask {name} elsewhere to keep something on track, they pass it to your Desk boss in your words. Off, Desk asks you first in your boss’s DM.
-                  </span>
+                  <span className="ability-sub">{handSaid(rule.mayHand, name)}</span>
                 </span>
                 <button
                   type="button"
                   role="switch"
                   className="switch"
-                  aria-checked={rule.mayHand}
+                  aria-checked={rule.mayHand === true}
                   aria-labelledby={`${ids}-hand`}
-                  onClick={() => save({ places: rule.places, transcripts: rule.transcripts, digest: rule.digest, mayHand: !rule.mayHand })}
+                  onClick={() => hand(rule.mayHand !== true)}
                 >
                   <span className="switch-knob" />
                 </button>
@@ -560,6 +579,14 @@ function KeepOrDelete({ name, asking, onChoose, onCancel }: { name: string; aski
     </Dialog>
   );
 }
+
+/** What handing the boss requests does now: on, off, or not said yet. */
+const handSaid = (on: boolean | null, name: string): string =>
+  on === true
+    ? `When you ask ${name} elsewhere to keep something on track, they pass it to your Desk boss in your words.`
+    : on === false
+      ? `Off: when you ask ${name} elsewhere to keep something on track, nothing is passed to your Desk boss, and they tell you so.`
+      : `Not said yet: the first time you ask ${name} elsewhere to keep something on track, Desk asks you on the Floor whether they may pass it to your Desk boss.`;
 
 const LOG_SAID: Record<string, (d: Record<string, unknown>) => string> = {
   rule: () => "Changed what they see",
