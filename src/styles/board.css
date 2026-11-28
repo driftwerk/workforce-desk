@@ -759,6 +759,11 @@ button.ticket-chip:hover {
   background-size: 100% 28px, 100% 28px, 100% 10px, 100% 10px;
   background-attachment: local, local, scroll, scroll;
 }
+/* Finished plans are shown on asking: the chip says how many. */
+.board-plans-filter {
+  display: flex;
+  justify-content: flex-end;
+}
 .board-plans > .plan-row-open {
   margin: 0 -10px;
   padding: 0 10px;

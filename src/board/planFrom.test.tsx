@@ -254,6 +254,7 @@ describe("the plans a board shows", () => {
     expect(plansOn({ p1: plan }, "b-desk").map((p) => p.id)).toEqual(["p1"]);
     expect(plansOn({ p1: plan }, "b-linear")).toEqual([]);
     expect(plansOn({ p1: plan }, "b-linear", details).map((p) => p.id)).toEqual(["p1"]);
-    expect(plansOn({ p1: { ...(plan as object), state: "dropped" } as never }, "b-linear", details)).toEqual([]);
+    // An ended plan stays listed: the board shows it under Finished.
+    expect(plansOn({ p1: { ...(plan as object), state: "dropped" } as never }, "b-linear", details).map((p) => p.id)).toEqual(["p1"]);
   });
 });

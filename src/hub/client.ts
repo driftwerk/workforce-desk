@@ -905,6 +905,10 @@ export class DeskHub {
   /** Moves a plan to group `group` (null: Ungrouped), its running sessions with it. */
   regroupPlan = (id: string, group: string | null): Promise<RegroupedPlan> =>
     this.call("POST", `/api/desk/plans/${encodeURIComponent(id)}/group`, { group });
+  /** Ends a running or paused plan, leaving its tickets as they are. */
+  endPlan = (id: string): Promise<BossPlanDetail> => this.call("POST", `/api/desk/plans/${encodeURIComponent(id)}/end`);
+  /** Takes a finished or ended plan off the board; its tickets stay. */
+  removePlan = (id: string): Promise<{ removed: string }> => this.call("POST", `/api/desk/plans/${encodeURIComponent(id)}/remove`);
   /** A page of a ticket's history, newest first. */
   ticketHistory = (id: string, before?: string): Promise<ActivityPage> =>
     this.call("GET", `/api/desk/tickets/${encodeURIComponent(id)}/history${before ? `?before=${encodeURIComponent(before)}` : ""}`);

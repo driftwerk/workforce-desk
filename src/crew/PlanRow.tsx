@@ -1,7 +1,10 @@
 import { useId, useMemo, useState } from "react";
 import { useBoard } from "../board/store";
+import { MoreIcon, below } from "../groups/rows";
 import { useDesk } from "../hub/store";
 import type { BossPlan } from "../hub/types";
+import { Confirm } from "../ui/Confirm";
+import { Menu } from "../ui/Menu";
 import { plainError } from "../ui/plainError";
 import { liveTickets, pausedLabel, progress, resumable, ruled, segments, standing } from "./plan";
 import { usePlans } from "./planStore";
@@ -16,14 +19,14 @@ export const openPlanOnBoard = (p: Pick<BossPlan, "id" | "board">): void => {
   useDesk.getState().setView("board");
 };
 
-/** A plan in a line: its goal, where it stands, how far it has got, and
- *  Pause or Resume. With `open`, its goal opens and closes its whole card
+/** A plan in a line: its goal, where it stands, how far it has got,
+ *  Pause or Resume, and its menu (End plan, or Remove once over). With `open`, its goal opens and closes its whole card
  *  (the board's); without, Open on board does `onToggle` (Settings). */
 export function PlanRow({ plan, open, onToggle, controls }: { plan: BossPlan; open?: boolean; onToggle: () => void; controls?: string }) {
   const detail = usePlans((s) => s.details[plan.id]);
   const refusal = usePlans((s) => s.refusals[plan.id]);
   const board = useBoard((s) => s.tickets);
-  const [asking, setAsking] = useState<"pause" | "resume" | null>(null);
+  const [asking, setAsking] = useState<"pause" | "resume" | "remove" | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const said = useId();
   // As its card counts it: the board's tickets as they now are, else what
@@ -33,13 +36,13 @@ export function PlanRow({ plan, open, onToggle, controls }: { plan: BossPlan; op
   const paused = plan.state === "paused" && plan.paused ? pausedLabel(plan, "Paused", true) : null;
   const line = [`${now.done} of ${now.total} done`, now.doing > 0 ? `${now.doing} running` : null].filter(Boolean).join(" · ");
 
-  const run = async (what: "pause" | "resume") => {
+  const run = async (what: "pause" | "resume" | "remove") => {
     if (asking) return;
     setAsking(what);
     setProblem(null);
     const store = usePlans.getState();
     try {
-      await (what === "pause" ? store.pause(plan.id) : store.resume(plan.id));
+      await (what === "pause" ? store.pause(plan.id) : what === "resume" ? store.resume(plan.id) : store.remove(plan.id));
     } catch (e) {
       // A refusal the store explains is shown from there.
       if (!usePlans.getState().refusals[plan.id]) setProblem(plainError(e));
@@ -98,12 +101,57 @@ export function PlanRow({ plan, open, onToggle, controls }: { plan: BossPlan; op
           </button>
         )}
       </span>
+      <PlanRowMenu plan={plan} busy={busy} onRemove={() => void run("remove")} />
       {told && (
         <span id={said} className="small state-blocked plan-row-said" role="alert">
           {told}
         </span>
       )}
     </div>
+  );
+}
+
+/** A plan line's ⋯: End plan (asked first) while it runs or is paused,
+ *  Remove once it is finished or ended. Nothing while it is proposed. */
+function PlanRowMenu({ plan, busy, onRemove }: { plan: BossPlan; busy: boolean; onRemove: () => void }) {
+  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+  const [ending, setEnding] = useState(false);
+  const going = plan.state === "running" || plan.state === "paused";
+  const over = plan.state === "done" || plan.state === "dropped";
+  if (!going && !over) return null;
+  return (
+    <>
+      <button
+        type="button"
+        className="icon-btn-sm"
+        aria-label={`More for the plan: ${plan.goal}`}
+        aria-haspopup="menu"
+        aria-disabled={busy || undefined}
+        title={going ? "End plan" : "Remove from the board"}
+        onClick={(e) => !busy && setAt(below(e.currentTarget))}
+      >
+        <MoreIcon />
+      </button>
+      {at && (
+        <Menu
+          label="Plan"
+          at={at}
+          onClose={() => setAt(null)}
+          entries={[
+            going
+              ? { kind: "item", label: "End plan…", detail: "Stops it here; its tickets stay as they are", onSelect: () => setEnding(true) }
+              : { kind: "item", label: "Remove", detail: "Takes it off the board; its tickets stay", onSelect: onRemove },
+          ]}
+        />
+      )}
+      {ending && (
+        <Confirm title="End this plan?" action="End plan" onConfirm={() => usePlans.getState().end(plan.id)} onClose={() => setEnding(false)}>
+          <p>
+            “{plan.goal}” stops: its boss starts no more of its tickets and stops watching it. Its tickets stay where they are on the board, and any session on one is left to you. You can remove it from the board once it has ended.
+          </p>
+        </Confirm>
+      )}
+    </>
   );
 }
 
