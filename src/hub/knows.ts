@@ -20,7 +20,22 @@ export type KnowsDigest = "off" | "live" | "daily";
  *  (`all`, `group:<id>`, `board:<id>`, `grid:<id>`, `session:<id>` or
  *  `session:<machine>/<id>`, `agent:<hub>/<agent>`; none is its own work
  *  alone), as the hub's `knows.rs` parses it. */
-export type KnowsRule = { agent: string; places: string[]; transcripts: boolean; digest: KnowsDigest; revision: number; changedAt: string | null };
+export type KnowsRule = {
+  agent: string;
+  places: string[];
+  transcripts: boolean;
+  digest: KnowsDigest;
+  revision: number;
+  changedAt: string | null;
+  /** Whether the agent may hand the person's boss requests: null until
+   *  they say, when it is off and Desk asks them on the Floor the first
+   *  time it does; missing from a hub that doesn't keep it yet. */
+  mayHand?: boolean | null;
+};
+
+/** A request an agent elsewhere holds for the person's word on whether it
+ *  may hand their boss requests: their own words, for them alone. */
+export type KnowsRequest = { place: string; words: string; askedAt: string };
 
 /** What an agent holds, counted: items, transcripts among them, and the
  *  sessions they are of. */
@@ -53,8 +68,16 @@ const path = (agent: string, rest = ""): string => {
 export const knowsOf = (hub: HubRef) => ({
   rules: async (): Promise<KnowsRule[]> => (await deskCall<{ rules: KnowsRule[] }>(hub, "GET", "/api/desk/knows")).rules ?? [],
   rule: (agent: string): Promise<KnowsView> => deskCall(hub, "GET", path(agent)),
-  /** Keeps the rule; left out, `transcripts` and `digest` stay as they were. */
-  setRule: (agent: string, b: { places: string[]; transcripts?: boolean; digest?: KnowsDigest }): Promise<KnowsChanged> => deskCall(hub, "PUT", path(agent), b),
+  /** Keeps the rule; left out, `transcripts` and `digest` stay as they
+   *  were. */
+  setRule: (agent: string, b: { places: string[]; transcripts?: boolean; digest?: KnowsDigest }): Promise<KnowsChanged> =>
+    deskCall(hub, "PUT", path(agent), b),
+  /** Whether the agent may hand the person's boss requests, logged: the
+   *  rule as it is then. */
+  setHand: (agent: string, on: boolean): Promise<{ rule: KnowsRule }> => deskCall(hub, "PUT", path(agent, "/hand"), { on }),
+  /** What the agent holds for the person's word on that, in their words. */
+  requests: async (agent: string): Promise<KnowsRequest[]> =>
+    (await deskCall<{ requests: KnowsRequest[] }>(hub, "GET", path(agent, "/requests"))).requests ?? [],
   /** The person's choice for what the agent holds outside its rule. */
   choose: (agent: string, choice: "delete" | "keep"): Promise<{ choice: string; covered: number }> => deskCall(hub, "POST", path(agent, "/held"), { choice }),
   log: async (agent: string): Promise<KnowsLogEntry[]> => (await deskCall<{ log: KnowsLogEntry[] }>(hub, "GET", path(agent, "/log"))).log ?? [],

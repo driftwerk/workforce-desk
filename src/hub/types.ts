@@ -1575,7 +1575,11 @@ export type DecideRef =
   /** An agent's settings file changed outside Desk, as it was when shown
    *  (`hash`): allow is Use it, deny is Keep saved. Every save for the agent
    *  waits on it. */
-  | { kind: "config"; agentId: string; hash: string };
+  | { kind: "config"; agentId: string; hash: string }
+  /** Whether an agent elsewhere (`<hub>/<agent>`) may hand the person's
+   *  boss requests, asked when it first did: allow lets it and passes on
+   *  what it held, deny keeps it off. Only the person answers it. */
+  | { kind: "hand"; agent: string };
 
 /** An answer to a need: Codex's requests take the last two as well. */
 export type Choice = "allow" | "deny" | "allow_for_session" | "cancel";

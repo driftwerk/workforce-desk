@@ -284,6 +284,27 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
     });
   };
 
+  /** Whether the agent may hand the person's boss requests, as they switch
+   *  it: kept and logged on its own, the rest of the rule as it is. */
+  const hand = (on: boolean) => {
+    const k = api();
+    if (!k || !view) return;
+    const n = ++seq.current;
+    setView({ ...view, rule: { ...view.rule, mayHand: on } });
+    setStatus({ state: "saving" });
+    writes.current = writes.current.then(async () => {
+      try {
+        await k.setHand(keyOf(), on);
+        if (n === seq.current) setStatus({ state: "idle" });
+        await read();
+        if (logShown.current) await readLog();
+      } catch (e) {
+        if (n === seq.current && confirmed.current) setView(confirmed.current);
+        setStatus({ state: "failed", problem: said(e) });
+      }
+    });
+  };
+
   /** Tells the machines this rule's part for them now, with the person's
    *  choice when there was one: an agent elsewhere's alone. */
   const tell = async (choice?: "delete" | "keep"): Promise<MachinesTold | null> => {
@@ -417,6 +438,32 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
                 <span className="switch-knob" />
               </button>
             </div>
+            {rule.mayHand !== undefined && rule.revision === 0 && (
+              <div className="ability-row">
+                <span className="ability-text">
+                  <b>Hand your boss requests</b>
+                  <span className="ability-sub">Choose what they see first: then you can let {name} hand your Desk boss requests.</span>
+                </span>
+              </div>
+            )}
+            {rule.mayHand !== undefined && rule.revision > 0 && (
+              <div className="ability-row">
+                <span className="ability-text">
+                  <b id={`${ids}-hand`}>Hand your boss requests</b>
+                  <span className="ability-sub">{handSaid(rule.mayHand, name)}</span>
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  className="switch"
+                  aria-checked={rule.mayHand === true}
+                  aria-labelledby={`${ids}-hand`}
+                  onClick={() => hand(rule.mayHand !== true)}
+                >
+                  <span className="switch-knob" />
+                </button>
+              </div>
+            )}
             <div className="ability-row ability-row-center">
               <span className="ability-text">
                 <b id={`${ids}-digest`}>A short update in their conversations with you</b>
@@ -541,11 +588,20 @@ function KeepOrDelete({ name, asking, onChoose, onCancel }: { name: string; aski
   );
 }
 
+/** What handing the boss requests does now: on, off, or not said yet. */
+const handSaid = (on: boolean | null, name: string): string =>
+  on === true
+    ? `When you ask ${name} elsewhere to keep something on track, they pass it to your Desk boss in your words.`
+    : on === false
+      ? `Off: when you ask ${name} elsewhere to keep something on track, nothing is passed to your Desk boss, and they tell you so.`
+      : `Not said yet: the first time you ask ${name} elsewhere to keep something on track, Desk asks you on the Floor whether they may pass it to your Desk boss.`;
+
 const LOG_SAID: Record<string, (d: Record<string, unknown>) => string> = {
   rule: () => "Changed what they see",
   delete: (d) => `Deleted ${items(d.items)} they held`,
   keep: (d) => `Kept ${items(d.items)} they held`,
   stop: () => "Stopped sharing",
+  hand: (d) => (d.on === true ? "Let them hand your boss requests" : "Stopped them handing your boss requests"),
 };
 
 const items = (x: unknown): string => (typeof x === "number" ? `${n(x)} ${x === 1 ? "item" : "items"}` : "the items");
