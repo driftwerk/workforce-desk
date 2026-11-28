@@ -169,10 +169,11 @@ describe("What they see", () => {
     await waitFor(() => expect(hand().getAttribute("aria-checked")).toBe("false"));
   });
 
-  it("shows no request switch before an agent has a rule kept", async () => {
+  it("says to choose what they see first before an agent has a rule kept", async () => {
     kept = viewOf(ruleOf("local/ledger", { mayHand: null, revision: 0 }));
     await show();
     expect(screen.queryByRole("switch", { name: "Hand your boss requests" })).toBeNull();
+    expect(screen.getByText(/Choose what they see first: then you can let Ledger hand your Desk boss requests/)).toBeTruthy();
   });
 
   it("shows no request switch for a hub that doesn't keep it yet", async () => {

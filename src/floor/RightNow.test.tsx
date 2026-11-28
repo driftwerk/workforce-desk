@@ -377,6 +377,29 @@ describe("Right now's needs, answered in place", () => {
     expect(hubs.local!.decided).toEqual([{ at: { kind: "hand", agent: "dw/allan" }, choice: "allow" }]);
   });
 
+  it("says when the held words can't be read, and reads them again when the need changes", async () => {
+    requests.mockRejectedValueOnce(new HubError(500, "down"));
+    const ask = (n: number, since: string) =>
+      need("hand:dw/allan", { kind: "desk", id: "hand:dw/allan", name: "Allan", engine: null }, {
+        kind: "approval",
+        ask: `Allan on dw asked to pass on ${n} requests. May it hand your boss requests?`,
+        place: { kind: "elsewhere" },
+        answer: { kind: "decide", at: { kind: "hand", agent: "dw/allan" } },
+        since,
+      });
+    show([ask(2, at(3))]);
+    render(<RightNow brief={null} />);
+    expect(await screen.findByText("Desk couldn’t read what you asked just now.")).toBeTruthy();
+    requests.mockResolvedValue([
+      { place: "Slack", words: "keep the launch video on track", askedAt: at(3) },
+      { place: "Slack", words: "keep the docs green", askedAt: at(2) },
+      { place: "Slack", words: "keep the site up", askedAt: at(1) },
+    ]);
+    await act(async () => show([ask(3, at(3))]));
+    expect(await screen.findByText("“keep the site up” · in Slack")).toBeTruthy();
+    expect(requests).toHaveBeenCalledTimes(2);
+  });
+
   it("allows and denies through the floor's own answer, without opening the row", async () => {
     show([npmTest, approval("ap-2", "s-1", { who: session("s-1", "acme-web"), ask: "Run npm install?", since: at(5) })]);
     render(<RightNow brief={null} />);

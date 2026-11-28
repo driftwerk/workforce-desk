@@ -438,6 +438,14 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
                 <span className="switch-knob" />
               </button>
             </div>
+            {rule.mayHand !== undefined && rule.revision === 0 && (
+              <div className="ability-row">
+                <span className="ability-text">
+                  <b>Hand your boss requests</b>
+                  <span className="ability-sub">Choose what they see first: then you can let {name} hand your Desk boss requests.</span>
+                </span>
+              </div>
+            )}
             {rule.mayHand !== undefined && rule.revision > 0 && (
               <div className="ability-row">
                 <span className="ability-text">

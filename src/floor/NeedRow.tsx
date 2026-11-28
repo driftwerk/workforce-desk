@@ -193,7 +193,7 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
         {need.why && <span className="floor-need-why faint small">{need.why}</span>}
         {planBudget && <span className="floor-need-why faint small">Capped at {budgetText(planBudget)}.</span>}
       </FloorRow>
-      {handOf(need) && <HeldWords agent={handOf(need)!} />}
+      {handOf(need) && <HeldWords agent={handOf(need)!} asked={`${need.since}·${need.ask}`} />}
       <OptionChips options={need.options} className="floor-need-options" />
       {actions && (
         <span className="floor-need-buttons">
@@ -317,9 +317,10 @@ export function NeedRow({ need, now, actions = false }: { need: FloorNeed; now: 
 }
 
 /** What an agent elsewhere holds for the person's word, in their own words:
- *  read for them here, never given to a boss. */
-function HeldWords({ agent }: { agent: string }) {
-  const [held, setHeld] = useState<KnowsRequest[] | null>(null);
+ *  read for them here, never given to a boss. Read again whenever the need
+ *  changes (another request held, one dropped). */
+function HeldWords({ agent, asked }: { agent: string; asked: string }) {
+  const [held, setHeld] = useState<KnowsRequest[] | "unread" | null>(null);
   useEffect(() => {
     const h = localAccount();
     if (!h) return;
@@ -327,11 +328,12 @@ function HeldWords({ agent }: { agent: string }) {
     knowsOf(h)
       .requests(agent)
       .then((r) => shown && setHeld(r))
-      .catch(() => shown && setHeld([]));
+      .catch(() => shown && setHeld("unread"));
     return () => {
       shown = false;
     };
-  }, [agent]);
+  }, [agent, asked]);
+  if (held === "unread") return <p className="floor-need-held faint small">Desk couldn’t read what you asked just now.</p>;
   if (!held?.length) return null;
   return (
     <ul className="floor-need-held faint small" aria-label="What you asked">
