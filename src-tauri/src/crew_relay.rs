@@ -91,12 +91,19 @@ const STATUSES: &[&str] = &["ok", "suggested", "refused"];
 const SESSIONS: &str = "desk.sessions";
 /// A plan's ticket's session started on a machine.
 const SESSION_START: &str = "desk.session_start";
-/// What a plan's start may say, as New session says it, and the session id
-/// its plan gave it (`id`, a UUID), so a start sent again is the same one:
-/// nothing else goes.
+/// What a plan's start may say, as New session says it, the session id
+/// its plan gave it (`id`, a UUID), so a start sent again is the same one,
+/// and what its prompt carries in from outside as the hub judged it
+/// (`outside`, null for nothing; a start from a hub that doesn't say goes
+/// as carrying [`START_UNSAID`]): nothing else goes.
 const START_FIELDS: &[&str] = &[
-    "engine", "name", "cwd", "goal", "prompt", "view", "worktree", "model", "id",
+    "engine", "name", "cwd", "goal", "prompt", "view", "worktree", "model", "id", "outside",
 ];
+/// What a plan's start is taken to carry in when its hub, older than
+/// saying it, doesn't: every start this carries is a plan's, never one
+/// the person made there.
+const START_OUTSIDE: &str = "outside";
+const START_UNSAID: &str = "a start handed from a hub that didn't say what it carried";
 /// Whether the machine installs the start's folder's dependencies as it
 /// starts (a plan's ticket): a boolean, beside [`START_FIELDS`], forwarded
 /// when `true`.
@@ -244,12 +251,18 @@ struct Call {
     /// is said, not a call that can't be read.
     #[serde(default)]
     left_ms: Option<Value>,
+    /// What the boss's turn had read of outside content, when the hub says
+    /// it had: what it says to a session there carries that in.
+    #[serde(default)]
+    outside: Option<Value>,
 }
 
 impl Call {
-    /// What the machine's hub takes: exactly its `Relayed`.
+    /// What the machine's hub takes: exactly its `Relayed`, `outside` only
+    /// when said, so a call of a turn that read none goes as a machine
+    /// older than that takes it.
     fn served(&self) -> Value {
-        json!({
+        let mut served = json!({
             "group": self.group,
             "tool": self.tool,
             "input": self.input,
@@ -258,7 +271,11 @@ impl Call {
             "id": self.id,
             "level": self.level,
             "act": self.act,
-        })
+        });
+        if let Some(outside) = self.outside.as_ref().filter(|o| !o.is_null()) {
+            served["outside"] = outside.clone();
+        }
+        served
     }
 
     fn time(&self, carry_for: Duration) -> Option<Duration> {
@@ -574,6 +591,9 @@ async fn carry_desk<E: Ends>(ends: &E, call: &Call, machine: &MachineId, tool: &
         .iter()
         .filter_map(|k| given.get(*k).map(|v| ((*k).to_string(), v.clone())))
         .collect();
+    start
+        .entry(START_OUTSIDE)
+        .or_insert_with(|| START_UNSAID.into());
     if deps {
         start.insert(START_DEPS.into(), true.into());
     }
@@ -1940,6 +1960,7 @@ mod tests {
             "prompt": "p", "model": "opus", "worktree": "vel-3", "deps": true,
             "free_resting": true, "assigned": "0f0e0d0c-0b0a-4909-8807-0605040302aa",
             "env": {"EVIL": "1"}, "account": null, "group": "g1",
+            "outside": "VEL-3, a Linear issue not all the person's words",
         });
         let stop = start(&fake.polled(vec![desk_call(A, "desk.session_start", input)]));
         let (id, answer) = next(&mut rx).await;
@@ -1962,6 +1983,7 @@ mod tests {
                     "prompt": "p", "model": "opus", "worktree": "vel-3", "deps": true,
                     "free_resting": true, "assigned": "0f0e0d0c-0b0a-4909-8807-0605040302aa",
                     "env": {"CLAUDE_CODE_PLUGIN_DIRS": "/home/dev/.local/share/Desk/bin/current/claude-plugin"},
+                    "outside": "VEL-3, a Linear issue not all the person's words",
                 }))
             )]
         );
@@ -1971,7 +1993,8 @@ mod tests {
     }
 
     /// A start's `deps` or `free_resting` that is `false` or `null` is
-    /// forwarded as absent.
+    /// forwarded as absent; its `outside` of `null` (nothing carried in) is
+    /// forwarded as said.
     #[tokio::test]
     async fn a_starts_deps_false_or_null_is_forwarded_as_absent() {
         let made = json!({"id": SESSION, "name": "VEL-3", "cwd": "/x", "state": "starting"});
@@ -1982,7 +2005,7 @@ mod tests {
                 desk_call(
                     id,
                     "desk.session_start",
-                    json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "deps": deps, "free_resting": deps}),
+                    json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "deps": deps, "free_resting": deps, "outside": null}),
                 )
             })
             .collect();
@@ -1993,10 +2016,57 @@ mod tests {
         let sent = fake.desk_sent.lock().unwrap().clone();
         assert_eq!(sent.len(), 2);
         assert!(
-            sent.iter()
-                .all(|(_, b)| b == &Some(json!({"engine": "codex", "name": "VEL-3", "cwd": "/x"}))),
+            sent.iter().all(|(_, b)| b
+                == &Some(
+                    json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "outside": null})
+                )),
             "{sent:?}"
         );
+        let _ = stop.send(true);
+    }
+
+    /// A start whose hub doesn't say what it carries in goes as carrying
+    /// some; one that says nothing (`null`) or what it carries goes as said.
+    #[tokio::test]
+    async fn a_start_whose_hub_doesnt_say_what_it_carries_goes_as_carrying_some() {
+        const C: &str = "0f0e0d0c-0b0a-4909-8807-0605040302cc";
+        let made = json!({"id": SESSION, "name": "VEL-3", "cwd": "/x", "state": "starting"});
+        let (fake, mut rx) = with_desk(vec![Does::Says(200, made); 3], None);
+        let start_of = |outside: Option<Value>| {
+            let mut input = json!({"engine": "codex", "name": "VEL-3", "cwd": "/x"});
+            if let Some(o) = outside {
+                input["outside"] = o;
+            }
+            input
+        };
+        let said = [
+            (A, None, json!(START_UNSAID)),
+            (B, Some(Value::Null), Value::Null),
+            (
+                C,
+                Some(json!("VEL-3, a Linear issue")),
+                json!("VEL-3, a Linear issue"),
+            ),
+        ];
+        let calls: Vec<Value> = said
+            .iter()
+            .map(|(id, outside, _)| desk_call(id, "desk.session_start", start_of(outside.clone())))
+            .collect();
+        let stop = start(&fake.polled(calls));
+        for _ in 0..3 {
+            assert_eq!(next(&mut rx).await.1["status"], "ok");
+        }
+        let mut sent: Vec<Value> = fake
+            .desk_sent
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|(_, b)| b.as_ref().map(|b| b["outside"].clone()))
+            .collect();
+        sent.sort_by_key(Value::to_string);
+        let mut want: Vec<Value> = said.into_iter().map(|(_, _, w)| w).collect();
+        want.sort_by_key(Value::to_string);
+        assert_eq!(sent, want);
         let _ = stop.send(true);
     }
 
@@ -2042,8 +2112,9 @@ mod tests {
             sent,
             vec![
                 json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "id": SESSION,
-                       "group": plan, "boss": "local:desk"}),
-                json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "id": SESSION}),
+                       "group": plan, "boss": "local:desk", "outside": START_UNSAID}),
+                json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "id": SESSION,
+                       "outside": START_UNSAID}),
             ]
         );
     }
@@ -2111,7 +2182,9 @@ mod tests {
             sent,
             vec![(
                 "devbox".to_string(),
-                Some(json!({"engine": "codex", "name": "VEL-3", "cwd": "/x"}))
+                Some(
+                    json!({"engine": "codex", "name": "VEL-3", "cwd": "/x", "outside": START_UNSAID})
+                )
             )]
         );
         let _ = stop.send(true);
@@ -2462,6 +2535,26 @@ mod tests {
         );
         assert_eq!(sent[1].0, "laptop");
         assert_eq!(sent[1].1["id"], B);
+        stop.send(true).unwrap();
+    }
+
+    /// What the boss's turn had read goes with its call when the hub says
+    /// it; a call that says none, or null, goes without it.
+    #[tokio::test]
+    async fn a_calls_outside_goes_with_it_only_when_said() {
+        let (fake, mut rx) = Fake::with(&[("devbox", vec![says(json!({})); 2])]);
+        let mut armed = call(A, "devbox");
+        armed["outside"] = json!("web.fetch");
+        let mut null = call(B, "devbox");
+        null["outside"] = Value::Null;
+        let stop = start(&fake.polled(vec![armed, null]));
+        for _ in 0..2 {
+            assert_eq!(next(&mut rx).await.1["status"], "ok");
+        }
+        let mut sent = fake.sent();
+        sent.sort_by(|a, b| a.1["id"].to_string().cmp(&b.1["id"].to_string()));
+        assert_eq!(sent[0].1["outside"], json!("web.fetch"));
+        assert!(sent[1].1.get("outside").is_none(), "{:?}", sent[1]);
         stop.send(true).unwrap();
     }
 
