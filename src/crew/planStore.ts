@@ -1,6 +1,7 @@
 import { create } from "zustand";
+import { useBoard } from "../board/store";
 import { useChat } from "../chat/store";
-import { HubError } from "../hub/client";
+import { HubError, type DeskHub } from "../hub/client";
 import { floorOf } from "../hub/floor";
 import { deskListeners, useDesk } from "../hub/store";
 import { revisionOf } from "./plan";
@@ -56,6 +57,12 @@ interface PlanState {
   /** Moves plan `id` to group `group` (null: Ungrouped); why its running
    *  sessions stayed where they were, when they did. */
   regroup: (id: string, group: string | null) => Promise<string | undefined>;
+  /** Ends plan `id`, leaving its tickets as they are. */
+  end: (id: string) => Promise<void>;
+  /** Takes finished or ended plan `id` off the board. */
+  remove: (id: string) => Promise<void>;
+  /** Forgets plan `id`, taken off the board here or elsewhere. */
+  forget: (id: string) => void;
   /** Forgets what was refused about plan `id`. */
   clear: (id: string) => void;
 }
@@ -92,13 +99,13 @@ export const usePlans = create<PlanState>((set, get) => {
   /** Does `request` about plan `id`, keeping the plan it answers with. A
    *  refusal reads the plan again; a newer revision found then is said as
    *  one, else the hub's own words. The refusal is thrown on. */
-  const act = async (id: string, request: () => Promise<BossPlanDetail>): Promise<void> => {
+  const act = async (id: string, request: (hub: DeskHub) => Promise<BossPlanDetail>): Promise<void> => {
     const hub = hubNow();
     if (!hub) throw new Error("Desk isn't ready yet. Try again in a moment.");
     const shown = get().details[id]?.revision ?? get().plans[id]?.revision;
     set((s) => ({ refusals: without(s.refusals, id) }));
     try {
-      keep(await request());
+      keep(await request(hub));
     } catch (e) {
       if (!(e instanceof HubError) || (e.status !== 409 && e.status !== 400 && e.status !== 404 && e.status !== 422)) throw e;
       if (e.status === 404) {
@@ -121,6 +128,21 @@ export const usePlans = create<PlanState>((set, get) => {
       set((s) => ({ refusals: { ...s.refusals, [id]: refusal } }));
       throw e;
     }
+  };
+
+  /** Forgets plan `id`: taken off the board. */
+  const forget = (id: string) => {
+    heardOf.delete(id);
+    set((s) => ({
+      plans: without(s.plans, id),
+      details: without(s.details, id),
+      unread: without(s.unread, id),
+      refusals: without(s.refusals, id),
+      cards: without(s.cards, id),
+      seen: without(s.seen, id),
+      looking: without(s.looking, id),
+    }));
+    if (useBoard.getState().plan === id) useBoard.getState().showPlan(null);
   };
 
   return {
@@ -197,6 +219,18 @@ export const usePlans = create<PlanState>((set, get) => {
       });
       return unmoved;
     },
+    end: (id) => act(id, (hub) => hub.endPlan(id)),
+    remove: async (id) => {
+      const hub = hubNow();
+      if (!hub) throw new Error("Desk isn't ready yet. Try again in a moment.");
+      try {
+        await hub.removePlan(id);
+      } catch (e) {
+        if (!(e instanceof HubError) || e.status !== 404) throw e;
+      }
+      forget(id);
+    },
+    forget,
     clear: (id) => set((s) => ({ refusals: without(s.refusals, id) })),
   };
 });
@@ -212,6 +246,9 @@ const onEvent = (e: DeskEvent) => {
       if (s.details[p.id]) void s.fetch(p.id);
       break;
     }
+    case "planRemoved":
+      s.forget(e.id);
+      break;
     case "snapshot":
       void s.load();
       break;
@@ -226,7 +263,7 @@ useDesk.subscribe((now, before) => {
   if (now.hub !== before.hub) usePlans.setState({ supported: null, plans: {}, details: {}, unread: {}, refusals: {}, seen: {} });
 });
 
-/** The plans on board `board` that aren't dropped, newest first. */
+/** The plans on board `board`, newest first: going, finished or ended. */
 export const plansOn = (
   plans: Readonly<Record<string, BossPlan>>,
   board: string,
@@ -235,5 +272,5 @@ export const plansOn = (
   details?: Readonly<Record<string, Pick<BossPlanDetail, "tickets">>>,
 ): BossPlan[] =>
   Object.values(plans)
-    .filter((p) => p.state !== "dropped" && (p.board === board || !!details?.[p.id]?.tickets.some((t) => t.board === board)))
+    .filter((p) => p.board === board || !!details?.[p.id]?.tickets.some((t) => t.board === board))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
