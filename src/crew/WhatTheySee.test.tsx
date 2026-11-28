@@ -54,8 +54,8 @@ beforeEach(() => {
   kept = viewOf(ruleOf("local/ledger"));
   api.rule.mockImplementation(() => Promise.resolve(kept));
   api.rules.mockImplementation(() => Promise.resolve([kept.rule]));
-  api.setRule.mockImplementation((agent: string, b: { places: string[]; transcripts: boolean; digest: KnowsRule["digest"] }) => {
-    kept = viewOf(ruleOf(agent, b), kept.heldOutside);
+  api.setRule.mockImplementation((agent: string, b: { places: string[]; transcripts: boolean; digest: KnowsRule["digest"]; mayHand?: boolean }) => {
+    kept = viewOf(ruleOf(agent, { mayHand: kept.rule.mayHand, ...b }), kept.heldOutside);
     return Promise.resolve({ rule: kept.rule, heldOutside: kept.heldOutside });
   });
   api.choose.mockResolvedValue({ choice: "keep", covered: 0 });
@@ -131,6 +131,39 @@ describe("What they see", () => {
     await waitFor(() => expect(api.setRule).toHaveBeenCalledWith("local/ledger", { places: ["all"], transcripts: true, digest: "live" }));
     expect(linkKnows).not.toHaveBeenCalled();
     await waitFor(() => expect(screen.getByRole("radio", { name: /Everything/ }).getAttribute("aria-checked")).toBe("true"));
+  });
+
+  it("hands the boss requests only once switched on, and keeps it when the rest changes", async () => {
+    kept = viewOf(ruleOf("local/ledger", { mayHand: false }));
+    await show();
+    const hand = () => screen.getByRole("switch", { name: "Hand your boss requests" });
+    expect(hand().getAttribute("aria-checked")).toBe("false");
+    fireEvent.click(hand());
+    await waitFor(() => expect(api.setRule).toHaveBeenLastCalledWith("local/ledger", { places: [], transcripts: false, digest: "off", mayHand: true }));
+    await waitFor(() => expect(hand().getAttribute("aria-checked")).toBe("true"));
+    fireEvent.click(screen.getByRole("switch", { name: "Include transcripts" }));
+    await waitFor(() => expect(api.setRule).toHaveBeenLastCalledWith("local/ledger", { places: [], transcripts: true, digest: "off" }));
+    await waitFor(() => expect(screen.getByRole("switch", { name: "Include transcripts" }).getAttribute("aria-checked")).toBe("true"));
+    expect(hand().getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(hand());
+    await waitFor(() => expect(api.setRule).toHaveBeenLastCalledWith("local/ledger", { places: [], transcripts: true, digest: "off", mayHand: false }));
+    await waitFor(() => expect(hand().getAttribute("aria-checked")).toBe("false"));
+  });
+
+  it("shows no request switch for a hub that doesn't keep it yet", async () => {
+    await show();
+    expect(screen.queryByRole("switch", { name: "Hand your boss requests" })).toBeNull();
+  });
+
+  it("says in the log when the boss's requests were let or stopped", async () => {
+    api.log.mockResolvedValue([
+      { id: "1", at: new Date().toISOString(), what: "hand", detail: { on: true }, doneAt: null },
+      { id: "2", at: new Date().toISOString(), what: "hand", detail: { on: false }, doneAt: null },
+    ]);
+    await show();
+    fireEvent.click(screen.getByRole("button", { name: "See what was shared" }));
+    expect(await screen.findByText("Let them hand your boss requests")).toBeTruthy();
+    expect(screen.getByText("Stopped them handing your boss requests")).toBeTruthy();
   });
 
   it("turns transcripts on and picks the digest", async () => {

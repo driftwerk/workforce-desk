@@ -244,14 +244,14 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
   /** Keeps `next`, one write after another. A rule that shares nothing
    *  with an agent elsewhere needs no link: it is kept by the key read
    *  (the one an earlier link gave, when there was one). */
-  const save = (next: Pick<KnowsRule, "places" | "transcripts" | "digest">) => {
+  const save = (next: Pick<KnowsRule, "places" | "transcripts" | "digest" | "mayHand">) => {
     const k = api();
     if (!k || !view) return;
     const was = view.rule;
     const n = ++seq.current;
     setView({ ...view, rule: { ...view.rule, ...next } });
     setStatus({ state: "saving" });
-    const nothing = next.places.length === 0 && !next.transcripts && next.digest === "off";
+    const nothing = next.places.length === 0 && !next.transcripts && next.digest === "off" && !next.mayHand;
     writes.current = writes.current.then(async () => {
       const back = () => {
         if (n === seq.current && confirmed.current) setView(confirmed.current);
@@ -417,6 +417,26 @@ export function WhatTheySee({ agent, hub }: { agent: Agent; hub: HubAccount | un
                 <span className="switch-knob" />
               </button>
             </div>
+            {typeof rule.mayHand === "boolean" && (
+              <div className="ability-row">
+                <span className="ability-text">
+                  <b id={`${ids}-hand`}>Hand your boss requests</b>
+                  <span className="ability-sub">
+                    When you ask {name} elsewhere to keep something on track, they pass it to your Desk boss in your words. Off, Desk asks you first in your boss’s DM.
+                  </span>
+                </span>
+                <button
+                  type="button"
+                  role="switch"
+                  className="switch"
+                  aria-checked={rule.mayHand}
+                  aria-labelledby={`${ids}-hand`}
+                  onClick={() => save({ places: rule.places, transcripts: rule.transcripts, digest: rule.digest, mayHand: !rule.mayHand })}
+                >
+                  <span className="switch-knob" />
+                </button>
+              </div>
+            )}
             <div className="ability-row ability-row-center">
               <span className="ability-text">
                 <b id={`${ids}-digest`}>A short update in their conversations with you</b>
@@ -546,6 +566,7 @@ const LOG_SAID: Record<string, (d: Record<string, unknown>) => string> = {
   delete: (d) => `Deleted ${items(d.items)} they held`,
   keep: (d) => `Kept ${items(d.items)} they held`,
   stop: () => "Stopped sharing",
+  hand: (d) => (d.on === true ? "Let them hand your boss requests" : "Stopped them handing your boss requests"),
 };
 
 const items = (x: unknown): string => (typeof x === "number" ? `${n(x)} ${x === 1 ? "item" : "items"}` : "the items");
